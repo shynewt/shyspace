@@ -468,13 +468,7 @@ pub fn run() {
                 data: DataDir::new(dir, KeyStorage::Keychain),
                 workspace: Mutex::new(None),
             });
-            let has_tray = match tray::install(app.handle()) {
-                Ok(()) => true,
-                Err(error) => {
-                    tracing::warn!("no tray icon, so closing the window quits: {error}");
-                    false
-                }
-            };
+            let has_tray = tray::try_install(app.handle());
             app.manage(tray::HasTray(has_tray));
             Ok(())
         })

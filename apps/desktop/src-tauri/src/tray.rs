@@ -1,5 +1,7 @@
 //! The tray icon: shyspace keeps running there when its window is closed.
 
+use std::panic::AssertUnwindSafe;
+
 use tauri::{
     AppHandle, Manager,
     menu::{Menu, MenuItem},
@@ -13,7 +15,27 @@ const MAIN_WINDOW: &str = "main";
 /// app would be hidden with no way back.
 pub struct HasTray(pub bool);
 
-pub fn install(app: &AppHandle) -> tauri::Result<()> {
+/// Creates the tray icon, or reports why there is none. On Linux the
+/// appindicator binding panics (rather than failing) when the system library
+/// is missing, so the panic is caught here; this relies on the default
+/// `panic = "unwind"`.
+pub fn try_install(app: &AppHandle) -> bool {
+    match std::panic::catch_unwind(AssertUnwindSafe(|| install(app))) {
+        Ok(Ok(())) => true,
+        Ok(Err(error)) => {
+            tracing::warn!("no tray icon, so closing the window quits: {error}");
+            false
+        }
+        Err(_) => {
+            tracing::warn!(
+                "no tray icon (the system's appindicator library is missing), so closing the window quits"
+            );
+            false
+        }
+    }
+}
+
+fn install(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open shyspace", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit shyspace", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
