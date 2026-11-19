@@ -248,11 +248,23 @@ impl Workspace {
         let snapshot = open_snapshot(&kit.recovery_key, &kit.workspace_id, &sealed)?;
         ensure_snapshot_is_current(&bucket, &kit, snapshot.epoch).await?;
 
+        std::fs::create_dir_all(&data.path)?;
+        if let Err(error) = data
+            .keys
+            .save(&data.path, &DeviceKey::from_bytes(snapshot.device_key))
+            .await
+        {
+            // Nothing of ours is in the folder yet; the key slot was taken by
+            // something else, which we must not touch.
+            let _ = std::fs::remove_dir(&data.path);
+            return Err(error);
+        }
         let restored = Self::install_snapshot(data, &kit, snapshot, bucket, networking).await;
         if restored.is_err() {
-            // Leave nothing behind, so the restore can simply be retried.
-            let _ = std::fs::remove_dir_all(&data.path);
+            // Undo everything this restore did, so it can simply be retried.
+            // The key goes first: its keychain slot is named after the folder.
             let _ = data.keys.forget(&data.path).await;
+            let _ = std::fs::remove_dir_all(&data.path);
         }
         restored
     }
@@ -264,10 +276,6 @@ impl Workspace {
         bucket: Bucket,
         networking: Networking,
     ) -> Result<Self> {
-        std::fs::create_dir_all(&data.path)?;
-        data.keys
-            .save(&data.path, &DeviceKey::from_bytes(snapshot.device_key))
-            .await?;
         write_private_file(&data.store_path(), &snapshot.store_db)?;
         write_private_file(&data.mls_path(), &snapshot.mls_db)?;
         write_private_file(&data.path.join(CONFIG_FILE), &snapshot.workspace_json)?;
@@ -301,12 +309,21 @@ fn ensure_new_empty_dir(dir: &std::path::Path) -> Result<()> {
 /// an old snapshot back, or the device died between commit and snapshot.
 /// Restoring it would fork the group, so refuse.
 async fn ensure_snapshot_is_current(bucket: &Bucket, kit: &RecoveryKit, epoch: u64) -> Result<()> {
-    if let Some(bytes) = bucket.commit(epoch).await?
-        && commit::verify(&bytes, epoch, &kit.admin).is_ok()
+    // Every later slot counts: deleting just the next one mustn't make a
+    // stale snapshot look current.
+    for later in bucket
+        .commit_epochs()
+        .await?
+        .into_iter()
+        .filter(|slot| *slot >= epoch)
     {
-        anyhow::bail!(
-            "the workspace changed after this recovery snapshot was taken; restoring it would split the group"
-        );
+        if let Some(bytes) = bucket.commit(later).await?
+            && commit::verify(&bytes, later, &kit.admin).is_ok()
+        {
+            anyhow::bail!(
+                "the workspace changed after this recovery snapshot was taken; restoring it would split the group"
+            );
+        }
     }
     Ok(())
 }

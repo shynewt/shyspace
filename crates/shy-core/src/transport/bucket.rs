@@ -183,6 +183,15 @@ impl Bucket {
         .await
     }
 
+    /// Epochs that have a commit slot in the bucket, valid or not.
+    pub async fn commit_epochs(&self) -> Result<Vec<u64>> {
+        let paths = self.list("mls/commit", None).await?;
+        Ok(paths
+            .iter()
+            .filter_map(|path| path.filename()?.parse().ok())
+            .collect())
+    }
+
     pub async fn commit(&self, from_epoch: u64) -> Result<Option<Bytes>> {
         self.get(&Path::from(format!("mls/commit/{}", padded(from_epoch))))
             .await
@@ -256,6 +265,11 @@ impl Bucket {
 /// where the in-memory bucket can't presign.
 #[cfg(test)]
 impl Bucket {
+    pub async fn delete_commit(&self, from_epoch: u64) -> Result<()> {
+        self.delete(&Path::from(format!("mls/commit/{}", padded(from_epoch))))
+            .await
+    }
+
     pub async fn put_invite_request(&self, token: &str, request: Vec<u8>) -> Result<()> {
         self.put(&invite_path(token, "request"), request).await
     }

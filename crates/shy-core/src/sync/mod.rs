@@ -86,9 +86,14 @@ impl Workspace {
             errors.push(error);
         }
         if !self.status().removed {
-            if self.is_admin()
-                && let Err(error) = self.admin_duties().await
-            {
+            // The admin repairs commits as part of its duties, after its
+            // recovery snapshot; members repair them here.
+            let repaired = if self.is_admin() {
+                self.admin_duties().await
+            } else {
+                self.republish_commits().await
+            };
+            if let Err(error) = repaired {
                 errors.push(error);
             }
             for result in [self.pull().await, self.push().await, self.join_peers().await] {

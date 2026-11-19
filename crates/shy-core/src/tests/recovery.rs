@@ -130,3 +130,36 @@ async fn restore_needs_an_empty_folder() {
         "keep me"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_commit_slots_does_not_make_a_stale_snapshot_restorable() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let old_snapshot = bucket.recovery_snapshot().await.unwrap().unwrap();
+    let snapshot_epoch = admin.state().mls.epoch().unwrap();
+    join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    sync_all(&[&admin, &bob]).await;
+
+    // An attacker restores the old snapshot and deletes the next commit slot.
+    bucket.put_recovery_snapshot(old_snapshot.to_vec()).await.unwrap();
+    bucket.delete_commit(snapshot_epoch).await.unwrap();
+    let attempt = |name: &str| {
+        let dir = data_dir(&root.path().join(name));
+        let bucket = bucket.clone();
+        let kit = kit.to_string();
+        async move { Workspace::restore_with(&dir, &kit, bucket, Networking::Offline).await }
+    };
+    assert!(
+        attempt("try-1").await.is_err(),
+        "the later commit still gives it away"
+    );
+
+    // Deleting every later slot doesn't help either: members put them back.
+    bucket.delete_commit(snapshot_epoch + 1).await.unwrap();
+    bob.sync().await;
+    assert!(
+        attempt("try-2").await.is_err(),
+        "Bob re-uploaded the commits he had applied"
+    );
+}

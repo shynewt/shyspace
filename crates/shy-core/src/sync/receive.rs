@@ -101,16 +101,27 @@ fn is_ready(state: &State, verified: &VerifiedOp) -> Result<bool> {
     Ok(follows_previous && state.store.accepts_clock(verified.body.lamport)?)
 }
 
+/// Applies a verified op. If it can't be applied (say it claims someone
+/// else's id), it is still recorded as handled, so it never blocks the
+/// author's later ops; every replica reaches the same verdict.
 fn apply_and_record(
     state: &State,
     envelope: &Envelope,
     verified: &VerifiedOp,
 ) -> Result<Option<crate::views::Change>> {
-    state.store.atomically(|store| {
+    let applied = state.store.atomically(|store| {
         let change = store.apply(verified)?;
         store.insert_applied(envelope, true)?;
         Ok(change)
-    })
+    });
+    match applied {
+        Ok(change) => Ok(change),
+        Err(error) => {
+            warn!("skipping an op that can't be applied: {error:#}");
+            state.store.insert_applied(envelope, true)?;
+            Ok(None)
+        }
+    }
 }
 
 fn park(state: &State, envelope: &Envelope) -> Result<()> {

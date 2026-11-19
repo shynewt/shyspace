@@ -312,17 +312,4 @@ impl Workspace {
         self.nudge_peers().await;
         Ok(())
     }
-
-    /// Re-uploads any of our commits that are missing or altered in the
-    /// bucket (a failed upload, or tampering by someone with bucket access).
-    /// There is one commit per membership change, so this stays cheap.
-    async fn republish_commits(&self) -> Result<()> {
-        let records = self.state().store.commit_records()?;
-        for (from_epoch, signed) in records {
-            if self.inner.bucket.commit(from_epoch).await?.as_deref() != Some(signed.as_slice()) {
-                self.inner.bucket.put_commit(from_epoch, signed).await?;
-            }
-        }
-        Ok(())
-    }
 }
