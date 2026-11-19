@@ -18,3 +18,6 @@ serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["sync"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1.0.104"
+
+[lints]
+workspace = true

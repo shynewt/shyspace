@@ -50,10 +50,7 @@ There is no UI test suite yet. To check a change, run the app on a pre-filled wo
 
 ## Conventions
 
-- Follow the existing style. Names explain intent; comments only for what code can't say.
-- Every behavior change gets a test. Security-relevant changes get an attack test in `workspace_tests.rs` and an update to `docs/security.md`.
-- Commits: Conventional Commits (`feat(core): …`), one logical change each.
-- Keep `docs/` current in the same commit as the change.
+Coding rules, testing and commit conventions are in [AGENTS.md](../AGENTS.md). Clippy enforces some of them (`[workspace.lints]` in `Cargo.toml`).
 
 ## Local scratch space
 
