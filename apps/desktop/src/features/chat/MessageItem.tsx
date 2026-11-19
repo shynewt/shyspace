@@ -27,7 +27,7 @@ export const MessageItem = memo(function MessageItem({
   onReply: () => void;
   onJumpTo: (id: string) => void;
 }) {
-  const { pages, navigate } = useWorkspace();
+  const { pages, navigate, session } = useWorkspace();
   const [isPickerOpen, setPickerOpen] = useState(false);
   const [isEditing, setEditing] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
@@ -49,6 +49,7 @@ export const MessageItem = memo(function MessageItem({
         "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 focus-within:bg-surface-2/50",
         isContinuation ? "py-0.5" : "pt-2 pb-0.5",
         isHighlighted && "bg-accent-soft/70",
+        message.mentions_me && !isHighlighted && "bg-warning/8 shadow-[inset_2px_0_0_var(--warning)]",
       )}
     >
       <div className="w-9 shrink-0">
@@ -90,6 +91,7 @@ export const MessageItem = memo(function MessageItem({
           <div className="prose-chat selectable text-[14px]">
             <ChatMarkdown
               text={message.text}
+              myId={session.me}
               pageTitle={(id) => titles.get(id)}
               onOpenPage={(id) => navigate({ kind: "page", id })}
             />

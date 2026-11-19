@@ -9,8 +9,10 @@ use crate::{
     ops::{EntityId, Envelope, Op, OpBody, VerifiedOp, new_owned_id, normalize_channel_name, now_ms},
     pages::{self, Edit},
     storage::ItemKind,
-    views::Change,
+    views::{Change, Message},
 };
+
+const MAX_MENTION_SCAN: u32 = 500;
 
 impl Workspace {
     /// Seals, stores and applies a local change, then sends it live. The
@@ -105,6 +107,37 @@ impl Workspace {
         // Replying means you've read what came before.
         self.state().store.mark_read(channel, &id)?;
         Ok(id)
+    }
+
+    /// Your unread messages that mention you, in every channel, and marks
+    /// them read: each is returned once. Looks at the latest
+    /// `MAX_MENTION_SCAN` messages of each channel.
+    pub fn take_unread_mentions(&self) -> Result<Vec<Message>> {
+        let mut found = Vec::new();
+        for channel in self.channels()? {
+            if channel.unread_mentions == 0 {
+                continue;
+            }
+            let mentioning: Vec<Message> = self
+                .messages(&channel.id, None, MAX_MENTION_SCAN)?
+                .into_iter()
+                .filter(|message| {
+                    message.mentions_me
+                        && channel
+                            .last_read
+                            .as_ref()
+                            .is_none_or(|read| read.precedes(message))
+                })
+                .collect();
+            if let Some(last) = mentioning.last() {
+                self.state().store.mark_read(&channel.id, &last.id)?;
+            }
+            found.extend(mentioning);
+        }
+        if !found.is_empty() {
+            self.emit(Change::Channels);
+        }
+        Ok(found)
     }
 
     /// Moves your read position in `channel` up to `message`. Personal: kept

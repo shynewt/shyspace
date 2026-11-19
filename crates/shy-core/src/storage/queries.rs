@@ -27,6 +27,7 @@ impl Store {
                 name: row.get(1)?,
                 can_delete: false,
                 unread: 0,
+                unread_mentions: 0,
                 last_read: None,
             })
         })?;
@@ -72,6 +73,7 @@ impl Store {
                 is_edited: row.get(9)?,
                 can_edit: false,
                 can_delete: false,
+                mentions_me: false,
                 reactions: Vec::new(),
             })
         })?;

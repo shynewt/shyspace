@@ -29,7 +29,8 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
    - page content: Yjs CRDT updates;
    - creations (channel, message, page): the id contains the author's key prefix, so only the author can create or overwrite it.
 5. **Local first.** Each device stores ops and the views built from them in SQLite (`store.rs`). Reads never touch the network. Search uses SQLite FTS5, on the device.
-6. **Personal state stays on the device.** Things only you care about, like where you've read up to in each channel (`storage/reading.rs`), are plain local rows, not ops: nobody else sees them, and they don't sync between devices (one member is one device today, #53).
+6. **Mentions are links in the text** (`mentions.rs`): `[@Ada](shy://member/<id>)`, `[@channel](shy://mention/channel)`, `[@here](shy://mention/here)`. They need no op of their own; each device works out what mentions it, so this works under end-to-end encryption.
+7. **Personal state stays on the device.** Things only you care about, like where you've read up to in each channel (`storage/reading.rs`), are plain local rows, not ops: nobody else sees them, and they don't sync between devices (one member is one device today, #53).
 
 ## Identity and local data
 

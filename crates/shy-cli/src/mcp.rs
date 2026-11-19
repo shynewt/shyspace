@@ -3,6 +3,8 @@
 
 use std::time::Duration;
 
+use tokio::sync::broadcast::error::RecvError;
+
 use anyhow::{Context, Result};
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -46,6 +48,12 @@ pub struct SendMessage {
     text: String,
     /// Id of the message this replies to.
     reply_to: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct WaitForMentions {
+    /// Give up after this many seconds (max 300). Defaults to 120.
+    timeout_seconds: Option<u64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -139,6 +147,22 @@ fn failed(error: anyhow::Error) -> String {
 }
 
 impl ShyTools {
+    fn format_by_channel(&self, messages: Vec<Message>) -> Result<String> {
+        let channels = self.workspace.channels()?;
+        let mut output = String::new();
+        for channel in channels {
+            let in_channel: Vec<Message> = messages
+                .iter()
+                .filter(|m| m.channel == channel.id)
+                .cloned()
+                .collect();
+            if !in_channel.is_empty() {
+                output.push_str(&format!("#{}:\n{}", channel.name, format_messages(in_channel)));
+            }
+        }
+        Ok(output)
+    }
+
     fn channel_id(&self, channel: &str) -> Result<String> {
         let wanted = channel.trim_start_matches('#');
         self.workspace
@@ -163,6 +187,22 @@ impl ShyTools {
 impl ShyTools {
     pub fn new(workspace: Workspace) -> Self {
         Self { workspace }
+    }
+
+    #[tool(
+        description = "List current members with their ids. Mention someone by writing [@Name](shy://member/<id>) in a message."
+    )]
+    fn list_members(&self) -> ToolResult {
+        let members = self.workspace.members().map_err(failed)?;
+        Ok(members
+            .iter()
+            .filter(|member| member.active)
+            .map(|member| {
+                let bot = if member.is_bot { " (bot)" } else { "" };
+                format!("{}{bot}: {}", member.name, member.id)
+            })
+            .collect::<Vec<_>>()
+            .join("\n"))
     }
 
     #[tool(description = "List channels in the workspace.")]
@@ -300,6 +340,36 @@ impl ShyTools {
             })
             .collect::<Vec<_>>()
             .join("\n"))
+    }
+
+    #[tool(
+        description = "Block until someone mentions you (by name, @channel or @here), then return those messages, grouped by channel. Each mention is returned once; mentions from while you were away come back at once."
+    )]
+    async fn wait_for_mentions(&self, Parameters(request): Parameters<WaitForMentions>) -> ToolResult {
+        let timeout = Duration::from_secs(request.timeout_seconds.unwrap_or(120).min(MAX_WAIT_SECONDS));
+        // Subscribe before checking, so a mention arriving in between still wakes us.
+        let mut changes = self.workspace.subscribe();
+        let found = tokio::time::timeout(timeout, async {
+            loop {
+                let mentions = self.workspace.take_unread_mentions()?;
+                if !mentions.is_empty() {
+                    return Ok::<_, anyhow::Error>(mentions);
+                }
+                loop {
+                    match changes.recv().await {
+                        Ok(Change::Messages { .. }) | Err(RecvError::Lagged(_)) => break,
+                        Ok(_) => {}
+                        Err(closed) => return Err(closed.into()),
+                    }
+                }
+            }
+        })
+        .await;
+        match found {
+            Ok(Ok(mentions)) => self.format_by_channel(mentions).map_err(failed),
+            Ok(Err(error)) => Err(failed(error)),
+            Err(_) => Ok("no new mentions".into()),
+        }
     }
 
     #[tool(

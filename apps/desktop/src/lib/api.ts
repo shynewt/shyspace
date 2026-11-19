@@ -8,6 +8,7 @@ export type Channel = {
   name: string;
   can_delete: boolean;
   unread: number;
+  unread_mentions: number;
   last_read: MessageCursor | null;
 };
 export type Reaction = { emoji: string; count: number; mine: boolean };
@@ -24,6 +25,7 @@ export type Message = {
   is_edited: boolean;
   can_edit: boolean;
   can_delete: boolean;
+  mentions_me: boolean;
   reactions: Reaction[];
 };
 export type MessageCursor = { lamport: number; author: string };

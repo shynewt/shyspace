@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 
 use super::Workspace;
 use crate::{
+    mentions::mentions,
     ops::Op,
     pages,
     views::{Channel, Member, Message, MessageCursor, Page, SearchHit},
@@ -13,9 +14,12 @@ use crate::{
 impl Workspace {
     pub fn channels(&self) -> Result<Vec<Channel>> {
         let state = self.state();
+        let my_id = self.my_id();
         let mut channels = state.store.channels()?;
         for channel in &mut channels {
-            channel.unread = state.store.unread_count(&channel.id, &self.me())?;
+            let unread = state.store.unread_messages(&channel.id, &self.me())?;
+            channel.unread = count(unread.len());
+            channel.unread_mentions = count(unread.iter().filter(|(_, text)| mentions(text, &my_id)).count());
             channel.last_read = state.store.read_marker(&channel.id)?;
             channel.can_delete = self.may(&Op::Delete {
                 id: channel.id.clone(),
@@ -32,7 +36,7 @@ impl Workspace {
         limit: u32,
     ) -> Result<Vec<Message>> {
         let messages = self.state().store.messages(channel, &self.me(), before, limit)?;
-        Ok(self.with_permissions(messages))
+        Ok(self.as_seen_by_me(messages))
     }
 
     /// Up to `limit` messages older than `message`, oldest first.
@@ -40,11 +44,15 @@ impl Workspace {
         let state = self.state();
         let cursor = state.store.message_cursor(message)?.context("no such message")?;
         let messages = state.store.messages(channel, &self.me(), Some(&cursor), limit)?;
-        Ok(self.with_permissions(messages))
+        Ok(self.as_seen_by_me(messages))
     }
 
-    fn with_permissions(&self, mut messages: Vec<Message>) -> Vec<Message> {
+    /// Marks what this member may do with each message, and whether it
+    /// mentions them.
+    fn as_seen_by_me(&self, mut messages: Vec<Message>) -> Vec<Message> {
+        let my_id = self.my_id();
         for message in &mut messages {
+            message.mentions_me = message.author != my_id && mentions(&message.text, &my_id);
             message.can_edit = self.may(&Op::MessageEdit {
                 id: message.id.clone(),
                 text: String::new(),
@@ -79,4 +87,8 @@ impl Workspace {
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
         self.state().store.search(query, limit)
     }
+}
+
+fn count(length: usize) -> u32 {
+    u32::try_from(length).unwrap_or(u32::MAX)
 }

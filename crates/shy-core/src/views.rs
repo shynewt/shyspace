@@ -58,6 +58,8 @@ pub struct Channel {
     pub can_delete: bool,
     /// Messages by others since this member's read position.
     pub unread: u32,
+    /// How many of those mention this member.
+    pub unread_mentions: u32,
     /// The last message this member has read, if any.
     pub last_read: Option<MessageCursor>,
 }
@@ -86,6 +88,8 @@ pub struct Message {
     pub can_edit: bool,
     /// Whether this member may delete it (its author or the admin).
     pub can_delete: bool,
+    /// Whether it mentions this member (directly, or @channel / @here).
+    pub mentions_me: bool,
     pub reactions: Vec<Reaction>,
 }
 
@@ -95,6 +99,13 @@ pub struct MessageCursor {
     pub lamport: u64,
     /// The message author's member id (hex).
     pub author: String,
+}
+
+impl MessageCursor {
+    /// Whether this position comes before `message` in channel order.
+    pub fn precedes(&self, message: &Message) -> bool {
+        (self.lamport, self.author.as_str()) < (message.lamport, message.author.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

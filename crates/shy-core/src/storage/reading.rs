@@ -47,14 +47,20 @@ impl Store {
         }))
     }
 
-    /// Messages by others after the read position.
-    pub fn unread_count(&self, channel: &str, me: &PublicKey) -> Result<u32> {
-        Ok(self.db.query_row(
-            "SELECT COUNT(*) FROM messages m LEFT JOIN read_markers r ON r.channel = m.channel
+    /// Ids and current text of messages by others after the read position,
+    /// oldest first.
+    pub fn unread_messages(&self, channel: &str, me: &PublicKey) -> Result<Vec<(String, String)>> {
+        let mut statement = self.db.prepare(
+            "SELECT m.id, COALESCE(e.text, m.text) FROM messages m
+             LEFT JOIN message_edits e ON e.message = m.id
+             LEFT JOIN read_markers r ON r.channel = m.channel
              WHERE m.channel = ?1 AND m.author != ?2
-               AND (r.channel IS NULL OR m.lamport > r.lamport OR (m.lamport = r.lamport AND m.author > r.author))",
-            params![channel, me.as_bytes()],
-            |row| row.get(0),
-        )?)
+               AND (r.channel IS NULL OR m.lamport > r.lamport OR (m.lamport = r.lamport AND m.author > r.author))
+             ORDER BY m.lamport, m.author",
+        )?;
+        let rows = statement.query_map(params![channel, me.as_bytes()], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 }

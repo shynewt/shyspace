@@ -2,6 +2,7 @@ mod collaboration;
 mod editing;
 mod hardening;
 mod invites;
+mod mentions;
 mod reading;
 mod recovery;
 mod storage;

@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Mentions are markdown links; @here means @channel for now (2026-11)
+A mention is a link in the message text, not a separate op: nothing new to sync or secure, agents read and write them as plain markdown, and copying a message keeps them. Each device decides what mentions it, exactly, even though everything is encrypted. Until presence exists (#42), @here reaches everyone like @channel.
+
 ## Editing and deleting: owner or admin, hide and purge (2026-11)
 Only authors edit their messages. Owners delete their own channels, messages and pages; the admin can delete anything, to moderate. Anyone may rename a channel (like page titles). Deletes are permanent markers, so they converge in any order; a deleted page's sub-pages move to the top level instead of disappearing with someone else's delete. Delete purges the views and search but can't erase the encrypted log other devices already hold; `security.md` says so.
 

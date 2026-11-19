@@ -64,6 +64,7 @@ function ChannelItem({ channel }: { channel: Channel }) {
         icon={<Hash size={15} />}
         label={channel.name}
         unread={channel.unread}
+        mentions={channel.unread_mentions}
         trailing={
           <span className="absolute right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
             <Menu

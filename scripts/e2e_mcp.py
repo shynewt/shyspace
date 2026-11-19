@@ -173,6 +173,19 @@ def main() -> int:
                 time.sleep(0.3)
         check(page_text == "# Plan\n\n- [ ] ship it", "admin reads the agent's new page")
         check(page_id in admin.tool("search", query="ship"), "admin finds the page with local search")
+
+        agent_id = next(line.split(": ")[1] for line in admin.tool("list_members").splitlines()
+                        if line.startswith("Claude"))
+        mentioned: dict[str, str] = {}
+        waiter = threading.Thread(target=lambda: mentioned.update(
+            text=agent.tool("wait_for_mentions", timeout_seconds=DELIVERY_TIMEOUT_SECONDS)))
+        waiter.start()
+        time.sleep(0.5)
+        admin.tool("send_message", channel="general", text=f"[@Claude](shy://member/{agent_id}) can you review?")
+        waiter.join()
+        check("can you review?" in mentioned.get("text", ""), "the agent woke up when mentioned")
+        check(agent.tool("wait_for_mentions", timeout_seconds=1) == "no new mentions",
+              "each mention reaches the agent once")
     finally:
         if joiner and joiner.poll() is None:
             joiner.kill()

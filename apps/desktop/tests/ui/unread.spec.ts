@@ -5,6 +5,7 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole("button", { name: "New channel" }).click();
   await page.getByLabel("Channel name").fill("random");
   await page.getByLabel("Channel name").press("Enter");
+  await expect(page.getByLabel("Message #random")).toBeVisible();
   await page.getByRole("button", { name: "general", exact: true }).click();
   await expect(page.getByLabel("Message #general")).toBeVisible();
 });

@@ -19,6 +19,7 @@ import type {
   Session,
   StorageSettings,
 } from "../../../src/lib/api";
+import { mentions } from "../../../src/lib/mentions";
 import { argument, type Kind, ownedId, randomHex, requireString } from "./helpers";
 import { FakeInvites } from "./invites";
 import { search } from "./search";
@@ -26,8 +27,11 @@ import { search } from "./search";
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
 
-type StoredChannel = Omit<Channel, "can_delete" | "unread" | "last_read">;
-type StoredMessage = Omit<Message, "author_name" | "author_is_bot" | "reactions" | "can_edit" | "can_delete">;
+type StoredChannel = Omit<Channel, "can_delete" | "unread" | "unread_mentions" | "last_read">;
+type StoredMessage = Omit<
+  Message,
+  "author_name" | "author_is_bot" | "reactions" | "can_edit" | "can_delete" | "mentions_me"
+>;
 type StoredPage = Omit<Page, "can_delete"> & { doc: Y.Doc };
 type StoredReaction = { message: string; author: string; emoji: string };
 
@@ -138,7 +142,8 @@ export class FakeBackend {
         return this.channels.map((channel) => ({
           ...channel,
           can_delete: this.mayDelete(channel.id),
-          unread: this.unreadIn(channel.id),
+          unread: this.unreadIn(channel.id).length,
+          unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.me())).length,
           last_read: this.readMarkers.get(channel.id) ?? null,
         }));
       case "mark_read":
@@ -319,6 +324,7 @@ export class FakeBackend {
       author_is_bot: author?.is_bot ?? false,
       can_edit: message.author === this.me(),
       can_delete: this.mayDelete(message.id),
+      mentions_me: message.author !== this.me() && mentions(message.text, this.me()),
       reactions: Array.from(counts, ([emoji, entry]) => ({ emoji, ...entry })),
     };
   }
@@ -334,11 +340,11 @@ export class FakeBackend {
     if (channel) this.notify({ kind: "messages", channel });
   }
 
-  private unreadIn(channel: string): number {
+  private unreadIn(channel: string): StoredMessage[] {
     const marker = this.readMarkers.get(channel);
     return this.messages.filter(
       (message) => message.channel === channel && message.author !== this.me() && (!marker || isAfter(message, marker)),
-    ).length;
+    );
   }
 
   /** Forward only, like the core. */

@@ -10,6 +10,7 @@ export function NavItem({
   icon,
   label,
   unread = 0,
+  mentions = 0,
   depth = 0,
   leading,
   trailing,
@@ -19,6 +20,8 @@ export function NavItem({
   label: string;
   /** Messages you haven't read; shown as a count and bold label. */
   unread?: number;
+  /** How many of those mention you; shown as a red badge instead. */
+  mentions?: number;
   depth?: number;
   /** Rendered before the item, outside its button (like a fold toggle). */
   leading?: ReactNode;
@@ -41,7 +44,7 @@ export function NavItem({
       <button
         type="button"
         aria-current={isActive ? "page" : undefined}
-        aria-label={hasUnread ? `${label}, ${unread} unread` : undefined}
+        aria-label={hasUnread ? unreadLabel(label, unread, mentions) : undefined}
         onClick={() => navigate(view)}
         className={cx(
           "relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-[13.5px] transition-colors",
@@ -54,17 +57,25 @@ export function NavItem({
         {hasUnread && (
           <motion.span
             aria-hidden
-            key={unread}
+            key={`${unread}:${mentions}`}
             initial={{ scale: 0.6, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={springs.pop}
-            className="ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white tabular-nums group-hover:opacity-0"
+            className={cx(
+              "ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-[10.5px] font-semibold text-white tabular-nums group-hover:opacity-0",
+              mentions > 0 ? "bg-danger" : "bg-accent",
+            )}
           >
-            {unread}
+            {mentions > 0 ? `@${mentions}` : unread}
           </motion.span>
         )}
       </button>
       {trailing}
     </div>
   );
+}
+
+function unreadLabel(label: string, unread: number, mentions: number): string {
+  const mentioning = mentions > 0 ? `, ${mentions} ${mentions === 1 ? "mentions" : "mention"} you` : "";
+  return `${label}, ${unread} unread${mentioning}`;
 }
