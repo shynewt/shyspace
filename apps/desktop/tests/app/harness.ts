@@ -98,6 +98,15 @@ export async function withApp(dataDir: string, body: (app: Browser) => Promise<v
   }
 }
 
+/** Waits for `child` to exit on its own, and stops it after `limitMs`. */
+async function exitWithin(child: ChildProcess, limitMs: number): Promise<void> {
+  if (child.exitCode !== null) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  const timer = setTimeout(() => child.kill(), limitMs);
+  await exited;
+  clearTimeout(timer);
+}
+
 async function stop(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null) return;
   const exited = new Promise((resolve) => child.once("exit", resolve));
@@ -155,8 +164,9 @@ export class CliMember {
       if (!reply.result) throw new Error(`${tool} failed: ${JSON.stringify(reply.error)}`);
       return reply.result.content.map((part) => part.text).join("\n");
     } finally {
+      // Closing its input lets `shy mcp` upload what it wrote, then exit.
       server.stdin.end();
-      await stop(server);
+      await exitWithin(server, 15_000);
     }
   }
 }

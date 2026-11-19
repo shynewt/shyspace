@@ -99,5 +99,5 @@ jobs:
         working-directory: apps/desktop
         run: |
           dbus-run-session -- sh -c '
-            printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            printf test | gnome-keyring-daemon --unlock --components=secrets >/dev/null
             xvfb-run -a pnpm test:app'

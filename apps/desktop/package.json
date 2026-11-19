@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests/app",
     "lint": "biome check .",
     "test:ui": "playwright test",
-    "test:app": "node --test --test-concurrency=1 --test-timeout=300000 --test-force-exit 'tests/app/*.test.ts'",
+    "test:app": "node --test --test-concurrency=1 --test-timeout=120000 --test-force-exit 'tests/app/*.test.ts'",
     "format": "biome check --write .",
     "tauri": "tauri"
   },
