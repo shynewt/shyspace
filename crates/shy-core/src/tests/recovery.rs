@@ -17,7 +17,7 @@ async fn a_lost_admin_is_restored_from_the_recovery_kit() {
     drop(admin);
 
     let new_device = data_dir(&root.path().join("ada-new-laptop"));
-    let restored = Workspace::restore_with(&new_device, &kit, bucket.clone(), Networking::Offline)
+    let restored = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Offline)
         .await
         .unwrap();
     assert_eq!(restored.me(), admin_id);
@@ -69,7 +69,7 @@ async fn a_forged_or_unknown_kit_is_refused() {
     let attempt = Workspace::restore_with(
         &data_dir(&root.path().join("x")),
         &forged,
-        bucket.clone(),
+        connector(&bucket),
         Networking::Offline,
     )
     .await;
@@ -79,7 +79,7 @@ async fn a_forged_or_unknown_kit_is_refused() {
     let attempt = Workspace::restore_with(
         &data_dir(&root.path().join("y")),
         &kit,
-        fresh_bucket,
+        connector(&fresh_bucket),
         Networking::Offline,
     )
     .await;
@@ -104,7 +104,7 @@ async fn a_rolled_back_snapshot_is_refused() {
     let error = Workspace::restore_with(
         &data_dir(&root.path().join("ada-new")),
         &kit,
-        bucket,
+        connector(&bucket),
         Networking::Offline,
     )
     .await
@@ -121,7 +121,7 @@ async fn restore_needs_an_empty_folder() {
     std::fs::create_dir_all(&busy).unwrap();
     std::fs::write(busy.join("notes.txt"), "keep me").unwrap();
     assert!(
-        Workspace::restore_with(&data_dir(&busy), &kit, bucket, Networking::Offline)
+        Workspace::restore_with(&data_dir(&busy), &kit, connector(&bucket), Networking::Offline)
             .await
             .is_err()
     );
@@ -148,7 +148,7 @@ async fn deleting_commit_slots_does_not_make_a_stale_snapshot_restorable() {
         let dir = data_dir(&root.path().join(name));
         let bucket = bucket.clone();
         let kit = kit.to_string();
-        async move { Workspace::restore_with(&dir, &kit, bucket, Networking::Offline).await }
+        async move { Workspace::restore_with(&dir, &kit, connector(&bucket), Networking::Offline).await }
     };
     assert!(
         attempt("try-1").await.is_err(),

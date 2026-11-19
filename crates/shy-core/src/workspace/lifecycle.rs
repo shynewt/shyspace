@@ -2,7 +2,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
 
@@ -24,7 +24,7 @@ use crate::{
     storage::Store,
     sync::SyncStatus,
     transport::{
-        bucket::{Bucket, BucketConfig},
+        bucket::{BucketConfig, Connector, s3_connector},
         gossip::Net,
         presigned::PresignedMailbox,
     },
@@ -134,14 +134,10 @@ impl Workspace {
     }
 
     pub async fn open(data: &DataDir, networking: Networking) -> Result<Self> {
-        Self::open_with(
-            data,
-            |config| config.bucket.connect(&config.workspace_id),
-            networking,
-        )
-        .await
+        Self::open_with(data, s3_connector(), networking).await
     }
 
+    /// Creates a workspace, after checking the bucket works with `bucket`.
     pub async fn create(
         data: &DataDir,
         workspace_name: &str,
@@ -149,19 +145,13 @@ impl Workspace {
         bucket: BucketConfig,
         networking: Networking,
     ) -> Result<Self> {
-        let workspace_id = new_random_id();
-        let connected = bucket.connect(&workspace_id)?;
-        connected
-            .check_access()
-            .await
-            .context("checking the bucket settings")?;
         Self::create_with(
             data,
-            workspace_id,
+            new_random_id(),
             workspace_name,
             profile,
             bucket,
-            connected,
+            s3_connector(),
             networking,
         )
         .await
@@ -177,16 +167,7 @@ impl Workspace {
     ) -> Result<Self> {
         let invite = Invite::decode(invite_code)?;
         let mailbox = PresignedMailbox::for_invite(&invite);
-        let workspace_id = invite.workspace_id.clone();
-        Self::join_with(
-            data,
-            invite,
-            profile,
-            &mailbox,
-            |bucket| bucket.connect(&workspace_id),
-            networking,
-        )
-        .await
+        Self::join_with(data, invite, profile, &mailbox, s3_connector(), networking).await
     }
 
     pub(crate) async fn create_with(
@@ -195,9 +176,14 @@ impl Workspace {
         workspace_name: &str,
         profile: Profile<'_>,
         bucket_config: BucketConfig,
-        bucket: Bucket,
+        connect: Connector,
         networking: Networking,
     ) -> Result<Self> {
+        let bucket = connect(&workspace_id, &bucket_config)?;
+        bucket
+            .check_access()
+            .await
+            .context("checking the bucket settings")?;
         prepare_empty_dir(&data.path)?;
         let local = data.open_local().await?;
         let mut mls = local.open_mls(data, None)?;
@@ -209,7 +195,7 @@ impl Workspace {
             bucket: bucket_config,
         };
         config.save(&data.path, &local.store)?;
-        let workspace = Self::start(data, local, mls, config, bucket, networking).await?;
+        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
             name: profile.name.to_owned(),
             is_bot: profile.is_bot,
@@ -228,7 +214,7 @@ impl Workspace {
         invite: Invite,
         profile: Profile<'_>,
         mailbox: &impl JoinMailbox,
-        connect: impl FnOnce(&BucketConfig) -> Result<Bucket>,
+        connect: Connector,
         networking: Networking,
     ) -> Result<Self> {
         ensure_not_expired(&invite, now_ms()?)?;
@@ -256,7 +242,6 @@ impl Workspace {
         let grant: Grant = postcard::from_bytes(&mls.open_from_admin(&sealed_grant, &invite.admin)?)?;
         grant.history.store_into(&local.store)?;
 
-        let bucket = connect(&grant.bucket)?;
         let config = WorkspaceConfig {
             workspace_id: invite.workspace_id,
             name: invite.workspace_name,
@@ -264,7 +249,7 @@ impl Workspace {
             bucket: grant.bucket,
         };
         config.save(&data.path, &local.store)?;
-        let workspace = Self::start(data, local, mls, config, bucket, networking).await?;
+        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
             name: profile.name.to_owned(),
             is_bot: profile.is_bot,
@@ -274,7 +259,7 @@ impl Workspace {
 
     pub(crate) async fn open_with(
         data: &DataDir,
-        connect: impl FnOnce(&WorkspaceConfig) -> Result<Bucket>,
+        connect: Connector,
         networking: Networking,
     ) -> Result<Self> {
         ensure!(
@@ -289,8 +274,7 @@ impl Workspace {
             "the MLS signing key reference is missing"
         );
         let mls = local.open_mls(data, Some(config.workspace_id.as_bytes()))?;
-        let bucket = connect(&config)?;
-        Self::start(data, local, mls, config, bucket, networking).await
+        Self::start(data, local, mls, config, connect, networking).await
     }
 
     async fn start(
@@ -298,9 +282,10 @@ impl Workspace {
         local: Local,
         mls: Mls,
         config: WorkspaceConfig,
-        bucket: Bucket,
+        connect: Connector,
         networking: Networking,
     ) -> Result<Self> {
+        let bucket = connect(&config.workspace_id, &config.bucket)?;
         let Local {
             lock,
             store,
@@ -326,7 +311,8 @@ impl Workspace {
                 identity,
                 config,
                 state: Mutex::new(state),
-                bucket,
+                bucket: RwLock::new(bucket),
+                connect,
                 net,
                 events: broadcast::channel(1024).0,
                 wake: Notify::new(),

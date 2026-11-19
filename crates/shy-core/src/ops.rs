@@ -2,6 +2,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use iroh::PublicKey;
+
+use crate::transport::bucket::BucketConfig;
 use serde::{Deserialize, Serialize};
 
 pub type EntityId = String;
@@ -70,6 +72,21 @@ pub enum Op {
         page: EntityId,
         update: Vec<u8>,
     },
+    /// New bucket settings (for example rotated keys). Admin only; members
+    /// ignore it from anyone else. Removed members can't read it.
+    StorageSettings {
+        bucket: BucketConfig,
+    },
+}
+
+impl Op {
+    /// Whether `author` may make this change in a workspace run by `admin`.
+    pub fn is_permitted(&self, author: &PublicKey, admin: &PublicKey) -> bool {
+        match self {
+            Op::StorageSettings { .. } => author == admin,
+            _ => true,
+        }
+    }
 }
 
 /// What the author signs and the epoch key encrypts.

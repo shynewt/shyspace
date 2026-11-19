@@ -1,10 +1,21 @@
-import { ArrowRight, KeyRound, LifeBuoy, Lock, ShieldCheck, Sparkles, Ticket } from "lucide-react";
+import {
+  ArrowRight,
+  CircleAlert,
+  CircleCheck,
+  KeyRound,
+  LifeBuoy,
+  Lock,
+  PlugZap,
+  ShieldCheck,
+  Sparkles,
+  Ticket,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { api, type BucketConfig, type Session } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
-import { Button, Field, Input, Logo, SegmentedControl, TextArea } from "../../ui";
+import { Button, Field, Input, Logo, rise, SegmentedControl, TextArea } from "../../ui";
 
 type Mode = "create" | "join" | "restore";
 
@@ -80,6 +91,20 @@ function CreateForm({ onReady }: { onReady: (session: Session) => void }) {
   useFocusOnMount(firstInput);
   const setField = (field: keyof BucketConfig) => (value: string) => setBucket({ ...bucket, [field]: value });
   const isComplete = workspaceName.trim() && name.trim() && Object.values(bucket).every((value) => value.trim());
+  const [check, setCheck] = useState<BucketCheck>({ kind: "untested" });
+  // A passed check only counts for the exact settings that were tested.
+  const settingsKey = JSON.stringify(bucket);
+  const isBucketVerified = check.kind === "passed" && check.settingsKey === settingsKey;
+
+  const testBucket = async () => {
+    setCheck({ kind: "testing" });
+    try {
+      await api.testBucket(bucket);
+      setCheck({ kind: "passed", settingsKey });
+    } catch (error) {
+      setCheck({ kind: "failed", message: String(error) });
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -138,10 +163,68 @@ function CreateForm({ onReady }: { onReady: (session: Session) => void }) {
           type="password"
         />
       </div>
-      <SubmitButton isBusy={isBusy} isDisabled={!isComplete} icon={<Sparkles size={15} />}>
+      <BucketTest
+        check={check}
+        isVerified={isBucketVerified}
+        canTest={Object.values(bucket).every((value) => value.trim() !== "")}
+        onTest={testBucket}
+      />
+      <SubmitButton isBusy={isBusy} isDisabled={!isComplete || !isBucketVerified} icon={<Sparkles size={15} />}>
         {isBusy ? "Creating your workspace…" : "Create workspace"}
       </SubmitButton>
     </form>
+  );
+}
+
+type BucketCheck =
+  | { kind: "untested" }
+  | { kind: "testing" }
+  | { kind: "passed"; settingsKey: string }
+  | { kind: "failed"; message: string };
+
+/** Creating is only possible once the bucket answered a write, read and delete. */
+function BucketTest({
+  check,
+  isVerified,
+  canTest,
+  onTest,
+}: {
+  check: BucketCheck;
+  isVerified: boolean;
+  canTest: boolean;
+  onTest: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-line bg-bg p-2.5">
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          icon={<PlugZap size={13} />}
+          isLoading={check.kind === "testing"}
+          disabled={!canTest}
+          onClick={onTest}
+        >
+          Test connection
+        </Button>
+        <AnimatePresence mode="wait" initial={false}>
+          {isVerified ? (
+            <motion.span key="ok" {...rise} className="flex items-center gap-1 text-[12.5px] text-success">
+              <CircleCheck size={14} /> The bucket works
+            </motion.span>
+          ) : (
+            <motion.span key="hint" {...rise} className="text-[12px] text-muted">
+              {check.kind === "passed" ? "Settings changed; test again." : "Required before creating."}
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </div>
+      {check.kind === "failed" && (
+        <p className="selectable flex gap-1.5 text-[12px] leading-relaxed text-danger">
+          <CircleAlert size={14} className="mt-0.5 shrink-0" />
+          {check.message}
+        </p>
+      )}
+    </div>
   );
 }
 

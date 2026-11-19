@@ -22,7 +22,7 @@ use crate::{
     config::{CONFIG_FILE, write_private_file},
     keys::DeviceKey,
     storage::{snapshot_database, snapshot_store_without_content},
-    transport::bucket::{Bucket, BucketConfig},
+    transport::bucket::{Bucket, BucketConfig, Connector, s3_connector},
     workspace::{DataDir, MLS_FILE, Networking, STORE_FILE, Workspace},
 };
 
@@ -129,6 +129,10 @@ fn generation(store: &crate::storage::Store, key: &str) -> Result<u64> {
 }
 
 impl Workspace {
+    pub fn has_recovery_kit(&self) -> Result<bool> {
+        Ok(self.state().store.meta(RECOVERY_KEY_META)?.is_some())
+    }
+
     /// The admin's recovery kit, created the first time. Uploads a fresh
     /// snapshot so the kit works right away.
     pub async fn recovery_kit(&self) -> Result<Zeroizing<String>> {
@@ -157,7 +161,7 @@ impl Workspace {
         RecoveryKit {
             workspace_id: config.workspace_id.clone(),
             admin: config.admin,
-            bucket: config.bucket.clone(),
+            bucket: self.bucket_config()?,
             recovery_key: *recovery_key,
         }
         .encode()
@@ -196,7 +200,7 @@ impl Workspace {
             let sealed = seal_snapshot(&recovery_key, &self.inner.config.workspace_id, &snapshot)?;
             (current, sealed)
         };
-        self.inner.bucket.put_recovery_snapshot(sealed).await?;
+        self.bucket().put_recovery_snapshot(sealed).await?;
         self.state()
             .store
             .set_meta(UPLOADED_GENERATION_META, &generation_taken.to_be_bytes())
@@ -228,18 +232,17 @@ impl Workspace {
     /// Restores the admin from a recovery kit onto this device, then catches
     /// up from the bucket. Only for when the old admin device is gone.
     pub async fn restore(data: &DataDir, recovery_kit: &str, networking: Networking) -> Result<Self> {
-        let kit = RecoveryKit::decode(recovery_kit)?;
-        let bucket = kit.bucket.connect(&kit.workspace_id)?;
-        Self::restore_with(data, recovery_kit, bucket, networking).await
+        Self::restore_with(data, recovery_kit, s3_connector(), networking).await
     }
 
     pub(crate) async fn restore_with(
         data: &DataDir,
         recovery_kit: &str,
-        bucket: Bucket,
+        connect: Connector,
         networking: Networking,
     ) -> Result<Self> {
         let kit = RecoveryKit::decode(recovery_kit)?;
+        let bucket = connect(&kit.workspace_id, &kit.bucket)?;
         ensure_new_empty_dir(&data.path)?;
         let sealed = bucket
             .recovery_snapshot()
@@ -259,7 +262,7 @@ impl Workspace {
             let _ = std::fs::remove_dir(&data.path);
             return Err(error);
         }
-        let restored = Self::install_snapshot(data, &kit, snapshot, bucket, networking).await;
+        let restored = Self::install_snapshot(data, &kit, snapshot, connect, networking).await;
         if restored.is_err() {
             // Undo everything this restore did, so it can simply be retried.
             // The key goes first: its keychain slot is named after the folder.
@@ -273,14 +276,14 @@ impl Workspace {
         data: &DataDir,
         kit: &RecoveryKit,
         snapshot: Snapshot,
-        bucket: Bucket,
+        connect: Connector,
         networking: Networking,
     ) -> Result<Self> {
         write_private_file(&data.store_path(), &snapshot.store_db)?;
         write_private_file(&data.mls_path(), &snapshot.mls_db)?;
         write_private_file(&data.path.join(CONFIG_FILE), &snapshot.workspace_json)?;
 
-        let workspace = Self::open_with(data, |_| Ok(bucket), networking).await?;
+        let workspace = Self::open_with(data, connect, networking).await?;
         ensure!(workspace.me() == kit.admin, "the snapshot is not the admin's");
         // Catch up before anyone writes, so our own sequence numbers continue
         // where the lost device left off.

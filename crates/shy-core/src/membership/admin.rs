@@ -13,6 +13,7 @@ use super::{
     keyring::KeyHistory,
 };
 use crate::{
+    config,
     ops::{new_random_id, now_ms},
     storage::Store,
     transport::bucket::InviteLinks,
@@ -55,7 +56,7 @@ impl Workspace {
     pub async fn create_invite(&self, label: &str) -> Result<String> {
         self.ensure_admin()?;
         let token = new_random_id();
-        let links = self.inner.bucket.presign_invite(&token, INVITE_LIFETIME).await?;
+        let links = self.bucket().presign_invite(&token, INVITE_LIFETIME).await?;
         self.record_invite(token, label, INVITE_LIFETIME, links)?.encode()
     }
 
@@ -136,7 +137,7 @@ impl Workspace {
             state.record_epoch()?;
             let grant = Grant {
                 history: KeyHistory::collect(&state.store)?,
-                bucket: self.inner.config.bucket.clone(),
+                bucket: config::current_bucket(&state.store)?,
             };
             let sealed_grant = state.mls.seal_for_members(&postcard::to_stdvec(&grant)?)?;
             let delivery = Delivery {
@@ -159,7 +160,7 @@ impl Workspace {
         self.refresh_recovery_snapshot().await?;
         self.upload_commit(from_epoch, signed).await?;
         self.deliver_answers().await?;
-        self.inner.bucket.delete_invite_request(token).await
+        self.bucket().delete_invite_request(token).await
     }
 
     pub async fn reject_invite(&self, token: &str) -> Result<()> {
@@ -171,11 +172,10 @@ impl Workspace {
         )?;
         ensure!(changed, "this invite has no request waiting for a decision");
         self.emit(Change::Invites);
-        self.inner
-            .bucket
+        self.bucket()
             .put_invite_answer(token, postcard::to_stdvec(&Answer::Rejected)?)
             .await?;
-        self.inner.bucket.delete_invite_request(token).await
+        self.bucket().delete_invite_request(token).await
     }
 
     /// Stops an invite from being used. Its links stay valid until they
@@ -189,7 +189,7 @@ impl Workspace {
         )?;
         ensure!(changed, "this invite is already used, revoked or unknown");
         self.emit(Change::Invites);
-        self.inner.bucket.delete_invite_request(token).await
+        self.bucket().delete_invite_request(token).await
     }
 
     pub(crate) async fn admin_duties(&self) -> Result<()> {
@@ -205,7 +205,7 @@ impl Workspace {
     async fn collect_join_requests(&self) -> Result<()> {
         let tokens = self.state().store.open_invite_tokens(now_ms()?)?;
         for token in tokens {
-            let Some(bytes) = self.inner.bucket.invite_request(&token).await? else {
+            let Some(bytes) = self.bucket().invite_request(&token).await? else {
                 continue;
             };
             match self.record_request(&token, &bytes) {
@@ -213,7 +213,7 @@ impl Workspace {
                 Err(error) => {
                     // Drop it so a genuine request can take the slot.
                     warn!("ignoring an invalid join request: {error:#}");
-                    self.inner.bucket.delete_invite_request(&token).await?;
+                    self.bucket().delete_invite_request(&token).await?;
                 }
             }
         }
@@ -239,8 +239,8 @@ impl Workspace {
         let deliveries = self.state().store.deliveries()?;
         for (joiner, token, payload) in deliveries {
             if self.state().store.has_ops_from(&joiner)? {
-                self.inner.bucket.delete_invite_answer(&token).await?;
-                self.inner.bucket.delete_invite_request(&token).await?;
+                self.bucket().delete_invite_answer(&token).await?;
+                self.bucket().delete_invite_request(&token).await?;
                 self.state().store.delete_delivery(&joiner)?;
                 continue;
             }
@@ -254,8 +254,7 @@ impl Workspace {
                 welcome: delivery.welcome,
                 sealed_grant,
             };
-            self.inner
-                .bucket
+            self.bucket()
                 .put_invite_answer(&token, postcard::to_stdvec(&answer)?)
                 .await?;
         }
@@ -308,7 +307,7 @@ impl Workspace {
     }
 
     async fn upload_commit(&self, from_epoch: u64, signed: Vec<u8>) -> Result<()> {
-        self.inner.bucket.put_commit(from_epoch, signed).await?;
+        self.bucket().put_commit(from_epoch, signed).await?;
         self.nudge_peers().await;
         Ok(())
     }

@@ -19,7 +19,7 @@ impl Workspace {
                 }
                 state.mls.epoch()?
             };
-            let Some(bytes) = self.inner.bucket.commit(epoch).await? else {
+            let Some(bytes) = self.bucket().commit(epoch).await? else {
                 return Ok(());
             };
             let verified = commit::verify(&bytes, epoch, &admin)
@@ -50,8 +50,8 @@ impl Workspace {
     pub(crate) async fn republish_commits(&self) -> Result<()> {
         let records = self.state().store.commit_records()?;
         for (from_epoch, signed) in records {
-            if self.inner.bucket.commit(from_epoch).await?.as_deref() != Some(signed.as_slice()) {
-                self.inner.bucket.put_commit(from_epoch, signed).await?;
+            if self.bucket().commit(from_epoch).await?.as_deref() != Some(signed.as_slice()) {
+                self.bucket().put_commit(from_epoch, signed).await?;
             }
         }
         Ok(())

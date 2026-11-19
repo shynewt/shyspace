@@ -9,6 +9,7 @@ import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Button, Drawer, SectionLabel, Tooltip } from "../../ui";
 import { Invites } from "./Invites";
 import { Recovery } from "./Recovery";
+import { Storage } from "./Storage";
 
 export function MembersPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { session } = useWorkspace();
@@ -16,6 +17,7 @@ export function MembersPanel({ open, onOpenChange }: { open: boolean; onOpenChan
     <Drawer open={open} onOpenChange={onOpenChange} title="Members">
       {session.is_admin && <Invites />}
       <MemberList />
+      {session.is_admin && <Storage />}
       {session.is_admin && <Recovery />}
     </Drawer>
   );

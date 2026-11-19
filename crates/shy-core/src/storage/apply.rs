@@ -6,6 +6,7 @@ use rusqlite::{OptionalExtension, named_params, params};
 
 use super::Store;
 use crate::{
+    config,
     ops::{Op, VerifiedOp, is_owned_by},
     pages,
     views::Change,
@@ -129,6 +130,12 @@ impl Store {
                     page: page.clone(),
                     update: update.clone(),
                 }
+            }
+            Op::StorageSettings { bucket } => {
+                if !config::update_bucket(self, bucket, lamport)? {
+                    return Ok(None);
+                }
+                Change::Storage
             }
         }))
     }

@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use crate::{
     BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace, crypto,
     membership::invite::{Invite, JoinMailbox},
-    transport::bucket::Bucket,
+    transport::bucket::{Bucket, Connector},
     views::InviteState,
 };
 
@@ -38,7 +38,7 @@ pub async fn create_admin(dir: &Path, bucket: &Bucket) -> Workspace {
             is_bot: false,
         },
         test_bucket_config(),
-        bucket.clone(),
+        connector(bucket),
         Networking::Offline,
     )
     .await
@@ -88,7 +88,7 @@ pub fn start_join(
             invite,
             profile,
             &mailbox,
-            |_| Ok(bucket),
+            connector(&bucket),
             Networking::Offline,
         )
         .await
@@ -144,6 +144,12 @@ pub fn channel_id(workspace: &Workspace, name: &str) -> String {
 
 pub fn memory_bucket() -> Bucket {
     Bucket::without_signing(Arc::new(InMemory::new()))
+}
+
+/// Connects every workspace to the same in-memory bucket, whatever the settings.
+pub fn connector(bucket: &Bucket) -> Connector {
+    let bucket = bucket.clone();
+    Arc::new(move |_: &str, _: &BucketConfig| Ok(bucket.clone()))
 }
 
 /// A workspace with an admin (Ada) and one member (Bob), in sync.

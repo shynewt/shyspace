@@ -13,12 +13,7 @@ impl Workspace {
         let authors = self.state().store.everyone_ever()?;
         for author in authors {
             let cursor = self.state().store.cursor(&author)?;
-            for (key, envelopes) in self
-                .inner
-                .bucket
-                .segments_after(&author, cursor.as_deref())
-                .await?
-            {
+            for (key, envelopes) in self.bucket().segments_after(&author, cursor.as_deref()).await? {
                 for envelope in envelopes {
                     if envelope.author != author {
                         warn!("segment {key} contains an op by someone else; skipping it");
@@ -41,7 +36,7 @@ impl Workspace {
         let Some(last) = unpushed.last().map(|envelope| envelope.seq) else {
             return Ok(());
         };
-        self.inner.bucket.put_segment(&unpushed).await?;
+        self.bucket().put_segment(&unpushed).await?;
         self.state().store.mark_pushed(&me, last)?;
         Ok(())
     }
@@ -52,11 +47,11 @@ impl Workspace {
             return Ok(());
         };
         net.set_members(&self.current_members()?);
-        net.join(self.inner.bucket.peers().await?).await
+        net.join(self.bucket().peers().await?).await
     }
 
     pub(super) async fn announce_self(&self) {
-        if let Err(error) = self.inner.bucket.announce_peer(&self.me()).await {
+        if let Err(error) = self.bucket().announce_peer(&self.me()).await {
             warn!("could not announce ourselves in the bucket: {error:#}");
         }
         self.nudge_peers().await;

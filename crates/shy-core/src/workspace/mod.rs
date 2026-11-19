@@ -3,11 +3,13 @@
 mod actions;
 mod lifecycle;
 mod reads;
+mod storage;
 
 pub use lifecycle::DataDir;
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
+pub use storage::StorageUpdate;
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use anyhow::Result;
 use iroh::{PublicKey, SecretKey};
@@ -19,7 +21,10 @@ use crate::{
     membership::{admin::drop_unsealed_deliveries, mls::Mls},
     storage::Store,
     sync::SyncStatus,
-    transport::{bucket::Bucket, gossip::Net},
+    transport::{
+        bucket::{Bucket, Connector},
+        gossip::Net,
+    },
     views::{Change, member_id},
 };
 
@@ -81,7 +86,9 @@ pub(crate) struct Inner {
     pub identity: SecretKey,
     pub config: WorkspaceConfig,
     pub state: Mutex<State>,
-    pub bucket: Bucket,
+    /// Swapped when the admin changes the storage settings.
+    pub bucket: RwLock<Bucket>,
+    pub connect: Connector,
     pub net: Option<Net>,
     pub events: broadcast::Sender<Change>,
     /// Wakes the sync loop early: after a local write or a peer's nudge.
@@ -97,6 +104,14 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub(crate) fn bucket(&self) -> Bucket {
+        self.inner
+            .bucket
+            .read()
+            .expect("bucket lock poisoned by an earlier panic")
+            .clone()
+    }
+
     pub(crate) fn state(&self) -> MutexGuard<'_, State> {
         self.inner
             .state
@@ -109,6 +124,7 @@ impl Workspace {
     }
 
     pub(crate) fn emit(&self, change: Change) {
+        self.on_storage_changed(&change);
         // No subscribers is fine: nobody is looking at the views right now.
         let _ = self.inner.events.send(change);
     }

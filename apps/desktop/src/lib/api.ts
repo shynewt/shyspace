@@ -39,6 +39,7 @@ export type Invite = {
   requester_is_bot: boolean;
   requester_safety_code: string | null;
 };
+export type StorageSettings = { endpoint: string; bucket: string; region: string; access_key_id: string };
 export type SyncStatus = { peers: number; last_sync_ms: number | null; error: string | null; removed: boolean };
 export type BucketConfig = {
   endpoint: string;
@@ -55,6 +56,7 @@ export type Change =
   | { kind: "doc"; page: string; update: number[] }
   | { kind: "members" }
   | { kind: "invites" }
+  | { kind: "storage" }
   | { kind: "sync" }
   | { kind: "removed" };
 
@@ -64,6 +66,11 @@ export const api = {
     invoke<Session>("create_workspace", { workspaceName, name, bucket }),
   joinWorkspace: (invite: string, name: string) => invoke<Session>("join_workspace", { invite, name }),
   restoreWorkspace: (kit: string) => invoke<Session>("restore_workspace", { kit }),
+  testBucket: (bucket: BucketConfig) => invoke<void>("test_bucket", { bucket }),
+  storageSettings: () => invoke<StorageSettings>("storage_settings"),
+  /** Resolves to the admin's new recovery kit, if they have one. */
+  updateStorage: (region: string, accessKeyId: string, secretAccessKey: string) =>
+    invoke<string | null>("update_storage", { region, accessKeyId, secretAccessKey }),
   safetyCode: () => invoke<string>("safety_code"),
   recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),

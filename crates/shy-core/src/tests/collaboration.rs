@@ -127,7 +127,7 @@ async fn reopening_keeps_state_and_keys() {
     admin.send_message(&general, "persist me", None).unwrap();
     drop(admin);
 
-    let reopened = Workspace::open_with(&data_dir(&dir), |_| Ok(bucket), Networking::Offline)
+    let reopened = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline)
         .await
         .unwrap();
     assert_eq!(
@@ -198,12 +198,12 @@ async fn a_data_folder_opens_in_one_place_at_a_time() {
     let dir = root.path().join("ada");
     let bucket = memory_bucket();
     let admin = create_admin(&dir, &bucket).await;
-    let second = Workspace::open_with(&data_dir(&dir), |_| Ok(bucket.clone()), Networking::Offline).await;
+    let second = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline).await;
     let error = second.err().unwrap();
     assert!(format!("{error:#}").contains("already open"), "{error:#}");
 
     drop(admin);
-    Workspace::open_with(&data_dir(&dir), |_| Ok(bucket), Networking::Offline)
+    Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline)
         .await
         .unwrap();
 }

@@ -11,6 +11,7 @@ use crate::{storage::Store, transport::bucket::BucketConfig};
 
 pub(crate) const CONFIG_FILE: &str = "workspace.json";
 const BUCKET_META: &str = "bucket_config";
+const BUCKET_LAMPORT_META: &str = "bucket_config_lamport";
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceConfig {
@@ -57,6 +58,31 @@ impl WorkspaceConfig {
         };
         write_private_file(&dir.join(CONFIG_FILE), &serde_json::to_vec_pretty(&settings)?)
     }
+}
+
+/// The bucket settings in use now, which the admin may have changed since
+/// the workspace was created.
+pub(crate) fn current_bucket(store: &Store) -> Result<BucketConfig> {
+    let bytes = store.meta(BUCKET_META)?.context("bucket settings are missing")?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+/// Applies new bucket settings unless newer ones (by lamport) are in place.
+pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) -> Result<bool> {
+    let current_lamport = match store.meta(BUCKET_LAMPORT_META)? {
+        Some(bytes) => u64::from_be_bytes(
+            bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("corrupt settings clock"))?,
+        ),
+        None => 0,
+    };
+    if lamport <= current_lamport {
+        return Ok(false);
+    }
+    store.set_meta(BUCKET_META, &serde_json::to_vec(bucket)?)?;
+    store.set_meta(BUCKET_LAMPORT_META, &lamport.to_be_bytes())?;
+    Ok(true)
 }
 
 /// Writes a file only its owner can read.

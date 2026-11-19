@@ -42,6 +42,7 @@ Only the admin (the workspace creator) changes membership. This keeps a single, 
 - **Inviting:** the admin creates an invite (`membership/invite.rs`). Its code is single-use, expires after 7 days, and holds the workspace id, the admin's keys, a token and two presigned links: one to upload a join request, one to download the answer. It contains no bucket credentials.
 - **Joining:** the joiner posts their key package, identity binding and name through the request link. The admin's app shows the request; the admin approves or declines. On approval it signs and saves the commit, applies it, and answers with the MLS Welcome plus an encrypted *grant*: the key history (older epoch keys, their members, removed members' frozen logs) and the bucket credentials. The answer is re-sent until the newcomer posts, then deleted.
 - **Recovery:** the admin can export a *recovery kit* (a code holding a random recovery key and the bucket settings). After every membership change, the admin's app uploads an encrypted snapshot of its admin state (MLS state, identity, keys, members, commits, invites; not content) to `recovery/snapshot`. `restore` on a new device decrypts it, then re-downloads everything else from the bucket, including the admin's own log so its sequence numbers continue. See `membership/recovery.rs`.
+- **Storage settings:** the admin can change the bucket's region and keys (`workspace/storage.rs`). The change is an op like any other, so it reaches members live or through the bucket; each member stores it and reconnects. The endpoint and bucket can't change: the data would stay behind.
 - **Removing:** the admin pulls the member's latest ops, then commits the removal with their last sequence number. The new epoch's key never reaches them, and later ops from them are rejected.
 - **Commits** are wrapped in the admin's signature (`SignedCommit`). Members ignore anything else in a commit slot. The admin re-uploads its commits if they go missing or are altered.
 
@@ -89,7 +90,7 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 | `pages.rs` | Yjs page helpers |
 | `views.rs` | read models sent to the UI and agents |
 | `keys.rs` | the device key and where it's kept (keychain or file) |
-| `config.rs`, `identity.rs` | workspace settings and the identity key |
+| `config.rs`, `identity.rs` | workspace settings (including the current bucket settings) and the identity key |
 | `tests/` | multi-member scenarios (`collaboration`) and attacks (`hardening`) |
 
 ## Database migrations

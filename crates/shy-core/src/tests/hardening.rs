@@ -193,7 +193,7 @@ async fn restart_forgets_a_staged_commit_that_was_never_recorded() {
         state.mls.add_member(key_package).unwrap(); // staged, then "crash"
     }
     drop(admin);
-    let reopened = Workspace::open_with(&data_dir(&dir), |_| Ok(bucket), Networking::Offline)
+    let reopened = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline)
         .await
         .unwrap();
     let state = reopened.state();
@@ -294,7 +294,7 @@ async fn the_data_directory_alone_reveals_nothing() {
     );
 
     let wrong_key = DataDir::new(&dir, KeyStorage::File(root.path().join("other.key")));
-    let error = Workspace::open_with(&wrong_key, |_| Ok(memory_bucket()), Networking::Offline)
+    let error = Workspace::open_with(&wrong_key, connector(&memory_bucket()), Networking::Offline)
         .await
         .err()
         .unwrap();

@@ -7,7 +7,8 @@ use serde::Serialize;
 use shy_core::{
     BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace,
     sync::SyncStatus,
-    views::{Channel, Invite, Member, Message, MessageCursor, Page, SearchHit},
+    views::{Channel, Invite, Member, Message, MessageCursor, Page, SearchHit, StorageSettings},
+    workspace::StorageUpdate,
 };
 use tauri::{AppHandle, Emitter, Manager, State, ipc::Response};
 use tokio::sync::Mutex;
@@ -149,6 +150,39 @@ async fn restore_workspace(
 async fn recovery_kit(state: State<'_, AppState>) -> CommandResult<String> {
     let kit = current(&state).await?.recovery_kit().await.map_err(failed)?;
     Ok(kit.as_str().to_owned())
+}
+
+/// Checks bucket settings before a workspace is created with them.
+#[tauri::command]
+async fn test_bucket(bucket: BucketConfig) -> CommandResult<()> {
+    bucket.check().await.map_err(failed)
+}
+
+#[tauri::command]
+async fn storage_settings(state: State<'_, AppState>) -> CommandResult<StorageSettings> {
+    current(&state).await?.storage_settings().map_err(failed)
+}
+
+/// Returns the admin's new recovery kit, if they have one: it holds the keys.
+#[tauri::command]
+async fn update_storage(
+    state: State<'_, AppState>,
+    region: String,
+    access_key_id: String,
+    secret_access_key: String,
+) -> CommandResult<Option<String>> {
+    let workspace = current(&state).await?;
+    let update = StorageUpdate {
+        region: &region,
+        access_key_id: &access_key_id,
+        secret_access_key: &secret_access_key,
+    };
+    workspace.update_storage(update).await.map_err(failed)?;
+    if !workspace.has_recovery_kit().map_err(failed)? {
+        return Ok(None);
+    }
+    let kit = workspace.recovery_kit().await.map_err(failed)?;
+    Ok(Some(kit.as_str().to_owned()))
 }
 
 #[tauri::command]
@@ -328,6 +362,9 @@ pub fn run() {
             create_workspace,
             join_workspace,
             restore_workspace,
+            test_bucket,
+            storage_settings,
+            update_storage,
             safety_code,
             recovery_kit,
             channels,

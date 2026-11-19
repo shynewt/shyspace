@@ -31,7 +31,7 @@ impl Workspace {
             }
             match verify(&state, &envelope)? {
                 Some(verified) if is_ready(&state, &verified)? => {
-                    apply_and_record(&state, &envelope, &verified)?
+                    apply_and_record(&state, &envelope, &verified, &self.inner.config.admin)?
                 }
                 _ => {
                     park(&state, &envelope)?;
@@ -57,7 +57,12 @@ impl Workspace {
                 }
                 match verify(&state, &envelope) {
                     Ok(Some(verified)) if is_ready(&state, &verified)? => {
-                        changes.extend(apply_and_record(&state, &envelope, &verified)?);
+                        changes.extend(apply_and_record(
+                            &state,
+                            &envelope,
+                            &verified,
+                            &self.inner.config.admin,
+                        )?);
                     }
                     Ok(_) => {}
                     Err(error) => {
@@ -108,8 +113,13 @@ fn apply_and_record(
     state: &State,
     envelope: &Envelope,
     verified: &VerifiedOp,
+    admin: &iroh::PublicKey,
 ) -> Result<Option<crate::views::Change>> {
     let applied = state.store.atomically(|store| {
+        ensure!(
+            verified.body.op.is_permitted(&verified.author, admin),
+            "only the admin may make this change"
+        );
         let change = store.apply(verified)?;
         store.insert_applied(envelope, true)?;
         Ok(change)

@@ -141,16 +141,32 @@ pub struct Invite {
     pub requester_safety_code: Option<String>,
 }
 
+/// Bucket settings as shown to people: never the secret key.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct StorageSettings {
+    pub endpoint: String,
+    pub bucket: String,
+    pub region: String,
+    pub access_key_id: String,
+}
+
 /// What changed, so listeners refresh only the affected view.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Change {
     Channels,
-    Messages { channel: EntityId },
+    Messages {
+        channel: EntityId,
+    },
     Pages,
-    Doc { page: EntityId, update: Vec<u8> },
+    Doc {
+        page: EntityId,
+        update: Vec<u8>,
+    },
     Members,
     Invites,
+    /// The bucket settings changed; the workspace reconnects.
+    Storage,
     Sync,
     Removed,
 }

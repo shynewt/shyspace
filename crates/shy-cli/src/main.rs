@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use shy_core::{BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace};
+use shy_core::{BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace, workspace::StorageUpdate};
 
 #[derive(Parser)]
 #[command(
@@ -46,6 +46,9 @@ enum Command {
     /// Manage invites (admin only).
     #[command(subcommand)]
     Invite(InviteCommand),
+    /// Show or change the bucket settings (changing is admin only).
+    #[command(subcommand)]
+    Storage(StorageCommand),
     /// Print the admin's recovery kit. Store it in a password manager.
     RecoveryKit,
     /// Restore the admin onto this device from a recovery kit. Only do this
@@ -71,6 +74,23 @@ enum InviteCommand {
     Reject { token: String },
     /// Stop this invite from being used.
     Revoke { token: String },
+}
+
+#[derive(Subcommand)]
+enum StorageCommand {
+    /// Show the bucket settings (never the secret key).
+    Show,
+    /// Change the region and keys, for example after rotating them. Keep the
+    /// old key active until every member has synced.
+    Update {
+        #[arg(long, env = "SHY_S3_REGION")]
+        region: String,
+        #[arg(long, env = "SHY_S3_ACCESS_KEY_ID")]
+        access_key_id: String,
+        /// Prefer the environment variable, to keep it out of shell history.
+        #[arg(long, env = "SHY_S3_SECRET_ACCESS_KEY", hide_env_values = true)]
+        secret_access_key: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -168,6 +188,10 @@ async fn main() -> Result<()> {
             let workspace = Workspace::open(&data, Networking::Offline).await?;
             run_invite_command(&workspace, command).await?;
         }
+        Command::Storage(command) => {
+            let workspace = Workspace::open(&data, Networking::Offline).await?;
+            run_storage_command(&workspace, command).await?;
+        }
         Command::RecoveryKit => {
             let workspace = Workspace::open(&data, Networking::Offline).await?;
             println!("{}", workspace.recovery_kit().await?.as_str());
@@ -187,6 +211,40 @@ async fn main() -> Result<()> {
             }
             let workspace = Workspace::open(&data, Networking::Online).await?;
             mcp::serve(workspace).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn run_storage_command(workspace: &Workspace, command: StorageCommand) -> Result<()> {
+    match command {
+        StorageCommand::Show => {
+            let settings = workspace.storage_settings()?;
+            println!("Endpoint:   {}", settings.endpoint);
+            println!("Bucket:     {}", settings.bucket);
+            println!("Region:     {}", settings.region);
+            println!("Access key: {}", settings.access_key_id);
+        }
+        StorageCommand::Update {
+            region,
+            access_key_id,
+            secret_access_key,
+        } => {
+            let update = StorageUpdate {
+                region: &region,
+                access_key_id: &access_key_id,
+                secret_access_key: &secret_access_key,
+            };
+            workspace.update_storage(update).await?;
+            workspace.sync().await;
+            report_sync_error(workspace)?;
+            println!("Updated. Keep the old key active until every member has synced.");
+            if workspace.has_recovery_kit()? {
+                println!(
+                    "Your recovery kit changed; save the new one:\n{}",
+                    workspace.recovery_kit().await?.as_str()
+                );
+            }
         }
     }
     Ok(())

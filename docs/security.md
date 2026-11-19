@@ -28,12 +28,13 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 - **Identity binding:** a joiner's key package must be signed by the identity it claims. The invite pins the admin's MLS key, so a forged Welcome is rejected.
 - **Members-only gossip:** peers that aren't current MLS members are refused at connection time, and we only dial members. See `transport/gossip.rs`.
 - **Admin recovery:** the recovery kit is a secret (recovery key plus bucket credentials). Snapshots in the bucket are encrypted with a key derived from the recovery key and bound to the workspace id. A snapshot is always uploaded before the commits it covers, and restore refuses a snapshot when the bucket holds any admin-signed commit from the snapshot's epoch onward (a rolled-back or stale snapshot). Deleting those slots doesn't help: members re-upload them. A failed restore removes only what it created. See `membership/recovery.rs`.
+- **Storage settings:** only the admin can change the bucket region and keys. New settings are checked against the bucket first, travel as an admin-only op encrypted with the current epoch key (so removed members can't read them), and ops claiming to change settings from anyone else are skipped. See `workspace/storage.rs`.
 - **Encryption at rest:** both local databases use SQLCipher with keys derived from a device key kept in the OS keychain (or a key file the user places elsewhere). The identity key and bucket credentials are inside the encrypted database; `workspace.json` holds only public settings. See `keys.rs`, `storage/mod.rs`.
 - **Chat rendering:** message HTML is sanitized with DOMPurify; only http(s), mailto and `shy://page/` links are allowed. External links open in the system browser.
 
 ## Known gaps
 
-- Bucket credentials are shared by all members, so any member can cause denial of service, and a removed member keeps them until the admin rotates them at the provider (#25).
+- Bucket credentials are shared by all members, so any member can cause denial of service. After removing someone, the admin should rotate the keys: create a new key at the provider, enter it under **Members → Storage** (it reaches current members only), and delete the old key once everyone has synced.
 - Single admin. A recovery kit restores a lost admin device, but there is still only one admin at a time; restoring while the old device is alive would cause conflicting membership changes (#5).
 
 Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issues?q=label%3Asecurity>

@@ -72,6 +72,13 @@ impl BucketConfig {
         Ok(with_scheme.trim_end_matches('/').to_owned())
     }
 
+    /// Checks the settings work (write, read back, delete) without creating
+    /// anything that stays in the bucket.
+    pub async fn check(&self) -> Result<()> {
+        let scratch = format!("access-check-{}", hex::encode(rand::random::<[u8; 8]>()));
+        self.connect(&scratch)?.check_access().await
+    }
+
     pub fn connect(&self, workspace_id: &str) -> Result<Bucket> {
         let endpoint = self.endpoint_url()?;
         let s3 = AmazonS3Builder::new()
@@ -106,6 +113,14 @@ struct Signing {
 pub struct Bucket {
     store: Arc<dyn ObjectStore>,
     signing: Option<Signing>,
+}
+
+/// Turns bucket settings into a connected bucket for a workspace. The app
+/// uses S3 ([`s3_connector`]); tests use an in-memory bucket.
+pub type Connector = Arc<dyn Fn(&str, &BucketConfig) -> Result<Bucket> + Send + Sync>;
+
+pub fn s3_connector() -> Connector {
+    Arc::new(|workspace_id: &str, config: &BucketConfig| config.connect(workspace_id))
 }
 
 /// Presigned links to one invite's request and answer slots.
