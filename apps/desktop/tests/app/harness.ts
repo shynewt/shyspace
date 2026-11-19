@@ -33,9 +33,14 @@ export const BUCKET = {
 
 export type Browser = Awaited<ReturnType<typeof remote>>;
 
-export function makeTempDir(purpose: string): { path: string; [Symbol.dispose]: () => void } {
-  const dir = mkdtempSync(path.join(tmpdir(), `shyspace-${purpose}-`));
-  return { path: dir, [Symbol.dispose]: () => rmSync(dir, { recursive: true, force: true }) };
+/** Runs `body` with fresh temporary folders, removed afterwards. */
+export async function withTempDirs(purposes: string[], body: (dirs: string[]) => Promise<void>): Promise<void> {
+  const dirs = purposes.map((purpose) => mkdtempSync(path.join(tmpdir(), `shyspace-${purpose}-`)));
+  try {
+    await body(dirs);
+  } finally {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 async function waitForDriver(): Promise<void> {
@@ -51,8 +56,8 @@ async function waitForDriver(): Promise<void> {
   throw new Error(`tauri-driver did not start on port ${DRIVER_PORT}`);
 }
 
-/** The app running on `dataDir`; closing it quits the app. */
-export async function launchApp(dataDir: string): Promise<Browser & AsyncDisposable> {
+/** Runs `body` against the app on `dataDir`, then quits the app. */
+export async function withApp(dataDir: string, body: (app: Browser) => Promise<void>): Promise<void> {
   // tauri-driver hands its environment to the app, which reads SHY_DIR.
   const driver = spawn("tauri-driver", ["--port", String(DRIVER_PORT)], {
     env: { ...process.env, SHY_DIR: dataDir },
@@ -65,12 +70,12 @@ export async function launchApp(dataDir: string): Promise<Browser & AsyncDisposa
     logLevel: "warn",
     capabilities: { browserName: "wry", "tauri:options": { application: APP_BINARY } },
   });
-  return Object.assign(browser, {
-    [Symbol.asyncDispose]: async () => {
-      await browser.deleteSession();
-      await stop(driver);
-    },
-  });
+  try {
+    await body(browser);
+  } finally {
+    await browser.deleteSession();
+    await stop(driver);
+  }
 }
 
 async function stop(child: ChildProcess): Promise<void> {
