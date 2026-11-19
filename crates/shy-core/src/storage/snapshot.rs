@@ -23,6 +23,7 @@ const REPLAYABLE_TABLES: &[&str] = &[
     "message_edits",
     "channel_names",
     "deleted",
+    "read_markers",
 ];
 
 /// Copies the database at `source` to `destination`, both under `key`.

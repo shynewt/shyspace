@@ -6,6 +6,7 @@ mod epochs;
 mod invites;
 mod oplog;
 mod queries;
+mod reading;
 mod revisions;
 mod schema;
 mod snapshot;

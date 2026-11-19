@@ -12,8 +12,11 @@ use crate::{
 
 impl Workspace {
     pub fn channels(&self) -> Result<Vec<Channel>> {
-        let mut channels = self.state().store.channels()?;
+        let state = self.state();
+        let mut channels = state.store.channels()?;
         for channel in &mut channels {
+            channel.unread = state.store.unread_count(&channel.id, &self.me())?;
+            channel.last_read = state.store.read_marker(&channel.id)?;
             channel.can_delete = self.may(&Op::Delete {
                 id: channel.id.clone(),
             });

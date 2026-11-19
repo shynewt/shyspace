@@ -9,6 +9,7 @@ use crate::{
     ops::{EntityId, Envelope, Op, OpBody, VerifiedOp, new_owned_id, normalize_channel_name, now_ms},
     pages::{self, Edit},
     storage::ItemKind,
+    views::Change,
 };
 
 impl Workspace {
@@ -101,7 +102,17 @@ impl Workspace {
             text: text.to_owned(),
             reply_to,
         })?;
+        // Replying means you've read what came before.
+        self.state().store.mark_read(channel, &id)?;
         Ok(id)
+    }
+
+    /// Moves your read position in `channel` up to `message`. Personal: kept
+    /// on this device, never sent to others.
+    pub fn mark_read(&self, channel: &str, message: &str) -> Result<()> {
+        self.state().store.mark_read(channel, message)?;
+        self.emit(Change::Channels);
+        Ok(())
     }
 
     /// Replaces a message's text. Its author only.

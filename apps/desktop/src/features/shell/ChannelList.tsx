@@ -8,12 +8,24 @@ import { useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, IconButton, Menu, type MenuItem } from "../../ui";
 import { NavItem } from "./NavItem";
 
-export function ChannelList({ isAdding, onAddDone }: { isAdding: boolean; onAddDone: () => void }) {
-  const { channels, navigate } = useWorkspace();
+export function ChannelList({
+  isAdding,
+  onAddDone,
+  isUnreadOnly,
+}: {
+  isAdding: boolean;
+  onAddDone: () => void;
+  isUnreadOnly: boolean;
+}) {
+  const { channels, view, navigate } = useWorkspace();
+  // The open channel stays listed, so filtering never hides where you are.
+  const shown = isUnreadOnly
+    ? channels.filter((channel) => channel.unread > 0 || (view?.kind === "channel" && view.id === channel.id))
+    : channels;
   const create = async (name: string) => navigate({ kind: "channel", id: await api.createChannel(name) });
   return (
     <>
-      {channels.map((channel) => (
+      {shown.map((channel) => (
         <ChannelItem key={channel.id} channel={channel} />
       ))}
       <AnimatePresence>
@@ -51,6 +63,7 @@ function ChannelItem({ channel }: { channel: Channel }) {
         view={{ kind: "channel", id: channel.id }}
         icon={<Hash size={15} />}
         label={channel.name}
+        unread={channel.unread}
         trailing={
           <span className="absolute right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
             <Menu

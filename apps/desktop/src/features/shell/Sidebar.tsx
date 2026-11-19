@@ -1,11 +1,11 @@
-import { Plus, Search, Users } from "lucide-react";
+import { ListFilter, Plus, Search, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useCallback, useState } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { IconButton, Kbd, Logo, SectionLabel, springs } from "../../ui";
+import { cx, IconButton, Kbd, Logo, SectionLabel, springs } from "../../ui";
 import { ChannelList } from "./ChannelList";
 import { PageTree } from "./PageTree";
 import { SyncIndicator } from "./SyncIndicator";
@@ -21,6 +21,7 @@ export function Sidebar({
 }) {
   const { session, pages, navigate } = useWorkspace();
   const [isAddingChannel, setAddingChannel] = useState(false);
+  const [isUnreadOnly, setUnreadOnly] = useState(false);
 
   const createPage = async (parent: string | null) => {
     try {
@@ -53,8 +54,27 @@ export function Sidebar({
       </div>
 
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto px-2 pb-3">
-        <Section title="Channels" addLabel="New channel" onAdd={() => setAddingChannel(true)}>
-          <ChannelList isAdding={isAddingChannel} onAddDone={() => setAddingChannel(false)} />
+        <Section
+          title="Channels"
+          addLabel="New channel"
+          onAdd={() => setAddingChannel(true)}
+          extraAction={
+            <IconButton
+              label={isUnreadOnly ? "Show all channels" : "Show unread channels only"}
+              aria-pressed={isUnreadOnly}
+              size="sm"
+              icon={<ListFilter size={13} />}
+              isActive={isUnreadOnly}
+              onClick={() => setUnreadOnly(!isUnreadOnly)}
+              className={cx(!isUnreadOnly && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
+            />
+          }
+        >
+          <ChannelList
+            isAdding={isAddingChannel}
+            onAddDone={() => setAddingChannel(false)}
+            isUnreadOnly={isUnreadOnly}
+          />
         </Section>
 
         <Section title="Pages" addLabel="New page" onAdd={() => createPage(null)}>
@@ -105,24 +125,29 @@ function Section({
   title,
   addLabel,
   onAdd,
+  extraAction,
   children,
 }: {
   title: string;
   addLabel: string;
   onAdd: () => void;
+  extraAction?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="mt-3">
       <SectionLabel
         action={
-          <IconButton
-            label={addLabel}
-            size="sm"
-            icon={<Plus size={14} />}
-            onClick={onAdd}
-            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-          />
+          <span className="flex items-center">
+            {extraAction}
+            <IconButton
+              label={addLabel}
+              size="sm"
+              icon={<Plus size={14} />}
+              onClick={onAdd}
+              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            />
+          </span>
         }
       >
         {title}

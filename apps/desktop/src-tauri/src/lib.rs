@@ -257,6 +257,14 @@ async fn create_page(
 }
 
 #[tauri::command]
+async fn mark_read(state: State<'_, AppState>, channel: String, message: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .mark_read(&channel, &message)
+        .map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
     current(&state)
         .await?
@@ -409,6 +417,7 @@ pub fn run() {
             channels,
             create_channel,
             rename_channel,
+            mark_read,
             delete_channel,
             edit_message,
             delete_message,

@@ -26,13 +26,17 @@ import { search } from "./search";
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
 
-type StoredChannel = Omit<Channel, "can_delete">;
+type StoredChannel = Omit<Channel, "can_delete" | "unread" | "last_read">;
 type StoredMessage = Omit<Message, "author_name" | "author_is_bot" | "reactions" | "can_edit" | "can_delete">;
 type StoredPage = Omit<Page, "can_delete"> & { doc: Y.Doc };
 type StoredReaction = { message: string; author: string; emoji: string };
 
 function compareMessages(left: StoredMessage, right: StoredMessage): number {
   return left.lamport - right.lamport || left.author.localeCompare(right.author);
+}
+
+function isAfter(message: StoredMessage, cursor: MessageCursor): boolean {
+  return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.author > cursor.author);
 }
 
 function isBefore(message: StoredMessage, cursor: MessageCursor): boolean {
@@ -49,6 +53,8 @@ export class FakeBackend {
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
   private storage: StorageSettings | null = null;
   private lamport = 0;
+  /** Personal read positions, by channel. */
+  private readMarkers = new Map<string, MessageCursor>();
 
   /** Starts as the admin of a workspace with #general, as `create` would. */
   static withWorkspace(workspaceName: string, myName: string): FakeBackend {
@@ -129,7 +135,14 @@ export class FakeBackend {
       case "update_storage":
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
       case "channels":
-        return this.channels.map((channel) => ({ ...channel, can_delete: this.mayDelete(channel.id) }));
+        return this.channels.map((channel) => ({
+          ...channel,
+          can_delete: this.mayDelete(channel.id),
+          unread: this.unreadIn(channel.id),
+          last_read: this.readMarkers.get(channel.id) ?? null,
+        }));
+      case "mark_read":
+        return this.markRead(requireString(args, "channel"), requireString(args, "message"));
       case "create_channel":
         return this.createChannel(requireString(args, "name"));
       case "rename_channel":
@@ -146,13 +159,17 @@ export class FakeBackend {
           argument(args, "before") as MessageCursor | null,
           argument(args, "limit") as number,
         );
-      case "send_message":
-        return this.writeMessage(
+      case "send_message": {
+        const channel = requireString(args, "channel");
+        const id = this.writeMessage(
           this.me(),
-          requireString(args, "channel"),
+          channel,
           requireString(args, "text"),
           (argument(args, "replyTo") as string | null) ?? null,
         );
+        this.markRead(channel, id);
+        return id;
+      }
       case "react":
         return this.react(
           requireString(args, "message"),
@@ -315,6 +332,23 @@ export class FakeBackend {
     this.tick();
     const channel = this.messages.find((candidate) => candidate.id === message)?.channel;
     if (channel) this.notify({ kind: "messages", channel });
+  }
+
+  private unreadIn(channel: string): number {
+    const marker = this.readMarkers.get(channel);
+    return this.messages.filter(
+      (message) => message.channel === channel && message.author !== this.me() && (!marker || isAfter(message, marker)),
+    ).length;
+  }
+
+  /** Forward only, like the core. */
+  private markRead(channel: string, messageId: string): void {
+    const message = this.messages.find((candidate) => candidate.id === messageId && candidate.channel === channel);
+    if (!message) throw "no such message in this channel";
+    const marker = this.readMarkers.get(channel);
+    if (marker && !isAfter(message, marker)) return;
+    this.readMarkers.set(channel, { lamport: message.lamport, author: message.author });
+    this.notify({ kind: "channels" });
   }
 
   private renameChannel(id: string, name: string): void {

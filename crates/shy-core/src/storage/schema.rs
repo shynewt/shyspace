@@ -56,6 +56,9 @@ CREATE TABLE channel_names (
     channel TEXT PRIMARY KEY, name TEXT NOT NULL, lamport INTEGER NOT NULL, author BLOB NOT NULL);
 CREATE TABLE deleted (id TEXT PRIMARY KEY);
 ",
+    "
+CREATE TABLE read_markers (channel TEXT PRIMARY KEY, lamport INTEGER NOT NULL, author BLOB NOT NULL);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

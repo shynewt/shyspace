@@ -26,6 +26,8 @@ impl Store {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 can_delete: false,
+                unread: 0,
+                last_read: None,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

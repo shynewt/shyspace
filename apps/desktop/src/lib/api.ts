@@ -3,7 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 import { reportError } from "./toast";
 
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
-export type Channel = { id: string; name: string; can_delete: boolean };
+export type Channel = {
+  id: string;
+  name: string;
+  can_delete: boolean;
+  unread: number;
+  last_read: MessageCursor | null;
+};
 export type Reaction = { emoji: string; count: number; mine: boolean };
 export type Message = {
   id: string;
@@ -86,6 +92,7 @@ export const api = {
   createChannel: (name: string) => invoke<string>("create_channel", { name }),
   renameChannel: (channel: string, name: string) => invoke<void>("rename_channel", { channel, name }),
   deleteChannel: (channel: string) => invoke<void>("delete_channel", { channel }),
+  markRead: (channel: string, message: string) => invoke<void>("mark_read", { channel, message }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>

@@ -56,6 +56,10 @@ pub struct Channel {
     pub name: String,
     /// Whether this member may delete it (its owner or the admin).
     pub can_delete: bool,
+    /// Messages by others since this member's read position.
+    pub unread: u32,
+    /// The last message this member has read, if any.
+    pub last_read: Option<MessageCursor>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

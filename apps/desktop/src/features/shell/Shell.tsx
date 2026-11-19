@@ -12,7 +12,8 @@ import { CommandPalette } from "../search/CommandPalette";
 import { Sidebar } from "./Sidebar";
 
 export function Shell({ session }: { session: Session }) {
-  const channels = useLive(api.channels, (change) => change.kind === "channels") ?? [];
+  // Unread counts change as messages arrive.
+  const channels = useLive(api.channels, (change) => change.kind === "channels" || change.kind === "messages") ?? [];
   const pages = useLive(api.pages, (change) => change.kind === "pages") ?? [];
   const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
   const [view, setView] = useState<View | null>(null);
