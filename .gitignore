@@ -4,3 +4,5 @@ dist/
 apps/desktop/src-tauri/gen/
 .local/
 .envrc
+test-results/
+playwright-report/

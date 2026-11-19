@@ -11,7 +11,7 @@ const DOT: Record<Tone, string> = {
   pending: "bg-faint",
 };
 
-function describe(status: SyncStatus | undefined): { tone: Tone; label: string; detail: string } {
+function describeStatus(status: SyncStatus | undefined): { tone: Tone; label: string; detail: string } {
   if (!status) return { tone: "pending", label: "Connecting…", detail: "Starting up." };
   if (status.error) return { tone: "error", label: "Sync problem", detail: status.error };
   if (status.peers > 0) {
@@ -27,7 +27,7 @@ function describe(status: SyncStatus | undefined): { tone: Tone; label: string; 
 }
 
 export function SyncIndicator({ status }: { status: SyncStatus | undefined }) {
-  const { tone, label, detail } = describe(status);
+  const { tone, label, detail } = describeStatus(status);
   return (
     <Tooltip label={<span className="block max-w-[260px] whitespace-normal">{detail}</span>} side="bottom">
       <div className="flex w-fit items-center gap-1.5 text-[11.5px] text-muted">

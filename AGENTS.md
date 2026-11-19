@@ -84,6 +84,7 @@ Inside `shy-core`, each file has one job (see the file map in `docs/architecture
   - unit tests next to the code (`#[cfg(test)] mod tests`);
   - multi-member scenarios in `crates/shy-core/src/tests/collaboration.rs`, using an in-memory bucket;
   - attacks in `crates/shy-core/src/tests/hardening.rs`: every security rule has a test that tries to break it;
+  - screens in `apps/desktop/tests/ui/*.spec.ts` (Playwright, against the in-memory fake in `tests/ui/fake/`). A UI behavior change comes with a test there; a new `invoke` command needs a matching case in the fake;
   - real processes, network and bucket in `scripts/e2e_mcp.py`.
 
 ## Checks
@@ -94,10 +95,10 @@ All must pass before every commit; never commit red:
 cargo fmt --check
 cargo clippy --workspace --all-targets
 cargo test --workspace
-(cd apps/desktop && pnpm typecheck && pnpm lint)
+(cd apps/desktop && pnpm typecheck && pnpm lint && pnpm test:ui)
 ```
 
-For changes to sync, networking or the CLI, also run `python3 scripts/e2e_mcp.py` (needs the local bucket; see `docs/development.md`). For UI changes, run the app and check the change by hand.
+For changes to sync, networking or the CLI, also run `python3 scripts/e2e_mcp.py` (needs the local bucket; see `docs/development.md`). For UI changes, also run the app and check the change by hand.
 
 "Done" means you ran these and saw them pass. If a check fails or you couldn't run it, say so and show the error.
 

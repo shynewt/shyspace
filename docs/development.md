@@ -46,7 +46,9 @@ python3 scripts/e2e_mcp.py
 
 ## Testing the UI
 
-There is no UI test suite yet (#11). To see every shared component, open the app with `#gallery` in development. To check a change, run the app on a pre-filled workspace and drive a second member through the CLI or MCP so you can watch live updates arrive.
+`pnpm test:ui` (in `apps/desktop`) runs the Playwright tests in `tests/ui/`. They load the real frontend from `tests/ui/app.html`, which answers every `invoke` from an in-memory fake (`tests/ui/fake/backend.ts`, through Tauri's `mockIPC`) instead of Rust. Tests act as other members through `window.fake` (for example `window.fake.receiveMessage(...)`). The fake copies only the behavior the screens rely on, so keep it in step with `src-tauri/src/lib.rs`. First run: `pnpm exec playwright install chromium-headless-shell`.
+
+To see every shared component, open the app with `#gallery` in development. To check a change by hand, run the app on a pre-filled workspace and drive a second member through the CLI or MCP so you can watch live updates arrive.
 
 ## Conventions
 
