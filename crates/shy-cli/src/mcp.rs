@@ -118,10 +118,11 @@ pub struct WaitForMessages {
 }
 
 /// One line per message, oldest first, each starting with its id.
-/// A new message wakes an agent unless it wrote it, or another bot did
-/// without mentioning it: two agents must not keep waking each other.
-fn should_wake(message: &Message, my_id: &str) -> bool {
-    message.author != my_id && (!message.author_is_bot || message.mentions_me)
+/// A new message wakes you unless you wrote it. If you're a bot, another
+/// bot's message wakes you only when it mentions you, so two agents don't
+/// keep waking each other.
+fn should_wake(message: &Message, my_id: &str, is_bot: bool) -> bool {
+    message.author != my_id && (!is_bot || !message.author_is_bot || message.mentions_me)
 }
 
 fn format_messages(messages: Vec<Message>) -> String {
@@ -407,6 +408,12 @@ impl ShyTools {
             .map_err(failed)?;
         let timeout = Duration::from_secs(request.timeout_seconds.unwrap_or(120).min(MAX_WAIT_SECONDS));
         let me = self.workspace.my_id();
+        let is_bot = self
+            .workspace
+            .members()
+            .map_err(failed)?
+            .iter()
+            .any(|member| member.id == me && member.is_bot);
         let mut changes = self.workspace.subscribe();
         let arrived = tokio::time::timeout(timeout, async {
             loop {
@@ -421,7 +428,7 @@ impl ShyTools {
                     continue;
                 }
                 if let Some(latest) = self.workspace.latest_message(&channel)?
-                    && should_wake(&latest.message, &me)
+                    && should_wake(&latest.message, &me, is_bot)
                 {
                     return Ok(latest);
                 }
@@ -494,18 +501,24 @@ mod tests {
 
     #[test]
     fn agents_wake_for_people_and_for_bots_only_when_mentioned() {
-        assert!(should_wake(&message("ada", false, false), "me"));
+        let as_bot = true;
+        assert!(should_wake(&message("ada", false, false), "me", as_bot));
         assert!(
-            !should_wake(&message("me", false, false), "me"),
+            !should_wake(&message("me", false, false), "me", as_bot),
             "not for your own message"
         );
         assert!(
-            !should_wake(&message("other-bot", true, false), "me"),
+            !should_wake(&message("other-bot", true, false), "me", as_bot),
             "bots don't wake each other"
         );
         assert!(
-            should_wake(&message("other-bot", true, true), "me"),
+            should_wake(&message("other-bot", true, true), "me", as_bot),
             "unless one mentions the other"
         );
+    }
+
+    #[test]
+    fn people_wake_for_bots() {
+        assert!(should_wake(&message("a-bot", true, false), "me", false));
     }
 }
