@@ -1,7 +1,8 @@
 import { Inbox as InboxIcon, ListFilter, Plus, Search, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useCallback, useState } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 import { api, type SyncStatus } from "../../lib/api";
+import { shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
@@ -21,7 +22,10 @@ export function Sidebar({
   onOpenMembers: () => void;
 }) {
   const { session, pages, navigate } = useWorkspace();
-  const [isAddingChannel, setAddingChannel] = useState(false);
+  // Each opening of the new-channel field is a fresh one: reopening while
+  // the last one fades out must not revive it, already submitted.
+  const [newChannelRound, setNewChannelRound] = useState<number | null>(null);
+  const roundsStarted = useRef(0);
   const [isUnreadOnly, setUnreadOnly] = useState(false);
 
   const createPage = async (parent: string | null) => {
@@ -50,7 +54,7 @@ export function Sidebar({
         >
           <Search size={14} />
           <span className="flex-1 text-left">Search</span>
-          <Kbd>Ctrl K</Kbd>
+          <Kbd>{shortcutKeys("search").join(" ")}</Kbd>
         </button>
       </div>
 
@@ -59,7 +63,10 @@ export function Sidebar({
         <Section
           title="Channels"
           addLabel="New channel"
-          onAdd={() => setAddingChannel(true)}
+          onAdd={() => {
+            roundsStarted.current += 1;
+            setNewChannelRound(roundsStarted.current);
+          }}
           extraAction={
             <IconButton
               label={isUnreadOnly ? "Show all channels" : "Show unread channels only"}
@@ -73,8 +80,8 @@ export function Sidebar({
           }
         >
           <ChannelList
-            isAdding={isAddingChannel}
-            onAddDone={() => setAddingChannel(false)}
+            newChannelRound={newChannelRound}
+            onAddDone={() => setNewChannelRound(null)}
             isUnreadOnly={isUnreadOnly}
           />
         </Section>

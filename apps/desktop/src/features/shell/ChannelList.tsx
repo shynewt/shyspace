@@ -15,11 +15,12 @@ const NOTIFY_CHOICES: { level: NotifyLevel; label: string; icon: ReactNode }[] =
 ];
 
 export function ChannelList({
-  isAdding,
+  newChannelRound,
   onAddDone,
   isUnreadOnly,
 }: {
-  isAdding: boolean;
+  /** Set while the new-channel field is open; a new number means a fresh field. */
+  newChannelRound: number | null;
   onAddDone: () => void;
   isUnreadOnly: boolean;
 }) {
@@ -35,7 +36,15 @@ export function ChannelList({
         <ChannelItem key={channel.id} channel={channel} />
       ))}
       <AnimatePresence>
-        {isAdding && <ChannelNameInput label="Channel name" initialName="" onSubmit={create} onDone={onAddDone} />}
+        {newChannelRound !== null && (
+          <ChannelNameInput
+            key={newChannelRound}
+            label="Channel name"
+            initialName=""
+            onSubmit={create}
+            onDone={onAddDone}
+          />
+        )}
       </AnimatePresence>
     </>
   );

@@ -12,9 +12,10 @@ import {
 import { motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SearchHit } from "../../lib/api";
+import { shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
-import { Dialog, springs } from "../../ui";
+import { Dialog, Kbd, springs } from "../../ui";
 
 const SEARCH_DELAY_MS = 120;
 const JUMP_LIMIT_WHILE_TYPING = 6;
@@ -27,6 +28,7 @@ type Item = {
   title: string;
   detail?: ReactNode;
   group: string;
+  shortcut?: string[];
 };
 
 export function CommandPalette({
@@ -66,7 +68,12 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
     const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
     const go = (view: View) => () => navigate(view);
     const actions: Item[] = [
-      { title: "Open inbox", icon: <Inbox size={15} />, onChoose: go({ kind: "inbox" }) },
+      {
+        title: "Open inbox",
+        icon: <Inbox size={15} />,
+        onChoose: go({ kind: "inbox" }),
+        shortcut: shortcutKeys("inbox"),
+      },
       {
         title: "New page",
         icon: <FilePlus2 size={15} />,
@@ -218,6 +225,13 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
                 <span className="block truncate text-[13.5px] font-medium">{item.title}</span>
                 {item.detail && <span className="mt-0.5 block truncate text-[12.5px] text-muted">{item.detail}</span>}
               </span>
+              {item.shortcut && (
+                <span className="relative mt-0.5 flex gap-1">
+                  {item.shortcut.map((key) => (
+                    <Kbd key={key}>{key}</Kbd>
+                  ))}
+                </span>
+              )}
               {selected === index && <CornerDownLeft size={14} className="relative mt-1 text-faint" />}
             </button>
           </div>

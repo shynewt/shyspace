@@ -2,15 +2,17 @@ import { UserX } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Session } from "../../lib/api";
+import { SHORTCUTS } from "../../lib/shortcuts";
 import { useAlerts } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
-import { type View, viewKey, WorkspaceContext } from "../../lib/workspace";
+import { sameView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { InboxView } from "../inbox/InboxView";
 import { MembersPanel } from "../members/MembersPanel";
 import { PageView } from "../pages/PageView";
 import { CommandPalette } from "../search/CommandPalette";
+import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
 
 export function Shell({ session }: { session: Session }) {
@@ -21,6 +23,7 @@ export function Shell({ session }: { session: Session }) {
   const [view, setView] = useState<View | null>(null);
   const [isPaletteOpen, setPaletteOpen] = useState(false);
   const [isMembersOpen, setMembersOpen] = useState(false);
+  const [isShortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
     if (!view && channels.length > 0) setView({ kind: "channel", id: channels[0].id });
@@ -38,14 +41,38 @@ export function Shell({ session }: { session: Session }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setPaletteOpen((open) => !open);
+      const shortcut = SHORTCUTS.find((candidate) => candidate.matches(event));
+      if (!shortcut) return;
+      event.preventDefault();
+      const views = sidebarViews(channels, pages);
+      const current = view ? views.findIndex((candidate) => sameView(candidate, view)) : -1;
+      const unread = (candidate: View) =>
+        candidate.kind === "channel" && (channels.find((channel) => channel.id === candidate.id)?.unread ?? 0) > 0;
+      const step = (direction: 1 | -1, isWanted: (candidate: View) => boolean) => {
+        for (let index = current + direction; index >= 0 && index < views.length; index += direction) {
+          if (isWanted(views[index])) return setView(views[index]);
+        }
+      };
+      switch (shortcut.id) {
+        case "search":
+          return setPaletteOpen((open) => !open);
+        case "inbox":
+          return setView({ kind: "inbox" });
+        case "previous":
+          return step(-1, () => true);
+        case "next":
+          return step(1, () => true);
+        case "previousUnread":
+          return step(-1, unread);
+        case "nextUnread":
+          return step(1, unread);
+        case "cheatSheet":
+          return setShortcutsOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [view, channels, pages]);
 
   useAlerts(view);
 
@@ -85,6 +112,7 @@ export function Shell({ session }: { session: Session }) {
       </motion.div>
       <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} onOpenMembers={() => setMembersOpen(true)} />
       <MembersPanel open={isMembersOpen} onOpenChange={setMembersOpen} />
+      <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setShortcutsOpen} />
       <RemovedNotice isRemoved={status?.removed ?? false} />
     </WorkspaceContext.Provider>
   );

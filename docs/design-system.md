@@ -44,6 +44,7 @@ Dialogs, drawers, menus, popovers and tooltips use [Radix](https://www.radix-ui.
 
 ## Rules
 
+- Keyboard shortcuts are defined once in `lib/shortcuts.ts` (the shell handles them, the cheat sheet and menus show them). Use a modifier key: the message box usually has focus, so plain letters belong to typing.
 - Need something new? First check whether an existing component (or a variant of it) fits. Add a component to `ui/` only when a third screen needs the same thing.
 - New components go in `ui/`, get an entry in `ui/index.ts`, and appear in the gallery.
 - Every interactive element works with the keyboard and has an accessible name.
