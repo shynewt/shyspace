@@ -32,10 +32,15 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
     };
   }, [target]);
 
+  // The text as last saved or restored; only a change from it is an edit.
+  const saved = useRef<string | null>(null);
   useEffect(() => {
     if (!isRestored) return;
+    if (saved.current === null) saved.current = text;
+    if (text === saved.current) return;
     isDirty.current = true;
     const timer = setTimeout(() => {
+      saved.current = text;
       isDirty.current = false;
       api.setDraft(target, text).catch(reportError);
     }, SAVE_DELAY_MS);

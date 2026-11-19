@@ -68,6 +68,11 @@ CREATE TABLE thread_follows (root TEXT PRIMARY KEY, is_following INTEGER NOT NUL
     "
 CREATE TABLE drafts (target TEXT PRIMARY KEY, text TEXT NOT NULL, updated_ms INTEGER NOT NULL);
 ",
+    "
+CREATE TABLE later (
+    item TEXT PRIMARY KEY, saved_ms INTEGER NOT NULL, remind_ms INTEGER,
+    is_reminded INTEGER NOT NULL DEFAULT 0, is_done INTEGER NOT NULL DEFAULT 0);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

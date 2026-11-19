@@ -4,6 +4,7 @@ import type {
   Channel,
   Inbox,
   InboxItem,
+  LinkedMessage,
   Member,
   Message,
   MessageCursor,
@@ -20,6 +21,7 @@ export type ChatContext = {
   members: () => readonly Member[];
   tick: () => number;
   notify: (change: Change) => void;
+  isSaved: (item: string) => boolean;
 };
 
 /** Returned by `answer` for commands that aren't about chat. */
@@ -34,6 +36,7 @@ type StoredMessage = Omit<
   | "can_edit"
   | "can_delete"
   | "mentions_me"
+  | "is_saved"
   | "reply_count"
   | "last_reply_ms"
   | "is_following"
@@ -73,13 +76,8 @@ export class FakeChat {
         return this.channelViews();
       case "inbox":
         return this.inbox();
-      case "linked_message": {
-        const id = requireString(args, "id");
-        const message = this.messages.find((candidate) => candidate.id === id);
-        if (!message) return null;
-        const root = rootOf(this.messages, id);
-        return { message: this.present(message), thread_root: root === id ? null : root };
-      }
+      case "linked_message":
+        return this.linkedMessage(requireString(args, "id"));
       case "mark_all_read":
         return this.markAllRead();
       case "set_notify_level":
@@ -175,6 +173,13 @@ export class FakeChat {
     return message.id;
   }
 
+  linkedMessage(id: string): LinkedMessage | null {
+    const message = this.messages.find((candidate) => candidate.id === id);
+    if (!message) return null;
+    const root = rootOf(this.messages, id);
+    return { message: this.present(message), thread_root: root === id ? null : root };
+  }
+
   /** The channel a draft target is in: itself, or a thread's channel. */
   channelOf(target: string): string | null {
     if (this.channels.some((channel) => channel.id === target)) return target;
@@ -253,6 +258,7 @@ export class FakeChat {
       can_edit: message.author === this.context.me(),
       can_delete: this.mayDelete(message.id),
       mentions_me: message.author !== this.context.me() && mentions(message.text, this.context.me()),
+      is_saved: this.context.isSaved(message.id),
       ...this.threadSummary(message),
       reactions: Array.from(counts, ([emoji, entry]) => ({ emoji, ...entry })),
     };

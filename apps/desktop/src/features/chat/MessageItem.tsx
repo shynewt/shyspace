@@ -1,9 +1,22 @@
-import { Copy, CornerUpLeft, Ellipsis, Link2, MessageSquareReply, Pencil, SmilePlus, Trash2 } from "lucide-react";
+import {
+  AlarmClock,
+  Bookmark,
+  BookmarkMinus,
+  Copy,
+  CornerUpLeft,
+  Ellipsis,
+  Link2,
+  MessageSquareReply,
+  Pencil,
+  SmilePlus,
+  Trash2,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink } from "../../lib/api";
 import { ChatMarkdown, messageIdsIn, pageIdsIn } from "../../lib/markdown";
 import { displayName, formatTime } from "../../lib/people";
+import { REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useWorkspace } from "../../lib/workspace";
@@ -218,6 +231,28 @@ function MessageMenu({
       onSelect: () => copy(messageLink(message.id), "Link copied. Paste it in any channel to share this message."),
     },
   ];
+  items.push(
+    message.is_saved
+      ? {
+          label: "Remove from Later",
+          icon: <BookmarkMinus size={14} />,
+          onSelect: () => api.removeFromLater(message.id).catch(reportError),
+        }
+      : {
+          label: "Save for later",
+          icon: <Bookmark size={14} />,
+          onSelect: () => api.saveForLater(message.id, null).catch(reportError),
+        },
+    {
+      label: "Remind me",
+      icon: <AlarmClock size={14} />,
+      choices: REMINDER_CHOICES.map((choice) => ({
+        label: choice.label,
+        isChosen: false,
+        onSelect: () => api.saveForLater(message.id, choice.at(new Date()).getTime()).catch(reportError),
+      })),
+    },
+  );
   if (message.can_edit) items.push({ label: "Edit", icon: <Pencil size={14} />, onSelect: onEdit });
   if (message.can_delete) {
     items.push({ label: "Delete", icon: <Trash2 size={14} />, onSelect: onDelete, isDestructive: true });

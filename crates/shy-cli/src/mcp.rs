@@ -490,6 +490,7 @@ mod tests {
             can_edit: false,
             can_delete: false,
             mentions_me,
+            is_saved: false,
             reply_count: 0,
             last_reply_ms: None,
             is_following: false,

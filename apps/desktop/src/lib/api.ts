@@ -28,6 +28,7 @@ export type Message = {
   can_edit: boolean;
   can_delete: boolean;
   mentions_me: boolean;
+  is_saved: boolean;
   reply_count: number;
   last_reply_ms: number | null;
   is_following: boolean;
@@ -40,11 +41,26 @@ export type InboxItem = {
   thread_root: string | null;
   reason: "mention" | "thread_reply";
 };
+export type LaterItem = {
+  id: string;
+  saved_ms: number;
+  remind_ms: number | null;
+  is_done: boolean;
+  message: LinkedMessage | null;
+  page: Page | null;
+};
 export type Draft = { target: string; channel: string; text: string; updated_ms: number };
 export type LinkedMessage = { message: Message; thread_root: string | null };
 export type Inbox = { attention: InboxItem[]; channels: Channel[] };
 export type MessageCursor = { lamport: number; author: string };
-export type Page = { id: string; parent: string | null; title: string; updated_ms: number; can_delete: boolean };
+export type Page = {
+  id: string;
+  parent: string | null;
+  title: string;
+  updated_ms: number;
+  can_delete: boolean;
+  is_saved: boolean;
+};
 export type Member = { id: string; name: string; is_bot: boolean; is_admin: boolean; active: boolean };
 export type SearchHit = {
   kind: "message" | "page";
@@ -94,6 +110,7 @@ export type Change =
     }
   | { kind: "channels" }
   | { kind: "drafts" }
+  | { kind: "later" }
   | { kind: "messages"; channel: string }
   | { kind: "pages" }
   | { kind: "doc"; page: string; update: number[] }
@@ -124,6 +141,11 @@ export const api = {
   thread: (root: string) => invoke<Message[]>("thread", { root }),
   inbox: () => invoke<Inbox>("inbox"),
   drafts: () => invoke<Draft[]>("drafts"),
+  later: () => invoke<LaterItem[]>("later"),
+  saveForLater: (item: string, remindMs: number | null) => invoke<void>("save_for_later", { item, remindMs }),
+  removeFromLater: (item: string) => invoke<void>("remove_from_later", { item }),
+  markLaterDone: (item: string, done: boolean) => invoke<void>("mark_later_done", { item, done }),
+  takeDueReminders: () => invoke<LaterItem[]>("take_due_reminders"),
   setDraft: (target: string, text: string) => invoke<void>("set_draft", { target, text }),
   linkedMessage: (id: string) => invoke<LinkedMessage | null>("linked_message", { id }),
   markAllRead: () => invoke<void>("mark_all_read"),

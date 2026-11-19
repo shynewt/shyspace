@@ -94,7 +94,7 @@ test("a regular member can only copy others' messages", async ({ page }) => {
   await page.evaluate(() => window.fake.receiveMessage(window.fake.memberNamed("Ada"), "general", "Welcome!"));
 
   await messageActions(page, "Welcome!");
-  await expect(page.getByRole("menuitem")).toHaveText(["Copy text", "Copy link"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Copy text", "Copy link", "Save for later", "Remind me"]);
 });
 
 test("a channel can be renamed from the sidebar", async ({ page }) => {

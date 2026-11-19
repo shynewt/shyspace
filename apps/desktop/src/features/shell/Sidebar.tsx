@@ -1,4 +1,4 @@
-import { Inbox as InboxIcon, ListFilter, Plus, Search, Users } from "lucide-react";
+import { Bookmark, Inbox as InboxIcon, ListFilter, Plus, Search, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { api, type SyncStatus } from "../../lib/api";
@@ -60,6 +60,7 @@ export function Sidebar({
 
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto px-2 pb-3">
         <InboxLink />
+        <LaterLink />
         <Section
           title="Channels"
           addLabel="New channel"
@@ -141,6 +142,15 @@ function InboxLink() {
       label="Inbox"
       unread={inbox?.attention.length ?? 0}
     />
+  );
+}
+
+/** Later, counting what's saved and not done yet. */
+function LaterLink() {
+  const later = useLive(api.later, (change) => change.kind === "later" || change.kind === "messages");
+  const open = later?.filter((item) => !item.is_done).length ?? 0;
+  return (
+    <NavItem view={{ kind: "later" }} icon={<Bookmark size={15} />} label="Later" unread={open} countNoun="saved" />
   );
 }
 

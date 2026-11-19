@@ -5,10 +5,12 @@ import { api, type Session } from "../../lib/api";
 import { SHORTCUTS } from "../../lib/shortcuts";
 import { useAlerts } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
+import { useReminders } from "../../lib/useReminders";
 import { sameView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { InboxView } from "../inbox/InboxView";
+import { LaterView } from "../later/LaterView";
 import { MembersPanel } from "../members/MembersPanel";
 import { PageView } from "../pages/PageView";
 import { CommandPalette } from "../search/CommandPalette";
@@ -34,7 +36,7 @@ export function Shell({ session }: { session: Session }) {
   const listedIds = useMemo(() => new Set([...channels, ...pages].map((item) => item.id)), [channels, pages]);
   const previouslyListedIds = useRef(listedIds);
   useEffect(() => {
-    const id = view && view.kind !== "inbox" ? view.id : null;
+    const id = view && (view.kind === "channel" || view.kind === "page") ? view.id : null;
     if (id && previouslyListedIds.current.has(id) && !listedIds.has(id)) setView(null);
     previouslyListedIds.current = listedIds;
   }, [view, listedIds]);
@@ -75,6 +77,7 @@ export function Shell({ session }: { session: Session }) {
   }, [view, channels, pages]);
 
   useAlerts(view);
+  useReminders();
 
   const navigate = useCallback((next: View) => setView(next), []);
   const context = useMemo(
@@ -105,6 +108,7 @@ export function Shell({ session }: { session: Session }) {
                 {view.kind === "channel" && <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} />}
                 {view.kind === "page" && <PageView pageId={view.id} />}
                 {view.kind === "inbox" && <InboxView />}
+                {view.kind === "later" && <LaterView />}
               </motion.div>
             )}
           </AnimatePresence>

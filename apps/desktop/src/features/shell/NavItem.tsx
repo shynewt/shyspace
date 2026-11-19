@@ -10,6 +10,7 @@ export function NavItem({
   icon,
   label,
   unread = 0,
+  countNoun = "unread",
   mentions = 0,
   isMuted = false,
   status,
@@ -23,6 +24,8 @@ export function NavItem({
   label: string;
   /** Messages you haven't read; shown as a count and bold label. */
   unread?: number;
+  /** What the count is, for screen readers ("unread" unless said). */
+  countNoun?: string;
   /** How many of those mention you; shown as a red badge instead. */
   mentions?: number;
   /** Muted: dimmed, and only mentions get a badge. */
@@ -54,7 +57,9 @@ export function NavItem({
         type="button"
         aria-current={isActive ? "page" : undefined}
         aria-label={
-          hasUnread || status ? accessibleName(label, status?.label, hasUnread ? unread : 0, mentions) : undefined
+          hasUnread || status
+            ? accessibleName(label, status?.label, hasUnread ? unread : 0, mentions, countNoun)
+            : undefined
         }
         onClick={() => navigate(view)}
         onContextMenu={
@@ -100,10 +105,16 @@ export function NavItem({
 }
 
 /** "random, muted, 2 unread, 1 mentions you": what the badges and icons show. */
-function accessibleName(label: string, status: string | undefined, unread: number, mentions: number): string {
+function accessibleName(
+  label: string,
+  status: string | undefined,
+  unread: number,
+  mentions: number,
+  countNoun: string,
+): string {
   const parts = [label];
   if (status) parts.push(status);
-  if (unread > 0) parts.push(`${unread} unread`);
+  if (unread > 0) parts.push(`${unread} ${countNoun}`);
   if (unread > 0 && mentions > 0) parts.push(`${mentions} ${mentions === 1 ? "mentions" : "mention"} you`);
   return parts.join(", ");
 }

@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { chooseInSubmenu } from "./support";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("");
@@ -26,8 +27,7 @@ const alertsShown = (page: Page) => page.evaluate(() => window.fake.alertsShown)
 async function setLevel(page: Page, channel: string, choice: string) {
   await page.getByRole("button", { name: channel, exact: true }).hover();
   await page.getByRole("button", { name: `Actions for #${channel}` }).click();
-  await page.getByRole("menuitem", { name: "Notifications" }).hover();
-  await page.getByRole("menuitemradio", { name: choice }).click();
+  await chooseInSubmenu(page, "Notifications", choice);
 }
 
 test("a mention elsewhere shows a desktop notification", async ({ page }) => {

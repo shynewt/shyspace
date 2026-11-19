@@ -11,7 +11,14 @@ test("right-clicking a message opens its menu", async ({ page }) => {
   await composer.press("Enter");
 
   await page.getByRole("article").filter({ hasText: "Right-click me" }).click({ button: "right" });
-  await expect(page.getByRole("menuitem")).toHaveText(["Copy text", "Copy link", "Edit", "Delete"]);
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "Copy text",
+    "Copy link",
+    "Save for later",
+    "Remind me",
+    "Edit",
+    "Delete",
+  ]);
 });
 
 test("right-clicking a page in the sidebar opens its menu", async ({ page }) => {

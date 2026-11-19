@@ -10,8 +10,8 @@ use shy_core::{
     BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace,
     sync::SyncStatus,
     views::{
-        Channel, Draft, Inbox, Invite, LinkedMessage, Member, Message, MessageCursor, NotifyLevel, Page,
-        SearchHit, StorageSettings,
+        Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
+        Page, SearchHit, StorageSettings,
     },
     workspace::StorageUpdate,
 };
@@ -340,6 +340,41 @@ async fn drafts(state: State<'_, AppState>) -> CommandResult<Vec<Draft>> {
 }
 
 #[tauri::command]
+async fn save_for_later(
+    state: State<'_, AppState>,
+    item: String,
+    remind_ms: Option<i64>,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .save_for_later(&item, remind_ms)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn remove_from_later(state: State<'_, AppState>, item: String) -> CommandResult<()> {
+    current(&state).await?.remove_from_later(&item).map_err(failed)
+}
+
+#[tauri::command]
+async fn mark_later_done(state: State<'_, AppState>, item: String, done: bool) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .mark_later_done(&item, done)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn later(state: State<'_, AppState>) -> CommandResult<Vec<LaterItem>> {
+    current(&state).await?.later().map_err(failed)
+}
+
+#[tauri::command]
+async fn take_due_reminders(state: State<'_, AppState>) -> CommandResult<Vec<LaterItem>> {
+    current(&state).await?.take_due_reminders().map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
     current(&state)
         .await?
@@ -508,6 +543,11 @@ pub fn run() {
             create_channel,
             rename_channel,
             mark_read,
+            save_for_later,
+            remove_from_later,
+            mark_later_done,
+            later,
+            take_due_reminders,
             set_draft,
             drafts,
             linked_message,

@@ -1,4 +1,4 @@
-import { ChevronRight, FilePlus2, Link2, Trash2 } from "lucide-react";
+import { Bookmark, BookmarkCheck, ChevronRight, FilePlus2, Link2, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
@@ -61,6 +61,19 @@ export function PageView({ pageId }: { pageId: string }) {
           <Button variant="ghost" size="sm" icon={<Link2 size={14} />} onClick={copyLink}>
             Copy link
           </Button>
+          {page && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={page.is_saved ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
+              aria-pressed={page.is_saved}
+              onClick={() =>
+                (page.is_saved ? api.removeFromLater(page.id) : api.saveForLater(page.id, null)).catch(reportError)
+              }
+            >
+              {page.is_saved ? "Saved" : "Save for later"}
+            </Button>
+          )}
           {page?.can_delete && (
             <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setConfirmingDelete(true)}>
               Delete

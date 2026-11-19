@@ -50,6 +50,7 @@ pub(super) fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mess
         can_edit: false,
         can_delete: false,
         mentions_me: false,
+        is_saved: false,
         reply_count: 0,
         last_reply_ms: None,
         is_following: false,
@@ -167,6 +168,7 @@ impl Store {
                 title: row.get(2)?,
                 updated_ms: row.get(3)?,
                 can_delete: false,
+                is_saved: false,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

@@ -121,6 +121,8 @@ pub struct Message {
     pub can_delete: bool,
     /// Whether it mentions this member (directly, or @channel / @here).
     pub mentions_me: bool,
+    /// Whether this member saved it for later.
+    pub is_saved: bool,
     /// For a thread's first message: how many replies it has, and when the
     /// latest came.
     pub reply_count: u32,
@@ -156,6 +158,8 @@ pub struct Page {
     pub updated_ms: i64,
     /// Whether this member may delete it (its owner or the admin).
     pub can_delete: bool,
+    /// Whether this member saved it for later.
+    pub is_saved: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -220,6 +224,8 @@ pub struct StorageSettings {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Change {
+    /// What's saved for later changed on this device.
+    Later,
     /// Drafts changed on this device.
     Drafts,
     /// A new message from someone else that this member's level for its
@@ -294,4 +300,15 @@ pub struct Draft {
     pub channel: EntityId,
     pub text: String,
     pub updated_ms: i64,
+}
+
+/// Something saved for later: a message or a page, never both.
+#[derive(Debug, Clone, Serialize)]
+pub struct LaterItem {
+    pub id: EntityId,
+    pub saved_ms: i64,
+    pub remind_ms: Option<i64>,
+    pub is_done: bool,
+    pub message: Option<LinkedMessage>,
+    pub page: Option<Page>,
 }

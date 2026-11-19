@@ -8,17 +8,18 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import * as Y from "yjs";
-import type { BucketConfig, Change, Member, Page, Session, StorageSettings } from "../../../src/lib/api";
+import type { BucketConfig, Change, LaterItem, Member, Page, Session, StorageSettings } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
 import { FakeDrafts } from "./drafts";
 import { argument, type Kind, ownedId, randomHex, requireString } from "./helpers";
 import { FakeInvites } from "./invites";
+import { FakeLater } from "./later";
 import { search } from "./search";
 
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
 
-type StoredPage = Omit<Page, "can_delete"> & { doc: Y.Doc };
+type StoredPage = Omit<Page, "can_delete" | "is_saved"> & { doc: Y.Doc };
 
 export class FakeBackend {
   session: Session | null = null;
@@ -30,7 +31,9 @@ export class FakeBackend {
     members: () => this.members,
     tick: () => this.tick(),
     notify: (change) => this.notify(change),
+    isSaved: (item) => this.later.has(item),
   });
+  private later = new FakeLater();
   private drafts = new FakeDrafts();
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
   private storage: StorageSettings | null = null;
@@ -112,6 +115,21 @@ export class FakeBackend {
     }
     if (chatAnswer !== NOT_CHAT) return chatAnswer;
     switch (command) {
+      case "save_for_later":
+        this.later.save(requireString(args, "item"), (argument(args, "remindMs") as number | null) ?? null);
+        return this.notifyLater();
+      case "remove_from_later":
+        this.later.remove(requireString(args, "item"));
+        return this.notifyLater();
+      case "mark_later_done":
+        this.later.setDone(requireString(args, "item"), argument(args, "done") === true);
+        return this.notifyLater();
+      case "later":
+        return this.laterItems();
+      case "take_due_reminders": {
+        const due = this.later.takeDue(Date.now());
+        return this.laterItems().filter((item) => due.includes(item.id));
+      }
       case "set_draft":
         this.drafts.set(requireString(args, "target"), requireString(args, "text"));
         return this.notify({ kind: "drafts" });
@@ -145,6 +163,7 @@ export class FakeBackend {
           ...page,
           parent: this.pages.some((candidate) => candidate.id === page.parent) ? page.parent : null,
           can_delete: this.mayDelete(page.id),
+          is_saved: this.later.has(page.id),
         }));
       case "create_page":
         return this.createPage(requireString(args, "title"), (argument(args, "parent") as string | null) ?? null);
@@ -298,6 +317,20 @@ export class FakeBackend {
   private tick(): number {
     this.lamport += 1;
     return this.lamport;
+  }
+
+  private laterItems(): LaterItem[] {
+    const pages = this.answer("pages", undefined) as Page[];
+    return this.later.list((item) => ({
+      message: this.chat.linkedMessage(item),
+      page: pages.find((page) => page.id === item) ?? null,
+    }));
+  }
+
+  private notifyLater(): void {
+    this.notify({ kind: "later" });
+    for (const channel of this.chat.channels) this.notify({ kind: "messages", channel: channel.id });
+    this.notify({ kind: "pages" });
   }
 
   private notify(change: Change): void {

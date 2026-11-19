@@ -1,0 +1,152 @@
+import { AlarmClock, Bookmark, Check, ChevronRight, Ellipsis, FileText, Trash2, Undo2 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useMemo, useState } from "react";
+import { api, type LaterItem } from "../../lib/api";
+import { plainPreview } from "../../lib/markdown";
+import { displayName } from "../../lib/people";
+import { describeReminder, REMINDER_CHOICES } from "../../lib/reminders";
+import { reportError } from "../../lib/toast";
+import { useLive } from "../../lib/useLive";
+import { useWorkspace } from "../../lib/workspace";
+import { cx, EmptyState, IconButton, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
+
+/** Messages and pages you saved for yourself, with their reminders. */
+export function LaterView() {
+  const items = useLive(api.later, (change) => change.kind === "later" || change.kind === "messages");
+  const [isCompletedOpen, setCompletedOpen] = useState(false);
+  const open = items?.filter((item) => !item.is_done) ?? [];
+  const done = items?.filter((item) => item.is_done) ?? [];
+
+  return (
+    <div className="flex h-full flex-col">
+      <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
+        <Bookmark size={17} className="text-faint" />
+        <h1 className="text-[15px] font-semibold">Later</h1>
+      </header>
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        {items && items.length === 0 && (
+          <EmptyState icon={<Bookmark size={22} />} title="Nothing saved for later">
+            Save a message or page from its menu, with a reminder if you like. Only you see this list.
+          </EmptyState>
+        )}
+        <ul aria-label="Saved for later" className="flex flex-col gap-1">
+          <AnimatePresence initial={false}>
+            {open.map((item) => (
+              <LaterRow key={item.id} item={item} />
+            ))}
+          </AnimatePresence>
+        </ul>
+        {done.length > 0 && (
+          <section className="mt-5">
+            <button
+              type="button"
+              aria-expanded={isCompletedOpen}
+              onClick={() => setCompletedOpen(!isCompletedOpen)}
+              className="flex items-center gap-1 text-left"
+            >
+              <motion.span
+                animate={{ rotate: isCompletedOpen ? 90 : 0 }}
+                transition={springs.snappy}
+                className="grid text-faint"
+              >
+                <ChevronRight size={14} />
+              </motion.span>
+              <SectionLabel>Completed · {done.length}</SectionLabel>
+            </button>
+            <AnimatePresence initial={false}>
+              {isCompletedOpen && (
+                <motion.ul
+                  aria-label="Completed"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="flex flex-col gap-1 overflow-hidden"
+                >
+                  {done.map((item) => (
+                    <LaterRow key={item.id} item={item} />
+                  ))}
+                </motion.ul>
+              )}
+            </AnimatePresence>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LaterRow({ item }: { item: LaterItem }) {
+  const { channels, pages, navigate } = useWorkspace();
+  const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const linked = item.message;
+  const openItem = () => {
+    if (linked) {
+      const { message, thread_root } = linked;
+      navigate({ kind: "channel", id: message.channel, thread: thread_root ?? undefined, focus: message.id });
+    } else if (item.page) {
+      navigate({ kind: "page", id: item.page.id });
+    }
+  };
+  const where = linked
+    ? `${displayName(linked.message.author_name, linked.message.author)} in #${channels.find((channel) => channel.id === linked.message.channel)?.name ?? ""}`
+    : "Page";
+  const preview = linked ? plainPreview(linked.message.text, (id) => titles.get(id)) : item.page?.title || "Untitled";
+  const isOverdue = item.remind_ms !== null && item.remind_ms <= Date.now() && !item.is_done;
+  const menu: MenuItem[] = [
+    {
+      label: "Remind me",
+      icon: <AlarmClock size={14} />,
+      choices: REMINDER_CHOICES.map((choice) => ({
+        label: choice.label,
+        isChosen: false,
+        onSelect: () => api.saveForLater(item.id, choice.at(new Date()).getTime()).catch(reportError),
+      })),
+    },
+    {
+      label: "Remove from Later",
+      icon: <Trash2 size={14} />,
+      onSelect: () => api.removeFromLater(item.id).catch(reportError),
+      isDestructive: true,
+    },
+  ];
+  return (
+    <motion.li
+      layout
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={springs.smooth}
+      className="group flex items-start gap-2 rounded-xl px-2 py-1.5 hover:bg-surface-2"
+    >
+      <IconButton
+        label={item.is_done ? "Mark as not done" : "Mark as done"}
+        size="sm"
+        icon={item.is_done ? <Undo2 size={13} /> : <Check size={13} />}
+        onClick={() => api.markLaterDone(item.id, !item.is_done).catch(reportError)}
+        className="mt-1"
+      />
+      <button type="button" onClick={openItem} className="min-w-0 flex-1 text-left">
+        <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
+          {!linked && <FileText size={12} />}
+          {where}
+          {item.remind_ms !== null && !item.is_done && (
+            <span
+              className={cx(
+                "ml-auto flex shrink-0 items-center gap-1 rounded-full px-2 text-[11px]",
+                isOverdue ? "bg-danger/15 text-danger" : "bg-accent-soft text-accent-text",
+              )}
+            >
+              <AlarmClock size={11} /> {describeReminder(item.remind_ms, new Date())}
+            </span>
+          )}
+        </span>
+        <span className={cx("mt-0.5 block truncate text-[13.5px]", item.is_done && "text-faint line-through")}>
+          {preview}
+        </span>
+      </button>
+      <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+        <Menu trigger={<IconButton label="Later actions" size="sm" icon={<Ellipsis size={13} />} />} items={menu} />
+      </span>
+    </motion.li>
+  );
+}

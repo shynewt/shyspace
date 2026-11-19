@@ -3,10 +3,13 @@ import type { Channel, Page, Session } from "./api";
 
 export type View =
   /** `thread` opens that thread beside the channel; `focus` scrolls to and highlights a message. */
-  { kind: "channel"; id: string; thread?: string; focus?: string } | { kind: "page"; id: string } | { kind: "inbox" };
+  | { kind: "channel"; id: string; thread?: string; focus?: string }
+  | { kind: "page"; id: string }
+  | { kind: "inbox" }
+  | { kind: "later" };
 
 export function viewKey(view: View): string {
-  return view.kind === "inbox" ? "inbox" : `${view.kind}:${view.id}`;
+  return view.kind === "inbox" || view.kind === "later" ? view.kind : `${view.kind}:${view.id}`;
 }
 
 export type WorkspaceContextValue = {

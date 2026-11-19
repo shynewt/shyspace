@@ -27,6 +27,7 @@ const REPLAYABLE_TABLES: &[&str] = &[
     "channel_notify",
     "thread_follows",
     "drafts",
+    "later",
 ];
 
 /// Copies the database at `source` to `destination`, both under `key`.

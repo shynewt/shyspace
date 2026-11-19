@@ -98,6 +98,7 @@ impl Workspace {
         let replies = state.store.thread_replies(channel)?;
         for message in &mut messages {
             message.mentions_me = message.author != my_id && mentions(&message.text, &my_id);
+            message.is_saved = state.store.is_saved(&message.id)?;
             message.can_edit = self.may(&Op::MessageEdit {
                 id: message.id.clone(),
                 text: String::new(),
@@ -138,9 +139,12 @@ impl Workspace {
     }
 
     pub fn pages(&self) -> Result<Vec<Page>> {
-        let mut pages = self.state().store.pages()?;
+        let state = self.state();
+        let saved = state.store.saved_items()?;
+        let mut pages = state.store.pages()?;
         for page in &mut pages {
             page.can_delete = self.may(&Op::Delete { id: page.id.clone() });
+            page.is_saved = saved.contains(&page.id);
         }
         Ok(pages)
     }
