@@ -7,6 +7,38 @@ use rusqlite::{OptionalExtension, params};
 use super::Store;
 use crate::views::{Channel, Member, Message, MessageCursor, NotifyLevel, Page, Reaction, SearchHit};
 
+/// The columns `message_from_row` reads, and the joins they need.
+pub(super) const MESSAGE_COLUMNS: &str =
+    "m.id, m.channel, m.author, COALESCE(p.name, ''), COALESCE(p.is_bot, 0),
+     COALESCE(e.text, m.text), m.reply_to, m.created_ms, m.lamport, e.message IS NOT NULL";
+pub(super) const MESSAGE_JOINS: &str = "FROM messages m
+     LEFT JOIN profiles p ON p.member = m.author
+     LEFT JOIN message_edits e ON e.message = m.id";
+
+/// A message as stored; what this member may do with it is filled in later.
+pub(super) fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Message> {
+    Ok(Message {
+        id: row.get(0)?,
+        channel: row.get(1)?,
+        author: hex::encode(row.get::<_, Vec<u8>>(2)?),
+        author_name: row.get(3)?,
+        author_is_bot: row.get(4)?,
+        text: row.get(5)?,
+        reply_to: row.get(6)?,
+        created_ms: row.get(7)?,
+        lamport: row.get(8)?,
+        is_edited: row.get(9)?,
+        can_edit: false,
+        can_delete: false,
+        mentions_me: false,
+        reply_count: 0,
+        last_reply_ms: None,
+        is_following: false,
+        unread_replies: 0,
+        reactions: Vec::new(),
+    })
+}
+
 impl Store {
     pub fn page_state(&self, id: &str) -> Result<Option<Vec<u8>>> {
         Ok(self
@@ -49,36 +81,24 @@ impl Store {
             None => (None, None),
         };
         let mut statement = self.db.prepare(
-            "SELECT * FROM (
-                SELECT m.id, m.channel, m.author, COALESCE(p.name, ''), COALESCE(p.is_bot, 0),
-                       COALESCE(e.text, m.text), m.reply_to, m.created_ms, m.lamport, e.message IS NOT NULL
-                FROM messages m
-                LEFT JOIN profiles p ON p.member = m.author
-                LEFT JOIN message_edits e ON e.message = m.id
-                WHERE m.channel = ?1
-                  AND (?2 IS NULL OR m.lamport < ?2 OR (m.lamport = ?2 AND m.author < ?3))
-                ORDER BY m.lamport DESC, m.author DESC LIMIT ?4)
-             ORDER BY lamport, author",
+            &format!(
+                "SELECT * FROM (
+                    SELECT {MESSAGE_COLUMNS} {MESSAGE_JOINS}
+                    WHERE m.channel = ?1
+                      AND (m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to))
+                      AND (?2 IS NULL OR m.lamport < ?2 OR (m.lamport = ?2 AND m.author < ?3))
+                    ORDER BY m.lamport DESC, m.author DESC LIMIT ?4)
+                 ORDER BY lamport, author"
+            ),
         )?;
-        let rows = statement.query_map(params![channel, before_lamport, before_author, limit], |row| {
-            Ok(Message {
-                id: row.get(0)?,
-                channel: row.get(1)?,
-                author: hex::encode(row.get::<_, Vec<u8>>(2)?),
-                author_name: row.get(3)?,
-                author_is_bot: row.get(4)?,
-                text: row.get(5)?,
-                reply_to: row.get(6)?,
-                created_ms: row.get(7)?,
-                lamport: row.get(8)?,
-                is_edited: row.get(9)?,
-                can_edit: false,
-                can_delete: false,
-                mentions_me: false,
-                reactions: Vec::new(),
-            })
-        })?;
-        let mut messages: Vec<Message> = rows.collect::<Result<_, _>>()?;
+        let rows = statement.query_map(
+            params![channel, before_lamport, before_author, limit],
+            message_from_row,
+        )?;
+        self.with_reactions(rows.collect::<Result<_, _>>()?, me)
+    }
+
+    pub(super) fn with_reactions(&self, mut messages: Vec<Message>, me: &PublicKey) -> Result<Vec<Message>> {
         for message in &mut messages {
             message.reactions = self.reactions(&message.id, me)?;
         }

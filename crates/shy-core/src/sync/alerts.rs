@@ -1,6 +1,7 @@
 //! Deciding which arriving messages alert this member: new ones from someone
-//! else that the channel's level allows. Catching up on old messages (after
-//! a day offline, say) never alerts.
+//! else that the channel's level allows (mentions also covers replies in
+//! threads you follow). Catching up on old messages (after a day offline,
+//! say) never alerts.
 
 use anyhow::Result;
 
@@ -8,7 +9,7 @@ use crate::{
     mentions::{mentions, with_plain_mentions},
     ops::{Op, VerifiedOp, now_ms},
     views::{Change, NotifyLevel},
-    workspace::{State, Workspace},
+    workspace::{State, Workspace, follows_by_default},
 };
 
 const ALERT_WINDOW_MS: i64 = 10 * 60 * 1000;
@@ -29,7 +30,7 @@ impl Workspace {
         let my_id = self.my_id();
         let is_wanted = match state.store.notify_level(channel)? {
             NotifyLevel::All => true,
-            NotifyLevel::Mentions => mentions(text, &my_id),
+            NotifyLevel::Mentions => mentions(text, &my_id) || self.follows_thread_of(state, id)?,
             NotifyLevel::Nothing => false,
         };
         if !is_wanted {
@@ -65,5 +66,26 @@ impl Workspace {
             author_name,
             preview,
         }))
+    }
+
+    /// Whether `message` is a reply in a thread this member follows.
+    fn follows_thread_of(&self, state: &State, message: &str) -> Result<bool> {
+        let Some(root) = state.store.thread_root(message)?.filter(|root| root != message) else {
+            return Ok(false);
+        };
+        if let Some(choice) = state.store.following_choice(&root)? {
+            return Ok(choice);
+        }
+        let thread = state.store.thread(&root, &self.me())?;
+        let Some((first, replies)) = thread.split_first() else {
+            return Ok(false);
+        };
+        // The new reply itself doesn't make you follow.
+        let others = replies.iter().filter(|reply| reply.id != message);
+        Ok(follows_by_default(
+            &self.my_id(),
+            (&first.author, &first.text),
+            others.map(|reply| (reply.author.as_str(), reply.text.as_str())),
+        ))
     }
 }

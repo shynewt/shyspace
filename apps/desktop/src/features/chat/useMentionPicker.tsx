@@ -1,6 +1,6 @@
 import { AtSign, Bot } from "lucide-react";
 import { motion } from "motion/react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { mentionQueryAt, withMentionLinks } from "../../lib/mentions";
 import { useLive } from "../../lib/useLive";
@@ -27,6 +27,8 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
   const [query, setQuery] = useState<{ start: number; query: string } | null>(null);
   const [selected, setSelected] = useState(0);
   const picked = useRef(new Map<string, string>());
+  // A channel and its open thread each have a composer.
+  const listId = useId();
 
   const suggestions = useMemo(() => {
     if (!query) return [];
@@ -86,7 +88,7 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
     <motion.div
       {...pop}
       transition={springs.snappy}
-      id="mention-suggestions"
+      id={listId}
       role="listbox"
       aria-label="People to mention"
       className="absolute right-0 bottom-full left-0 mb-2 rounded-xl border border-line bg-surface p-1 shadow-float"
@@ -96,7 +98,7 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
           key={suggestion.id ?? suggestion.name}
           type="button"
           role="option"
-          id={`mention-option-${index}`}
+          id={`${listId}-${index}`}
           aria-selected={index === selected}
           onMouseDown={(event) => {
             event.preventDefault();
@@ -126,8 +128,8 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
   const inputProps = {
     "aria-autocomplete": "list" as const,
     "aria-expanded": isOpen,
-    "aria-controls": isOpen ? "mention-suggestions" : undefined,
-    "aria-activedescendant": isOpen ? `mention-option-${selected}` : undefined,
+    "aria-controls": isOpen ? listId : undefined,
+    "aria-activedescendant": isOpen ? `${listId}-${selected}` : undefined,
   };
 
   return { list, inputProps, onTextChange, onKeyDown, toSend, forgetPicked };

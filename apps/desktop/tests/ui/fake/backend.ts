@@ -8,19 +8,8 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import * as Y from "yjs";
-import type {
-  BucketConfig,
-  Change,
-  Channel,
-  Member,
-  Message,
-  MessageCursor,
-  NotifyLevel,
-  Page,
-  Session,
-  StorageSettings,
-} from "../../../src/lib/api";
-import { mentions } from "../../../src/lib/mentions";
+import type { BucketConfig, Change, Member, Page, Session, StorageSettings } from "../../../src/lib/api";
+import { FakeChat, NOT_CHAT } from "./chat";
 import { argument, type Kind, ownedId, randomHex, requireString } from "./helpers";
 import { FakeInvites } from "./invites";
 import { search } from "./search";
@@ -28,39 +17,22 @@ import { search } from "./search";
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
 
-type StoredChannel = Omit<Channel, "can_delete" | "unread" | "unread_mentions" | "last_read" | "notify">;
-type StoredMessage = Omit<
-  Message,
-  "author_name" | "author_is_bot" | "reactions" | "can_edit" | "can_delete" | "mentions_me"
->;
 type StoredPage = Omit<Page, "can_delete"> & { doc: Y.Doc };
-type StoredReaction = { message: string; author: string; emoji: string };
-
-function compareMessages(left: StoredMessage, right: StoredMessage): number {
-  return left.lamport - right.lamport || left.author.localeCompare(right.author);
-}
-
-function isAfter(message: StoredMessage, cursor: MessageCursor): boolean {
-  return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.author > cursor.author);
-}
-
-function isBefore(message: StoredMessage, cursor: MessageCursor): boolean {
-  return message.lamport < cursor.lamport || (message.lamport === cursor.lamport && message.author < cursor.author);
-}
 
 export class FakeBackend {
   session: Session | null = null;
   private members: Member[] = [];
-  private channels: StoredChannel[] = [];
-  private messages: StoredMessage[] = [];
-  private reactions: StoredReaction[] = [];
   private pages: StoredPage[] = [];
+  private chat = new FakeChat({
+    me: () => this.me(),
+    isAdmin: () => Boolean(this.session?.is_admin),
+    members: () => this.members,
+    tick: () => this.tick(),
+    notify: (change) => this.notify(change),
+  });
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
   private storage: StorageSettings | null = null;
   private lamport = 0;
-  /** Personal read positions and alert levels, by channel. */
-  private readMarkers = new Map<string, MessageCursor>();
-  private notifyLevels = new Map<string, NotifyLevel>();
 
   /** Starts as the admin of a workspace with #general, as `create` would. */
   static withWorkspace(workspaceName: string, myName: string): FakeBackend {
@@ -101,23 +73,15 @@ export class FakeBackend {
   readonly alertsShown: { title: string; body: string }[] = [];
 
   receiveMessage(author: string, channelName: string, text: string): string {
-    const channel = this.channelNamed(channelName);
-    const id = this.writeMessage(author, channel.id, text, null);
-    const level = this.notifyLevels.get(channel.id) ?? "mentions";
-    if (level === "all" || (level === "mentions" && mentions(text, this.me()))) {
-      const member = this.members.find((candidate) => candidate.id === author);
-      this.notify({
-        kind: "alert",
-        channel: channel.id,
-        channel_name: channel.name,
-        message: id,
-        author,
-        author_name: member?.name ?? "",
-        // Like the core: mentions shown as @name.
-        preview: text.replace(/\[(@[^\]]*)\]\(shy:\/\/(?:member|mention)\/[0-9a-z]+\)/g, "$1"),
-      });
-    }
-    return id;
+    return this.chat.receiveMessage(author, channelName, text);
+  }
+
+  receiveReply(author: string, root: string, text: string): string {
+    return this.chat.receiveReply(author, root, text);
+  }
+
+  messageWithText(text: string): string {
+    return this.chat.messageWithText(text);
   }
 
   receiveJoinRequest(name: string, kind: Kind = { kind: "person" }): string {
@@ -138,6 +102,8 @@ export class FakeBackend {
   }
 
   private answer(command: string, args: InvokeArgs | undefined): unknown {
+    const chatAnswer = this.chat.answer(command, args);
+    if (chatAnswer !== NOT_CHAT) return chatAnswer;
     switch (command) {
       case "session":
         return this.session;
@@ -159,56 +125,9 @@ export class FakeBackend {
         return this.requireStorage();
       case "update_storage":
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
-      case "channels":
-        return this.channels.map((channel) => ({
-          ...channel,
-          can_delete: this.mayDelete(channel.id),
-          unread: this.unreadIn(channel.id).length,
-          unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.me())).length,
-          last_read: this.readMarkers.get(channel.id) ?? null,
-          notify: this.notifyLevels.get(channel.id) ?? "mentions",
-        }));
-      case "set_notify_level":
-        this.notifyLevels.set(requireString(args, "channel"), requireString(args, "level") as NotifyLevel);
-        return this.notify({ kind: "channels" });
       case "show_alert":
         this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
         return null;
-      case "mark_read":
-        return this.markRead(requireString(args, "channel"), requireString(args, "message"));
-      case "create_channel":
-        return this.createChannel(requireString(args, "name"));
-      case "rename_channel":
-        return this.renameChannel(requireString(args, "channel"), requireString(args, "name"));
-      case "delete_channel":
-        return this.deleteChannel(requireString(args, "channel"));
-      case "edit_message":
-        return this.editMessage(requireString(args, "message"), requireString(args, "text"));
-      case "delete_message":
-        return this.deleteMessage(requireString(args, "message"));
-      case "messages":
-        return this.messagesIn(
-          requireString(args, "channel"),
-          argument(args, "before") as MessageCursor | null,
-          argument(args, "limit") as number,
-        );
-      case "send_message": {
-        const channel = requireString(args, "channel");
-        const id = this.writeMessage(
-          this.me(),
-          channel,
-          requireString(args, "text"),
-          (argument(args, "replyTo") as string | null) ?? null,
-        );
-        this.markRead(channel, id);
-        return id;
-      }
-      case "react":
-        return this.react(
-          requireString(args, "message"),
-          requireString(args, "emoji"),
-          argument(args, "active") === true,
-        );
       case "pages":
         return this.pages.map(({ doc: _doc, ...page }) => ({
           ...page,
@@ -241,8 +160,8 @@ export class FakeBackend {
         return this.invites.setState(requireString(args, "token"), "revoked");
       case "search":
         return search(requireString(args, "query"), {
-          messages: this.messages,
-          channels: this.channels,
+          messages: this.chat.messages,
+          channels: this.chat.channels,
           pages: this.pages,
         });
       case "status":
@@ -264,7 +183,7 @@ export class FakeBackend {
       access_key_id: bucket.access_key_id,
     };
     this.session = { workspace_name: workspaceName, me, is_admin: true };
-    this.createChannel("general");
+    this.chat.createChannel("general");
     return this.session;
   }
 
@@ -275,7 +194,7 @@ export class FakeBackend {
       { id: admin, name: "Ada", is_bot: false, is_admin: true, active: true },
       { id: me, name, is_bot: false, is_admin: false, active: true },
     ];
-    this.channels = [{ id: ownedId(admin), name: "general" }];
+    this.chat.addChannel(ownedId(admin), "general");
     this.session = { workspace_name: "Team", me, is_admin: false };
     return this.session;
   }
@@ -295,127 +214,6 @@ export class FakeBackend {
     this.storage = { ...this.requireStorage(), region, access_key_id: accessKeyId };
     this.notify({ kind: "storage" });
     return `shyrec1_${randomHex(48)}`;
-  }
-
-  // ---- Chat -------------------------------------------------------------
-
-  private createChannel(name: string): string {
-    const id = ownedId(this.me());
-    this.channels.push({ id, name });
-    this.tick();
-    this.notify({ kind: "channels" });
-    return id;
-  }
-
-  private channelNamed(name: string): StoredChannel {
-    const channel = this.channels.find((candidate) => candidate.name === name);
-    if (!channel) throw new Error(`fake backend: no channel #${name}`);
-    return channel;
-  }
-
-  private writeMessage(author: string, channel: string, text: string, replyTo: string | null): string {
-    const id = ownedId(author);
-    const created_ms = Date.now();
-    this.messages.push({
-      id,
-      channel,
-      author,
-      text,
-      reply_to: replyTo,
-      created_ms,
-      lamport: this.tick(),
-      is_edited: false,
-    });
-    this.notify({ kind: "messages", channel });
-    return id;
-  }
-
-  private messagesIn(channel: string, before: MessageCursor | null, limit: number): Message[] {
-    const inChannel = this.messages
-      .filter((message) => message.channel === channel && (!before || isBefore(message, before)))
-      .sort(compareMessages);
-    return inChannel.slice(-limit).map((message) => this.present(message));
-  }
-
-  private present(message: StoredMessage): Message {
-    const author = this.members.find((member) => member.id === message.author);
-    const counts = new Map<string, { count: number; mine: boolean }>();
-    for (const reaction of this.reactions.filter((candidate) => candidate.message === message.id)) {
-      const entry = counts.get(reaction.emoji) ?? { count: 0, mine: false };
-      entry.count += 1;
-      entry.mine ||= reaction.author === this.me();
-      counts.set(reaction.emoji, entry);
-    }
-    return {
-      ...message,
-      author_name: author?.name ?? "",
-      author_is_bot: author?.is_bot ?? false,
-      can_edit: message.author === this.me(),
-      can_delete: this.mayDelete(message.id),
-      mentions_me: message.author !== this.me() && mentions(message.text, this.me()),
-      reactions: Array.from(counts, ([emoji, entry]) => ({ emoji, ...entry })),
-    };
-  }
-
-  private react(message: string, emoji: string, active: boolean): void {
-    const me = this.me();
-    this.reactions = this.reactions.filter(
-      (reaction) => !(reaction.message === message && reaction.author === me && reaction.emoji === emoji),
-    );
-    if (active) this.reactions.push({ message, author: me, emoji });
-    this.tick();
-    const channel = this.messages.find((candidate) => candidate.id === message)?.channel;
-    if (channel) this.notify({ kind: "messages", channel });
-  }
-
-  private unreadIn(channel: string): StoredMessage[] {
-    const marker = this.readMarkers.get(channel);
-    return this.messages.filter(
-      (message) => message.channel === channel && message.author !== this.me() && (!marker || isAfter(message, marker)),
-    );
-  }
-
-  /** Forward only, like the core. */
-  private markRead(channel: string, messageId: string): void {
-    const message = this.messages.find((candidate) => candidate.id === messageId && candidate.channel === channel);
-    if (!message) throw "no such message in this channel";
-    const marker = this.readMarkers.get(channel);
-    if (marker && !isAfter(message, marker)) return;
-    this.readMarkers.set(channel, { lamport: message.lamport, author: message.author });
-    this.notify({ kind: "channels" });
-  }
-
-  private renameChannel(id: string, name: string): void {
-    const channel = this.channels.find((candidate) => candidate.id === id);
-    if (!channel) throw new Error(`fake backend: no channel ${id}`);
-    channel.name = name;
-    this.tick();
-    this.notify({ kind: "channels" });
-  }
-
-  private deleteChannel(id: string): void {
-    this.requireMayDelete(id);
-    this.channels = this.channels.filter((channel) => channel.id !== id);
-    this.messages = this.messages.filter((message) => message.channel !== id);
-    this.notify({ kind: "channels" });
-  }
-
-  private editMessage(id: string, text: string): void {
-    const message = this.messages.find((candidate) => candidate.id === id);
-    if (!message) throw new Error(`fake backend: no message ${id}`);
-    if (message.author !== this.me()) throw "only its owner or the admin can do that";
-    message.text = text;
-    message.is_edited = true;
-    this.tick();
-    this.notify({ kind: "messages", channel: message.channel });
-  }
-
-  private deleteMessage(id: string): void {
-    this.requireMayDelete(id);
-    const message = this.messages.find((candidate) => candidate.id === id);
-    this.messages = this.messages.filter((candidate) => candidate.id !== id);
-    this.reactions = this.reactions.filter((reaction) => reaction.message !== id);
-    if (message) this.notify({ kind: "messages", channel: message.channel });
   }
 
   // ---- Pages ------------------------------------------------------------

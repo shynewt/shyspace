@@ -62,6 +62,9 @@ CREATE TABLE read_markers (channel TEXT PRIMARY KEY, lamport INTEGER NOT NULL, a
     "
 CREATE TABLE channel_notify (channel TEXT PRIMARY KEY, level TEXT NOT NULL);
 ",
+    "
+CREATE TABLE thread_follows (root TEXT PRIMARY KEY, is_following INTEGER NOT NULL);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

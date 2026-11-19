@@ -105,8 +105,38 @@ impl Workspace {
             reply_to,
         })?;
         // Replying means you've read what came before.
-        self.state().store.mark_read(channel, &id)?;
+        let state = self.state();
+        state.store.mark_read(channel, &id)?;
+        if let Some(root) = state.store.thread_root(&id)?.filter(|root| *root != id) {
+            state.store.mark_thread_read(&root, &id)?;
+        }
         Ok(id)
+    }
+
+    /// Whether new replies in the thread starting at `root` alert you.
+    /// Personal: overrides following threads you started or joined.
+    pub fn set_following(&self, root: &str, is_following: bool) -> Result<()> {
+        self.require_item(root, ItemKind::Message)?;
+        self.state().store.set_following(root, is_following)?;
+        self.emit_messages_of(root)
+    }
+
+    /// Moves your read position in the thread starting at `root` up to
+    /// `message`. Personal, like channel read positions.
+    pub fn mark_thread_read(&self, root: &str, message: &str) -> Result<()> {
+        self.state().store.mark_thread_read(root, message)?;
+        self.emit_messages_of(root)
+    }
+
+    fn emit_messages_of(&self, message: &str) -> Result<()> {
+        let channel = self
+            .thread(message)?
+            .first()
+            .context("no such message")?
+            .channel
+            .clone();
+        self.emit(Change::Messages { channel });
+        Ok(())
     }
 
     /// Your unread messages that mention you, in every channel, and marks

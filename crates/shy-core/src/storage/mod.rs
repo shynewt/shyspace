@@ -10,10 +10,13 @@ mod reading;
 mod revisions;
 mod schema;
 mod snapshot;
+mod threads;
 
 pub use invites::PendingRequest;
+pub use reading::UnreadMessage;
 pub use revisions::ItemKind;
 pub use snapshot::{snapshot_database, snapshot_store_without_content};
+pub use threads::Reply;
 
 use std::path::Path;
 

@@ -1,8 +1,8 @@
-import { CornerUpLeft, Ellipsis, Pencil, SmilePlus, Trash2 } from "lucide-react";
+import { CornerUpLeft, Ellipsis, MessageSquareReply, Pencil, SmilePlus, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useMemo, useState } from "react";
 import { api, type Message } from "../../lib/api";
-import { ChatMarkdown, pageIdsIn, plainPreview } from "../../lib/markdown";
+import { ChatMarkdown, pageIdsIn } from "../../lib/markdown";
 import { displayName, formatTime } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
@@ -15,17 +15,14 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
 export const MessageItem = memo(function MessageItem({
   message,
   isContinuation,
-  repliedTo,
   isHighlighted,
-  onReply,
-  onJumpTo,
+  onOpenThread,
 }: {
   message: Message;
   isContinuation: boolean;
-  repliedTo: Message | undefined;
   isHighlighted: boolean;
-  onReply: () => void;
-  onJumpTo: (id: string) => void;
+  /** Opens this message's thread; `null` inside a thread. */
+  onOpenThread: (() => void) | null;
 }) {
   const { pages, navigate, session } = useWorkspace();
   const [isPickerOpen, setPickerOpen] = useState(false);
@@ -63,16 +60,11 @@ export const MessageItem = memo(function MessageItem({
       </div>
 
       <div className="min-w-0 flex-1">
-        {repliedTo && (
-          <button
-            type="button"
-            onClick={() => onJumpTo(repliedTo.id)}
-            className="mb-0.5 flex max-w-full items-center gap-1.5 text-[12px] text-muted hover:text-ink"
-          >
-            <CornerUpLeft size={12} className="shrink-0" />
-            <span className="font-medium">{displayName(repliedTo.author_name, repliedTo.author)}</span>
-            <span className="truncate text-faint">{plainPreview(repliedTo.text, (id) => titles.get(id))}</span>
-          </button>
+        {onOpenThread && message.reply_to && (
+          // In the channel, a reply only shows when what it answered is gone.
+          <div className="mb-0.5 flex items-center gap-1.5 text-[12px] text-faint">
+            <CornerUpLeft size={12} className="shrink-0" /> Reply to a deleted message
+          </div>
         )}
         {!isContinuation && (
           <div className="flex items-baseline gap-2">
@@ -138,6 +130,7 @@ export const MessageItem = memo(function MessageItem({
             </AnimatePresence>
           </motion.div>
         )}
+        {onOpenThread && message.reply_count > 0 && <ThreadSummary message={message} onOpen={onOpenThread} />}
       </div>
 
       <div
@@ -168,7 +161,9 @@ export const MessageItem = memo(function MessageItem({
             ))}
           </div>
         </Popover>
-        <IconButton label="Reply" icon={<CornerUpLeft size={15} />} onClick={onReply} />
+        {onOpenThread && (
+          <IconButton label="Reply in thread" icon={<MessageSquareReply size={15} />} onClick={onOpenThread} />
+        )}
         <MessageMenu message={message} onEdit={() => setEditing(true)} onDelete={() => setConfirmingDelete(true)} />
       </div>
       <ConfirmDialog
@@ -191,4 +186,25 @@ function MessageMenu({ message, onEdit, onDelete }: { message: Message; onEdit: 
   }
   if (items.length === 0) return null;
   return <Menu trigger={<IconButton label="More actions" icon={<Ellipsis size={15} />} />} items={items} />;
+}
+
+function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
+  const count = message.reply_count;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mt-1 flex items-center gap-2 rounded-md px-1.5 py-0.5 -ml-1.5 text-[12.5px] hover:bg-surface-2"
+    >
+      <span className="font-medium text-accent-text">
+        {count} {count === 1 ? "reply" : "replies"}
+      </span>
+      {message.last_reply_ms && <span className="text-faint">Last reply {formatTime(message.last_reply_ms)}</span>}
+      {message.unread_replies > 0 && (
+        <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white">
+          {message.unread_replies} new
+        </span>
+      )}
+    </button>
+  );
 }

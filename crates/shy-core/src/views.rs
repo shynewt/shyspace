@@ -121,6 +121,15 @@ pub struct Message {
     pub can_delete: bool,
     /// Whether it mentions this member (directly, or @channel / @here).
     pub mentions_me: bool,
+    /// For a thread's first message: how many replies it has, and when the
+    /// latest came.
+    pub reply_count: u32,
+    pub last_reply_ms: Option<i64>,
+    /// Whether this member follows the thread: new replies alert them.
+    pub is_following: bool,
+    /// Replies by others since this member last read the thread (counted
+    /// only when following).
+    pub unread_replies: u32,
     pub reactions: Vec<Reaction>,
 }
 

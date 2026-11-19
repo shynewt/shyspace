@@ -46,7 +46,8 @@ pub struct SendMessage {
     channel: String,
     /// Markdown text. Link a page with shy://page/<page id>.
     text: String,
-    /// Id of the message this replies to.
+    /// Reply in the thread of this message (id). Replies stay in the thread,
+    /// not the channel.
     reply_to: Option<String>,
 }
 
@@ -126,12 +127,17 @@ fn format_messages(messages: Vec<Message>) -> String {
         let bot = if message.author_is_bot { " (bot)" } else { "" };
         let reply = message.reply_to.map(|id| format!(" ↩{id}")).unwrap_or_default();
         let edited = if message.is_edited { " (edited)" } else { "" };
+        let replies = match message.reply_count {
+            0 => String::new(),
+            1 => " [1 reply]".into(),
+            count => format!(" [{count} replies]"),
+        };
         let author = match message.author_name.as_str() {
             "" => format!("member {}", &message.author[..8]),
             name => name.to_owned(),
         };
         output.push_str(&format!(
-            "[{}] {author}{bot}{reply}: {}{edited}",
+            "[{}] {author}{bot}{reply}: {}{edited}{replies}",
             message.id, message.text
         ));
         for reaction in message.reactions {
@@ -252,6 +258,16 @@ impl ShyTools {
             .delete_message(&request.message_id)
             .map_err(failed)?;
         Ok("deleted".into())
+    }
+
+    #[tool(
+        description = "Read a thread: its first message, then every reply, oldest first. Messages marked [N replies] in read_messages have one."
+    )]
+    fn read_thread(&self, Parameters(request): Parameters<MessageRef>) -> ToolResult {
+        self.workspace
+            .thread(&request.message_id)
+            .map(format_messages)
+            .map_err(failed)
     }
 
     #[tool(description = "Add an emoji reaction to a message.")]

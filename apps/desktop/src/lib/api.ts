@@ -28,6 +28,10 @@ export type Message = {
   can_edit: boolean;
   can_delete: boolean;
   mentions_me: boolean;
+  reply_count: number;
+  last_reply_ms: number | null;
+  is_following: boolean;
+  unread_replies: number;
   reactions: Reaction[];
 };
 export type MessageCursor = { lamport: number; author: string };
@@ -106,6 +110,9 @@ export const api = {
   renameChannel: (channel: string, name: string) => invoke<void>("rename_channel", { channel, name }),
   deleteChannel: (channel: string) => invoke<void>("delete_channel", { channel }),
   markRead: (channel: string, message: string) => invoke<void>("mark_read", { channel, message }),
+  thread: (root: string) => invoke<Message[]>("thread", { root }),
+  setFollowing: (root: string, following: boolean) => invoke<void>("set_following", { root, following }),
+  markThreadRead: (root: string, message: string) => invoke<void>("mark_thread_read", { root, message }),
   setNotifyLevel: (channel: string, level: NotifyLevel) => invoke<void>("set_notify_level", { channel, level }),
   showAlert: (title: string, body: string) => invoke<void>("show_alert", { title, body }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>

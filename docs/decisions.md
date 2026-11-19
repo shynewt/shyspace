@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Replies are threads, built on reply_to (2026-11)
+One reply model: a reply lives in a side-panel thread instead of the channel, like Slack, with Zulip's attention tools (follow and unfollow, following threads you join). Threads are optional, never forced like Zulip topics. Thread replies don't add to a channel's unread count, but a mention in one still does. No new op was needed; a title and a "resolved" mark would need one (#58).
+
 ## Mentions are markdown links; @here means @channel for now (2026-11)
 A mention is a link in the message text, not a separate op: nothing new to sync or secure, agents read and write them as plain markdown, and copying a message keeps them. Each device decides what mentions it, exactly, even though everything is encrypted. Until presence exists (#42), @here reaches everyone like @channel.
 

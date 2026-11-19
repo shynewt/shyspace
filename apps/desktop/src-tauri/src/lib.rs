@@ -291,6 +291,27 @@ fn show_alert(app: AppHandle, title: String, body: String) -> CommandResult<()> 
 }
 
 #[tauri::command]
+async fn thread(state: State<'_, AppState>, root: String) -> CommandResult<Vec<Message>> {
+    current(&state).await?.thread(&root).map_err(failed)
+}
+
+#[tauri::command]
+async fn set_following(state: State<'_, AppState>, root: String, following: bool) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_following(&root, following)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn mark_thread_read(state: State<'_, AppState>, root: String, message: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .mark_thread_read(&root, &message)
+        .map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
     current(&state)
         .await?
@@ -465,6 +486,9 @@ pub fn run() {
             create_channel,
             rename_channel,
             mark_read,
+            thread,
+            set_following,
+            mark_thread_read,
             set_notify_level,
             show_alert,
             delete_channel,

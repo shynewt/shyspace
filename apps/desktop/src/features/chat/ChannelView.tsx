@@ -9,11 +9,11 @@ import { useWorkspace } from "../../lib/workspace";
 import { EmptyState, Spinner, springs } from "../../ui";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
+import { ThreadPanel } from "./ThreadPanel";
 
 const PAGE_SIZE = 100;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const NEAR_EDGE_PX = 80;
-const HIGHLIGHT_MS = 1600;
 
 type Row =
   | { kind: "day"; key: string; label: string }
@@ -64,15 +64,13 @@ export function ChannelView({ channelId }: { channelId: string }) {
     (change) => (change.kind === "messages" && change.channel === channelId) || change.kind === "members",
   );
   const hasOlder = (messages?.length ?? 0) >= windowSize;
-  const [replyTo, setReplyTo] = useState<Message | null>(null);
-  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const [openThread, setOpenThread] = useState<string | null>(null);
   const unreadFrom = useMemo(
     () => (isUnreadLineDismissed ? null : firstUnreadId(messages ?? [], lastReadOnOpen, session.me)),
     [messages, lastReadOnOpen, session.me, isUnreadLineDismissed],
   );
   const rows = useMemo(() => toRows(messages ?? [], unreadFrom), [messages, unreadFrom]);
   const hasScrolledToUnread = useRef(false);
-  const byId = useMemo(() => new Map((messages ?? []).map((message) => [message.id, message])), [messages]);
   const scroller = useRef<HTMLDivElement>(null);
   const isPinnedToBottom = useRef(true);
   const heightBeforeLoadingOlder = useRef<number | null>(null);
@@ -115,90 +113,84 @@ export function ChannelView({ channelId }: { channelId: string }) {
     return () => window.removeEventListener("focus", markRead);
   }, [channelId, latestId, isPresent]);
 
-  useEffect(() => {
-    if (!highlighted) return;
-    const timer = setTimeout(() => setHighlighted(null), HIGHLIGHT_MS);
-    return () => clearTimeout(timer);
-  }, [highlighted]);
-
   const loadOlder = () => {
     if (!hasOlder || heightBeforeLoadingOlder.current !== null || !scroller.current) return;
     heightBeforeLoadingOlder.current = scroller.current.scrollHeight;
     setWindowSize((size) => size + PAGE_SIZE);
   };
 
-  const jumpTo = (id: string) => {
-    document.getElementById(`message-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    setHighlighted(id);
-  };
-
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-        <Hash size={17} className="text-faint" />
-        <h1 className="text-[15px] font-semibold">{channel?.name ?? "…"}</h1>
-        <span className="ml-auto flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
-          <Lock size={11} /> End-to-end encrypted
-        </span>
-      </header>
+    <div className="flex h-full">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
+          <Hash size={17} className="text-faint" />
+          <h1 className="text-[15px] font-semibold">{channel?.name ?? "…"}</h1>
+          <span className="ml-auto flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
+            <Lock size={11} /> End-to-end encrypted
+          </span>
+        </header>
 
-      <div
-        ref={scroller}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
-          if (element.scrollTop < NEAR_EDGE_PX) loadOlder();
-        }}
-        className="flex-1 overflow-y-auto py-3"
-      >
-        {hasOlder && (
-          <div className="flex justify-center py-2 text-faint">
-            <Spinner size={14} />
-          </div>
-        )}
-        {messages && messages.length === 0 && (
-          <EmptyState icon={<Hash size={22} />} title={`This is the start of #${channel?.name ?? ""}`}>
-            Say hi. Only workspace members can read what you write.
-          </EmptyState>
-        )}
-        <AnimatePresence initial={false}>
-          {rows.map((row) =>
-            row.kind === "day" ? (
-              <DayDivider key={row.key} label={row.label} />
-            ) : row.kind === "unread" ? (
-              <UnreadLine key={row.key} />
-            ) : (
-              <motion.div
-                key={row.key}
-                layout="position"
-                initial={{ opacity: 0, y: 10, scale: 0.99 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={springs.smooth}
-              >
-                <MessageItem
-                  message={row.message}
-                  isContinuation={row.isContinuation}
-                  repliedTo={row.message.reply_to ? byId.get(row.message.reply_to) : undefined}
-                  isHighlighted={highlighted === row.message.id}
-                  onReply={() => setReplyTo(row.message)}
-                  onJumpTo={jumpTo}
-                />
-              </motion.div>
-            ),
+        <div
+          ref={scroller}
+          role="log"
+          aria-label={`Messages in #${channel?.name ?? ""}`}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
+            if (element.scrollTop < NEAR_EDGE_PX) loadOlder();
+          }}
+          className="flex-1 overflow-y-auto py-3"
+        >
+          {hasOlder && (
+            <div className="flex justify-center py-2 text-faint">
+              <Spinner size={14} />
+            </div>
           )}
-        </AnimatePresence>
-      </div>
+          {messages && messages.length === 0 && (
+            <EmptyState icon={<Hash size={22} />} title={`This is the start of #${channel?.name ?? ""}`}>
+              Say hi. Only workspace members can read what you write.
+            </EmptyState>
+          )}
+          <AnimatePresence initial={false}>
+            {rows.map((row) =>
+              row.kind === "day" ? (
+                <DayDivider key={row.key} label={row.label} />
+              ) : row.kind === "unread" ? (
+                <UnreadLine key={row.key} />
+              ) : (
+                <motion.div
+                  key={row.key}
+                  layout="position"
+                  initial={{ opacity: 0, y: 10, scale: 0.99 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={springs.smooth}
+                >
+                  <MessageItem
+                    message={row.message}
+                    isContinuation={row.isContinuation}
+                    isHighlighted={openThread === row.message.id}
+                    onOpenThread={() => setOpenThread(row.message.id)}
+                  />
+                </motion.div>
+              ),
+            )}
+          </AnimatePresence>
+        </div>
 
-      <Composer
-        channelId={channelId}
-        channelName={channel?.name ?? ""}
-        replyTo={replyTo}
-        onCancelReply={() => setReplyTo(null)}
-        onSent={() => {
-          isPinnedToBottom.current = true;
-          setReplyTo(null);
-        }}
-      />
+        <Composer
+          channelId={channelId}
+          label={`Message #${channel?.name ?? ""}`}
+          threadRoot={null}
+          onSent={() => {
+            isPinnedToBottom.current = true;
+          }}
+        />
+      </div>
+      <AnimatePresence>
+        {openThread && (
+          <ThreadPanel key={openThread} root={openThread} channelId={channelId} onClose={() => setOpenThread(null)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

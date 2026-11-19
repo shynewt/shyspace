@@ -3,11 +3,12 @@
 
 use anyhow::{Context, Result};
 
-use super::Workspace;
+use super::{State, Workspace};
 use crate::{
     mentions::mentions,
     ops::Op,
     pages,
+    storage::Reply,
     views::{Channel, Member, Message, MessageCursor, Page, SearchHit},
 };
 
@@ -18,8 +19,14 @@ impl Workspace {
         let mut channels = state.store.channels()?;
         for channel in &mut channels {
             let unread = state.store.unread_messages(&channel.id, &self.me())?;
-            channel.unread = count(unread.len());
-            channel.unread_mentions = count(unread.iter().filter(|(_, text)| mentions(text, &my_id)).count());
+            // Thread replies count in their thread, but a mention counts anywhere.
+            channel.unread = count(unread.iter().filter(|message| message.is_in_channel).count());
+            channel.unread_mentions = count(
+                unread
+                    .iter()
+                    .filter(|message| mentions(&message.text, &my_id))
+                    .count(),
+            );
             channel.last_read = state.store.read_marker(&channel.id)?;
             channel.notify = state.store.notify_level(&channel.id)?;
             channel.can_delete = self.may(&Op::Delete {
@@ -29,15 +36,17 @@ impl Workspace {
         Ok(channels)
     }
 
-    /// The latest `limit` messages, or with `before`, the ones just older.
+    /// The latest `limit` messages shown in the channel (thread replies
+    /// stay in their thread), or with `before`, the ones just older.
     pub fn messages(
         &self,
         channel: &str,
         before: Option<&MessageCursor>,
         limit: u32,
     ) -> Result<Vec<Message>> {
-        let messages = self.state().store.messages(channel, &self.me(), before, limit)?;
-        Ok(self.as_seen_by_me(messages))
+        let state = self.state();
+        let messages = state.store.messages(channel, &self.me(), before, limit)?;
+        self.as_seen_by_me(&state, channel, messages)
     }
 
     /// Up to `limit` messages older than `message`, oldest first.
@@ -45,13 +54,27 @@ impl Workspace {
         let state = self.state();
         let cursor = state.store.message_cursor(message)?.context("no such message")?;
         let messages = state.store.messages(channel, &self.me(), Some(&cursor), limit)?;
-        Ok(self.as_seen_by_me(messages))
+        self.as_seen_by_me(&state, channel, messages)
     }
 
-    /// Marks what this member may do with each message, and whether it
-    /// mentions them.
-    fn as_seen_by_me(&self, mut messages: Vec<Message>) -> Vec<Message> {
+    /// The thread starting at `root`: its first message, then every reply.
+    pub fn thread(&self, root: &str) -> Result<Vec<Message>> {
+        let state = self.state();
+        let messages = state.store.thread(root, &self.me())?;
+        let channel = messages.first().context("no such thread")?.channel.clone();
+        self.as_seen_by_me(&state, &channel, messages)
+    }
+
+    /// Marks what this member may do with each message, whether it mentions
+    /// them, and for a thread's first message, its replies and follow state.
+    fn as_seen_by_me(
+        &self,
+        state: &State,
+        channel: &str,
+        mut messages: Vec<Message>,
+    ) -> Result<Vec<Message>> {
         let my_id = self.my_id();
+        let replies = state.store.thread_replies(channel)?;
         for message in &mut messages {
             message.mentions_me = message.author != my_id && mentions(&message.text, &my_id);
             message.can_edit = self.may(&Op::MessageEdit {
@@ -61,8 +84,36 @@ impl Workspace {
             message.can_delete = self.may(&Op::Delete {
                 id: message.id.clone(),
             });
+            let thread: Vec<&Reply> = replies.iter().filter(|reply| reply.root == message.id).collect();
+            message.reply_count = count(thread.len());
+            message.last_reply_ms = thread.iter().map(|reply| reply.created_ms).max();
+            message.is_following = match state.store.following_choice(&message.id)? {
+                Some(choice) => choice,
+                None => follows_by_default(
+                    &my_id,
+                    (&message.author, &message.text),
+                    thread
+                        .iter()
+                        .map(|reply| (reply.author.as_str(), reply.text.as_str())),
+                ),
+            };
+            if message.is_following && !thread.is_empty() {
+                let read = state.store.read_marker(&message.id)?;
+                message.unread_replies = count(
+                    thread
+                        .iter()
+                        .filter(|reply| {
+                            reply.author != my_id
+                                && read.as_ref().is_none_or(|read| {
+                                    (read.lamport, read.author.as_str())
+                                        < (reply.lamport, reply.author.as_str())
+                                })
+                        })
+                        .count(),
+                );
+            }
         }
-        messages
+        Ok(messages)
     }
 
     pub fn pages(&self) -> Result<Vec<Page>> {
@@ -88,6 +139,18 @@ impl Workspace {
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
         self.state().store.search(query, limit)
     }
+}
+
+/// Without an explicit choice, you follow a thread you started, replied in,
+/// or were mentioned in.
+pub(crate) fn follows_by_default<'a>(
+    my_id: &str,
+    (root_author, root_text): (&str, &str),
+    mut replies: impl Iterator<Item = (&'a str, &'a str)>,
+) -> bool {
+    root_author == my_id
+        || mentions(root_text, my_id)
+        || replies.any(|(author, text)| author == my_id || mentions(text, my_id))
 }
 
 fn count(length: usize) -> u32 {
