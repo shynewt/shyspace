@@ -37,8 +37,8 @@ Each member has an iroh ed25519 key (`identity.key` in their data directory). It
 
 Only the admin (the workspace creator) changes membership. This keeps a single, linear chain of epochs without needing a server to order commits.
 
-- **Joining:** an invite code (`invite.rs`) carries the workspace id, bucket settings, admin key, admin MLS key and a token. The joiner uploads a key package with their identity binding to `join/<token>/<joiner>`. The admin's app accepts automatically when online: it signs and saves the commit, applies it, then uploads it with a Welcome and the *keyring* (all older epoch keys and members), so the newcomer can read history.
-- **Removing:** the admin commits a removal. The new epoch's key never reaches the removed member.
+- **Joining:** an invite code (`invite.rs`) carries the workspace id, bucket settings, admin key, admin MLS key and a token. The joiner uploads a key package with their identity binding to `join/<token>/<joiner>`. The admin's app accepts automatically when online: it signs and saves the commit, applies it, then uploads it with a Welcome and the *key history* (all older epoch keys, their members, and frozen logs of removed members), so the newcomer can read history.
+- **Removing:** the admin pulls the member's latest ops, then commits the removal with their last sequence number. The new epoch's key never reaches them, and later ops from them are rejected.
 - **Commits** are wrapped in the admin's signature (`SignedCommit`). Members ignore anything else in a commit slot. The admin re-uploads its commits if they go missing or are altered.
 
 ## Sync loop (`sync.rs`)
@@ -48,7 +48,7 @@ Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even i
 1. apply new admin commits (advance epochs);
 2. retry parked ops;
 3. admin only: repair commits, accept join requests, deliver Welcomes;
-4. pull other members' new segments from the bucket;
+4. pull new segments from everyone who was ever a member (newcomers need removed members' history too);
 5. push our unpushed ops as one segment;
 6. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
 

@@ -85,6 +85,10 @@ fn verify(state: &State, envelope: &Envelope) -> Result<Option<VerifiedOp>> {
         "author was not a member in epoch {}",
         envelope.epoch
     );
+    ensure!(
+        !state.store.is_beyond_frozen_log(&envelope.author, envelope.seq)?,
+        "op written after its author was removed"
+    );
     Ok(Some(crypto::open(envelope, &key)?))
 }
 

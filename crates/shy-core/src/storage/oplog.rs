@@ -49,13 +49,18 @@ impl Store {
         Ok(lamport <= self.lamport()?.saturating_add(MAX_CLOCK_JUMP))
     }
 
-    pub fn next_seq(&self, author: &PublicKey) -> Result<u64> {
+    /// The highest sequence number we have applied from `author`, or 0.
+    pub fn last_seq(&self, author: &PublicKey) -> Result<u64> {
         let last: Option<u64> = self.db.query_row(
             "SELECT MAX(seq) FROM ops WHERE author = ?",
             [author.as_bytes()],
             |row| row.get(0),
         )?;
-        Ok(last.unwrap_or(0) + 1)
+        Ok(last.unwrap_or(0))
+    }
+
+    pub fn next_seq(&self, author: &PublicKey) -> Result<u64> {
+        Ok(self.last_seq(author)? + 1)
     }
 
     pub fn is_applied(&self, author: &PublicKey, seq: u64) -> Result<bool> {

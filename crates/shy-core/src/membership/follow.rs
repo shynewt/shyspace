@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 
-use super::commit::SignedCommit;
+use super::commit;
 use crate::{views::Change, workspace::Workspace};
 
 impl Workspace {
@@ -22,11 +22,14 @@ impl Workspace {
             let Some(bytes) = self.inner.bucket.commit(epoch).await? else {
                 return Ok(());
             };
-            let commit = SignedCommit::verify(&bytes, epoch, &admin)
+            let verified = commit::verify(&bytes, epoch, &admin)
                 .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
             let outcome = {
                 let mut state = self.state();
-                let outcome = state.mls.process_commit(&commit, &admin)?;
+                let outcome = state.mls.process_commit(&verified.commit, &admin)?;
+                for frozen in &verified.frozen {
+                    state.store.freeze_author(&frozen.member, frozen.last_seq)?;
+                }
                 state.record_epoch()?;
                 outcome
             };

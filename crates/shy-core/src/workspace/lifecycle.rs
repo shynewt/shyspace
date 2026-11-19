@@ -16,7 +16,7 @@ use crate::{
     identity,
     membership::{
         invite::Invite,
-        keyring::KeyringEntry,
+        keyring::KeyHistory,
         mls::{Mls, binding_message},
     },
     ops::{Op, new_owned_id, new_random_id},
@@ -164,7 +164,7 @@ impl Workspace {
         // The admin re-uploads the key history until we post our first op,
         // so an overwritten copy gets repaired; give up if it never does.
         let deadline = tokio::time::Instant::now() + KEYRING_TIMEOUT;
-        let keyring: Vec<KeyringEntry> = loop {
+        let history: KeyHistory = loop {
             if let Some(sealed) = bucket.keyring(epoch).await?
                 && let Ok(payload) = mls.open_from_admin(&sealed, &invite.admin)
             {
@@ -176,9 +176,7 @@ impl Workspace {
             );
             tokio::time::sleep(WELCOME_POLL).await;
         };
-        for entry in keyring {
-            store.put_epoch(entry.epoch, &entry.key, &entry.members)?;
-        }
+        history.store_into(&store)?;
 
         let config = WorkspaceConfig {
             workspace_id: invite.workspace_id,

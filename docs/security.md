@@ -16,6 +16,7 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 - **Content encryption:** sign-then-encrypt with XChaCha20-Poly1305. The signature and the AEAD both cover the header (author, seq, epoch). See `crypto.rs`.
 - **Per-epoch keys** come from the MLS exporter. A removal starts a new epoch. See `mls.rs`.
 - **Author must belong to the op's epoch:** checked in `sync.rs` (`verify`) against `epoch_members`.
+- **Removed members' logs are frozen:** before removing someone, the admin pulls their latest ops and puts their last sequence number in the signed removal commit. Every member (and every later newcomer, through the key history) rejects ops from them past that number. See `membership/admin.rs`, `sync/receive.rs`.
 - **Owned ids:** a channel, message or page id starts with its creator's key prefix (16 bytes), so nobody else can claim it. See `ops.rs` and `store.rs`.
 - **Clock bound:** ops whose lamport clock jumps more than 2^32 ahead wait instead of applying, so one op can't pin titles forever.
 - **Junk can't shadow real ops:** ops are stored only after they verify. Parked ops get one row each, keyed by hash, capped per author and in total.
@@ -27,7 +28,6 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 ## Known gaps
 
 - Anyone with the invite code can join, because the admin's app accepts automatically (#1). The code also contains the bucket credentials (#2).
-- A removed member could still forge back-dated ops in epochs they belonged to (#4).
 - Bucket credentials are shared, so anyone holding them can cause denial of service (#2).
 - Local data (SQLite, keys) is not encrypted at rest (#3).
 - Single admin: if their device is lost, membership can no longer change (#5).

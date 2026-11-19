@@ -69,9 +69,20 @@ impl Store {
         )
     }
 
-    /// Members ever seen stay listed (so old messages keep a name), but only
+    /// Everyone who belonged to any epoch we know of, current or former.
+    pub fn everyone_ever(&self) -> Result<Vec<PublicKey>> {
+        let mut statement = self.db.prepare("SELECT DISTINCT member FROM epoch_members")?;
+        let rows = statement.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
+        rows.map(|bytes| to_public_key(bytes?)).collect()
+    }
+
+    /// Former members stay listed (so their messages keep a name), but only
     /// current MLS members are active.
     pub fn set_current_members(&self, current: &[PublicKey]) -> Result<()> {
+        self.db.execute(
+            "INSERT OR IGNORE INTO members (member, active) SELECT DISTINCT member, 0 FROM epoch_members",
+            [],
+        )?;
         self.db.execute("UPDATE members SET active = 0", [])?;
         for member in current {
             self.db.execute(
@@ -80,6 +91,32 @@ impl Store {
             )?;
         }
         Ok(())
+    }
+
+    /// A removed member's log ends at `last_seq`; anything later is forged.
+    pub fn freeze_author(&self, member: &PublicKey, last_seq: u64) -> Result<()> {
+        self.db.execute(
+            "INSERT OR IGNORE INTO frozen_authors (member, last_seq) VALUES (?, ?)",
+            params![member.as_bytes(), last_seq],
+        )?;
+        Ok(())
+    }
+
+    pub fn frozen_authors(&self) -> Result<Vec<(PublicKey, u64)>> {
+        let mut statement = self.db.prepare("SELECT member, last_seq FROM frozen_authors")?;
+        let rows = statement.query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, u64>(1)?)))?;
+        rows.map(|row| {
+            let (member, last_seq) = row?;
+            Ok((to_public_key(member)?, last_seq))
+        })
+        .collect()
+    }
+
+    pub fn is_beyond_frozen_log(&self, member: &PublicKey, seq: u64) -> Result<bool> {
+        self.exists(
+            "SELECT 1 FROM frozen_authors WHERE member = ? AND last_seq < ?",
+            params![member.as_bytes(), seq],
+        )
     }
 
     pub fn put_commit_record(&self, from_epoch: u64, signed: &[u8]) -> Result<()> {

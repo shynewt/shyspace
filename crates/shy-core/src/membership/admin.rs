@@ -5,7 +5,11 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use super::{commit::SignedCommit, invite::Invite, keyring};
+use super::{
+    commit::{self, FrozenAuthor},
+    invite::Invite,
+    keyring,
+};
 use crate::{
     storage::Store,
     views::{Change, parse_member_id},
@@ -84,7 +88,7 @@ impl Workspace {
                     state
                         .store
                         .put_delivery(&joiner, &postcard::to_stdvec(&delivery)?)?;
-                    let signed = self.record_commit(&state, from_epoch, commit)?;
+                    let signed = self.record_commit(&state, from_epoch, commit, Vec::new())?;
                     state.mls.merge_pending_commit()?;
                     state.record_epoch()?;
                     let delivery = Delivery {
@@ -131,15 +135,25 @@ impl Workspace {
         Ok(())
     }
 
+    /// Removes a member. Their log is frozen at the last op we have from
+    /// them, so we first pull everything they wrote.
     pub async fn remove_member(&self, member_id: &str) -> Result<()> {
         let member = parse_member_id(member_id)?;
         ensure!(self.is_admin(), "only the workspace admin can remove members");
         ensure!(member != self.me(), "the admin cannot remove themselves");
+        self.pull()
+            .await
+            .context("can't reach the bucket to collect the member's last messages")?;
         let (from_epoch, signed) = {
             let mut state = self.state();
+            let frozen = FrozenAuthor {
+                member,
+                last_seq: state.store.last_seq(&member)?,
+            };
             let from_epoch = state.mls.epoch()?;
             let commit = state.mls.remove_member(&member)?;
-            let signed = self.record_commit(&state, from_epoch, commit)?;
+            state.store.freeze_author(&frozen.member, frozen.last_seq)?;
+            let signed = self.record_commit(&state, from_epoch, commit, vec![frozen])?;
             state.mls.merge_pending_commit()?;
             state.record_epoch()?;
             (from_epoch, signed)
@@ -150,8 +164,14 @@ impl Workspace {
 
     /// Signs a staged commit and saves it before it is applied, so a crash
     /// can't leave us in an epoch the bucket never hears about.
-    fn record_commit(&self, state: &State, from_epoch: u64, commit: Vec<u8>) -> Result<Vec<u8>> {
-        let signed = SignedCommit::sign(&self.inner.identity, from_epoch, commit)?;
+    fn record_commit(
+        &self,
+        state: &State,
+        from_epoch: u64,
+        commit: Vec<u8>,
+        frozen: Vec<FrozenAuthor>,
+    ) -> Result<Vec<u8>> {
+        let signed = commit::sign(&self.inner.identity, from_epoch, commit, frozen)?;
         state.store.put_commit_record(from_epoch, &signed)?;
         Ok(signed)
     }

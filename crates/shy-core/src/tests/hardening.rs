@@ -211,3 +211,44 @@ async fn pending_ops_are_capped() {
     }
     assert_eq!(admin.state().store.pending().unwrap().len(), 2_000);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn removed_members_cannot_backdate_ops_with_old_keys() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "written before removal", None)
+        .unwrap();
+    bob.sync().await;
+
+    let (old_epoch, old_key) = current_key(&bob);
+    let next_seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    sync_all(&[&admin, &carol]).await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    sync_all(&[&admin, &carol, &dave]).await;
+
+    let body = OpBody {
+        lamport: 1_000,
+        timestamp_ms: 0,
+        op: Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: "forged after removal".into(),
+            reply_to: None,
+        },
+    };
+    let forged = crypto::seal(&bob.inner.identity, &old_key, old_epoch, next_seq, &body).unwrap();
+    for member in [&admin, &carol, &dave] {
+        assert!(member.receive(forged.clone()).is_err());
+        let texts: Vec<_> = member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.text)
+            .collect();
+        assert!(texts.contains(&"written before removal".to_string()));
+        assert!(!texts.contains(&"forged after removal".to_string()));
+    }
+}

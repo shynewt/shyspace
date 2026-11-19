@@ -5,46 +5,74 @@ use anyhow::{Context, Result, ensure};
 use iroh::{PublicKey, SecretKey, Signature};
 use serde::{Deserialize, Serialize};
 
-const COMMIT_LABEL: &[u8] = b"shyspace commit v1";
+const COMMIT_LABEL: &[u8] = b"shyspace commit v2";
+
+/// A removed member's log ends here. Ops they sign later with an old epoch
+/// key are forgeries and get rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct FrozenAuthor {
+    pub member: PublicKey,
+    pub last_seq: u64,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct SignedCommit {
+struct SignedPayload {
     from_epoch: u64,
     commit: Vec<u8>,
+    frozen: Vec<FrozenAuthor>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SignedCommit {
+    payload: Vec<u8>,
     signature: Vec<u8>,
 }
 
-fn signed_message(from_epoch: u64, commit: &[u8]) -> Vec<u8> {
-    [COMMIT_LABEL, &from_epoch.to_be_bytes(), commit].concat()
+/// A commit whose admin signature checked out.
+#[derive(Debug)]
+pub(crate) struct VerifiedCommit {
+    pub commit: Vec<u8>,
+    pub frozen: Vec<FrozenAuthor>,
 }
 
-impl SignedCommit {
-    pub fn sign(admin: &SecretKey, from_epoch: u64, commit: Vec<u8>) -> Result<Vec<u8>> {
-        let signature = admin.sign(&signed_message(from_epoch, &commit));
-        Ok(postcard::to_stdvec(&Self {
-            from_epoch,
-            commit,
-            signature: signature.to_bytes().to_vec(),
-        })?)
-    }
+pub(crate) fn sign(
+    admin: &SecretKey,
+    from_epoch: u64,
+    commit: Vec<u8>,
+    frozen: Vec<FrozenAuthor>,
+) -> Result<Vec<u8>> {
+    let payload = postcard::to_stdvec(&SignedPayload {
+        from_epoch,
+        commit,
+        frozen,
+    })?;
+    let signature = admin.sign(&[COMMIT_LABEL, &payload].concat());
+    Ok(postcard::to_stdvec(&SignedCommit {
+        payload,
+        signature: signature.to_bytes().to_vec(),
+    })?)
+}
 
-    /// Returns the MLS commit if `bytes` is the admin's commit for `from_epoch`.
-    pub fn verify(bytes: &[u8], from_epoch: u64, admin: &PublicKey) -> Result<Vec<u8>> {
-        let signed: Self = postcard::from_bytes(bytes)?;
-        ensure!(signed.from_epoch == from_epoch, "commit is for another epoch");
-        let signature: [u8; 64] = signed
-            .signature
-            .as_slice()
-            .try_into()
-            .context("malformed signature")?;
-        admin
-            .verify(
-                &signed_message(from_epoch, &signed.commit),
-                &Signature::from_bytes(&signature),
-            )
-            .context("commit not signed by the admin")?;
-        Ok(signed.commit)
-    }
+/// Checks that `bytes` is the admin's commit for `from_epoch`.
+pub(crate) fn verify(bytes: &[u8], from_epoch: u64, admin: &PublicKey) -> Result<VerifiedCommit> {
+    let signed: SignedCommit = postcard::from_bytes(bytes)?;
+    let signature: [u8; 64] = signed
+        .signature
+        .as_slice()
+        .try_into()
+        .context("malformed signature")?;
+    admin
+        .verify(
+            &[COMMIT_LABEL, &signed.payload].concat(),
+            &Signature::from_bytes(&signature),
+        )
+        .context("commit not signed by the admin")?;
+    let payload: SignedPayload = postcard::from_bytes(&signed.payload)?;
+    ensure!(payload.from_epoch == from_epoch, "commit is for another epoch");
+    Ok(VerifiedCommit {
+        commit: payload.commit,
+        frozen: payload.frozen,
+    })
 }
 
 #[cfg(test)]
@@ -54,13 +82,16 @@ mod tests {
     #[test]
     fn only_the_admins_signature_for_that_epoch_verifies() {
         let admin = SecretKey::generate();
-        let signed = SignedCommit::sign(&admin, 3, b"commit".to_vec()).unwrap();
-        assert_eq!(
-            SignedCommit::verify(&signed, 3, &admin.public()).unwrap(),
-            b"commit"
-        );
-        assert!(SignedCommit::verify(&signed, 4, &admin.public()).is_err());
-        assert!(SignedCommit::verify(&signed, 3, &SecretKey::generate().public()).is_err());
-        assert!(SignedCommit::verify(b"junk", 3, &admin.public()).is_err());
+        let frozen = vec![FrozenAuthor {
+            member: SecretKey::generate().public(),
+            last_seq: 9,
+        }];
+        let signed = sign(&admin, 3, b"commit".to_vec(), frozen.clone()).unwrap();
+        let verified = verify(&signed, 3, &admin.public()).unwrap();
+        assert_eq!(verified.commit, b"commit");
+        assert_eq!(verified.frozen, frozen);
+        assert!(verify(&signed, 4, &admin.public()).is_err());
+        assert!(verify(&signed, 3, &SecretKey::generate().public()).is_err());
+        assert!(verify(b"junk", 3, &admin.public()).is_err());
     }
 }

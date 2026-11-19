@@ -3,16 +3,18 @@
 use anyhow::Result;
 use tracing::warn;
 
-use crate::{views::parse_member_id, workspace::Workspace};
+use crate::workspace::Workspace;
 
 impl Workspace {
-    /// Reads every other member's new segments from the bucket.
-    pub(super) async fn pull(&self) -> Result<()> {
+    /// Reads new segments from everyone who was ever a member: a newcomer
+    /// also needs the history of people removed before they joined.
+    pub(crate) async fn pull(&self) -> Result<()> {
         let me = self.me();
         let authors: Vec<_> = self
-            .members()?
-            .iter()
-            .filter_map(|member| parse_member_id(&member.id).ok())
+            .state()
+            .store
+            .everyone_ever()?
+            .into_iter()
             .filter(|author| *author != me)
             .collect();
         for author in authors {

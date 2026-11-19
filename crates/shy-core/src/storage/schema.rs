@@ -4,7 +4,8 @@
 use anyhow::{Context, Result, ensure};
 use rusqlite::Connection;
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
 CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);
 CREATE TABLE epoch_keys (epoch INTEGER PRIMARY KEY, key BLOB NOT NULL);
 CREATE TABLE epoch_members (epoch INTEGER NOT NULL, member BLOB NOT NULL, PRIMARY KEY (epoch, member));
@@ -38,7 +39,11 @@ CREATE TABLE pages (
     updated_ms INTEGER NOT NULL DEFAULT 0, doc BLOB);
 CREATE VIRTUAL TABLE search USING fts5(
     kind UNINDEXED, ref UNINDEXED, title, body, tokenize = 'unicode61 remove_diacritics 2');
-"];
+",
+    "
+CREATE TABLE frozen_authors (member BLOB PRIMARY KEY, last_seq INTEGER NOT NULL);
+",
+];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     let applied: usize = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
