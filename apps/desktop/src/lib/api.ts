@@ -41,6 +41,15 @@ export type InboxItem = {
   thread_root: string | null;
   reason: "mention" | "thread_reply";
 };
+export type SectionSort = "name" | "recent";
+export type SidebarSection = {
+  id: string;
+  name: string;
+  sort: SectionSort;
+  is_collapsed: boolean;
+  is_builtin: boolean;
+  channels: string[];
+};
 export type LaterItem = {
   id: string;
   saved_ms: number;
@@ -142,6 +151,14 @@ export const api = {
   inbox: () => invoke<Inbox>("inbox"),
   drafts: () => invoke<Draft[]>("drafts"),
   later: () => invoke<LaterItem[]>("later"),
+  sidebarSections: () => invoke<SidebarSection[]>("sidebar_sections"),
+  createSection: (name: string) => invoke<string>("create_section", { name }),
+  renameSection: (section: string, name: string) => invoke<void>("rename_section", { section, name }),
+  deleteSection: (section: string) => invoke<void>("delete_section", { section }),
+  setSectionSort: (section: string, sort: SectionSort) => invoke<void>("set_section_sort", { section, sort }),
+  setSectionCollapsed: (section: string, collapsed: boolean) =>
+    invoke<void>("set_section_collapsed", { section, collapsed }),
+  moveChannel: (channel: string, section: string | null) => invoke<void>("move_channel", { channel, section }),
   saveForLater: (item: string, remindMs: number | null) => invoke<void>("save_for_later", { item, remindMs }),
   removeFromLater: (item: string) => invoke<void>("remove_from_later", { item }),
   markLaterDone: (item: string, done: boolean) => invoke<void>("mark_later_done", { item, done }),

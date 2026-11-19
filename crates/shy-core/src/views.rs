@@ -312,3 +312,44 @@ pub struct LaterItem {
     pub message: Option<LinkedMessage>,
     pub page: Option<Page>,
 }
+
+/// How a sidebar section orders its channels.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionSort {
+    /// A to Z.
+    #[default]
+    Name,
+    /// Newest message first.
+    Recent,
+}
+
+impl SectionSort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SectionSort::Name => "name",
+            SectionSort::Recent => "recent",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "name" => Some(SectionSort::Name),
+            "recent" => Some(SectionSort::Recent),
+            _ => None,
+        }
+    }
+}
+
+/// A personal group of channels in the sidebar.
+#[derive(Debug, Clone, Serialize)]
+pub struct SidebarSection {
+    pub id: String,
+    pub name: String,
+    pub sort: SectionSort,
+    pub is_collapsed: bool,
+    /// The built-in "Channels" section: can't be renamed or deleted.
+    pub is_builtin: bool,
+    /// Channel ids, in the section's order.
+    pub channels: Vec<EntityId>,
+}

@@ -11,7 +11,7 @@ use shy_core::{
     sync::SyncStatus,
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
-        Page, SearchHit, StorageSettings,
+        Page, SearchHit, SectionSort, SidebarSection, StorageSettings,
     },
     workspace::StorageUpdate,
 };
@@ -375,6 +375,65 @@ async fn take_due_reminders(state: State<'_, AppState>) -> CommandResult<Vec<Lat
 }
 
 #[tauri::command]
+async fn sidebar_sections(state: State<'_, AppState>) -> CommandResult<Vec<SidebarSection>> {
+    current(&state).await?.sidebar_sections().map_err(failed)
+}
+
+#[tauri::command]
+async fn create_section(state: State<'_, AppState>, name: String) -> CommandResult<String> {
+    current(&state).await?.create_section(&name).map_err(failed)
+}
+
+#[tauri::command]
+async fn rename_section(state: State<'_, AppState>, section: String, name: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .rename_section(&section, &name)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn delete_section(state: State<'_, AppState>, section: String) -> CommandResult<()> {
+    current(&state).await?.delete_section(&section).map_err(failed)
+}
+
+#[tauri::command]
+async fn set_section_sort(
+    state: State<'_, AppState>,
+    section: String,
+    sort: SectionSort,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_section_sort(&section, sort)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn set_section_collapsed(
+    state: State<'_, AppState>,
+    section: String,
+    collapsed: bool,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_section_collapsed(&section, collapsed)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn move_channel(
+    state: State<'_, AppState>,
+    channel: String,
+    section: Option<String>,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .move_channel(&channel, section.as_deref())
+        .map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
     current(&state)
         .await?
@@ -543,6 +602,13 @@ pub fn run() {
             create_channel,
             rename_channel,
             mark_read,
+            sidebar_sections,
+            create_section,
+            rename_section,
+            delete_section,
+            set_section_sort,
+            set_section_collapsed,
+            move_channel,
             save_for_later,
             remove_from_later,
             mark_later_done,

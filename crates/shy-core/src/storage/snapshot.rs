@@ -28,6 +28,7 @@ const REPLAYABLE_TABLES: &[&str] = &[
     "thread_follows",
     "drafts",
     "later",
+    "sidebar_placement",
 ];
 
 /// Copies the database at `source` to `destination`, both under `key`.

@@ -1,13 +1,13 @@
-import { Bookmark, Inbox as InboxIcon, ListFilter, Plus, Search, Users } from "lucide-react";
+import { Bookmark, Inbox as InboxIcon, Plus, Search, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { cx, IconButton, Kbd, Logo, SectionLabel, springs } from "../../ui";
-import { ChannelList } from "./ChannelList";
+import { IconButton, Kbd, Logo, SectionLabel, springs } from "../../ui";
+import { ChannelSections } from "./ChannelSections";
 import { NavItem } from "./NavItem";
 import { PageTree } from "./PageTree";
 import { SyncIndicator } from "./SyncIndicator";
@@ -22,11 +22,6 @@ export function Sidebar({
   onOpenMembers: () => void;
 }) {
   const { session, pages, navigate } = useWorkspace();
-  // Each opening of the new-channel field is a fresh one: reopening while
-  // the last one fades out must not revive it, already submitted.
-  const [newChannelRound, setNewChannelRound] = useState<number | null>(null);
-  const roundsStarted = useRef(0);
-  const [isUnreadOnly, setUnreadOnly] = useState(false);
 
   const createPage = async (parent: string | null) => {
     try {
@@ -61,31 +56,7 @@ export function Sidebar({
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto px-2 pb-3">
         <InboxLink />
         <LaterLink />
-        <Section
-          title="Channels"
-          addLabel="New channel"
-          onAdd={() => {
-            roundsStarted.current += 1;
-            setNewChannelRound(roundsStarted.current);
-          }}
-          extraAction={
-            <IconButton
-              label={isUnreadOnly ? "Show all channels" : "Show unread channels only"}
-              aria-pressed={isUnreadOnly}
-              size="sm"
-              icon={<ListFilter size={13} />}
-              isActive={isUnreadOnly}
-              onClick={() => setUnreadOnly(!isUnreadOnly)}
-              className={cx(!isUnreadOnly && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
-            />
-          }
-        >
-          <ChannelList
-            newChannelRound={newChannelRound}
-            onAddDone={() => setNewChannelRound(null)}
-            isUnreadOnly={isUnreadOnly}
-          />
-        </Section>
+        <ChannelSections />
 
         <Section title="Pages" addLabel="New page" onAdd={() => createPage(null)}>
           <PageTree pages={pages} parent={null} depth={0} onCreateChild={createPage} />

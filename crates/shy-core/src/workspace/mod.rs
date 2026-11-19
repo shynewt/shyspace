@@ -5,6 +5,7 @@ mod inbox;
 mod later;
 mod lifecycle;
 mod reads;
+mod sections;
 mod storage;
 
 pub use lifecycle::DataDir;

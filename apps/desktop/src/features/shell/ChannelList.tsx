@@ -1,7 +1,7 @@
-import { AtSign, Bell, BellOff, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
+import { AtSign, Bell, BellOff, Ellipsis, FolderInput, Hash, Pencil, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useRef, useState } from "react";
-import { api, type Channel, type NotifyLevel } from "../../lib/api";
+import { api, type Channel, type NotifyLevel, type SidebarSection } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useLive } from "../../lib/useLive";
@@ -24,10 +24,16 @@ const LEVEL_STATUS: Record<NotifyLevel, { icon: ReactNode; label: string } | nul
 const DRAFT_STATUS = { icon: <Pencil size={12} />, label: "draft" };
 
 export function ChannelList({
+  channelIds,
+  sections,
   newChannelRound,
   onAddDone,
   isUnreadOnly,
 }: {
+  /** The section's channels, in its order. */
+  channelIds: string[];
+  /** Every section, for "Move to". */
+  sections: SidebarSection[];
   /** Set while the new-channel field is open; a new number means a fresh field. */
   newChannelRound: number | null;
   onAddDone: () => void;
@@ -36,15 +42,16 @@ export function ChannelList({
   const { channels, view, navigate } = useWorkspace();
   const drafts = useLive(api.drafts, (change) => change.kind === "drafts");
   const hasDraft = (channel: string) => drafts?.some((draft) => draft.target === channel) ?? false;
+  const inSection = channelIds.flatMap((id) => channels.filter((channel) => channel.id === id));
   // The open channel stays listed, so filtering never hides where you are.
   const shown = isUnreadOnly
-    ? channels.filter((channel) => channel.unread > 0 || (view?.kind === "channel" && view.id === channel.id))
-    : channels;
+    ? inSection.filter((channel) => channel.unread > 0 || (view?.kind === "channel" && view.id === channel.id))
+    : inSection;
   const create = async (name: string) => navigate({ kind: "channel", id: await api.createChannel(name) });
   return (
     <>
       {shown.map((channel) => (
-        <ChannelItem key={channel.id} channel={channel} hasDraft={hasDraft(channel.id)} />
+        <ChannelItem key={channel.id} channel={channel} hasDraft={hasDraft(channel.id)} sections={sections} />
       ))}
       <AnimatePresence>
         {newChannelRound !== null && (
@@ -61,7 +68,15 @@ export function ChannelList({
   );
 }
 
-function ChannelItem({ channel, hasDraft }: { channel: Channel; hasDraft: boolean }) {
+function ChannelItem({
+  channel,
+  hasDraft,
+  sections,
+}: {
+  channel: Channel;
+  hasDraft: boolean;
+  sections: SidebarSection[];
+}) {
   const [isRenaming, setRenaming] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const [isMenuOpen, setMenuOpen] = useState(false);
@@ -86,6 +101,15 @@ function ChannelItem({ channel, hasDraft }: { channel: Channel; hasDraft: boolea
         icon: choice.icon,
         isChosen: channel.notify === choice.level,
         onSelect: () => setLevel(choice.level),
+      })),
+    },
+    {
+      label: "Move to",
+      icon: <FolderInput size={14} />,
+      choices: sections.map((section) => ({
+        label: section.name,
+        isChosen: section.channels.includes(channel.id),
+        onSelect: () => api.moveChannel(channel.id, section.is_builtin ? null : section.id).catch(reportError),
       })),
     },
   ];

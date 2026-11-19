@@ -73,6 +73,13 @@ CREATE TABLE later (
     item TEXT PRIMARY KEY, saved_ms INTEGER NOT NULL, remind_ms INTEGER,
     is_reminded INTEGER NOT NULL DEFAULT 0, is_done INTEGER NOT NULL DEFAULT 0);
 ",
+    "
+CREATE TABLE sidebar_sections (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL,
+    sort TEXT NOT NULL DEFAULT 'name', is_collapsed INTEGER NOT NULL DEFAULT 0);
+INSERT INTO sidebar_sections (id, name, position) VALUES ('channels', 'Channels', 0);
+CREATE TABLE sidebar_placement (channel TEXT PRIMARY KEY, section TEXT NOT NULL);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

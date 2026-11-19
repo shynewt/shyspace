@@ -32,9 +32,9 @@ export function sameView(left: View | null, right: View | null) {
   return left !== null && right !== null && viewKey(left) === viewKey(right);
 }
 
-/** Channels then pages (as the page tree lists them), in sidebar order. */
-export function sidebarViews(channels: Channel[], pages: Page[]): View[] {
-  const ordered: View[] = channels.map((channel) => ({ kind: "channel", id: channel.id }));
+/** Channels (in the order their sections show them) then pages, as in the sidebar. */
+export function sidebarViews(channelOrder: string[], pages: Page[]): View[] {
+  const ordered: View[] = channelOrder.map((id) => ({ kind: "channel", id }));
   const addPages = (parent: string | null) => {
     for (const page of pages.filter((candidate) => candidate.parent === parent)) {
       ordered.push({ kind: "page", id: page.id });

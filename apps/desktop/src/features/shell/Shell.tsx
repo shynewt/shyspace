@@ -21,6 +21,7 @@ export function Shell({ session }: { session: Session }) {
   // Unread counts change as messages arrive.
   const channels = useLive(api.channels, (change) => change.kind === "channels" || change.kind === "messages") ?? [];
   const pages = useLive(api.pages, (change) => change.kind === "pages") ?? [];
+  const sections = useLive(api.sidebarSections, (change) => change.kind === "channels" || change.kind === "messages");
   const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
   const [view, setView] = useState<View | null>(null);
   const [isPaletteOpen, setPaletteOpen] = useState(false);
@@ -46,7 +47,8 @@ export function Shell({ session }: { session: Session }) {
       const shortcut = SHORTCUTS.find((candidate) => candidate.matches(event));
       if (!shortcut) return;
       event.preventDefault();
-      const views = sidebarViews(channels, pages);
+      const channelOrder = sections?.flatMap((section) => section.channels) ?? channels.map((channel) => channel.id);
+      const views = sidebarViews(channelOrder, pages);
       const current = view ? views.findIndex((candidate) => sameView(candidate, view)) : -1;
       const unread = (candidate: View) =>
         candidate.kind === "channel" && (channels.find((channel) => channel.id === candidate.id)?.unread ?? 0) > 0;
@@ -74,7 +76,7 @@ export function Shell({ session }: { session: Session }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, channels, pages]);
+  }, [view, channels, pages, sections]);
 
   useAlerts(view);
   useReminders();

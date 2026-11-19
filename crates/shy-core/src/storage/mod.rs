@@ -10,6 +10,7 @@ mod queries;
 mod reading;
 mod revisions;
 mod schema;
+mod sections;
 mod snapshot;
 mod threads;
 
@@ -17,6 +18,7 @@ pub use invites::PendingRequest;
 pub use queries::SearchFilters;
 pub use reading::UnreadMessage;
 pub use revisions::ItemKind;
+pub use sections::BUILTIN_SECTION;
 pub use snapshot::{snapshot_database, snapshot_store_without_content};
 pub use threads::Reply;
 

@@ -8,13 +8,23 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import * as Y from "yjs";
-import type { BucketConfig, Change, LaterItem, Member, Page, Session, StorageSettings } from "../../../src/lib/api";
+import type {
+  BucketConfig,
+  Change,
+  LaterItem,
+  Member,
+  Page,
+  SectionSort,
+  Session,
+  StorageSettings,
+} from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
 import { FakeDrafts } from "./drafts";
 import { argument, type Kind, ownedId, randomHex, requireString } from "./helpers";
 import { FakeInvites } from "./invites";
 import { FakeLater } from "./later";
 import { search } from "./search";
+import { FakeSections } from "./sections";
 
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
@@ -34,6 +44,7 @@ export class FakeBackend {
     isSaved: (item) => this.later.has(item),
   });
   private later = new FakeLater();
+  private sections = new FakeSections();
   private drafts = new FakeDrafts();
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
   private storage: StorageSettings | null = null;
@@ -115,6 +126,39 @@ export class FakeBackend {
     }
     if (chatAnswer !== NOT_CHAT) return chatAnswer;
     switch (command) {
+      case "sidebar_sections":
+        return this.sections.list(
+          this.chat.channels.map((channel) => ({
+            id: channel.id,
+            name: channel.name,
+            lastActivity: Math.max(
+              0,
+              ...this.chat.messages
+                .filter((message) => message.channel === channel.id)
+                .map((message) => message.created_ms),
+            ),
+          })),
+        );
+      case "create_section": {
+        const id = this.sections.create(requireString(args, "name"));
+        this.notify({ kind: "channels" });
+        return id;
+      }
+      case "rename_section":
+        this.sections.rename(requireString(args, "section"), requireString(args, "name"));
+        return this.notify({ kind: "channels" });
+      case "delete_section":
+        this.sections.delete(requireString(args, "section"));
+        return this.notify({ kind: "channels" });
+      case "set_section_sort":
+        this.sections.setSort(requireString(args, "section"), requireString(args, "sort") as SectionSort);
+        return this.notify({ kind: "channels" });
+      case "set_section_collapsed":
+        this.sections.setCollapsed(requireString(args, "section"), argument(args, "collapsed") === true);
+        return this.notify({ kind: "channels" });
+      case "move_channel":
+        this.sections.move(requireString(args, "channel"), (argument(args, "section") as string | null) ?? null);
+        return this.notify({ kind: "channels" });
       case "save_for_later":
         this.later.save(requireString(args, "item"), (argument(args, "remindMs") as number | null) ?? null);
         return this.notifyLater();

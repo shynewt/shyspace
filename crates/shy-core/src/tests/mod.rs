@@ -10,6 +10,7 @@ mod notifications;
 mod reading;
 mod recovery;
 mod search;
+mod sections;
 mod storage;
 mod support;
 mod threads;

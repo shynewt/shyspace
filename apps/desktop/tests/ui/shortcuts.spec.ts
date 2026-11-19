@@ -14,10 +14,11 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("alt and the arrows move through the sidebar", async ({ page }) => {
-  await page.keyboard.press("Alt+ArrowDown");
-  await expect(page.getByLabel("Message #design")).toBeVisible();
+  // Channels sort A to Z: design, general, random.
   await page.keyboard.press("Alt+ArrowDown");
   await expect(page.getByLabel("Message #random")).toBeVisible();
+  await page.keyboard.press("Alt+ArrowUp");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
   await page.keyboard.press("Alt+ArrowUp");
   await expect(page.getByLabel("Message #design")).toBeVisible();
 });
