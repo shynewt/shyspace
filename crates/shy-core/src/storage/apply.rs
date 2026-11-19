@@ -1,13 +1,13 @@
 //! Folds verified ops into the views. Every op merges the same way whatever
 //! order ops arrive in, and applying one twice changes nothing.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use rusqlite::{OptionalExtension, named_params, params};
 
 use super::Store;
 use crate::{
     config,
-    ops::{Op, VerifiedOp, is_owned_by},
+    ops::{Op, VerifiedOp, is_owned_by, rule_violation},
     pages,
     views::Change,
 };
@@ -26,7 +26,7 @@ impl Store {
             &verified.body.op
             && !is_owned_by(id, &verified.author)
         {
-            bail!("op creates an id that belongs to someone else");
+            return Err(rule_violation("op creates an id that belongs to someone else"));
         }
         self.observe_lamport(lamport)?;
         Ok(Some(match &verified.body.op {
@@ -120,7 +120,8 @@ impl Store {
                 self.db
                     .execute("INSERT OR IGNORE INTO pages (id) VALUES (?)", [page])?;
                 let state = self.page_state(page)?;
-                let merged = pages::merge(state.as_deref(), update)?;
+                let merged = pages::merge(state.as_deref(), update)
+                    .map_err(|error| rule_violation(format!("damaged page update: {error:#}")))?;
                 self.db.execute(
                     "UPDATE pages SET doc = ?, updated_ms = MAX(updated_ms, ?) WHERE id = ?",
                     params![merged, now, page],

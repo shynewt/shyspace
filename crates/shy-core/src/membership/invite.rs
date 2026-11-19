@@ -76,6 +76,9 @@ pub(crate) enum Answer {
 pub(crate) struct Grant {
     pub history: KeyHistory,
     pub bucket: BucketConfig,
+    /// When `bucket` was last changed, so older changes replayed later
+    /// can't overwrite it.
+    pub bucket_lamport: u64,
 }
 
 /// How a joiner reaches the admin before having bucket credentials.

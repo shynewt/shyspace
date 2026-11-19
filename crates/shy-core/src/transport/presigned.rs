@@ -8,6 +8,7 @@ use crate::membership::invite::{Invite, JoinMailbox};
 
 /// The largest answer we accept. It holds a Welcome and the key history.
 const MAX_ANSWER_SIZE: usize = 32 * 1024 * 1024;
+const MAX_ERROR_BODY: usize = 16 * 1024;
 
 pub struct PresignedMailbox {
     http: reqwest::Client,
@@ -42,11 +43,26 @@ async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>> {
 /// expired" or "403 Forbidden: not entitled" (the bucket key can't write).
 async fn refusal(response: reqwest::Response) -> String {
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = read_up_to(response, MAX_ERROR_BODY).await.unwrap_or_default();
+    let body = String::from_utf8_lossy(&body);
     match xml_tag(&body, "Message").or_else(|| xml_tag(&body, "Code")) {
         Some(reason) => format!("{status}: {reason}"),
         None => status.to_string(),
     }
+}
+
+/// Reads at most `limit` bytes of a body: the address came from an invite
+/// code, so the server on the other end isn't trusted.
+async fn read_up_to(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        let room = limit.saturating_sub(body.len());
+        body.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        if body.len() >= limit {
+            break;
+        }
+    }
+    Ok(body)
 }
 
 /// The text of the first `<tag>` in an S3 error document.

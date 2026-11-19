@@ -67,17 +67,20 @@ pub(crate) fn current_bucket(store: &Store) -> Result<BucketConfig> {
     Ok(serde_json::from_slice(&bytes)?)
 }
 
+/// When the bucket settings were last changed (0 if never since creation).
+pub(crate) fn bucket_lamport(store: &Store) -> Result<u64> {
+    let Some(bytes) = store.meta(BUCKET_LAMPORT_META)? else {
+        return Ok(0);
+    };
+    let bytes: [u8; 8] = bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("corrupt settings clock"))?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
 /// Applies new bucket settings unless newer ones (by lamport) are in place.
 pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) -> Result<bool> {
-    let current_lamport = match store.meta(BUCKET_LAMPORT_META)? {
-        Some(bytes) => u64::from_be_bytes(
-            bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("corrupt settings clock"))?,
-        ),
-        None => 0,
-    };
-    if lamport <= current_lamport {
+    if lamport <= bucket_lamport(store)? {
         return Ok(false);
     }
     store.set_meta(BUCKET_META, &serde_json::to_vec(bucket)?)?;

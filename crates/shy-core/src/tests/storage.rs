@@ -131,3 +131,35 @@ async fn settings_that_fail_the_check_change_nothing() {
         test_bucket_config().access_key_id
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn newcomers_keep_the_newest_settings_over_older_changes() {
+    let (root, bucket, admin, _bob) = admin_and_bob().await;
+    admin
+        .update_storage(StorageUpdate {
+            region: "r1",
+            access_key_id: "FIRST",
+            secret_access_key: "s1",
+        })
+        .await
+        .unwrap();
+    admin
+        .update_storage(StorageUpdate {
+            region: "r2",
+            access_key_id: "SECOND",
+            secret_access_key: "s2",
+        })
+        .await
+        .unwrap();
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+
+    let stamp =
+        |workspace: &crate::Workspace| crate::config::bucket_lamport(&workspace.state().store).unwrap();
+    assert_eq!(
+        stamp(&carol),
+        stamp(&admin),
+        "the grant carries when the settings last changed"
+    );
+    carol.sync().await;
+    assert_eq!(carol.storage_settings().unwrap().access_key_id, "SECOND");
+}

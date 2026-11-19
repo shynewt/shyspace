@@ -12,7 +12,7 @@ use tokio::sync::{Notify, broadcast, mpsc};
 
 use super::{Inner, Networking, Profile, State, Workspace};
 use crate::{
-    config::WorkspaceConfig,
+    config::{self, WorkspaceConfig},
     identity,
     keys::{DeviceKey, KeyStorage},
     membership::{
@@ -241,6 +241,7 @@ impl Workspace {
         )?;
         let grant: Grant = postcard::from_bytes(&mls.open_from_admin(&sealed_grant, &invite.admin)?)?;
         grant.history.store_into(&local.store)?;
+        let bucket_lamport = grant.bucket_lamport;
 
         let config = WorkspaceConfig {
             workspace_id: invite.workspace_id,
@@ -249,6 +250,7 @@ impl Workspace {
             bucket: grant.bucket,
         };
         config.save(&data.path, &local.store)?;
+        config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
             name: profile.name.to_owned(),

@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::{
     crypto,
-    ops::{Envelope, VerifiedOp},
+    ops::{Envelope, RuleViolation, VerifiedOp, rule_violation},
     workspace::{State, Workspace},
 };
 
@@ -106,9 +106,8 @@ fn is_ready(state: &State, verified: &VerifiedOp) -> Result<bool> {
     Ok(follows_previous && state.store.accepts_clock(verified.body.lamport)?)
 }
 
-/// Applies a verified op. If it can't be applied (say it claims someone
-/// else's id), it is still recorded as handled, so it never blocks the
-/// author's later ops; every replica reaches the same verdict.
+/// Applies a verified op. One that breaks a rule is recorded as handled
+/// anyway, so it never blocks the author's later ops.
 fn apply_and_record(
     state: &State,
     envelope: &Envelope,
@@ -116,21 +115,21 @@ fn apply_and_record(
     admin: &iroh::PublicKey,
 ) -> Result<Option<crate::views::Change>> {
     let applied = state.store.atomically(|store| {
-        ensure!(
-            verified.body.op.is_permitted(&verified.author, admin),
-            "only the admin may make this change"
-        );
+        if !verified.body.op.is_permitted(&verified.author, admin) {
+            return Err(rule_violation("only the admin may make this change"));
+        }
         let change = store.apply(verified)?;
         store.insert_applied(envelope, true)?;
         Ok(change)
     });
     match applied {
         Ok(change) => Ok(change),
-        Err(error) => {
-            warn!("skipping an op that can't be applied: {error:#}");
+        Err(error) if error.downcast_ref::<RuleViolation>().is_some() => {
+            warn!("skipping an op that breaks a rule: {error:#}");
             state.store.insert_applied(envelope, true)?;
             Ok(None)
         }
+        Err(error) => Err(error),
     }
 }
 

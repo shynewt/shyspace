@@ -138,6 +138,7 @@ impl Workspace {
             let grant = Grant {
                 history: KeyHistory::collect(&state.store)?,
                 bucket: config::current_bucket(&state.store)?,
+                bucket_lamport: config::bucket_lamport(&state.store)?,
             };
             let sealed_grant = state.mls.seal_for_members(&postcard::to_stdvec(&grant)?)?;
             let delivery = Delivery {

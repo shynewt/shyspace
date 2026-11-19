@@ -39,13 +39,44 @@ fn parse_member_path(name: &str) -> Option<PublicKey> {
     PublicKey::from_bytes(&bytes).ok()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct BucketConfig {
     pub endpoint: String,
     pub region: String,
     pub bucket: String,
     pub access_key_id: String,
     pub secret_access_key: String,
+}
+
+/// Never prints the secret key, so a stray `{:?}` can't leak it.
+impl std::fmt::Debug for BucketConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BucketConfig")
+            .field("endpoint", &self.endpoint)
+            .field("region", &self.region)
+            .field("bucket", &self.bucket)
+            .field("access_key_id", &self.access_key_id)
+            .field("secret_access_key", &"<hidden>")
+            .finish()
+    }
+}
+
+/// Plain http is only for servers on this machine or the local network;
+/// anywhere else the keys would cross the internet readable.
+fn is_local_host(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    match host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+    {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback(),
+        Err(_) => host == "localhost" || host.ends_with(".local") || !host.contains('.'),
+    }
 }
 
 impl BucketConfig {
@@ -62,8 +93,8 @@ impl BucketConfig {
         let url = reqwest::Url::parse(&with_scheme)
             .with_context(|| format!("the bucket endpoint {:?} isn't a valid address", self.endpoint))?;
         ensure!(
-            matches!(url.scheme(), "https" | "http"),
-            "the bucket endpoint must start with https:// (or http:// for a local server)"
+            url.scheme() == "https" || (url.scheme() == "http" && is_local_host(&url)),
+            "the bucket endpoint must use https:// (plain http:// only works for a server on your own network)"
         );
         ensure!(
             url.host_str().is_some_and(|host| !host.is_empty()),
@@ -363,7 +394,20 @@ mod tests {
         );
         assert!(endpoint("").is_err());
         assert!(endpoint("ftp://files.example.com").is_err());
+        assert!(
+            endpoint("http://s3.example.com").is_err(),
+            "keys would cross the internet in the clear"
+        );
+        assert!(endpoint("http://192.168.1.20:9000").is_ok());
+        assert!(endpoint("http://minio:9000").is_ok());
         assert!(endpoint("https://").is_err());
+    }
+
+    #[test]
+    fn debug_output_hides_the_secret() {
+        let printed = format!("{:?}", test_config());
+        assert!(!printed.contains("very-secret-key"), "{printed}");
+        assert!(printed.contains("AKIDEXAMPLE"));
     }
 
     #[tokio::test]

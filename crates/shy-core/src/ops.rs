@@ -79,6 +79,25 @@ pub enum Op {
     },
 }
 
+/// An op that is validly signed but breaks a rule (someone else's id, an
+/// admin-only change, a damaged page update). Every replica reaches the same
+/// verdict, so it is skipped rather than retried. Other errors (a full disk,
+/// say) are not rule violations and must not cause a skip.
+#[derive(Debug)]
+pub struct RuleViolation(pub String);
+
+impl std::fmt::Display for RuleViolation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RuleViolation {}
+
+pub(crate) fn rule_violation(reason: impl Into<String>) -> anyhow::Error {
+    RuleViolation(reason.into()).into()
+}
+
 impl Op {
     /// Whether `author` may make this change in a workspace run by `admin`.
     pub fn is_permitted(&self, author: &PublicKey, admin: &PublicKey) -> bool {
