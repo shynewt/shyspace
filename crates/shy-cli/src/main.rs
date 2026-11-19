@@ -1,8 +1,10 @@
+mod agents;
 mod mcp;
+mod skill;
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use shy_core::{BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace, workspace::StorageUpdate};
 
@@ -13,8 +15,12 @@ use shy_core::{BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace
 )]
 struct Cli {
     /// Where this member's keys and data live.
-    #[arg(long, env = "SHY_DIR", global = true)]
+    #[arg(long, env = "SHY_DIR", global = true, conflicts_with = "agent")]
     dir: Option<PathBuf>,
+    /// Act as the named agent: its own member, with its own identity and
+    /// data folder. Use one name per agent (and per concurrent session).
+    #[arg(long, env = "SHY_AGENT", global = true)]
+    agent: Option<String>,
     /// Keep the key that encrypts local data in this file instead of the
     /// system keychain (for servers). Keep it outside the data directory.
     #[arg(long, env = "SHY_KEY_FILE", global = true)]
@@ -56,6 +62,11 @@ enum Command {
     Restore { kit: String },
     /// Serve the workspace to an AI agent over MCP on stdin/stdout.
     Mcp,
+    /// List the named agents on this machine.
+    Agents,
+    /// Print the agent skill (how to be a good member). For Claude Code:
+    /// `mkdir -p ~/.claude/skills/shyspace && shy skill > ~/.claude/skills/shyspace/SKILL.md`
+    Skill,
 }
 
 #[derive(Subcommand)]
@@ -107,14 +118,6 @@ struct BucketArgs {
     secret_access_key: String,
 }
 
-fn default_dir() -> Result<PathBuf> {
-    let data_home = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
-        .context("cannot find a data directory; pass --dir")?;
-    Ok(data_home.join("shyspace/cli"))
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -124,9 +127,10 @@ async fn main() -> Result<()> {
         )
         .init();
     let cli = Cli::parse();
-    let path = match cli.dir {
-        Some(dir) => dir,
-        None => default_dir()?,
+    let path = match (cli.dir, &cli.agent) {
+        (Some(dir), _) => dir,
+        (None, Some(agent)) => agents::agent_dir(agent)?,
+        (None, None) => agents::default_member_dir()?,
     };
     let keys = match cli.key_file {
         Some(file) => KeyStorage::File(file),
@@ -205,6 +209,21 @@ async fn main() -> Result<()> {
                 data.path.display()
             );
         }
+        Command::Agents => {
+            let agents = agents::list()?;
+            if agents.is_empty() {
+                println!(
+                    "No named agents yet. Create one with `shy --agent <name> join --bot --name <Name> <invite>`."
+                );
+            }
+            for (name, workspace) in agents {
+                println!(
+                    "{name}  {}",
+                    workspace.map_or("(not in a workspace yet)".into(), |name| format!("in \"{name}\""))
+                );
+            }
+        }
+        Command::Skill => print!("{}", skill::SKILL),
         Command::Mcp => {
             if !Workspace::exists(&data.path) {
                 bail!("no workspace in {}; run `shy join` first", data.path.display());

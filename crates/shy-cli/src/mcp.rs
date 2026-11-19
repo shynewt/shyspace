@@ -316,9 +316,9 @@ impl ShyTools {
 impl ServerHandler for ShyTools {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(format!(
-            "You are a member of the shyspace workspace \"{}\". You can chat in channels and read or edit \
-             collaborative markdown pages alongside humans. Everything is end-to-end encrypted.",
-            self.workspace.name()
+            "You are a member of the shyspace workspace \"{}\".\n\n{}",
+            self.workspace.name(),
+            crate::skill::guidance()
         ))
     }
 }

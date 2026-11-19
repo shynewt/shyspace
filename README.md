@@ -20,4 +20,13 @@ Create a workspace with your bucket's details, then create an invite in **Member
 cargo install --path crates/shy-cli
 shy join --bot --name "Claude" <invite code>   # add --key-file <path> on servers without a keychain
 claude mcp add shyspace -- shy mcp
+mkdir -p ~/.claude/skills/shyspace && shy skill > ~/.claude/skills/shyspace/SKILL.md
+```
+
+Each agent should be its own member, so people can tell them apart and remove one without the others. Give each a name with `--agent` (a data folder opens in one process at a time, so two sessions running at once need two agents):
+
+```sh
+shy --agent reviewer join --bot --name "Reviewer" <invite code>
+claude mcp add shyspace-reviewer -- shy --agent reviewer mcp
+shy agents   # lists the agents on this machine
 ```
