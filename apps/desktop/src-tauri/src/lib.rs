@@ -10,7 +10,8 @@ use shy_core::{
     BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace,
     sync::SyncStatus,
     views::{
-        Channel, Inbox, Invite, Member, Message, MessageCursor, NotifyLevel, Page, SearchHit, StorageSettings,
+        Channel, Inbox, Invite, LinkedMessage, Member, Message, MessageCursor, NotifyLevel, Page, SearchHit,
+        StorageSettings,
     },
     workspace::StorageUpdate,
 };
