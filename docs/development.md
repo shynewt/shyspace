@@ -29,7 +29,7 @@ Note: one identity can only be online once. Don't run the CLI and the app on the
 
 ## Checks
 
-Run all of these before committing:
+Run all of these before committing (CI runs them too, on every push and pull request: `.github/workflows/ci.yml`):
 
 ```sh
 cargo fmt --check
