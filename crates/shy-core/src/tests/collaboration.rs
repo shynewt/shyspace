@@ -127,7 +127,7 @@ async fn reopening_keeps_state_and_keys() {
     admin.send_message(&general, "persist me", None).unwrap();
     drop(admin);
 
-    let reopened = Workspace::open_with(&dir, bucket, Networking::Offline)
+    let reopened = Workspace::open_with(&data_dir(&dir), |_| Ok(bucket), Networking::Offline)
         .await
         .unwrap();
     assert_eq!(

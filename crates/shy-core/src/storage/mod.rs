@@ -16,13 +16,19 @@ use anyhow::{Context, Result};
 use iroh::PublicKey;
 use rusqlite::{Connection, OptionalExtension, Params, params};
 
+/// A fixed key for databases that only live inside tests.
+#[cfg(test)]
+pub(crate) const TEST_DB_KEY: &str = "x'0000000000000000000000000000000000000000000000000000000000000000'";
+
 pub struct Store {
     db: Connection,
 }
 
 impl Store {
-    pub fn open(path: &Path) -> Result<Self> {
-        let mut db = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
+    /// Opens (or creates) the encrypted database at `path`. `key` is a
+    /// SQLCipher raw-key literal from [`crate::keys::DeviceKey`].
+    pub fn open(path: &Path, key: &str) -> Result<Self> {
+        let mut db = open_encrypted(path, key)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         schema::migrate(&mut db)?;
         Ok(Self { db })
@@ -54,6 +60,15 @@ impl Store {
     fn exists(&self, sql: &str, args: impl Params) -> Result<bool> {
         Ok(self.db.query_row(sql, args, |_| Ok(())).optional()?.is_some())
     }
+}
+
+/// Opens a SQLCipher database and checks the key actually decrypts it.
+pub(crate) fn open_encrypted(path: &Path, key: &str) -> Result<Connection> {
+    let db = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
+    db.pragma_update(None, "key", key)?;
+    db.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
+        .with_context(|| format!("{} can't be decrypted with this device's key", path.display()))?;
+    Ok(db)
 }
 
 fn to_public_key(bytes: Vec<u8>) -> Result<PublicKey> {

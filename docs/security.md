@@ -11,6 +11,7 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 | Anyone holding an invite code | ask to join once, before it expires | get in without the admin's approval, touch anything else in the bucket |
 | A removed member | read what they already had | read anything written after removal |
 | A current member | write as themselves | write as someone else, take over others' messages, change membership |
+| Someone who copies a member's data directory | nothing, without the device key | read messages, keys or credentials |
 
 ## Defenses, and where they live
 
@@ -25,12 +26,12 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 - **Invites:** single-use, expire after 7 days, need the admin's approval, and carry only presigned links (no credentials). The admin sees the requester's name and key fingerprint before deciding. Credentials reach the newcomer only inside the MLS-encrypted answer. See `membership/admin.rs`.
 - **Identity binding:** a joiner's key package must be signed by the identity it claims. The invite pins the admin's MLS key, so a forged Welcome is rejected.
 - **Members-only gossip:** peers that aren't current MLS members are refused at connection time, and we only dial members. See `transport/gossip.rs`.
+- **Encryption at rest:** both local databases use SQLCipher with keys derived from a device key kept in the OS keychain (or a key file the user places elsewhere). The identity key and bucket credentials are inside the encrypted database; `workspace.json` holds only public settings. See `keys.rs`, `storage/mod.rs`.
 - **Chat rendering:** message HTML is sanitized with DOMPurify; only http(s), mailto and `shy://page/` links are allowed. External links open in the system browser.
 
 ## Known gaps
 
-- Bucket credentials are shared by all members, so any member can cause denial of service, and a removed member keeps them until the admin rotates them at the provider (#2).
-- Local data (SQLite, keys) is not encrypted at rest (#3).
+- Bucket credentials are shared by all members, so any member can cause denial of service, and a removed member keeps them until the admin rotates them at the provider (#25).
 - Single admin: if their device is lost, membership can no longer change (#5).
 
 Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issues?q=label%3Asecurity>

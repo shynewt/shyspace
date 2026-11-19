@@ -1,7 +1,7 @@
 //! Creating, joining and reopening a workspace.
 
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -9,11 +9,13 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use iroh::SecretKey;
 use tokio::sync::{Notify, broadcast, mpsc};
+use zeroize::Zeroizing;
 
 use super::{Inner, Networking, Profile, State, Workspace};
 use crate::{
     config::WorkspaceConfig,
     identity,
+    keys::KeyStorage,
     membership::{
         invite::{Answer, Grant, Invite, JoinMailbox, JoinRequest, ensure_not_expired},
         mls::{Mls, binding_message},
@@ -42,19 +44,60 @@ Everything here is end-to-end encrypted. Your bucket only ever stores ciphertext
 - **Agents** join with an invite code like anyone else.\n\n\
 Press `Ctrl K` to search everything.\n";
 
+/// Where a member's data lives, and where the key that encrypts it is kept.
+#[derive(Debug, Clone)]
+pub struct DataDir {
+    pub path: PathBuf,
+    pub keys: KeyStorage,
+}
+
+/// The decrypted local pieces every workspace starts from.
+struct Local {
+    store: Store,
+    identity: SecretKey,
+    mls_key: Zeroizing<String>,
+}
+
+impl DataDir {
+    pub fn new(path: impl Into<PathBuf>, keys: KeyStorage) -> Self {
+        Self {
+            path: path.into(),
+            keys,
+        }
+    }
+
+    async fn open_local(&self) -> Result<Local> {
+        let device_key = self.keys.load_or_create(&self.path).await?;
+        let store = Store::open(&self.path.join(STORE_FILE), &device_key.database_key(STORE_FILE))?;
+        let identity = identity::load_or_create(&store)?;
+        Ok(Local {
+            store,
+            identity,
+            mls_key: device_key.database_key(MLS_FILE),
+        })
+    }
+
+    fn mls_path(&self) -> PathBuf {
+        self.path.join(MLS_FILE)
+    }
+}
+
 impl Workspace {
     pub fn exists(dir: &Path) -> bool {
         WorkspaceConfig::exists(dir)
     }
 
-    pub async fn open(dir: &Path, networking: Networking) -> Result<Self> {
-        let config = WorkspaceConfig::load(dir)?;
-        let bucket = config.bucket.connect(&config.workspace_id)?;
-        Self::open_with(dir, bucket, networking).await
+    pub async fn open(data: &DataDir, networking: Networking) -> Result<Self> {
+        Self::open_with(
+            data,
+            |config| config.bucket.connect(&config.workspace_id),
+            networking,
+        )
+        .await
     }
 
     pub async fn create(
-        dir: &Path,
+        data: &DataDir,
         workspace_name: &str,
         profile: Profile<'_>,
         bucket: BucketConfig,
@@ -63,7 +106,7 @@ impl Workspace {
         let workspace_id = new_random_id();
         let connected = bucket.connect(&workspace_id)?;
         Self::create_with(
-            dir,
+            data,
             workspace_id,
             workspace_name,
             profile,
@@ -77,7 +120,7 @@ impl Workspace {
     /// Asks the admin to let us in and waits until they decide or the invite
     /// expires. The admin approves from their app.
     pub async fn join(
-        dir: &Path,
+        data: &DataDir,
         invite_code: &str,
         profile: Profile<'_>,
         networking: Networking,
@@ -86,7 +129,7 @@ impl Workspace {
         let mailbox = PresignedMailbox::for_invite(&invite);
         let workspace_id = invite.workspace_id.clone();
         Self::join_with(
-            dir,
+            data,
             invite,
             profile,
             &mailbox,
@@ -97,7 +140,7 @@ impl Workspace {
     }
 
     pub(crate) async fn create_with(
-        dir: &Path,
+        data: &DataDir,
         workspace_id: String,
         workspace_name: &str,
         profile: Profile<'_>,
@@ -105,10 +148,13 @@ impl Workspace {
         bucket: Bucket,
         networking: Networking,
     ) -> Result<Self> {
-        prepare_empty_dir(dir)?;
-        let identity = identity::load_or_create(dir)?;
-        let store = Store::open(&dir.join(STORE_FILE))?;
-        let mut mls = Mls::open(&dir.join(MLS_FILE), &identity, None, None)?;
+        prepare_empty_dir(&data.path)?;
+        let Local {
+            store,
+            identity,
+            mls_key,
+        } = data.open_local().await?;
+        let mut mls = Mls::open(&data.mls_path(), &mls_key, &identity, None, None)?;
         mls.create_group(workspace_id.as_bytes())?;
         store.set_meta(SIGNER_META, mls.signer_public())?;
         let config = WorkspaceConfig {
@@ -117,7 +163,7 @@ impl Workspace {
             admin: identity.public(),
             bucket: bucket_config,
         };
-        config.save(dir)?;
+        config.save(&data.path, &store)?;
         let workspace = Self::start(identity, config, State { store, mls }, bucket, networking).await?;
         workspace.write(Op::Profile {
             name: profile.name.to_owned(),
@@ -133,7 +179,7 @@ impl Workspace {
     }
 
     pub(crate) async fn join_with(
-        dir: &Path,
+        data: &DataDir,
         invite: Invite,
         profile: Profile<'_>,
         mailbox: &impl JoinMailbox,
@@ -141,11 +187,14 @@ impl Workspace {
         networking: Networking,
     ) -> Result<Self> {
         ensure_not_expired(&invite, now_ms()?)?;
-        prepare_empty_dir(dir)?;
-        let identity = identity::load_or_create(dir)?;
-        let store = Store::open(&dir.join(STORE_FILE))?;
+        prepare_empty_dir(&data.path)?;
+        let Local {
+            store,
+            identity,
+            mls_key,
+        } = data.open_local().await?;
         let signer = store.meta(SIGNER_META)?;
-        let mut mls = Mls::open(&dir.join(MLS_FILE), &identity, signer.as_deref(), None)?;
+        let mut mls = Mls::open(&data.mls_path(), &mls_key, &identity, signer.as_deref(), None)?;
         store.set_meta(SIGNER_META, mls.signer_public())?;
 
         let request = JoinRequest {
@@ -175,7 +224,7 @@ impl Workspace {
             admin: invite.admin,
             bucket: grant.bucket,
         };
-        config.save(dir)?;
+        config.save(&data.path, &store)?;
         let workspace = Self::start(identity, config, State { store, mls }, bucket, networking).await?;
         workspace.write(Op::Profile {
             name: profile.name.to_owned(),
@@ -184,19 +233,33 @@ impl Workspace {
         Ok(workspace)
     }
 
-    pub(crate) async fn open_with(dir: &Path, bucket: Bucket, networking: Networking) -> Result<Self> {
-        let config = WorkspaceConfig::load(dir)?;
-        let identity = identity::load_or_create(dir)?;
-        let store = Store::open(&dir.join(STORE_FILE))?;
+    pub(crate) async fn open_with(
+        data: &DataDir,
+        connect: impl FnOnce(&WorkspaceConfig) -> Result<Bucket>,
+        networking: Networking,
+    ) -> Result<Self> {
+        ensure!(
+            Self::exists(&data.path),
+            "no workspace in {}",
+            data.path.display()
+        );
+        let Local {
+            store,
+            identity,
+            mls_key,
+        } = data.open_local().await?;
+        let config = WorkspaceConfig::load(&data.path, &store)?;
         let signer = store
             .meta(SIGNER_META)?
             .context("MLS signing key reference missing")?;
         let mls = Mls::open(
-            &dir.join(MLS_FILE),
+            &data.mls_path(),
+            &mls_key,
             &identity,
             Some(&signer),
             Some(config.workspace_id.as_bytes()),
         )?;
+        let bucket = connect(&config)?;
         Self::start(identity, config, State { store, mls }, bucket, networking).await
     }
 

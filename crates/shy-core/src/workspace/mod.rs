@@ -4,6 +4,8 @@ mod actions;
 mod lifecycle;
 mod reads;
 
+pub use lifecycle::DataDir;
+
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::Result;

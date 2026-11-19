@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use shy_core::{
-    BucketConfig, Networking, Profile, Workspace,
+    BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace,
     sync::SyncStatus,
     views::{Channel, Invite, Member, Message, MessageCursor, Page, SearchHit},
 };
@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 type CommandResult<T> = Result<T, String>;
 
 struct AppState {
-    dir: PathBuf,
+    data: DataDir,
     workspace: Mutex<Option<Workspace>>,
 }
 
@@ -77,10 +77,10 @@ async fn session(app: AppHandle, state: State<'_, AppState>) -> CommandResult<Op
     if let Some(workspace) = state.workspace.lock().await.as_ref() {
         return Ok(Some(session_of(workspace)));
     }
-    if !Workspace::exists(&state.dir) {
+    if !Workspace::exists(&state.data.path) {
         return Ok(None);
     }
-    let workspace = Workspace::open(&state.dir, Networking::Online)
+    let workspace = Workspace::open(&state.data, Networking::Online)
         .await
         .map_err(failed)?;
     Ok(Some(install(&app, &state, workspace).await))
@@ -99,7 +99,7 @@ async fn create_workspace(
         is_bot: false,
     };
     let workspace = Workspace::create(
-        &state.dir,
+        &state.data,
         workspace_name.trim(),
         profile,
         bucket,
@@ -121,7 +121,7 @@ async fn join_workspace(
         name: name.trim(),
         is_bot: false,
     };
-    let workspace = Workspace::join(&state.dir, &invite, profile, Networking::Online)
+    let workspace = Workspace::join(&state.data, &invite, profile, Networking::Online)
         .await
         .map_err(failed)?;
     Ok(install(&app, &state, workspace).await)
@@ -294,7 +294,7 @@ pub fn run() {
         .setup(|app| {
             let dir = data_dir(app.handle())?;
             app.manage(AppState {
-                dir,
+                data: DataDir::new(dir, KeyStorage::Keychain),
                 workspace: Mutex::new(None),
             });
             Ok(())

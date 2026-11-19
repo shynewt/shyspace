@@ -5,7 +5,7 @@ use iroh::SecretKey;
 
 use super::support::*;
 use crate::{
-    Networking, Workspace, crypto,
+    DataDir, KeyStorage, Networking, Workspace, crypto,
     ops::{Envelope, Op, OpBody},
 };
 
@@ -177,8 +177,14 @@ async fn restart_forgets_a_staged_commit_that_was_never_recorded() {
     {
         let mut state = admin.state();
         let identity = SecretKey::generate();
-        let joiner =
-            crate::membership::mls::Mls::open(&root.path().join("j.db"), &identity, None, None).unwrap();
+        let joiner = crate::membership::mls::Mls::open(
+            &root.path().join("j.db"),
+            crate::storage::TEST_DB_KEY,
+            &identity,
+            None,
+            None,
+        )
+        .unwrap();
         let binding = identity.sign(&crate::membership::mls::binding_message(joiner.signer_public()));
         let (_, key_package) = state
             .mls
@@ -187,7 +193,7 @@ async fn restart_forgets_a_staged_commit_that_was_never_recorded() {
         state.mls.add_member(key_package).unwrap(); // staged, then "crash"
     }
     drop(admin);
-    let reopened = Workspace::open_with(&dir, bucket, Networking::Offline)
+    let reopened = Workspace::open_with(&data_dir(&dir), |_| Ok(bucket), Networking::Offline)
         .await
         .unwrap();
     let state = reopened.state();
@@ -251,4 +257,46 @@ async fn removed_members_cannot_backdate_ops_with_old_keys() {
         assert!(texts.contains(&"written before removal".to_string()));
         assert!(!texts.contains(&"forged after removal".to_string()));
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_data_directory_alone_reveals_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("ada");
+    let admin = create_admin(&dir, &memory_bucket()).await;
+    let general = channel_id(&admin, "general");
+    admin.send_message(&general, "LOCAL-SECRET-TEXT", None).unwrap();
+    let identity = admin.inner.identity.to_bytes();
+    drop(admin);
+
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let bytes = std::fs::read(&path).unwrap();
+        let contains = |needle: &[u8]| bytes.windows(needle.len()).any(|window| window == needle);
+        assert!(
+            !contains(b"LOCAL-SECRET-TEXT"),
+            "message text in {}",
+            path.display()
+        );
+        assert!(
+            !contains(b"test-bucket-secret"),
+            "bucket secret in {}",
+            path.display()
+        );
+        assert!(!contains(&identity), "identity key in {}", path.display());
+    }
+
+    let plain = rusqlite::Connection::open(dir.join("shy.db")).unwrap();
+    assert!(
+        plain
+            .query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))
+            .is_err()
+    );
+
+    let wrong_key = DataDir::new(&dir, KeyStorage::File(root.path().join("other.key")));
+    let error = Workspace::open_with(&wrong_key, |_| Ok(memory_bucket()), Networking::Offline)
+        .await
+        .err()
+        .unwrap();
+    assert!(format!("{error:#}").contains("can't be decrypted"), "{error:#}");
 }

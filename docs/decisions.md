@@ -2,6 +2,12 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Local encryption: SQLCipher plus a device key in the OS keychain (2026-11)
+SQLCipher encrypts the whole database, including indexes and the search index, with little code on our side. The key lives in the OS keychain so the data directory alone is useless. Servers without a keychain use an explicit key file (`--key-file`); there is no silent fallback. SQLCipher links the system OpenSSL; macOS and Windows release builds will need a decision (see #24).
+
+## Invites: single-use, approved, credential-free (2026-11)
+A reusable code containing bucket credentials meant anyone who saw it could join and could vandalize the bucket. Invites now carry only presigned links (one upload, one download) that expire after 7 days, and the admin approves each request. Credentials travel inside the MLS-encrypted answer.
+
 ## Pages are markdown in one Yjs text (2026-11)
 Agents edit pages from Rust (yrs), people from the editor (Yjs). A block editor like BlockNote stores a complex XML tree that would be hard and fragile to edit from Rust. Plain markdown keeps one simple shape for both, makes search and export trivial, and still gives live collaboration.
 

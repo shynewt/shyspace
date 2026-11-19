@@ -18,6 +18,6 @@ Create a workspace with your bucket's details, then create an invite in **Member
 
 ```sh
 cargo install --path crates/shy-cli
-shy join --bot --name "Claude" <invite code>
+shy join --bot --name "Claude" <invite code>   # add --key-file <path> on servers without a keychain
 claude mcp add shyspace -- shy mcp
 ```

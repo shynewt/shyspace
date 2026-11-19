@@ -15,7 +15,10 @@ use openmls_sqlite_storage::{Codec, SqliteStorageProvider};
 use openmls_traits::{OpenMlsProvider, types::SignatureScheme};
 use rusqlite::Connection;
 
-use crate::crypto::{EPOCH_KEY_LEN, EpochKey};
+use crate::{
+    crypto::{EPOCH_KEY_LEN, EpochKey},
+    storage::open_encrypted,
+};
 
 const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 const SIGNATURE_SCHEME: SignatureScheme = SignatureScheme::ED25519;
@@ -99,11 +102,12 @@ impl Mls {
     /// key remembered from an earlier session; `None` creates a new one.
     pub fn open(
         db_path: &Path,
+        db_key: &str,
         identity: &SecretKey,
         signer_public: Option<&[u8]>,
         group_id: Option<&[u8]>,
     ) -> Result<Self> {
-        let mut storage = SqliteStorageProvider::new(Connection::open(db_path)?);
+        let mut storage = SqliteStorageProvider::new(open_encrypted(db_path, db_key)?);
         storage.run_migrations().context("MLS storage migrations")?;
         let provider = Provider {
             crypto: RustCrypto::default(),
@@ -335,6 +339,7 @@ impl Mls {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::TEST_DB_KEY;
 
     struct TestMember {
         identity: SecretKey,
@@ -344,7 +349,14 @@ mod tests {
     impl TestMember {
         fn new(dir: &Path, name: &str) -> Self {
             let identity = SecretKey::generate();
-            let mls = Mls::open(&dir.join(format!("{name}.db")), &identity, None, None).unwrap();
+            let mls = Mls::open(
+                &dir.join(format!("{name}.db")),
+                TEST_DB_KEY,
+                &identity,
+                None,
+                None,
+            )
+            .unwrap();
             Self { identity, mls }
         }
 
@@ -397,13 +409,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let identity = SecretKey::generate();
         let path = dir.path().join("mls.db");
-        let mut mls = Mls::open(&path, &identity, None, None).unwrap();
+        let mut mls = Mls::open(&path, TEST_DB_KEY, &identity, None, None).unwrap();
         mls.create_group(GROUP).unwrap();
         let key = mls.epoch_key().unwrap();
         let signer_public = mls.signer_public().to_vec();
         drop(mls);
 
-        let reopened = Mls::open(&path, &identity, Some(&signer_public), Some(GROUP)).unwrap();
+        let reopened = Mls::open(&path, TEST_DB_KEY, &identity, Some(&signer_public), Some(GROUP)).unwrap();
         assert_eq!(reopened.epoch_key().unwrap(), key);
     }
 
@@ -436,7 +448,14 @@ mod tests {
         // The attacker builds a key package claiming the victim's identity.
         let forged = Mls {
             identity: victim.id(),
-            ..Mls::open(&dir.path().join("forged.db"), &attacker.identity, None, None).unwrap()
+            ..Mls::open(
+                &dir.path().join("forged.db"),
+                TEST_DB_KEY,
+                &attacker.identity,
+                None,
+                None,
+            )
+            .unwrap()
         };
         let binding = attacker.identity.sign(&binding_message(forged.signer_public()));
         let result = admin

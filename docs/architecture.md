@@ -29,9 +29,11 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
    - creations (channel, message, page): the id contains the author's key prefix, so only the author can create or overwrite it.
 5. **Local first.** Each device stores ops and the views built from them in SQLite (`store.rs`). Reads never touch the network. Search uses SQLite FTS5, on the device.
 
-## Identity
+## Identity and local data
 
-Each member has an iroh ed25519 key (`identity.key` in their data directory). It is their network address, signs their ops, and is their MLS credential identity. Their MLS signature key is a separate key, bound to the identity by a signature (`mls::binding_message`).
+Each member has an iroh ed25519 key. It is their network address, signs their ops, and is their MLS credential identity. Their MLS signature key is a separate key, bound to the identity by a signature (`mls::binding_message`).
+
+A member's data directory holds two SQLCipher-encrypted databases (`shy.db`, `mls.db`) and a `workspace.json` with only non-secret settings (workspace id, name, admin). The identity key and bucket credentials live inside `shy.db`. Both databases are encrypted with keys derived from a random *device key* (`keys.rs`), kept outside the directory: in the OS keychain, or in a key file (`shy --key-file`) on servers.
 
 ## Membership
 
@@ -84,7 +86,8 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 | `ops.rs` | op types, owned ids, timestamps |
 | `pages.rs` | Yjs page helpers |
 | `views.rs` | read models sent to the UI and agents |
-| `config.rs`, `identity.rs` | files in a member's data directory |
+| `keys.rs` | the device key and where it's kept (keychain or file) |
+| `config.rs`, `identity.rs` | workspace settings and the identity key |
 | `tests/` | multi-member scenarios (`collaboration`) and attacks (`hardening`) |
 
 ## Database migrations

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use shy_core::{BucketConfig, Networking, Profile, Workspace};
+use shy_core::{BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace};
 
 #[derive(Parser)]
 #[command(
@@ -15,6 +15,10 @@ struct Cli {
     /// Where this member's keys and data live.
     #[arg(long, env = "SHY_DIR", global = true)]
     dir: Option<PathBuf>,
+    /// Keep the key that encrypts local data in this file instead of the
+    /// system keychain (for servers). Keep it outside the data directory.
+    #[arg(long, env = "SHY_KEY_FILE", global = true)]
+    key_file: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -95,10 +99,15 @@ async fn main() -> Result<()> {
         )
         .init();
     let cli = Cli::parse();
-    let dir = match cli.dir {
+    let path = match cli.dir {
         Some(dir) => dir,
         None => default_dir()?,
     };
+    let keys = match cli.key_file {
+        Some(file) => KeyStorage::File(file),
+        None => KeyStorage::Keychain,
+    };
+    let data = DataDir::new(path, keys);
     match cli.command {
         Command::Create {
             workspace,
@@ -113,7 +122,7 @@ async fn main() -> Result<()> {
                 secret_access_key: bucket.secret_access_key,
             };
             let created = Workspace::create(
-                &dir,
+                &data,
                 &workspace,
                 Profile {
                     name: &name,
@@ -125,13 +134,13 @@ async fn main() -> Result<()> {
             .await?;
             created.sync().await;
             report_sync_error(&created)?;
-            println!("Created \"{workspace}\" in {}", dir.display());
+            println!("Created \"{workspace}\" in {}", data.path.display());
             println!("Invite people with `shy invite create`.");
         }
         Command::Join { invite, name, bot } => {
             eprintln!("Asked to join. Waiting for the workspace admin to approve…");
             let joined = Workspace::join(
-                &dir,
+                &data,
                 &invite,
                 Profile {
                     name: &name,
@@ -145,18 +154,18 @@ async fn main() -> Result<()> {
             println!(
                 "Joined \"{}\" as {name}. Data is in {}",
                 joined.name(),
-                dir.display()
+                data.path.display()
             );
         }
         Command::Invite(command) => {
-            let workspace = Workspace::open(&dir, Networking::Offline).await?;
+            let workspace = Workspace::open(&data, Networking::Offline).await?;
             run_invite_command(&workspace, command).await?;
         }
         Command::Mcp => {
-            if !Workspace::exists(&dir) {
-                bail!("no workspace in {}; run `shy join` first", dir.display());
+            if !Workspace::exists(&data.path) {
+                bail!("no workspace in {}; run `shy join` first", data.path.display());
             }
-            let workspace = Workspace::open(&dir, Networking::Online).await?;
+            let workspace = Workspace::open(&data, Networking::Online).await?;
             mcp::serve(workspace).await?;
         }
     }

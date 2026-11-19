@@ -40,7 +40,7 @@ class McpMember:
         self.name = name
         self.log = open(WORK_DIR / f"{name}.log", "w")
         self.process = subprocess.Popen(
-            [SHY, "--dir", str(WORK_DIR / name), "mcp"],
+            [SHY, *member_args(name), "mcp"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=self.log,
@@ -85,6 +85,12 @@ class McpMember:
         self.log.close()
 
 
+def member_args(name: str) -> list[str]:
+    """A member's data directory and key file. Key files keep test runs out
+    of the real system keychain."""
+    return ["--dir", str(WORK_DIR / name), "--key-file", str(WORK_DIR / f"{name}.key")]
+
+
 def check(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
@@ -103,7 +109,7 @@ def wait_for_request() -> str:
     """Polls the admin's invite list until the agent's request shows up."""
     deadline = time.time() + DELIVERY_TIMEOUT_SECONDS
     while time.time() < deadline:
-        for line in run_shy("--dir", str(WORK_DIR / "admin"), "invite", "list").splitlines():
+        for line in run_shy(*member_args("admin"), "invite", "list").splitlines():
             if "Requested" in line and "from Claude" in line:
                 return line.split()[0]
         time.sleep(1)
@@ -117,8 +123,8 @@ def main() -> int:
     shutil.rmtree(WORK_DIR, ignore_errors=True)
     WORK_DIR.mkdir(parents=True)
 
-    run_shy("--dir", str(WORK_DIR / "admin"), "create", "--workspace", "E2E", "--name", "Ada")
-    invite = run_shy("--dir", str(WORK_DIR / "admin"), "invite", "create", "--label", "e2e agent").strip()
+    run_shy(*member_args("admin"), "create", "--workspace", "E2E", "--name", "Ada")
+    invite = run_shy(*member_args("admin"), "invite", "create", "--label", "e2e agent").strip()
     check(invite.startswith("shy2_") and "shysecret123" not in invite,
           "admin created a single-use invite that carries no bucket credentials")
 
@@ -126,11 +132,11 @@ def main() -> int:
     joiner = None
     try:
         started = time.time()
-        joiner = subprocess.Popen([SHY, "--dir", str(WORK_DIR / "agent"), "join", "--name", "Claude", "--bot", invite],
+        joiner = subprocess.Popen([SHY, *member_args("agent"), "join", "--name", "Claude", "--bot", invite],
                                   stdout=subprocess.DEVNULL, stderr=open(WORK_DIR / "join.log", "w"))
         token = wait_for_request()
         check(joiner.poll() is None, "the agent waits for approval")
-        run_shy("--dir", str(WORK_DIR / "admin"), "invite", "approve", token)
+        run_shy(*member_args("admin"), "invite", "approve", token)
         check(joiner.wait(timeout=DELIVERY_TIMEOUT_SECONDS) == 0,
               f"agent joined {time.time() - started:.1f}s after asking, once approved")
         check((WORK_DIR / "agent/workspace.json").exists(), "agent has the workspace, bucket settings included")

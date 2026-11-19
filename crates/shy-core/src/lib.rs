@@ -4,6 +4,7 @@
 pub mod config;
 pub mod crypto;
 pub mod identity;
+pub mod keys;
 pub mod membership;
 pub mod ops;
 pub mod pages;
@@ -16,6 +17,7 @@ pub mod workspace;
 #[cfg(test)]
 mod tests;
 
+pub use keys::KeyStorage;
 pub use pages::Edit;
 pub use transport::bucket::BucketConfig;
-pub use workspace::{Networking, Profile, Workspace};
+pub use workspace::{DataDir, Networking, Profile, Workspace};

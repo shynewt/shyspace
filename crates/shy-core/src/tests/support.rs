@@ -7,7 +7,7 @@ use object_store::memory::InMemory;
 use tokio::task::JoinHandle;
 
 use crate::{
-    BucketConfig, Networking, Profile, Workspace, crypto,
+    BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace, crypto,
     membership::invite::{Invite, JoinMailbox},
     transport::bucket::Bucket,
     views::InviteState,
@@ -19,13 +19,18 @@ pub fn test_bucket_config() -> BucketConfig {
         region: "us-east-1".into(),
         bucket: "unused".into(),
         access_key_id: "unused".into(),
-        secret_access_key: "unused".into(),
+        secret_access_key: "test-bucket-secret".into(),
     }
+}
+
+/// A member's data directory, with its key file beside it (never inside).
+pub fn data_dir(dir: &Path) -> DataDir {
+    DataDir::new(dir, KeyStorage::File(dir.with_extension("key")))
 }
 
 pub async fn create_admin(dir: &Path, bucket: &Bucket) -> Workspace {
     Workspace::create_with(
-        dir,
+        &data_dir(dir),
         "workspace-id".into(),
         "Acme",
         Profile {
@@ -79,7 +84,7 @@ pub fn start_join(
         };
         let profile = Profile { name: &name, is_bot };
         Workspace::join_with(
-            &dir,
+            &data_dir(&dir),
             invite,
             profile,
             &mailbox,
