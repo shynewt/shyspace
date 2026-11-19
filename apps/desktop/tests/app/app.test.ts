@@ -18,6 +18,20 @@ async function createWorkspace(app: Browser) {
   await app.$("aria/Message #general").waitForDisplayed(TIMEOUT);
 }
 
+/** The full invite code on screen, however the page truncates it visually. */
+async function waitForInviteCode(app: Browser): Promise<string> {
+  let code: string | undefined;
+  await app.waitUntil(
+    async () => {
+      code = await app.execute(() => document.body.textContent?.match(/shy2_[A-Za-z0-9_-]{40,}/)?.[0]);
+      return Boolean(code);
+    },
+    { timeout: TIMEOUT.timeout, timeoutMsg: "no invite code appeared" },
+  );
+  if (!code) throw new Error("no invite code appeared");
+  return code;
+}
+
 async function sendMessage(app: Browser, text: string) {
   await app.$("aria/Message #general").setValue(text);
   await app.keys("Enter");
@@ -43,10 +57,10 @@ test("an approved agent's message arrives live in the app", () =>
       await app.$("button*=Members & invites").click();
       await app.$("aria/Who the invite is for").setValue("Robot");
       await app.$("button=Create").click();
-      const inviteCode = await app.$('//*[starts-with(normalize-space(text()), "shy2_")]').getText();
+      const inviteCode = await waitForInviteCode(app);
 
       const agent = new CliMember(agentDir);
-      const joined = agent.join(inviteCode.trim(), "Robot");
+      const joined = agent.join(inviteCode, "Robot");
       await app.$("button=Codes match, let in").waitForClickable(TIMEOUT);
       await app.$("button=Codes match, let in").click();
       await joined;
