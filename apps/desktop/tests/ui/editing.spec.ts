@@ -10,7 +10,7 @@ async function messageActions(page: Page, text: string) {
   await page.getByRole("button", { name: "More actions" }).click();
 }
 
-test("you can edit your own message in place", async ({ page }) => {
+test("editing happens in the composer and marks the message edited", async ({ page }) => {
   await openGeneral(page);
   const composer = page.getByLabel("Message #general");
   await composer.fill("Lunch at noon");
@@ -18,28 +18,60 @@ test("you can edit your own message in place", async ({ page }) => {
 
   await messageActions(page, "Lunch at noon");
   await page.getByRole("menuitem", { name: "Edit" }).click();
-  const editor = page.getByLabel("Edit message");
-  await editor.fill("Lunch at one");
-  await editor.press("Enter");
+  await expect(page.getByText("Editing message")).toBeVisible();
+  await expect(composer).toHaveValue("Lunch at noon");
+  await composer.fill("Lunch at one");
+  await composer.press("Enter");
 
-  const message = page.getByRole("article").filter({ hasText: "Lunch at one" });
-  await expect(message).toContainText("(edited)");
-  await expect(page.getByRole("article").filter({ hasText: "noon" })).toHaveCount(0);
+  await expect(page.getByRole("article").filter({ hasText: "Lunch at one" })).toContainText("(edited)");
+  await expect(page.getByText("Editing message")).toHaveCount(0);
+  await expect(composer).toHaveValue("");
 });
 
-test("escape leaves a message unchanged", async ({ page }) => {
+test("escape cancels an edit and brings your draft back", async ({ page }) => {
   await openGeneral(page);
   const composer = page.getByLabel("Message #general");
   await composer.fill("Keep me");
   await composer.press("Enter");
+  await composer.fill("a draft in progress");
 
   await messageActions(page, "Keep me");
   await page.getByRole("menuitem", { name: "Edit" }).click();
-  await page.getByLabel("Edit message").fill("Changed my mind");
-  await page.getByLabel("Edit message").press("Escape");
+  await expect(composer).toHaveValue("Keep me");
+  await composer.press("Escape");
 
-  await expect(page.getByLabel("Edit message")).toHaveCount(0);
+  await expect(composer).toHaveValue("a draft in progress");
   await expect(page.getByRole("article").filter({ hasText: "Keep me" })).not.toContainText("(edited)");
+});
+
+test("up in an empty composer edits your last message", async ({ page }) => {
+  await openGeneral(page);
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("First try");
+  await composer.press("Enter");
+  await composer.press("ArrowUp");
+
+  await expect(composer).toHaveValue("First try");
+  await composer.fill("Second try");
+  await composer.press("Enter");
+  await expect(page.getByRole("article").filter({ hasText: "Second try" })).toContainText("(edited)");
+});
+
+test("mentions stay mentions through an edit", async ({ page }) => {
+  await openGeneral(page);
+  await page.evaluate(() => window.fake.addMember("Grace"));
+  const composer = page.getByLabel("Message #general");
+  await composer.pressSequentially("Thanks @Gra");
+  await composer.press("Enter");
+  await composer.pressSequentially("for this");
+  await composer.press("Enter");
+
+  await composer.press("ArrowUp");
+  await expect(composer).toHaveValue("Thanks @Grace for this");
+  await composer.fill("Thanks @Grace for all of this");
+  await composer.press("Enter");
+  const message = page.getByRole("article").filter({ hasText: "for all of this" });
+  await expect(message.locator(".mention", { hasText: "@Grace" })).toBeVisible();
 });
 
 test("the admin can delete someone else's message but not edit it", async ({ page }) => {

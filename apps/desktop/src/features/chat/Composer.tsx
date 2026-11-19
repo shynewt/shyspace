@@ -1,10 +1,10 @@
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Pencil, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useRef, useState } from "react";
-import { api } from "../../lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, type Message } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
-import { Button, Kbd } from "../../ui";
+import { Button, IconButton, Kbd } from "../../ui";
 import { useDraft } from "./useDraft";
 import { useMentionPicker } from "./useMentionPicker";
 
@@ -15,6 +15,9 @@ export function Composer({
   label,
   threadRoot,
   onSent,
+  editing = null,
+  onEditDone,
+  onEditLast,
 }: {
   channelId: string;
   /** Names the field for screen readers and is its placeholder. */
@@ -22,6 +25,11 @@ export function Composer({
   /** Reply in this thread instead of posting to the channel. */
   threadRoot: string | null;
   onSent?: () => void;
+  /** A message of yours to edit here instead of writing a new one. */
+  editing?: Message | null;
+  onEditDone?: () => void;
+  /** Up in an empty composer: edit your last message. */
+  onEditLast?: () => void;
 }) {
   const [text, setText] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
@@ -37,10 +45,41 @@ export function Composer({
     element.style.height = "0px";
     element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT_PX)}px`;
   }, []);
-  useDraft(threadRoot ?? channelId, text, updateText);
+  // While editing, the draft is set aside and comes back afterwards.
+  const [setAside, setSetAside] = useState("");
+  useDraft(threadRoot ?? channelId, editing ? setAside : text, updateText);
+  // Editing starts once per message: later refreshes of it mustn't reset the text.
+  const latest = useRef({ editing, text });
+  useEffect(() => {
+    latest.current = { editing, text };
+  }, [editing, text]);
+  const editingId = editing?.id;
+  const { adopt } = picker;
+  useEffect(() => {
+    const message = latest.current.editing;
+    if (!editingId || !message) return;
+    setSetAside(latest.current.text);
+    updateText(adopt(message.text));
+    input.current?.focus();
+  }, [editingId, adopt, updateText]);
+
+  const finishEditing = () => {
+    updateText(setAside);
+    onEditDone?.();
+  };
+
+  const saveEdit = async (message: Message) => {
+    try {
+      if (text.trim() !== picker.adopt(message.text).trim()) await api.editMessage(message.id, picker.toSend(text));
+      finishEditing();
+    } catch (error) {
+      reportError(error);
+    }
+  };
 
   const send = async () => {
     if (!canSend) return;
+    if (editing) return saveEdit(editing);
     const draft = text;
     setText("");
     if (input.current) input.current.style.height = "";
@@ -62,6 +101,28 @@ export function Composer({
           layout
           className="overflow-hidden rounded-xl border border-line bg-surface shadow-card transition-colors focus-within:border-accent/50 focus-within:ring-3 focus-within:ring-accent/10"
         >
+          <AnimatePresence initial={false}>
+            {editing && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.16 }}
+              >
+                <div className="flex items-center gap-2 border-b border-line bg-accent-soft/50 px-3 py-1 text-[12px] text-accent-text">
+                  <Pencil size={13} />
+                  <span className="font-medium">Editing message</span>
+                  <IconButton
+                    label="Cancel editing"
+                    size="sm"
+                    icon={<X size={13} />}
+                    onClick={finishEditing}
+                    className="ml-auto"
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <div className="flex items-end gap-2 p-2 pl-3.5">
             <textarea
               ref={input}
@@ -78,6 +139,12 @@ export function Composer({
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   send();
+                } else if (event.key === "Escape" && editing) {
+                  event.preventDefault();
+                  finishEditing();
+                } else if (event.key === "ArrowUp" && !text && !editing && onEditLast) {
+                  event.preventDefault();
+                  onEditLast();
                 }
               }}
               placeholder={label}
@@ -85,7 +152,7 @@ export function Composer({
             />
             <Button
               variant="primary"
-              aria-label="Send"
+              aria-label={editing ? "Save" : "Send"}
               disabled={!canSend}
               onClick={send}
               icon={<ArrowUp size={16} strokeWidth={2.4} />}
@@ -95,7 +162,15 @@ export function Composer({
         </motion.div>
       </div>
       <p className="mt-1.5 flex items-center gap-1.5 px-1 text-[11px] text-faint">
-        <Kbd>Enter</Kbd> to send · <Kbd>Shift Enter</Kbd> for a new line · Markdown works
+        {editing ? (
+          <>
+            <Kbd>Enter</Kbd> to save · <Kbd>Esc</Kbd> to cancel
+          </>
+        ) : (
+          <>
+            <Kbd>Enter</Kbd> to send · <Kbd>Shift Enter</Kbd> for a new line · <Kbd>↑</Kbd> to edit your last message
+          </>
+        )}
       </p>
     </div>
   );

@@ -82,6 +82,18 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
   };
 
   const toSend = (text: string) => withMentionLinks(text, picked.current);
+  /** Shows a sent message's mention links as plain `@Name` again, remembering who they are. */
+  const adopt = useCallback(
+    (text: string) =>
+      text.replace(
+        /\[@([^\]]*)\]\(shy:\/\/(member|mention)\/([0-9a-z]+)\)/g,
+        (_, name: string, kind: string, id: string) => {
+          if (kind === "member") picked.current.set(name, id);
+          return `@${name}`;
+        },
+      ),
+    [],
+  );
   const forgetPicked = () => picked.current.clear();
 
   const list = isOpen ? (
@@ -132,5 +144,5 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
     "aria-activedescendant": isOpen ? `${listId}-${selected}` : undefined,
   };
 
-  return { list, inputProps, onTextChange, onKeyDown, toSend, forgetPicked };
+  return { list, inputProps, onTextChange, onKeyDown, toSend, adopt, forgetPicked };
 }

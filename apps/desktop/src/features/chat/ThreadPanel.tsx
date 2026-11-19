@@ -1,7 +1,7 @@
 import { Bell, BellOff, X } from "lucide-react";
 import { motion, useIsPresent } from "motion/react";
-import { useCallback, useEffect } from "react";
-import { api } from "../../lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { api, type Message } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { Button, IconButton, Spinner, springs } from "../../ui";
@@ -27,6 +27,7 @@ export function ThreadPanel({
     (change) => (change.kind === "messages" && change.channel === channelId) || change.kind === "members",
   );
   const first = thread?.[0];
+  const [editing, setEditing] = useState<Message | null>(null);
   const replies = thread?.slice(1) ?? [];
 
   // Replies on screen while the window has focus count as read.
@@ -82,7 +83,15 @@ export function ThreadPanel({
             <Spinner size={14} />
           </div>
         )}
-        {first && <MessageItem message={first} isContinuation={false} isHighlighted={false} onOpenThread={null} />}
+        {first && (
+          <MessageItem
+            message={first}
+            isContinuation={false}
+            isHighlighted={editing?.id === first.id}
+            onOpenThread={null}
+            onEdit={() => setEditing(first)}
+          />
+        )}
         {replies.length > 0 && (
           <div className="my-2 flex items-center gap-3 px-5">
             <span className="text-[11.5px] font-medium text-faint">
@@ -96,12 +105,20 @@ export function ThreadPanel({
             key={reply.id}
             message={reply}
             isContinuation={false}
-            isHighlighted={reply.id === focus}
+            isHighlighted={reply.id === focus || editing?.id === reply.id}
             onOpenThread={null}
+            onEdit={() => setEditing(reply)}
           />
         ))}
       </div>
-      <Composer channelId={channelId} label="Reply in thread" threadRoot={root} />
+      <Composer
+        channelId={channelId}
+        label="Reply in thread"
+        threadRoot={root}
+        editing={editing}
+        onEditDone={() => setEditing(null)}
+        onEditLast={() => setEditing(thread?.findLast((message) => message.can_edit) ?? null)}
+      />
     </motion.aside>
   );
 }

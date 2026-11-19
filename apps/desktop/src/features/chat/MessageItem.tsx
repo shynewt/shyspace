@@ -9,7 +9,6 @@ import { useContextMenu } from "../../lib/useContextMenu";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs } from "../../ui";
 import { MessageCard } from "./MessageCard";
-import { MessageEditor } from "./MessageEditor";
 import { PageCard } from "./PageCard";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
@@ -19,16 +18,18 @@ export const MessageItem = memo(function MessageItem({
   isContinuation,
   isHighlighted,
   onOpenThread,
+  onEdit,
 }: {
   message: Message;
   isContinuation: boolean;
   isHighlighted: boolean;
   /** Opens this message's thread; `null` inside a thread. */
   onOpenThread: (() => void) | null;
+  /** Starts editing this message in the composer. */
+  onEdit: () => void;
 }) {
   const { pages, navigate, session } = useWorkspace();
   const [isPickerOpen, setPickerOpen] = useState(false);
-  const [isEditing, setEditing] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const [isMenuOpen, setMenuOpen] = useState(false);
   const article = useRef<HTMLElement>(null);
@@ -81,23 +82,16 @@ export const MessageItem = memo(function MessageItem({
             <span className="text-[11.5px] text-faint">{formatTime(message.created_ms)}</span>
           </div>
         )}
-        {isEditing ? (
-          <MessageEditor
-            initialText={message.text}
-            onSave={(text) => api.editMessage(message.id, text)}
-            onClose={() => setEditing(false)}
+        <div className="prose-chat selectable text-[14px]">
+          <ChatMarkdown
+            text={message.text}
+            myId={session.me}
+            pageTitle={(id) => titles.get(id)}
+            onOpenPage={(id) => navigate({ kind: "page", id })}
           />
-        ) : (
-          <div className="prose-chat selectable text-[14px]">
-            <ChatMarkdown
-              text={message.text}
-              myId={session.me}
-              pageTitle={(id) => titles.get(id)}
-              onOpenPage={(id) => navigate({ kind: "page", id })}
-            />
-            {message.is_edited && <span className="text-[11px] text-faint">(edited)</span>}
-          </div>
-        )}
+          {message.is_edited && <span className="text-[11px] text-faint">(edited)</span>}
+        </div>
+
         {linkedPages.map((id) => (
           <PageCard key={id} pageId={id} />
         ))}
@@ -181,7 +175,7 @@ export const MessageItem = memo(function MessageItem({
           message={message}
           open={isMenuOpen}
           onOpenChange={setMenuOpen}
-          onEdit={() => setEditing(true)}
+          onEdit={onEdit}
           onDelete={() => setConfirmingDelete(true)}
         />
       </div>

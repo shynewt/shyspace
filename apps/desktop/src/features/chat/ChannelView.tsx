@@ -70,6 +70,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
     if (thread) setOpenThread(thread);
   }, [thread]);
   const [highlighted, setHighlighted] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Message | null>(null);
   // A linked message to show: in the channel (loading older history until
   // it's there), or in the open thread, which handles it.
   const [pendingFocus, setPendingFocus] = useState(thread ? null : (focus ?? null));
@@ -202,8 +203,11 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
                   <MessageItem
                     message={row.message}
                     isContinuation={row.isContinuation}
-                    isHighlighted={openThread === row.message.id || highlighted === row.message.id}
+                    isHighlighted={
+                      openThread === row.message.id || highlighted === row.message.id || editing?.id === row.message.id
+                    }
                     onOpenThread={() => setOpenThread(row.message.id)}
+                    onEdit={() => setEditing(row.message)}
                   />
                 </motion.div>
               ),
@@ -218,6 +222,9 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
           onSent={() => {
             isPinnedToBottom.current = true;
           }}
+          editing={editing}
+          onEditDone={() => setEditing(null)}
+          onEditLast={() => setEditing(messages?.findLast((message) => message.can_edit) ?? null)}
         />
       </div>
       <AnimatePresence>
