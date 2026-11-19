@@ -58,9 +58,14 @@ fn forward_changes(app: &AppHandle, workspace: &Workspace) {
 }
 
 async fn install(app: &AppHandle, state: &AppState, workspace: Workspace) -> Session {
+    activate(app, &mut *state.workspace.lock().await, workspace)
+}
+
+/// Makes `workspace` the open one and starts forwarding its changes to the UI.
+fn activate(app: &AppHandle, slot: &mut Option<Workspace>, workspace: Workspace) -> Session {
     forward_changes(app, &workspace);
     let session = session_of(&workspace);
-    *state.workspace.lock().await = Some(workspace);
+    *slot = Some(workspace);
     session
 }
 
@@ -75,7 +80,10 @@ async fn current(state: &State<'_, AppState>) -> CommandResult<Workspace> {
 
 #[tauri::command]
 async fn session(app: AppHandle, state: State<'_, AppState>) -> CommandResult<Option<Session>> {
-    if let Some(workspace) = state.workspace.lock().await.as_ref() {
+    // Held across the open, so two calls at once (React runs effects twice in
+    // development) wait for each other instead of both opening the folder.
+    let mut slot = state.workspace.lock().await;
+    if let Some(workspace) = slot.as_ref() {
         return Ok(Some(session_of(workspace)));
     }
     if !Workspace::exists(&state.data.path) {
@@ -84,7 +92,7 @@ async fn session(app: AppHandle, state: State<'_, AppState>) -> CommandResult<Op
     let workspace = Workspace::open(&state.data, Networking::Online)
         .await
         .map_err(failed)?;
-    Ok(Some(install(&app, &state, workspace).await))
+    Ok(Some(activate(&app, &mut slot, workspace)))
 }
 
 #[tauri::command]
