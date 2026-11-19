@@ -3,6 +3,8 @@
 
 use std::time::Duration;
 
+use tokio::sync::broadcast::error::RecvError;
+
 use anyhow::{Context, Result};
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -44,8 +46,27 @@ pub struct SendMessage {
     channel: String,
     /// Markdown text. Link a page with shy://page/<page id>.
     text: String,
-    /// Id of the message this replies to.
+    /// Reply in the thread of this message (id). Replies stay in the thread,
+    /// not the channel.
     reply_to: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct WaitForMentions {
+    /// Give up after this many seconds (max 300). Defaults to 120.
+    timeout_seconds: Option<u64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct EditMessage {
+    message_id: String,
+    /// The new markdown text.
+    text: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct MessageRef {
+    message_id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -97,6 +118,13 @@ pub struct WaitForMessages {
 }
 
 /// One line per message, oldest first, each starting with its id.
+/// A new message wakes you unless you wrote it. If you're a bot, another
+/// bot's message wakes you only when it mentions you, so two agents don't
+/// keep waking each other.
+fn should_wake(message: &Message, my_id: &str, is_bot: bool) -> bool {
+    message.author != my_id && (!is_bot || !message.author_is_bot || message.mentions_me)
+}
+
 fn format_messages(messages: Vec<Message>) -> String {
     if messages.is_empty() {
         return "(no messages yet)".into();
@@ -105,12 +133,18 @@ fn format_messages(messages: Vec<Message>) -> String {
     for message in messages {
         let bot = if message.author_is_bot { " (bot)" } else { "" };
         let reply = message.reply_to.map(|id| format!(" ↩{id}")).unwrap_or_default();
+        let edited = if message.is_edited { " (edited)" } else { "" };
+        let replies = match message.reply_count {
+            0 => String::new(),
+            1 => " [1 reply]".into(),
+            count => format!(" [{count} replies]"),
+        };
         let author = match message.author_name.as_str() {
             "" => format!("member {}", &message.author[..8]),
             name => name.to_owned(),
         };
         output.push_str(&format!(
-            "[{}] {author}{bot}{reply}: {}",
+            "[{}] {author}{bot}{reply}: {}{edited}{replies}",
             message.id, message.text
         ));
         for reaction in message.reactions {
@@ -126,6 +160,22 @@ fn failed(error: anyhow::Error) -> String {
 }
 
 impl ShyTools {
+    fn format_by_channel(&self, messages: Vec<Message>) -> Result<String> {
+        let channels = self.workspace.channels()?;
+        let mut output = String::new();
+        for channel in channels {
+            let in_channel: Vec<Message> = messages
+                .iter()
+                .filter(|m| m.channel == channel.id)
+                .cloned()
+                .collect();
+            if !in_channel.is_empty() {
+                output.push_str(&format!("#{}:\n{}", channel.name, format_messages(in_channel)));
+            }
+        }
+        Ok(output)
+    }
+
     fn channel_id(&self, channel: &str) -> Result<String> {
         let wanted = channel.trim_start_matches('#');
         self.workspace
@@ -150,6 +200,22 @@ impl ShyTools {
 impl ShyTools {
     pub fn new(workspace: Workspace) -> Self {
         Self { workspace }
+    }
+
+    #[tool(
+        description = "List current members with their ids. Mention someone by writing [@Name](shy://member/<id>) in a message."
+    )]
+    fn list_members(&self) -> ToolResult {
+        let members = self.workspace.members().map_err(failed)?;
+        Ok(members
+            .iter()
+            .filter(|member| member.active)
+            .map(|member| {
+                let bot = if member.is_bot { " (bot)" } else { "" };
+                format!("{}{bot}: {}", member.name, member.id)
+            })
+            .collect::<Vec<_>>()
+            .join("\n"))
     }
 
     #[tool(description = "List channels in the workspace.")]
@@ -183,6 +249,32 @@ impl ShyTools {
             .send_message(&channel, &request.text, request.reply_to)
             .map_err(failed)?;
         Ok(format!("sent message {id}"))
+    }
+
+    #[tool(description = "Replace the text of one of your own messages. Everyone sees it marked as edited.")]
+    fn edit_message(&self, Parameters(request): Parameters<EditMessage>) -> ToolResult {
+        self.workspace
+            .edit_message(&request.message_id, &request.text)
+            .map_err(failed)?;
+        Ok("edited".into())
+    }
+
+    #[tool(description = "Delete one of your own messages for everyone.")]
+    fn delete_message(&self, Parameters(request): Parameters<MessageRef>) -> ToolResult {
+        self.workspace
+            .delete_message(&request.message_id)
+            .map_err(failed)?;
+        Ok("deleted".into())
+    }
+
+    #[tool(
+        description = "Read a thread: its first message, then every reply, oldest first. Messages marked [N replies] in read_messages have one."
+    )]
+    fn read_thread(&self, Parameters(request): Parameters<MessageRef>) -> ToolResult {
+        self.workspace
+            .thread(&request.message_id)
+            .map(format_messages)
+            .map_err(failed)
     }
 
     #[tool(description = "Add an emoji reaction to a message.")]
@@ -257,7 +349,9 @@ impl ShyTools {
         Ok("replaced".into())
     }
 
-    #[tool(description = "Full-text search across messages and pages.")]
+    #[tool(
+        description = "Full-text search across messages and pages. Filters: from:Name (from:\"Two Words\", from:me), in:#channel, before:2026-11-19, after:2026-11-01; any filter limits results to messages."
+    )]
     fn search(&self, Parameters(request): Parameters<Search>) -> ToolResult {
         let hits = self.workspace.search(&request.query, 20).map_err(failed)?;
         if hits.is_empty() {
@@ -274,6 +368,36 @@ impl ShyTools {
     }
 
     #[tool(
+        description = "Block until someone mentions you (by name, @channel or @here), then return those messages, grouped by channel. Each mention is returned once; mentions from while you were away come back at once."
+    )]
+    async fn wait_for_mentions(&self, Parameters(request): Parameters<WaitForMentions>) -> ToolResult {
+        let timeout = Duration::from_secs(request.timeout_seconds.unwrap_or(120).min(MAX_WAIT_SECONDS));
+        // Subscribe before checking, so a mention arriving in between still wakes us.
+        let mut changes = self.workspace.subscribe();
+        let found = tokio::time::timeout(timeout, async {
+            loop {
+                let mentions = self.workspace.take_unread_mentions()?;
+                if !mentions.is_empty() {
+                    return Ok::<_, anyhow::Error>(mentions);
+                }
+                loop {
+                    match changes.recv().await {
+                        Ok(Change::Messages { .. }) | Err(RecvError::Lagged(_)) => break,
+                        Ok(_) => {}
+                        Err(closed) => return Err(closed.into()),
+                    }
+                }
+            }
+        })
+        .await;
+        match found {
+            Ok(Ok(mentions)) => self.format_by_channel(mentions).map_err(failed),
+            Ok(Err(error)) => Err(failed(error)),
+            Err(_) => Ok("no new mentions".into()),
+        }
+    }
+
+    #[tool(
         description = "Block until someone else posts a message (optionally in one channel), then return that channel's recent messages. Use it to stay in a conversation."
     )]
     async fn wait_for_messages(&self, Parameters(request): Parameters<WaitForMessages>) -> ToolResult {
@@ -284,30 +408,48 @@ impl ShyTools {
             .map_err(failed)?;
         let timeout = Duration::from_secs(request.timeout_seconds.unwrap_or(120).min(MAX_WAIT_SECONDS));
         let me = self.workspace.my_id();
+        let is_bot = self
+            .workspace
+            .members()
+            .map_err(failed)?
+            .iter()
+            .any(|member| member.id == me && member.is_bot);
         let mut changes = self.workspace.subscribe();
         let arrived = tokio::time::timeout(timeout, async {
-            while let Ok(change) = changes.recv().await {
-                let Change::Messages { channel } = change else {
-                    continue;
+            loop {
+                let channel = match changes.recv().await {
+                    Ok(Change::Messages { channel }) => channel,
+                    Ok(_) => continue,
+                    // Missed some changes: nothing to tell which; keep waiting.
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(closed) => return Err(anyhow::Error::from(closed)),
                 };
                 if wanted.as_ref().is_some_and(|wanted| *wanted != channel) {
                     continue;
                 }
-                let latest = self.workspace.messages(&channel, None, 1).ok()?;
-                if latest.first().is_some_and(|message| message.author != me) {
-                    return Some(channel);
+                if let Some(latest) = self.workspace.latest_message(&channel)?
+                    && should_wake(&latest.message, &me, is_bot)
+                {
+                    return Ok(latest);
                 }
             }
-            None
         })
         .await;
         match arrived {
-            Ok(Some(channel)) => self
-                .workspace
-                .messages(&channel, None, 10)
-                .map(format_messages)
-                .map_err(failed),
-            _ => Ok("no new messages".into()),
+            Ok(Ok(latest)) => match latest.thread_root {
+                Some(root) => self
+                    .workspace
+                    .thread(&root)
+                    .map(|thread| format!("New reply in a thread:\n{}", format_messages(thread)))
+                    .map_err(failed),
+                None => self
+                    .workspace
+                    .messages(&latest.message.channel, None, 10)
+                    .map(format_messages)
+                    .map_err(failed),
+            },
+            Ok(Err(error)) => Err(failed(error)),
+            Err(_) => Ok("no new messages".into()),
         }
     }
 }
@@ -328,4 +470,55 @@ pub async fn serve(workspace: Workspace) -> Result<()> {
     service.waiting().await?;
     workspace.shutdown().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(author: &str, is_bot: bool, mentions_me: bool) -> Message {
+        Message {
+            id: "m".into(),
+            channel: "c".into(),
+            author: author.into(),
+            author_name: String::new(),
+            author_is_bot: is_bot,
+            text: String::new(),
+            reply_to: None,
+            created_ms: 0,
+            lamport: 1,
+            is_edited: false,
+            can_edit: false,
+            can_delete: false,
+            mentions_me,
+            reply_count: 0,
+            last_reply_ms: None,
+            is_following: false,
+            unread_replies: 0,
+            reactions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn agents_wake_for_people_and_for_bots_only_when_mentioned() {
+        let as_bot = true;
+        assert!(should_wake(&message("ada", false, false), "me", as_bot));
+        assert!(
+            !should_wake(&message("me", false, false), "me", as_bot),
+            "not for your own message"
+        );
+        assert!(
+            !should_wake(&message("other-bot", true, false), "me", as_bot),
+            "bots don't wake each other"
+        );
+        assert!(
+            should_wake(&message("other-bot", true, true), "me", as_bot),
+            "unless one mentions the other"
+        );
+    }
+
+    #[test]
+    fn people_wake_for_bots() {
+        assert!(should_wake(&message("a-bot", true, false), "me", false));
+    }
 }

@@ -1,16 +1,22 @@
 //! Thin bridge from the UI to shy-core: every command maps to one Workspace
 //! call, and every core change is forwarded to the UI as a "change" event.
 
+mod tray;
+
 use std::path::PathBuf;
 
 use serde::Serialize;
 use shy_core::{
     BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace,
     sync::SyncStatus,
-    views::{Channel, Invite, Member, Message, MessageCursor, Page, SearchHit, StorageSettings},
+    views::{
+        Channel, Inbox, Invite, LinkedMessage, Member, Message, MessageCursor, NotifyLevel, Page, SearchHit,
+        StorageSettings,
+    },
     workspace::StorageUpdate,
 };
-use tauri::{AppHandle, Emitter, Manager, State, ipc::Response};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, ipc::Response};
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Mutex;
 
 type CommandResult<T> = Result<T, String>;
@@ -257,6 +263,104 @@ async fn create_page(
 }
 
 #[tauri::command]
+async fn mark_read(state: State<'_, AppState>, channel: String, message: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .mark_read(&channel, &message)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn set_notify_level(
+    state: State<'_, AppState>,
+    channel: String,
+    level: NotifyLevel,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_notify_level(&channel, level)
+        .map_err(failed)
+}
+
+/// Shows a desktop notification. The UI decides when one is wanted.
+#[tauri::command]
+fn show_alert(app: AppHandle, title: String, body: String) -> CommandResult<()> {
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn thread(state: State<'_, AppState>, root: String) -> CommandResult<Vec<Message>> {
+    current(&state).await?.thread(&root).map_err(failed)
+}
+
+#[tauri::command]
+async fn set_following(state: State<'_, AppState>, root: String, following: bool) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_following(&root, following)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn mark_thread_read(state: State<'_, AppState>, root: String, message: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .mark_thread_read(&root, &message)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn inbox(state: State<'_, AppState>) -> CommandResult<Inbox> {
+    current(&state).await?.inbox().map_err(failed)
+}
+
+#[tauri::command]
+async fn mark_all_read(state: State<'_, AppState>) -> CommandResult<()> {
+    current(&state).await?.mark_all_read().map_err(failed)
+}
+
+#[tauri::command]
+async fn linked_message(state: State<'_, AppState>, id: String) -> CommandResult<Option<LinkedMessage>> {
+    current(&state).await?.linked_message(&id).map_err(failed)
+}
+
+#[tauri::command]
+async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .rename_channel(&channel, &name)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn delete_channel(state: State<'_, AppState>, channel: String) -> CommandResult<()> {
+    current(&state).await?.delete_channel(&channel).map_err(failed)
+}
+
+#[tauri::command]
+async fn edit_message(state: State<'_, AppState>, message: String, text: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .edit_message(&message, &text)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn delete_message(state: State<'_, AppState>, message: String) -> CommandResult<()> {
+    current(&state).await?.delete_message(&message).map_err(failed)
+}
+
+#[tauri::command]
+async fn delete_page(state: State<'_, AppState>, page: String) -> CommandResult<()> {
+    current(&state).await?.delete_page(&page).map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_page(state: State<'_, AppState>, page: String, title: String) -> CommandResult<()> {
     current(&state).await?.rename_page(&page, &title).map_err(failed)
 }
@@ -357,13 +461,28 @@ pub fn run() {
         .init();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let dir = data_dir(app.handle())?;
             app.manage(AppState {
                 data: DataDir::new(dir, KeyStorage::Keychain),
                 workspace: Mutex::new(None),
             });
+            let has_tray = tray::try_install(app.handle());
+            app.manage(tray::HasTray(has_tray));
             Ok(())
+        })
+        // With a tray icon, closing the window keeps shyspace running there,
+        // so alerts still arrive; Quit in the tray menu ends it.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event
+                && window.state::<tray::HasTray>().0
+            {
+                api.prevent_close();
+                if let Err(error) = window.hide() {
+                    tracing::warn!("could not hide the window: {error}");
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             session,
@@ -377,12 +496,26 @@ pub fn run() {
             recovery_kit,
             channels,
             create_channel,
+            rename_channel,
+            mark_read,
+            linked_message,
+            inbox,
+            mark_all_read,
+            thread,
+            set_following,
+            mark_thread_read,
+            set_notify_level,
+            show_alert,
+            delete_channel,
+            edit_message,
+            delete_message,
             messages,
             send_message,
             react,
             pages,
             create_page,
             rename_page,
+            delete_page,
             page_state,
             apply_doc_update,
             members,
@@ -396,6 +529,18 @@ pub fn run() {
             status,
             set_profile,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running shyspace");
+        .build(tauri::generate_context!())
+        .expect("error while building shyspace")
+        .run(on_run_event);
 }
+
+/// macOS: clicking the dock icon brings the hidden window back.
+#[cfg(target_os = "macos")]
+fn on_run_event(app: &AppHandle, event: tauri::RunEvent) {
+    if let tauri::RunEvent::Reopen { .. } = event {
+        tray::show_main_window(app);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn on_run_event(_app: &AppHandle, _event: tauri::RunEvent) {}

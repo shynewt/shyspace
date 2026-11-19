@@ -5,8 +5,9 @@ use anyhow::{Result, ensure};
 use tracing::warn;
 
 use crate::{
-    crypto,
+    crypto::{self, NewerFormat},
     ops::{Envelope, RuleViolation, VerifiedOp, rule_violation},
+    views::Change,
     workspace::{State, Workspace},
 };
 
@@ -24,29 +25,46 @@ impl Workspace {
             (1..=MAX_STORED_NUMBER).contains(&envelope.seq) && envelope.epoch <= MAX_STORED_NUMBER,
             "op numbering out of range"
         );
-        let change = {
+        let changes = {
             let state = self.state();
             if state.store.is_applied(&envelope.author, envelope.seq)? {
                 return Ok(());
             }
-            match verify(&state, &envelope)? {
+            match verify_or_wait(&state, &envelope)? {
                 Some(verified) if is_ready(&state, &verified)? => {
-                    apply_and_record(&state, &envelope, &verified, &self.inner.config.admin)?
+                    self.apply_with_alert(&state, &envelope, &verified)?
                 }
                 _ => {
                     park(&state, &envelope)?;
-                    None
+                    Vec::new()
                 }
             }
         };
-        if let Some(change) = change {
+        for change in changes {
             self.emit(change);
         }
         Ok(())
     }
 
+    fn apply_with_alert(
+        &self,
+        state: &State,
+        envelope: &Envelope,
+        verified: &VerifiedOp,
+    ) -> Result<Vec<Change>> {
+        let Some(change) = apply_and_record(state, envelope, verified, &self.inner.config.admin)? else {
+            return Ok(Vec::new());
+        };
+        Ok([Some(change), self.alert_for(state, verified)?]
+            .into_iter()
+            .flatten()
+            .collect())
+    }
+
     /// Retries parked ops, for example after a new epoch key arrived.
-    pub(super) fn apply_pending(&self) -> Result<()> {
+    /// Returns whether an op from a newer version is holding up its author.
+    pub(super) fn apply_pending(&self) -> Result<bool> {
+        let mut is_waiting_for_update = false;
         let changes = {
             let state = self.state();
             let mut changes = Vec::new();
@@ -57,14 +75,14 @@ impl Workspace {
                 }
                 match verify(&state, &envelope) {
                     Ok(Some(verified)) if is_ready(&state, &verified)? => {
-                        changes.extend(apply_and_record(
-                            &state,
-                            &envelope,
-                            &verified,
-                            &self.inner.config.admin,
-                        )?);
+                        changes.extend(self.apply_with_alert(&state, &envelope, &verified)?);
                     }
                     Ok(_) => {}
+                    Err(error) if error.downcast_ref::<NewerFormat>().is_some() => {
+                        // Only the op its author needs next blocks anything;
+                        // a far-ahead one can't raise a false alarm.
+                        is_waiting_for_update |= envelope.seq == state.store.next_seq(&envelope.author)?;
+                    }
                     Err(error) => {
                         warn!("dropping pending op: {error:#}");
                         state.store.delete_pending(&envelope)?;
@@ -76,7 +94,18 @@ impl Workspace {
         for change in changes {
             self.emit(change);
         }
-        Ok(())
+        Ok(is_waiting_for_update)
+    }
+}
+
+/// Like `verify`, but an op from a newer version also waits (`Ok(None)`).
+fn verify_or_wait(state: &State, envelope: &Envelope) -> Result<Option<VerifiedOp>> {
+    match verify(state, envelope) {
+        Err(error) if error.downcast_ref::<NewerFormat>().is_some() => {
+            warn!("keeping an op from a newer version of shyspace until this one is updated");
+            Ok(None)
+        }
+        other => other,
     }
 }
 

@@ -1,6 +1,8 @@
 /**
  * Test-only entry: answers the app's `invoke` calls from the fake backend,
- * then starts the real app. `?start=onboarding` begins with no workspace.
+ * then starts the real app. By default you're Ada, the admin of "Acme";
+ * `?start=onboarding` begins with no workspace, `?start=member` as Grace, a
+ * regular member.
  */
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { FakeBackend } from "./backend";
@@ -12,7 +14,12 @@ declare global {
 }
 
 mockIPC((command, args) => window.fake.handle(command, args), { shouldMockEvents: true });
-const startsEmpty = new URLSearchParams(window.location.search).get("start") === "onboarding";
-window.fake = startsEmpty ? new FakeBackend() : FakeBackend.withWorkspace("Acme", "Ada");
+const start = new URLSearchParams(window.location.search).get("start");
+window.fake =
+  start === "onboarding"
+    ? new FakeBackend()
+    : start === "member"
+      ? FakeBackend.asMember("Grace")
+      : FakeBackend.withWorkspace("Acme", "Ada");
 
 await import("../../../src/main");

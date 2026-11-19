@@ -23,11 +23,17 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
 2. **Everything is an op.** Any change (message, reaction, page edit, rename…) is an `Op` (`ops.rs`). The author signs it with their identity key, then it is encrypted with the epoch key (`crypto.rs`). The result is an `Envelope`.
 3. **Two ways to deliver, same envelopes.** Envelopes are sent live over iroh gossip and also uploaded to the bucket. A member that was offline catches up from the bucket.
 4. **No ordering needed.** Every op merges the same way whatever order it arrives in. That is why two unordered transports are enough:
-   - names, titles and profiles: last writer wins, by lamport clock;
+   - names, titles, channel renames, message edits and profiles: last writer wins, by lamport clock (edits are kept apart from what they change, so an edit may arrive first);
+   - deletes: permanent markers that win over everything else about their target; later ops touching a deleted item are dropped;
    - reactions: per-author on/off toggles;
    - page content: Yjs CRDT updates;
    - creations (channel, message, page): the id contains the author's key prefix, so only the author can create or overwrite it.
-5. **Local first.** Each device stores ops and the views built from them in SQLite (`store.rs`). Reads never touch the network. Search uses SQLite FTS5, on the device.
+5. **Local first.** Each device stores ops and the views built from them in SQLite (`store.rs`). Reads never touch the network. Search uses SQLite FTS5, on the device, with filters parsed in `search.rs` (`from:`, `in:`, `before:`, `after:`).
+6. **Mentions are links in the text** (`mentions.rs`): `[@Ada](shy://member/<id>)`, `[@channel](shy://mention/channel)`, `[@here](shy://mention/here)`. They need no op of their own; each device works out what mentions it, so this works under end-to-end encryption.
+7. **Threads are replies** (`storage/threads.rs`): a message with `reply_to` lives in the thread of the message it eventually answers, in the same channel, worked out when reading so arrival order doesn't matter. A reply whose parent is missing shows in the channel. You follow threads you started, replied in or were mentioned in, unless you choose otherwise; their new replies alert you.
+8. **Alerts are decided on the device** (`sync/alerts.rs`): a new message from someone else raises `Change::Alert` when that channel's level (all, mentions, or nothing) allows it and it was written in the last 10 minutes, so catching up never floods you. The desktop app shows it unless you're looking at that channel, and keeps running in the tray when its window is closed.
+9. **The inbox** (`workspace/inbox.rs`) gathers unread mentions and new replies in followed threads across channels, from the same read positions, so reading something anywhere clears it.
+10. **Personal state stays on the device.** Things only you care about, like where you've read up to in each channel or thread, alert levels and which threads you follow (`storage/reading.rs`), are plain local rows, not ops: nobody else sees them, and they don't sync between devices (one member is one device today, #53).
 
 ## Identity and local data
 
@@ -83,7 +89,7 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 | `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads` |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
-| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `queries` |
+| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `queries` |
 | `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |
 | `crypto.rs` | sign-then-encrypt ops |
 | `ops.rs` | op types, owned ids, timestamps |

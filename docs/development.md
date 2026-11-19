@@ -21,7 +21,7 @@ The CLI reads bucket settings from `SHY_S3_ENDPOINT`, `SHY_S3_BUCKET`, `SHY_S3_A
 
 ## Running
 
-- **Desktop:** `cd apps/desktop && pnpm tauri dev`. `SHY_DIR=<dir>` picks the data directory, so you can run several members on one machine.
+- **Desktop:** `cd apps/desktop && pnpm tauri dev`. The tray icon needs the system's appindicator library on Linux (`libayatana-appindicator-gtk3` on Fedora, `libayatana-appindicator3-1` on Ubuntu); without it the app still runs, but closing the window quits. `SHY_DIR=<dir>` picks the data directory, so you can run several members on one machine.
 - **CLI:** `cargo run -p shy-cli -- --dir <dir> <create|join|invite|recovery-kit|restore|mcp>`. The binary is called `shy`. It keeps its device key in the system keychain; add `--key-file <path>` (outside the data directory) on machines without one, and in tests.
 - **An agent as a member:** the admin creates an invite (app or `shy invite create`), then `shy join --bot --name Claude <invite>` waits until the admin approves; then `claude mcp add shyspace -- shy mcp`. Named agents (`--agent <name>`) keep separate members in `~/.local/share/shyspace/agents/<name>`. The agent skill lives in `skills/shyspace/SKILL.md`; `shy skill` prints it, and the MCP server sends the same guidance as its instructions, so keep it in step with the tools.
 

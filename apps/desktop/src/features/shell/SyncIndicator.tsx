@@ -14,6 +14,13 @@ const DOT: Record<Tone, string> = {
 function describeStatus(status: SyncStatus | undefined): { tone: Tone; label: string; detail: string } {
   if (!status) return { tone: "pending", label: "Connecting…", detail: "Starting up." };
   if (status.error) return { tone: "error", label: "Sync problem", detail: status.error };
+  if (status.needs_update) {
+    return {
+      tone: "error",
+      label: "Update shyspace",
+      detail: "A teammate uses a newer version. Some of their changes wait until you update.",
+    };
+  }
   if (status.peers > 0) {
     return {
       tone: "live",

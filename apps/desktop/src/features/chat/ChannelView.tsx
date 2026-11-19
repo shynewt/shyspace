@@ -1,13 +1,15 @@
-import { Hash, Lock } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { Bot, Hash, Lock } from "lucide-react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, type Message } from "../../lib/api";
+import { api, type Message, type MessageCursor } from "../../lib/api";
 import { formatDay } from "../../lib/people";
+import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { EmptyState, Spinner, springs } from "../../ui";
+import { EmptyState, Spinner, springs, Tooltip } from "../../ui";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
+import { ThreadPanel } from "./ThreadPanel";
 
 const PAGE_SIZE = 100;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -16,14 +18,26 @@ const HIGHLIGHT_MS = 1600;
 
 type Row =
   | { kind: "day"; key: string; label: string }
+  | { kind: "unread"; key: string }
   | { kind: "message"; key: string; message: Message; isContinuation: boolean };
 
-function toRows(messages: Message[]): Row[] {
+function isAfter(message: Message, cursor: MessageCursor): boolean {
+  return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.author > cursor.author);
+}
+
+/** The first message by someone else after the read position. */
+function firstUnreadId(messages: Message[], lastRead: MessageCursor | null, me: string): string | null {
+  const first = messages.find((message) => message.author !== me && (!lastRead || isAfter(message, lastRead)));
+  return first?.id ?? null;
+}
+
+function toRows(messages: Message[], unreadFrom: string | null): Row[] {
   const rows: Row[] = [];
   let previous: Message | undefined;
   for (const message of messages) {
     const day = formatDay(message.created_ms);
     if (!previous || formatDay(previous.created_ms) !== day) rows.push({ kind: "day", key: `day:${day}`, label: day });
+    if (message.id === unreadFrom) rows.push({ kind: "unread", key: "unread" });
     const isContinuation =
       !!previous &&
       previous.author === message.author &&
@@ -36,9 +50,13 @@ function toRows(messages: Message[]): Row[] {
   return rows;
 }
 
-export function ChannelView({ channelId }: { channelId: string }) {
-  const { channels } = useWorkspace();
+export function ChannelView({ channelId, thread, focus }: { channelId: string; thread?: string; focus?: string }) {
+  const { channels, session } = useWorkspace();
   const channel = channels.find((candidate) => candidate.id === channelId);
+  // Where you left off, as of opening the channel: the line stays put while
+  // you read, until Escape dismisses it.
+  const [lastReadOnOpen] = useState(() => channel?.last_read ?? null);
+  const [isUnreadLineDismissed, setUnreadLineDismissed] = useState(false);
   // Loading older messages grows the window, so new arrivals never leave gaps.
   const [windowSize, setWindowSize] = useState(PAGE_SIZE);
   const loadMessages = useCallback(() => api.messages(channelId, null, windowSize), [channelId, windowSize]);
@@ -47,10 +65,23 @@ export function ChannelView({ channelId }: { channelId: string }) {
     (change) => (change.kind === "messages" && change.channel === channelId) || change.kind === "members",
   );
   const hasOlder = (messages?.length ?? 0) >= windowSize;
-  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [openThread, setOpenThread] = useState<string | null>(thread ?? null);
+  useEffect(() => {
+    if (thread) setOpenThread(thread);
+  }, [thread]);
   const [highlighted, setHighlighted] = useState<string | null>(null);
-  const rows = useMemo(() => toRows(messages ?? []), [messages]);
-  const byId = useMemo(() => new Map((messages ?? []).map((message) => [message.id, message])), [messages]);
+  // A linked message to show: in the channel (loading older history until
+  // it's there), or in the open thread, which handles it.
+  const [pendingFocus, setPendingFocus] = useState(thread ? null : (focus ?? null));
+  useEffect(() => {
+    if (focus && !thread) setPendingFocus(focus);
+  }, [focus, thread]);
+  const unreadFrom = useMemo(
+    () => (isUnreadLineDismissed ? null : firstUnreadId(messages ?? [], lastReadOnOpen, session.me)),
+    [messages, lastReadOnOpen, session.me, isUnreadLineDismissed],
+  );
+  const rows = useMemo(() => toRows(messages ?? [], unreadFrom), [messages, unreadFrom]);
+  const hasScrolledToUnread = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const isPinnedToBottom = useRef(true);
   const heightBeforeLoadingOlder = useRef<number | null>(null);
@@ -62,10 +93,52 @@ export function ChannelView({ channelId }: { channelId: string }) {
     if (heightBeforeLoadingOlder.current !== null) {
       element.scrollTop += element.scrollHeight - heightBeforeLoadingOlder.current;
       heightBeforeLoadingOlder.current = null;
+    } else if (!hasScrolledToUnread.current && unreadFrom) {
+      hasScrolledToUnread.current = true;
+      document.getElementById("unread-line")?.scrollIntoView({ block: "start" });
+      isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
     } else if (isPinnedToBottom.current) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [rows]);
+  }, [rows, unreadFrom]);
+
+  useEffect(() => {
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setUnreadLineDismissed(true);
+    };
+    window.addEventListener("keydown", dismissOnEscape);
+    return () => window.removeEventListener("keydown", dismissOnEscape);
+  }, []);
+
+  // What's on screen while the window has focus counts as read; not while
+  // this view is fading out after you switched away.
+  const latestId = messages?.at(-1)?.id;
+  const isPresent = useIsPresent();
+  useEffect(() => {
+    if (!latestId || !isPresent) return;
+    const markRead = () => {
+      if (document.hasFocus()) api.markRead(channelId, latestId).catch(reportError);
+    };
+    markRead();
+    window.addEventListener("focus", markRead);
+    return () => window.removeEventListener("focus", markRead);
+  }, [channelId, latestId, isPresent]);
+
+  useEffect(() => {
+    if (!pendingFocus || !messages) return;
+    const target = pendingFocus;
+    if (messages.some((message) => message.id === target)) {
+      setPendingFocus(null);
+      hasScrolledToUnread.current = true;
+      isPinnedToBottom.current = false;
+      document.getElementById(`message-${target}`)?.scrollIntoView({ block: "center" });
+      setHighlighted(target);
+    } else if (hasOlder) {
+      setWindowSize((size) => size + PAGE_SIZE);
+    } else {
+      setPendingFocus(null);
+    }
+  }, [messages, hasOlder, pendingFocus]);
 
   useEffect(() => {
     if (!highlighted) return;
@@ -79,77 +152,128 @@ export function ChannelView({ channelId }: { channelId: string }) {
     setWindowSize((size) => size + PAGE_SIZE);
   };
 
-  const jumpTo = (id: string) => {
-    document.getElementById(`message-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    setHighlighted(id);
-  };
-
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-        <Hash size={17} className="text-faint" />
-        <h1 className="text-[15px] font-semibold">{channel?.name ?? "…"}</h1>
-        <span className="ml-auto flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
-          <Lock size={11} /> End-to-end encrypted
-        </span>
-      </header>
+    <div className="flex h-full">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
+          <Hash size={17} className="text-faint" />
+          <h1 className="text-[15px] font-semibold">{channel?.name ?? "…"}</h1>
+          <AgentsNote />
+          <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
+            <Lock size={11} /> End-to-end encrypted
+          </span>
+        </header>
 
-      <div
-        ref={scroller}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
-          if (element.scrollTop < NEAR_EDGE_PX) loadOlder();
-        }}
-        className="flex-1 overflow-y-auto py-3"
-      >
-        {hasOlder && (
-          <div className="flex justify-center py-2 text-faint">
-            <Spinner size={14} />
-          </div>
-        )}
-        {messages && messages.length === 0 && (
-          <EmptyState icon={<Hash size={22} />} title={`This is the start of #${channel?.name ?? ""}`}>
-            Say hi. Only workspace members can read what you write.
-          </EmptyState>
-        )}
-        <AnimatePresence initial={false}>
-          {rows.map((row) =>
-            row.kind === "day" ? (
-              <DayDivider key={row.key} label={row.label} />
-            ) : (
-              <motion.div
-                key={row.key}
-                layout="position"
-                initial={{ opacity: 0, y: 10, scale: 0.99 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={springs.smooth}
-              >
-                <MessageItem
-                  message={row.message}
-                  isContinuation={row.isContinuation}
-                  repliedTo={row.message.reply_to ? byId.get(row.message.reply_to) : undefined}
-                  isHighlighted={highlighted === row.message.id}
-                  onReply={() => setReplyTo(row.message)}
-                  onJumpTo={jumpTo}
-                />
-              </motion.div>
-            ),
+        <div
+          ref={scroller}
+          role="log"
+          aria-label={`Messages in #${channel?.name ?? ""}`}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
+            if (element.scrollTop < NEAR_EDGE_PX) loadOlder();
+          }}
+          className="flex-1 overflow-y-auto py-3"
+        >
+          {hasOlder && (
+            <div className="flex justify-center py-2 text-faint">
+              <Spinner size={14} />
+            </div>
           )}
-        </AnimatePresence>
-      </div>
+          {messages && messages.length === 0 && (
+            <EmptyState icon={<Hash size={22} />} title={`This is the start of #${channel?.name ?? ""}`}>
+              Say hi. Only workspace members can read what you write.
+            </EmptyState>
+          )}
+          <AnimatePresence initial={false}>
+            {rows.map((row) =>
+              row.kind === "day" ? (
+                <DayDivider key={row.key} label={row.label} />
+              ) : row.kind === "unread" ? (
+                <UnreadLine key={row.key} />
+              ) : (
+                <motion.div
+                  key={row.key}
+                  layout="position"
+                  initial={{ opacity: 0, y: 10, scale: 0.99 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={springs.smooth}
+                >
+                  <MessageItem
+                    message={row.message}
+                    isContinuation={row.isContinuation}
+                    isHighlighted={openThread === row.message.id || highlighted === row.message.id}
+                    onOpenThread={() => setOpenThread(row.message.id)}
+                  />
+                </motion.div>
+              ),
+            )}
+          </AnimatePresence>
+        </div>
 
-      <Composer
-        channelId={channelId}
-        channelName={channel?.name ?? ""}
-        replyTo={replyTo}
-        onCancelReply={() => setReplyTo(null)}
-        onSent={() => {
-          isPinnedToBottom.current = true;
-          setReplyTo(null);
-        }}
-      />
+        <Composer
+          channelId={channelId}
+          label={`Message #${channel?.name ?? ""}`}
+          threadRoot={null}
+          onSent={() => {
+            isPinnedToBottom.current = true;
+          }}
+        />
+      </div>
+      <AnimatePresence>
+        {openThread && (
+          <ThreadPanel
+            key={openThread}
+            root={openThread}
+            focus={openThread === thread ? focus : undefined}
+            channelId={channelId}
+            onClose={() => setOpenThread(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+/** Agents can read every channel; say so where people write. */
+function AgentsNote() {
+  const loadMembers = useCallback(() => api.members(), []);
+  const members = useLive(loadMembers, (change) => change.kind === "members");
+  const agents = members?.filter((member) => member.active && member.is_bot).length ?? 0;
+  return (
+    <span className="ml-auto">
+      {agents > 0 && (
+        <Tooltip
+          label={
+            <span className="block max-w-[260px] whitespace-normal">
+              AI agents are members and can read this channel. What they read goes to their AI provider.
+            </span>
+          }
+          side="bottom"
+        >
+          <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-[11.5px] text-accent-text">
+            <Bot size={12} /> {agents} {agents === 1 ? "agent" : "agents"} can read this
+          </span>
+        </Tooltip>
+      )}
+    </span>
+  );
+}
+
+function UnreadLine() {
+  return (
+    <motion.div
+      id="unread-line"
+      role="separator"
+      aria-label="New messages"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="my-2 flex items-center gap-3 px-5"
+    >
+      <div className="h-px flex-1 bg-danger/60" />
+      <span className="text-[11px] font-semibold tracking-wide text-danger uppercase">New messages</span>
+    </motion.div>
   );
 }
 

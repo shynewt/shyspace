@@ -1,12 +1,14 @@
 //! The public entry point: one workspace, stored in one data directory.
 
 mod actions;
+mod inbox;
 mod lifecycle;
 mod reads;
 mod storage;
 
 pub use lifecycle::DataDir;
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
+pub(crate) use reads::follows_by_default;
 pub use storage::StorageUpdate;
 
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -96,6 +98,9 @@ pub(crate) struct Inner {
     pub sync_lock: tokio::sync::Mutex<()>,
     pub recovery_lock: tokio::sync::Mutex<()>,
     pub status: Mutex<SyncStatus>,
+    /// Gaps (author, missing seq) already fetched again this run, so a gap
+    /// the bucket can't fill doesn't make every pass re-read everything.
+    pub refetched_gaps: Mutex<std::collections::HashSet<(iroh::PublicKey, u64)>>,
 }
 
 #[derive(Clone)]
@@ -104,6 +109,11 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// Whether this member may make `op`, by the rule every member enforces.
+    pub(crate) fn may(&self, op: &crate::ops::Op) -> bool {
+        op.is_permitted(&self.me(), &self.inner.config.admin)
+    }
+
     pub(crate) fn bucket(&self) -> Bucket {
         self.inner
             .bucket

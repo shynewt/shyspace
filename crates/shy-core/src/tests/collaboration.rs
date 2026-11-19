@@ -52,8 +52,12 @@ async fn two_members_collaborate_then_one_is_removed() {
     let asked = messages.iter().find(|message| message.id == question).unwrap();
     assert_eq!(asked.reactions[0].count, 2);
     assert!(asked.reactions[0].mine);
+    // The reply lives in the question's thread.
+    assert_eq!(asked.reply_count, 1);
+    let thread = bob.thread(&question).unwrap();
+    assert_eq!(thread.last().unwrap().text, "sure, go ahead");
     assert_eq!(
-        messages.last().unwrap().reply_to.as_deref(),
+        thread.last().unwrap().reply_to.as_deref(),
         Some(question.as_str())
     );
     let members = admin.members().unwrap();

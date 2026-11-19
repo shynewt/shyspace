@@ -1,38 +1,80 @@
 import { UserX } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Session } from "../../lib/api";
+import { SHORTCUTS } from "../../lib/shortcuts";
+import { useAlerts } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
-import { type View, WorkspaceContext } from "../../lib/workspace";
+import { sameView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
+import { InboxView } from "../inbox/InboxView";
 import { MembersPanel } from "../members/MembersPanel";
 import { PageView } from "../pages/PageView";
 import { CommandPalette } from "../search/CommandPalette";
+import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
 
 export function Shell({ session }: { session: Session }) {
-  const channels = useLive(api.channels, (change) => change.kind === "channels") ?? [];
+  // Unread counts change as messages arrive.
+  const channels = useLive(api.channels, (change) => change.kind === "channels" || change.kind === "messages") ?? [];
   const pages = useLive(api.pages, (change) => change.kind === "pages") ?? [];
   const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
   const [view, setView] = useState<View | null>(null);
   const [isPaletteOpen, setPaletteOpen] = useState(false);
   const [isMembersOpen, setMembersOpen] = useState(false);
+  const [isShortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
     if (!view && channels.length > 0) setView({ kind: "channel", id: channels[0].id });
   }, [view, channels]);
 
+  // Leave a channel or page once it's deleted. Only one that was listed
+  // before counts: a brand-new one may not be listed yet.
+  const listedIds = useMemo(() => new Set([...channels, ...pages].map((item) => item.id)), [channels, pages]);
+  const previouslyListedIds = useRef(listedIds);
+  useEffect(() => {
+    const id = view && view.kind !== "inbox" ? view.id : null;
+    if (id && previouslyListedIds.current.has(id) && !listedIds.has(id)) setView(null);
+    previouslyListedIds.current = listedIds;
+  }, [view, listedIds]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setPaletteOpen((open) => !open);
+      const shortcut = SHORTCUTS.find((candidate) => candidate.matches(event));
+      if (!shortcut) return;
+      event.preventDefault();
+      const views = sidebarViews(channels, pages);
+      const current = view ? views.findIndex((candidate) => sameView(candidate, view)) : -1;
+      const unread = (candidate: View) =>
+        candidate.kind === "channel" && (channels.find((channel) => channel.id === candidate.id)?.unread ?? 0) > 0;
+      const step = (direction: 1 | -1, isWanted: (candidate: View) => boolean) => {
+        for (let index = current + direction; index >= 0 && index < views.length; index += direction) {
+          if (isWanted(views[index])) return setView(views[index]);
+        }
+      };
+      switch (shortcut.id) {
+        case "search":
+          return setPaletteOpen((open) => !open);
+        case "inbox":
+          return setView({ kind: "inbox" });
+        case "previous":
+          return step(-1, () => true);
+        case "next":
+          return step(1, () => true);
+        case "previousUnread":
+          return step(-1, unread);
+        case "nextUnread":
+          return step(1, unread);
+        case "cheatSheet":
+          return setShortcutsOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [view, channels, pages]);
+
+  useAlerts(view);
 
   const navigate = useCallback((next: View) => setView(next), []);
   const context = useMemo(
@@ -53,21 +95,24 @@ export function Shell({ session }: { session: Session }) {
           <AnimatePresence mode="wait" initial={false}>
             {view && (
               <motion.div
-                key={`${view.kind}:${view.id}`}
+                key={viewKey(view)}
                 className="absolute inset-0"
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, transition: { duration: 0.1 } }}
                 transition={{ duration: 0.2, ease: "easeOut" }}
               >
-                {view.kind === "channel" ? <ChannelView channelId={view.id} /> : <PageView pageId={view.id} />}
+                {view.kind === "channel" && <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} />}
+                {view.kind === "page" && <PageView pageId={view.id} />}
+                {view.kind === "inbox" && <InboxView />}
               </motion.div>
             )}
           </AnimatePresence>
         </main>
       </motion.div>
-      <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} onOpenMembers={() => setMembersOpen(true)} />
       <MembersPanel open={isMembersOpen} onOpenChange={setMembersOpen} />
+      <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setShortcutsOpen} />
       <RemovedNotice isRemoved={status?.removed ?? false} />
     </WorkspaceContext.Provider>
   );

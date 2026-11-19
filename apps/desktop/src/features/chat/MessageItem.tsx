@@ -1,12 +1,14 @@
-import { CornerUpLeft, SmilePlus } from "lucide-react";
+import { Copy, CornerUpLeft, Ellipsis, Link2, MessageSquareReply, Pencil, SmilePlus, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useMemo, useState } from "react";
-import { api, type Message } from "../../lib/api";
-import { ChatMarkdown, pageIdsIn, plainPreview } from "../../lib/markdown";
+import { api, type Message, messageLink } from "../../lib/api";
+import { ChatMarkdown, messageIdsIn, pageIdsIn } from "../../lib/markdown";
 import { displayName, formatTime } from "../../lib/people";
-import { reportError } from "../../lib/toast";
+import { reportError, showToast } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Badge, cx, IconButton, Popover, springs } from "../../ui";
+import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs } from "../../ui";
+import { MessageCard } from "./MessageCard";
+import { MessageEditor } from "./MessageEditor";
 import { PageCard } from "./PageCard";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
@@ -14,21 +16,21 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
 export const MessageItem = memo(function MessageItem({
   message,
   isContinuation,
-  repliedTo,
   isHighlighted,
-  onReply,
-  onJumpTo,
+  onOpenThread,
 }: {
   message: Message;
   isContinuation: boolean;
-  repliedTo: Message | undefined;
   isHighlighted: boolean;
-  onReply: () => void;
-  onJumpTo: (id: string) => void;
+  /** Opens this message's thread; `null` inside a thread. */
+  onOpenThread: (() => void) | null;
 }) {
-  const { pages, navigate } = useWorkspace();
+  const { pages, navigate, session } = useWorkspace();
   const [isPickerOpen, setPickerOpen] = useState(false);
+  const [isEditing, setEditing] = useState(false);
+  const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const linkedMessages = useMemo(() => messageIdsIn(message.text).filter((id) => id !== message.id), [message]);
   const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
   const name = displayName(message.author_name, message.author);
 
@@ -46,6 +48,7 @@ export const MessageItem = memo(function MessageItem({
         "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 focus-within:bg-surface-2/50",
         isContinuation ? "py-0.5" : "pt-2 pb-0.5",
         isHighlighted && "bg-accent-soft/70",
+        message.mentions_me && !isHighlighted && "bg-warning/8 shadow-[inset_2px_0_0_var(--warning)]",
       )}
     >
       <div className="w-9 shrink-0">
@@ -59,16 +62,11 @@ export const MessageItem = memo(function MessageItem({
       </div>
 
       <div className="min-w-0 flex-1">
-        {repliedTo && (
-          <button
-            type="button"
-            onClick={() => onJumpTo(repliedTo.id)}
-            className="mb-0.5 flex max-w-full items-center gap-1.5 text-[12px] text-muted hover:text-ink"
-          >
-            <CornerUpLeft size={12} className="shrink-0" />
-            <span className="font-medium">{displayName(repliedTo.author_name, repliedTo.author)}</span>
-            <span className="truncate text-faint">{plainPreview(repliedTo.text, (id) => titles.get(id))}</span>
-          </button>
+        {onOpenThread && message.reply_to && (
+          // In the channel, a reply only shows when what it answered is gone.
+          <div className="mb-0.5 flex items-center gap-1.5 text-[12px] text-faint">
+            <CornerUpLeft size={12} className="shrink-0" /> Reply to a deleted message
+          </div>
         )}
         {!isContinuation && (
           <div className="flex items-baseline gap-2">
@@ -77,15 +75,28 @@ export const MessageItem = memo(function MessageItem({
             <span className="text-[11.5px] text-faint">{formatTime(message.created_ms)}</span>
           </div>
         )}
-        <div className="prose-chat selectable text-[14px]">
-          <ChatMarkdown
-            text={message.text}
-            pageTitle={(id) => titles.get(id)}
-            onOpenPage={(id) => navigate({ kind: "page", id })}
+        {isEditing ? (
+          <MessageEditor
+            initialText={message.text}
+            onSave={(text) => api.editMessage(message.id, text)}
+            onClose={() => setEditing(false)}
           />
-        </div>
+        ) : (
+          <div className="prose-chat selectable text-[14px]">
+            <ChatMarkdown
+              text={message.text}
+              myId={session.me}
+              pageTitle={(id) => titles.get(id)}
+              onOpenPage={(id) => navigate({ kind: "page", id })}
+            />
+            {message.is_edited && <span className="text-[11px] text-faint">(edited)</span>}
+          </div>
+        )}
         {linkedPages.map((id) => (
           <PageCard key={id} pageId={id} />
+        ))}
+        {linkedMessages.map((id) => (
+          <MessageCard key={id} messageId={id} />
         ))}
         {message.reactions.length > 0 && (
           <motion.div layout className="mt-1 flex flex-wrap gap-1">
@@ -124,6 +135,7 @@ export const MessageItem = memo(function MessageItem({
             </AnimatePresence>
           </motion.div>
         )}
+        {onOpenThread && message.reply_count > 0 && <ThreadSummary message={message} onOpen={onOpenThread} />}
       </div>
 
       <div
@@ -154,8 +166,62 @@ export const MessageItem = memo(function MessageItem({
             ))}
           </div>
         </Popover>
-        <IconButton label="Reply" icon={<CornerUpLeft size={15} />} onClick={onReply} />
+        {onOpenThread && (
+          <IconButton label="Reply in thread" icon={<MessageSquareReply size={15} />} onClick={onOpenThread} />
+        )}
+        <MessageMenu message={message} onEdit={() => setEditing(true)} onDelete={() => setConfirmingDelete(true)} />
       </div>
+      <ConfirmDialog
+        open={isConfirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title="Delete this message?"
+        description="It disappears for everyone, along with its reactions. This can't be undone."
+        confirmLabel="Delete message"
+        onConfirm={() => api.deleteMessage(message.id)}
+      />
     </article>
   );
 });
+
+function MessageMenu({ message, onEdit, onDelete }: { message: Message; onEdit: () => void; onDelete: () => void }) {
+  const copy = (text: string, done: string) =>
+    navigator.clipboard.writeText(text).then(() => showToast(done), reportError);
+  const items: MenuItem[] = [
+    {
+      label: "Copy text",
+      icon: <Copy size={14} />,
+      onSelect: () => copy(message.text, "Copied the message's markdown."),
+    },
+    {
+      label: "Copy link",
+      icon: <Link2 size={14} />,
+      onSelect: () => copy(messageLink(message.id), "Link copied. Paste it in any channel to share this message."),
+    },
+  ];
+  if (message.can_edit) items.push({ label: "Edit", icon: <Pencil size={14} />, onSelect: onEdit });
+  if (message.can_delete) {
+    items.push({ label: "Delete", icon: <Trash2 size={14} />, onSelect: onDelete, isDestructive: true });
+  }
+  return <Menu trigger={<IconButton label="More actions" icon={<Ellipsis size={15} />} />} items={items} />;
+}
+
+function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
+  const count = message.reply_count;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mt-1 flex items-center gap-2 rounded-md px-1.5 py-0.5 -ml-1.5 text-[12.5px] hover:bg-surface-2"
+    >
+      <span className="font-medium text-accent-text">
+        {count} {count === 1 ? "reply" : "replies"}
+      </span>
+      {message.last_reply_ms && <span className="text-faint">Last reply {formatTime(message.last_reply_ms)}</span>}
+      {message.unread_replies > 0 && (
+        <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white">
+          {message.unread_replies} new
+        </span>
+      )}
+    </button>
+  );
+}

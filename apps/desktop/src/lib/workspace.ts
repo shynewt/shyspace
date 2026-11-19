@@ -1,7 +1,13 @@
 import { createContext, useContext } from "react";
 import type { Channel, Page, Session } from "./api";
 
-export type View = { kind: "channel"; id: string } | { kind: "page"; id: string };
+export type View =
+  /** `thread` opens that thread beside the channel; `focus` scrolls to and highlights a message. */
+  { kind: "channel"; id: string; thread?: string; focus?: string } | { kind: "page"; id: string } | { kind: "inbox" };
+
+export function viewKey(view: View): string {
+  return view.kind === "inbox" ? "inbox" : `${view.kind}:${view.id}`;
+}
 
 export type WorkspaceContextValue = {
   session: Session;
@@ -20,5 +26,18 @@ export function useWorkspace() {
 }
 
 export function sameView(left: View | null, right: View | null) {
-  return left?.kind === right?.kind && left?.id === right?.id;
+  return left !== null && right !== null && viewKey(left) === viewKey(right);
+}
+
+/** Channels then pages (as the page tree lists them), in sidebar order. */
+export function sidebarViews(channels: Channel[], pages: Page[]): View[] {
+  const ordered: View[] = channels.map((channel) => ({ kind: "channel", id: channel.id }));
+  const addPages = (parent: string | null) => {
+    for (const page of pages.filter((candidate) => candidate.parent === parent)) {
+      ordered.push({ kind: "page", id: page.id });
+      addPages(page.id);
+    }
+  };
+  addPages(null);
+  return ordered;
 }

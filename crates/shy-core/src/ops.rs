@@ -77,6 +77,23 @@ pub enum Op {
     StorageSettings {
         bucket: BucketConfig,
     },
+    /// New text for a message. Only its author may edit it.
+    MessageEdit {
+        id: EntityId,
+        text: String,
+    },
+    /// Anyone may rename a channel; the latest rename wins.
+    ChannelRename {
+        id: EntityId,
+        name: String,
+    },
+    /// Deletes whatever `id` names: a message, a channel (with its messages)
+    /// or a page. Deletes are permanent and win over everything else about
+    /// their target, whatever order ops arrive in. The owner or the admin
+    /// may delete.
+    Delete {
+        id: EntityId,
+    },
 }
 
 /// An op that is validly signed but breaks a rule (someone else's id, an
@@ -103,6 +120,8 @@ impl Op {
     pub fn is_permitted(&self, author: &PublicKey, admin: &PublicKey) -> bool {
         match self {
             Op::StorageSettings { .. } => author == admin,
+            Op::MessageEdit { id, .. } => is_owned_by(id, author),
+            Op::Delete { id } => author == admin || is_owned_by(id, author),
             _ => true,
         }
     }
@@ -132,4 +151,58 @@ pub struct VerifiedOp {
     pub author: PublicKey,
     pub seq: u64,
     pub body: OpBody,
+}
+
+const MAX_CHANNEL_NAME_CHARS: usize = 80;
+
+/// Turns what someone typed into a channel name: lowercase, words joined by
+/// dashes, no leading `#`.
+pub fn normalize_channel_name(raw: &str) -> anyhow::Result<String> {
+    let name = raw
+        .trim()
+        .trim_start_matches('#')
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-");
+    anyhow::ensure!(
+        is_valid_channel_name(&name),
+        "channel names use letters, numbers, dashes, dots and underscores (up to {MAX_CHANNEL_NAME_CHARS})"
+    );
+    Ok(name)
+}
+
+/// Renames from anyone must follow the rule new names follow. Names reach
+/// everyone's sidebar: no control or invisible characters, bounded length.
+pub fn is_valid_channel_name(name: &str) -> bool {
+    let length = name.chars().count();
+    (1..=MAX_CHANNEL_NAME_CHARS).contains(&length)
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// Channels created before the naming rule may hold any text, and every
+/// member must still list them the same way: instead of rejecting a
+/// created name, drop control and invisible characters and cut it short.
+pub fn clean_channel_name(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control() && !is_invisible_format_char(*c))
+        .take(MAX_CHANNEL_NAME_CHARS)
+        .collect()
+}
+
+/// Zero-width and text-direction characters, which can disguise a name.
+fn is_invisible_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+    )
 }

@@ -57,6 +57,12 @@ function JoinRequest({ invite }: { invite: Invite }) {
           {invite.requester_name} wants to join
         </div>
         {invite.label && <div className="mt-0.5 text-[12px] text-muted">Invite: {invite.label}</div>}
+        {invite.requester_is_bot && (
+          <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+            This is an AI agent. It will read every channel and page, and what it reads goes to its AI provider:
+            end-to-end encryption ends there.
+          </p>
+        )}
         <div className="mt-2 rounded-lg bg-surface px-2.5 py-2">
           <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-muted">
             <ShieldCheck size={13} /> Safety code

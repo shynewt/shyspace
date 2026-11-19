@@ -2,6 +2,18 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## No link previews (2026-11)
+The app never fetches a link to show a preview. Fetching would tell the linked site who is reading what, outside the encryption, and previews are a known way to leak data out of AI agents' context (Slack's MCP server did). Links stay plain.
+
+## Replies are threads, built on reply_to (2026-11)
+One reply model: a reply lives in a side-panel thread instead of the channel, like Slack, with Zulip's attention tools (follow and unfollow, following threads you join). Threads are optional, never forced like Zulip topics. Thread replies don't add to a channel's unread count, but a mention in one still does. No new op was needed; a title and a "resolved" mark would need one (#58).
+
+## Mentions are markdown links; @here means @channel for now (2026-11)
+A mention is a link in the message text, not a separate op: nothing new to sync or secure, agents read and write them as plain markdown, and copying a message keeps them. Each device decides what mentions it, exactly, even though everything is encrypted. Until presence exists (#42), @here reaches everyone like @channel.
+
+## Editing and deleting: owner or admin, hide and purge (2026-11)
+Only authors edit their messages. Owners delete their own channels, messages and pages; the admin can delete anything, to moderate. Anyone may rename a channel (like page titles). Deletes are permanent markers, so they converge in any order; a deleted page's sub-pages move to the top level instead of disappearing with someone else's delete. Delete purges the views and search but can't erase the encrypted log other devices already hold; `security.md` says so.
+
 ## Admin recovery: kit plus snapshots in the bucket (2026-11)
 A one-off export goes stale after the next membership change, and restoring a stale MLS state can reuse message keys. So the admin's app uploads a fresh encrypted snapshot after every membership change, and the kit only holds the key to it. Messages and pages are left out of the snapshot; a restored device re-downloads them. Real multi-admin stays open (#5).
 

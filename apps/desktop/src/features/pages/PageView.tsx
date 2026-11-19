@@ -1,10 +1,10 @@
-import { ChevronRight, FilePlus2, Link2 } from "lucide-react";
+import { ChevronRight, FilePlus2, Link2, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
 import { reportError, showToast } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
-import { Button } from "../../ui";
+import { Button, ConfirmDialog } from "../../ui";
 import { Editor } from "./Editor";
 
 function ancestorsOf(page: Page | undefined, pages: Page[]): Page[] {
@@ -21,6 +21,7 @@ function ancestorsOf(page: Page | undefined, pages: Page[]): Page[] {
 export function PageView({ pageId }: { pageId: string }) {
   const { pages, navigate } = useWorkspace();
   const page = pages.find((candidate) => candidate.id === pageId);
+  const [isConfirmingDelete, setConfirmingDelete] = useState(false);
 
   const copyLink = () =>
     navigator.clipboard
@@ -60,8 +61,21 @@ export function PageView({ pageId }: { pageId: string }) {
           <Button variant="ghost" size="sm" icon={<Link2 size={14} />} onClick={copyLink}>
             Copy link
           </Button>
+          {page?.can_delete && (
+            <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setConfirmingDelete(true)}>
+              Delete
+            </Button>
+          )}
         </div>
       </header>
+      <ConfirmDialog
+        open={isConfirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title={`Delete "${page?.title || "Untitled"}"?`}
+        description="The page disappears for everyone. Its sub-pages stay and move to the top level. This can't be undone."
+        confirmLabel="Delete page"
+        onConfirm={() => api.deletePage(pageId)}
+      />
       <div className="flex-1 overflow-y-auto">
         <motion.article
           className="mx-auto max-w-[760px] px-12 pt-14"

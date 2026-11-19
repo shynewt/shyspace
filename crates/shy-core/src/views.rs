@@ -54,6 +54,45 @@ mod tests {
 pub struct Channel {
     pub id: EntityId,
     pub name: String,
+    /// Whether this member may delete it (its owner or the admin).
+    pub can_delete: bool,
+    /// Messages by others since this member's read position.
+    pub unread: u32,
+    /// How many of those mention this member.
+    pub unread_mentions: u32,
+    /// The last message this member has read, if any.
+    pub last_read: Option<MessageCursor>,
+    /// Which new messages here alert this member.
+    pub notify: NotifyLevel,
+}
+
+/// A personal, per-channel choice of which new messages alert you.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifyLevel {
+    All,
+    #[default]
+    Mentions,
+    Nothing,
+}
+
+impl NotifyLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NotifyLevel::All => "all",
+            NotifyLevel::Mentions => "mentions",
+            NotifyLevel::Nothing => "nothing",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "all" => Some(NotifyLevel::All),
+            "mentions" => Some(NotifyLevel::Mentions),
+            "nothing" => Some(NotifyLevel::Nothing),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -75,6 +114,22 @@ pub struct Message {
     pub created_ms: i64,
     /// Position in the channel's order; pass it back as a cursor to page.
     pub lamport: u64,
+    pub is_edited: bool,
+    /// Whether this member may edit it (its author).
+    pub can_edit: bool,
+    /// Whether this member may delete it (its author or the admin).
+    pub can_delete: bool,
+    /// Whether it mentions this member (directly, or @channel / @here).
+    pub mentions_me: bool,
+    /// For a thread's first message: how many replies it has, and when the
+    /// latest came.
+    pub reply_count: u32,
+    pub last_reply_ms: Option<i64>,
+    /// Whether this member follows the thread: new replies alert them.
+    pub is_following: bool,
+    /// Replies by others since this member last read the thread (counted
+    /// only when following).
+    pub unread_replies: u32,
     pub reactions: Vec<Reaction>,
 }
 
@@ -86,12 +141,21 @@ pub struct MessageCursor {
     pub author: String,
 }
 
+impl MessageCursor {
+    /// Whether this position comes before `message` in channel order.
+    pub fn precedes(&self, message: &Message) -> bool {
+        (self.lamport, self.author.as_str()) < (message.lamport, message.author.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Page {
     pub id: EntityId,
     pub parent: Option<EntityId>,
     pub title: String,
     pub updated_ms: i64,
+    /// Whether this member may delete it (its owner or the admin).
+    pub can_delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -111,6 +175,8 @@ pub struct SearchHit {
     /// Matches are wrapped in \u{1} … \u{2} markers for highlighting.
     pub snippet: String,
     pub channel: Option<EntityId>,
+    /// For a reply, the first message of its thread.
+    pub thread_root: Option<EntityId>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -154,6 +220,19 @@ pub struct StorageSettings {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Change {
+    /// A new message from someone else that this member's level for its
+    /// channel says should alert them. Only recent ones: catching up on old
+    /// messages never alerts.
+    Alert {
+        channel: EntityId,
+        channel_name: String,
+        message: EntityId,
+        /// The author's member id (hex) and name ("" until their profile arrives).
+        author: String,
+        author_name: String,
+        /// One line of plain text, mentions shown as @name.
+        preview: String,
+    },
     Channels,
     Messages {
         channel: EntityId,
@@ -169,4 +248,37 @@ pub enum Change {
     Storage,
     Sync,
     Removed,
+}
+
+/// What needs your attention, across channels and threads.
+#[derive(Debug, Clone, Serialize)]
+pub struct Inbox {
+    /// Unread mentions of you and new replies in threads you follow, newest first.
+    pub attention: Vec<InboxItem>,
+    /// Channels with unread messages.
+    pub channels: Vec<Channel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InboxItem {
+    pub message: Message,
+    pub channel_name: String,
+    /// The first message of the thread it's in, if it's a reply.
+    pub thread_root: Option<EntityId>,
+    pub reason: InboxReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InboxReason {
+    Mention,
+    ThreadReply,
+}
+
+/// A message found from a `shy://message/<id>` link.
+#[derive(Debug, Clone, Serialize)]
+pub struct LinkedMessage {
+    pub message: Message,
+    /// The first message of its thread, if it's a reply.
+    pub thread_root: Option<EntityId>,
 }

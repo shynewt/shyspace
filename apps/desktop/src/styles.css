@@ -178,6 +178,19 @@
   font-weight: 500;
 }
 
+.prose-chat .mention {
+  border-radius: 4px;
+  padding: 0 0.2rem;
+  font-weight: 500;
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.prose-chat .mention-me {
+  color: var(--text);
+  background: color-mix(in srgb, var(--warning) 28%, transparent);
+}
+
 mark.hit {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: inherit;

@@ -50,6 +50,21 @@ CREATE TABLE invites (
 DROP TABLE deliveries;
 CREATE TABLE deliveries (joiner BLOB PRIMARY KEY, token TEXT NOT NULL, payload BLOB NOT NULL);
 ",
+    "
+CREATE TABLE message_edits (message TEXT PRIMARY KEY, text TEXT NOT NULL, lamport INTEGER NOT NULL);
+CREATE TABLE channel_names (
+    channel TEXT PRIMARY KEY, name TEXT NOT NULL, lamport INTEGER NOT NULL, author BLOB NOT NULL);
+CREATE TABLE deleted (id TEXT PRIMARY KEY);
+",
+    "
+CREATE TABLE read_markers (channel TEXT PRIMARY KEY, lamport INTEGER NOT NULL, author BLOB NOT NULL);
+",
+    "
+CREATE TABLE channel_notify (channel TEXT PRIMARY KEY, level TEXT NOT NULL);
+",
+    "
+CREATE TABLE thread_follows (root TEXT PRIMARY KEY, is_following INTEGER NOT NULL);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

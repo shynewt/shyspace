@@ -390,3 +390,260 @@ async fn an_op_that_cannot_apply_does_not_block_later_ones() {
     assert!(texts.contains(&"good after bad".to_string()));
     assert!(!texts.contains(&"bad".to_string()));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forged_edits_and_deletes_of_someone_elses_content_are_skipped() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "the real text", None).unwrap();
+    let page = admin.create_page("Plans", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let (epoch, key) = current_key(&bob);
+    let first_seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    let forgeries = [
+        Op::MessageEdit {
+            id: message.clone(),
+            text: "forged".into(),
+        },
+        Op::Delete { id: message.clone() },
+        Op::Delete { id: general.clone() },
+        Op::Delete { id: page.clone() },
+    ];
+    for (offset, op) in forgeries.into_iter().enumerate() {
+        let body = OpBody {
+            lamport: 9_000 + offset as u64,
+            timestamp_ms: 0,
+            op,
+        };
+        let seq = first_seq + offset as u64;
+        admin
+            .receive(crypto::seal(&bob.inner.identity, &key, epoch, seq, &body).unwrap())
+            .unwrap();
+    }
+    admin.sync().await;
+
+    let messages = admin.messages(&general, None, 50).unwrap();
+    let kept = messages.iter().find(|candidate| candidate.id == message).unwrap();
+    assert_eq!(kept.text, "the real text");
+    assert!(!kept.is_edited);
+    assert!(
+        admin
+            .channels()
+            .unwrap()
+            .iter()
+            .any(|channel| channel.id == general)
+    );
+    assert!(
+        admin
+            .pages()
+            .unwrap()
+            .iter()
+            .any(|candidate| candidate.id == page)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn edits_and_deletes_must_name_an_item_of_the_right_kind() {
+    let (_root, _bucket, admin, _bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let page = admin.create_page("Plans", None).unwrap();
+    let message = admin.send_message(&general, "hello", None).unwrap();
+
+    assert!(
+        admin.delete_message(&general).is_err(),
+        "a channel id isn't a message"
+    );
+    assert!(
+        admin.edit_message(&page, "text").is_err(),
+        "a page id isn't a message"
+    );
+    assert!(admin.delete_page(&message).is_err(), "a message id isn't a page");
+    assert!(admin.delete_channel(&page).is_err(), "a page id isn't a channel");
+    assert!(admin.edit_message("missing", "text").is_err());
+    assert!(
+        admin
+            .channels()
+            .unwrap()
+            .iter()
+            .any(|channel| channel.id == general)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn channel_names_from_others_must_be_plain_and_short() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let (epoch, key) = current_key(&bob);
+    let first_seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    let long_name = "x".repeat(10_000);
+    let renames = [
+        "fine-name",
+        "\u{202e}lanreg",
+        "",
+        long_name.as_str(),
+        "line\nbreak",
+    ];
+    let mut ops: Vec<Op> = renames
+        .into_iter()
+        .map(|name| Op::ChannelRename {
+            id: general.clone(),
+            name: name.into(),
+        })
+        .collect();
+    ops.push(Op::Message {
+        id: crate::ops::new_owned_id(&bob.me()),
+        channel: general.clone(),
+        text: "still delivered".into(),
+        reply_to: None,
+    });
+    for (offset, op) in ops.into_iter().enumerate() {
+        let body = OpBody {
+            lamport: 9_000 + offset as u64,
+            timestamp_ms: 0,
+            op,
+        };
+        let seq = first_seq + offset as u64;
+        admin
+            .receive(crypto::seal(&bob.inner.identity, &key, epoch, seq, &body).unwrap())
+            .unwrap();
+    }
+
+    let names: Vec<_> = admin
+        .channels()
+        .unwrap()
+        .into_iter()
+        .map(|channel| channel.name)
+        .collect();
+    assert_eq!(
+        names,
+        vec!["fine-name".to_string()],
+        "later, invalid names are skipped"
+    );
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert!(texts.contains(&"still delivered".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ops_from_a_newer_version_wait_instead_of_being_dropped() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let (epoch, key) = current_key(&bob);
+    let seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    // An op body whose kind of change this version doesn't know.
+    let mut unknown_kind = postcard::to_stdvec(&(9_000u64, 0i64)).unwrap();
+    unknown_kind.push(100);
+    let from_the_future = crypto::seal_bytes(&bob.inner.identity, &key, epoch, seq, unknown_kind).unwrap();
+    let next = OpBody {
+        lamport: 9_001,
+        timestamp_ms: 0,
+        op: Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: "after the new kind".into(),
+            reply_to: None,
+        },
+    };
+    let next = crypto::seal(&bob.inner.identity, &key, epoch, seq + 1, &next).unwrap();
+
+    admin.receive(from_the_future).unwrap();
+    admin.receive(next).unwrap();
+    admin.sync().await;
+
+    assert_eq!(
+        admin.state().store.pending().unwrap().len(),
+        2,
+        "both wait for an update"
+    );
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert!(!texts.contains(&"after the new kind".to_string()));
+    assert!(admin.status().needs_update, "the app says to update");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_op_far_ahead_raises_no_update_alarm() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let (epoch, key) = current_key(&bob);
+    let far_ahead = bob.state().store.next_seq(&bob.me()).unwrap() + 500;
+    let mut junk = postcard::to_stdvec(&(9_000u64, 0i64)).unwrap();
+    junk.push(100);
+    admin
+        .receive(crypto::seal_bytes(&bob.inner.identity, &key, epoch, far_ahead, junk).unwrap())
+        .unwrap();
+    admin.sync().await;
+
+    let status = admin.status();
+    assert!(!status.needs_update);
+    assert_eq!(status.error, None, "sync still reports success");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lost_op_is_fetched_again_from_the_bucket() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "second", None).unwrap();
+    bob.send_message(&general, "third", None).unwrap();
+    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
+    let third = unpushed.last().unwrap().clone();
+    bob.sync().await;
+
+    // As if the admin had read past "second" in the bucket and then lost it.
+    admin.state().store.set_cursor(&bob.me(), "z").unwrap();
+    admin.receive(third).unwrap();
+    admin.sync().await;
+    admin.sync().await;
+
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert!(
+        texts.contains(&"second".to_string()) && texts.contains(&"third".to_string()),
+        "{texts:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn channels_named_before_the_naming_rule_still_show_for_everyone() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let (epoch, key) = current_key(&bob);
+    let first_seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    for (offset, name) in ["q&a", "\u{202e}evil\u{200b}name"].into_iter().enumerate() {
+        let body = OpBody {
+            lamport: 9_000 + offset as u64,
+            timestamp_ms: 0,
+            op: Op::ChannelCreate {
+                id: crate::ops::new_owned_id(&bob.me()),
+                name: name.into(),
+            },
+        };
+        let seq = first_seq + offset as u64;
+        admin
+            .receive(crypto::seal(&bob.inner.identity, &key, epoch, seq, &body).unwrap())
+            .unwrap();
+    }
+
+    let names: Vec<_> = admin
+        .channels()
+        .unwrap()
+        .into_iter()
+        .map(|channel| channel.name)
+        .collect();
+    assert!(names.contains(&"q&a".to_string()), "{names:?}");
+    assert!(
+        names.contains(&"evilname".to_string()),
+        "invisible characters are dropped: {names:?}"
+    );
+}

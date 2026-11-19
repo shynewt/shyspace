@@ -1,6 +1,13 @@
 mod collaboration;
+mod editing;
 mod hardening;
+mod inbox;
 mod invites;
+mod mentions;
+mod notifications;
+mod reading;
 mod recovery;
+mod search;
 mod storage;
 mod support;
+mod threads;
