@@ -5,7 +5,7 @@ use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
 use super::Store;
-use crate::views::{Channel, Member, Message, MessageCursor, Page, Reaction, SearchHit};
+use crate::views::{Channel, Member, Message, MessageCursor, NotifyLevel, Page, Reaction, SearchHit};
 
 impl Store {
     pub fn page_state(&self, id: &str) -> Result<Option<Vec<u8>>> {
@@ -29,6 +29,7 @@ impl Store {
                 unread: 0,
                 unread_mentions: 0,
                 last_read: None,
+                notify: NotifyLevel::default(),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

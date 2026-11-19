@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { reportError } from "./toast";
 
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
+export type NotifyLevel = "all" | "mentions" | "nothing";
 export type Channel = {
   id: string;
   name: string;
@@ -10,6 +11,7 @@ export type Channel = {
   unread: number;
   unread_mentions: number;
   last_read: MessageCursor | null;
+  notify: NotifyLevel;
 };
 export type Reaction = { emoji: string; count: number; mine: boolean };
 export type Message = {
@@ -67,6 +69,15 @@ export type BucketConfig = {
 };
 
 export type Change =
+  | {
+      kind: "alert";
+      channel: string;
+      channel_name: string;
+      message: string;
+      author: string;
+      author_name: string;
+      preview: string;
+    }
   | { kind: "channels" }
   | { kind: "messages"; channel: string }
   | { kind: "pages" }
@@ -95,6 +106,8 @@ export const api = {
   renameChannel: (channel: string, name: string) => invoke<void>("rename_channel", { channel, name }),
   deleteChannel: (channel: string) => invoke<void>("delete_channel", { channel }),
   markRead: (channel: string, message: string) => invoke<void>("mark_read", { channel, message }),
+  setNotifyLevel: (channel: string, level: NotifyLevel) => invoke<void>("set_notify_level", { channel, level }),
+  showAlert: (title: string, body: string) => invoke<void>("show_alert", { title, body }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>

@@ -11,6 +11,7 @@ export function NavItem({
   label,
   unread = 0,
   mentions = 0,
+  isMuted = false,
   depth = 0,
   leading,
   trailing,
@@ -22,6 +23,8 @@ export function NavItem({
   unread?: number;
   /** How many of those mention you; shown as a red badge instead. */
   mentions?: number;
+  /** Muted: dimmed, and only mentions get a badge. */
+  isMuted?: boolean;
   depth?: number;
   /** Rendered before the item, outside its button (like a fold toggle). */
   leading?: ReactNode;
@@ -29,7 +32,7 @@ export function NavItem({
 }) {
   const { view: current, navigate } = useWorkspace();
   const isActive = sameView(current, view);
-  const hasUnread = unread > 0 && !isActive;
+  const hasUnread = !isActive && (isMuted ? mentions > 0 : unread > 0);
   return (
     <div className="group relative flex items-center" style={{ paddingLeft: depth * INDENT_PX }}>
       {isActive && (
@@ -50,6 +53,7 @@ export function NavItem({
           "relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-[13.5px] transition-colors",
           isActive ? "font-medium text-ink" : "text-muted hover:bg-surface-2/70 hover:text-ink",
           hasUnread && "font-semibold text-ink",
+          isMuted && !hasUnread && !isActive && "opacity-60",
         )}
       >
         <span className={isActive ? "text-accent" : "text-faint"}>{icon}</span>

@@ -1,12 +1,12 @@
-//! Read positions: personal, kept on this device only, never sent to others.
-//! A channel's position is the last message read, in channel order.
+//! Personal state, kept on this device only and never sent to others: read
+//! positions (the last message read in each channel) and alert levels.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
 use super::Store;
-use crate::views::MessageCursor;
+use crate::views::{MessageCursor, NotifyLevel};
 
 impl Store {
     /// Moves the read position in `channel` forward to `message`. A stale
@@ -62,5 +62,29 @@ impl Store {
             Ok((row.get(0)?, row.get(1)?))
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn notify_level(&self, channel: &str) -> Result<NotifyLevel> {
+        let level: Option<String> = self
+            .db
+            .query_row(
+                "SELECT level FROM channel_notify WHERE channel = ?",
+                [channel],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match level {
+            None => Ok(NotifyLevel::default()),
+            Some(text) => NotifyLevel::parse(&text).with_context(|| format!("unknown alert level {text:?}")),
+        }
+    }
+
+    pub fn set_notify_level(&self, channel: &str, level: NotifyLevel) -> Result<()> {
+        self.db.execute(
+            "INSERT INTO channel_notify (channel, level) VALUES (?1, ?2)
+             ON CONFLICT (channel) DO UPDATE SET level = ?2",
+            params![channel, level.as_str()],
+        )?;
+        Ok(())
     }
 }

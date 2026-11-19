@@ -2,6 +2,7 @@
 //! membership changes, pulls and pushes ops through the bucket, and applies
 //! ops arriving live over gossip.
 
+mod alerts;
 mod receive;
 mod replicate;
 

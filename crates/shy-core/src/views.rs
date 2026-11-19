@@ -62,6 +62,37 @@ pub struct Channel {
     pub unread_mentions: u32,
     /// The last message this member has read, if any.
     pub last_read: Option<MessageCursor>,
+    /// Which new messages here alert this member.
+    pub notify: NotifyLevel,
+}
+
+/// A personal, per-channel choice of which new messages alert you.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifyLevel {
+    All,
+    #[default]
+    Mentions,
+    Nothing,
+}
+
+impl NotifyLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NotifyLevel::All => "all",
+            NotifyLevel::Mentions => "mentions",
+            NotifyLevel::Nothing => "nothing",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "all" => Some(NotifyLevel::All),
+            "mentions" => Some(NotifyLevel::Mentions),
+            "nothing" => Some(NotifyLevel::Nothing),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -178,6 +209,19 @@ pub struct StorageSettings {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Change {
+    /// A new message from someone else that this member's level for its
+    /// channel says should alert them. Only recent ones: catching up on old
+    /// messages never alerts.
+    Alert {
+        channel: EntityId,
+        channel_name: String,
+        message: EntityId,
+        /// The author's member id (hex) and name ("" until their profile arrives).
+        author: String,
+        author_name: String,
+        /// One line of plain text, mentions shown as @name.
+        preview: String,
+    },
     Channels,
     Messages {
         channel: EntityId,

@@ -1,12 +1,18 @@
-import { Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
+import { AtSign, Bell, BellOff, Check, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useRef, useState } from "react";
-import { api, type Channel } from "../../lib/api";
+import { type ReactNode, useRef, useState } from "react";
+import { api, type Channel, type NotifyLevel } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, IconButton, Menu, type MenuItem } from "../../ui";
 import { NavItem } from "./NavItem";
+
+const NOTIFY_CHOICES: { level: NotifyLevel; label: string; icon: ReactNode }[] = [
+  { level: "all", label: "Notify for every message", icon: <Bell size={14} /> },
+  { level: "mentions", label: "Notify for mentions", icon: <AtSign size={14} /> },
+  { level: "nothing", label: "Mute channel", icon: <BellOff size={14} /> },
+];
 
 export function ChannelList({
   isAdding,
@@ -48,7 +54,15 @@ function ChannelItem({ channel }: { channel: Channel }) {
       />
     );
   }
-  const items: MenuItem[] = [{ label: "Rename", icon: <Pencil size={14} />, onSelect: () => setRenaming(true) }];
+  const setLevel = (level: NotifyLevel) => api.setNotifyLevel(channel.id, level).catch(reportError);
+  const items: MenuItem[] = [
+    { label: "Rename", icon: <Pencil size={14} />, onSelect: () => setRenaming(true) },
+    ...NOTIFY_CHOICES.map((choice) => ({
+      label: choice.label,
+      icon: channel.notify === choice.level ? <Check size={14} /> : choice.icon,
+      onSelect: () => setLevel(choice.level),
+    })),
+  ];
   if (channel.can_delete) {
     items.push({
       label: "Delete channel",
@@ -65,6 +79,7 @@ function ChannelItem({ channel }: { channel: Channel }) {
         label={channel.name}
         unread={channel.unread}
         mentions={channel.unread_mentions}
+        isMuted={channel.notify === "nothing"}
         trailing={
           <span className="absolute right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
             <Menu

@@ -2,6 +2,7 @@ import { UserX } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Session } from "../../lib/api";
+import { useAlerts } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
 import { type View, WorkspaceContext } from "../../lib/workspace";
 import { Dialog } from "../../ui";
@@ -43,6 +44,8 @@ export function Shell({ session }: { session: Session }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  useAlerts(view);
 
   const navigate = useCallback((next: View) => setView(next), []);
   const context = useMemo(

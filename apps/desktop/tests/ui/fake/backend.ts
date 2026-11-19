@@ -15,6 +15,7 @@ import type {
   Member,
   Message,
   MessageCursor,
+  NotifyLevel,
   Page,
   Session,
   StorageSettings,
@@ -27,7 +28,7 @@ import { search } from "./search";
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
 
-type StoredChannel = Omit<Channel, "can_delete" | "unread" | "unread_mentions" | "last_read">;
+type StoredChannel = Omit<Channel, "can_delete" | "unread" | "unread_mentions" | "last_read" | "notify">;
 type StoredMessage = Omit<
   Message,
   "author_name" | "author_is_bot" | "reactions" | "can_edit" | "can_delete" | "mentions_me"
@@ -57,8 +58,9 @@ export class FakeBackend {
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
   private storage: StorageSettings | null = null;
   private lamport = 0;
-  /** Personal read positions, by channel. */
+  /** Personal read positions and alert levels, by channel. */
   private readMarkers = new Map<string, MessageCursor>();
+  private notifyLevels = new Map<string, NotifyLevel>();
 
   /** Starts as the admin of a workspace with #general, as `create` would. */
   static withWorkspace(workspaceName: string, myName: string): FakeBackend {
@@ -95,8 +97,27 @@ export class FakeBackend {
     return member.id;
   }
 
+  /** Desktop notifications the app asked to show. */
+  readonly alertsShown: { title: string; body: string }[] = [];
+
   receiveMessage(author: string, channelName: string, text: string): string {
-    return this.writeMessage(author, this.channelNamed(channelName).id, text, null);
+    const channel = this.channelNamed(channelName);
+    const id = this.writeMessage(author, channel.id, text, null);
+    const level = this.notifyLevels.get(channel.id) ?? "mentions";
+    if (level === "all" || (level === "mentions" && mentions(text, this.me()))) {
+      const member = this.members.find((candidate) => candidate.id === author);
+      this.notify({
+        kind: "alert",
+        channel: channel.id,
+        channel_name: channel.name,
+        message: id,
+        author,
+        author_name: member?.name ?? "",
+        // Like the core: mentions shown as @name.
+        preview: text.replace(/\[(@[^\]]*)\]\(shy:\/\/(?:member|mention)\/[0-9a-z]+\)/g, "$1"),
+      });
+    }
+    return id;
   }
 
   receiveJoinRequest(name: string, kind: Kind = { kind: "person" }): string {
@@ -145,7 +166,14 @@ export class FakeBackend {
           unread: this.unreadIn(channel.id).length,
           unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.me())).length,
           last_read: this.readMarkers.get(channel.id) ?? null,
+          notify: this.notifyLevels.get(channel.id) ?? "mentions",
         }));
+      case "set_notify_level":
+        this.notifyLevels.set(requireString(args, "channel"), requireString(args, "level") as NotifyLevel);
+        return this.notify({ kind: "channels" });
+      case "show_alert":
+        this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
+        return null;
       case "mark_read":
         return this.markRead(requireString(args, "channel"), requireString(args, "message"));
       case "create_channel":

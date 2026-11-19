@@ -21,6 +21,7 @@ impl Workspace {
             channel.unread = count(unread.len());
             channel.unread_mentions = count(unread.iter().filter(|(_, text)| mentions(text, &my_id)).count());
             channel.last_read = state.store.read_marker(&channel.id)?;
+            channel.notify = state.store.notify_level(&channel.id)?;
             channel.can_delete = self.may(&Op::Delete {
                 id: channel.id.clone(),
             });

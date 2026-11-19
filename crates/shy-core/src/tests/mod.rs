@@ -3,6 +3,7 @@ mod editing;
 mod hardening;
 mod invites;
 mod mentions;
+mod notifications;
 mod reading;
 mod recovery;
 mod storage;

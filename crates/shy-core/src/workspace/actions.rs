@@ -9,7 +9,7 @@ use crate::{
     ops::{EntityId, Envelope, Op, OpBody, VerifiedOp, new_owned_id, normalize_channel_name, now_ms},
     pages::{self, Edit},
     storage::ItemKind,
-    views::{Change, Message},
+    views::{Change, Message, NotifyLevel},
 };
 
 const MAX_MENTION_SCAN: u32 = 500;
@@ -138,6 +138,14 @@ impl Workspace {
             self.emit(Change::Channels);
         }
         Ok(found)
+    }
+
+    /// Which new messages in `channel` alert you. Personal, like read positions.
+    pub fn set_notify_level(&self, channel: &str, level: NotifyLevel) -> Result<()> {
+        self.require_item(channel, ItemKind::Channel)?;
+        self.state().store.set_notify_level(channel, level)?;
+        self.emit(Change::Channels);
+        Ok(())
     }
 
     /// Moves your read position in `channel` up to `message`. Personal: kept
