@@ -13,7 +13,7 @@ pub use storage::StorageUpdate;
 
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use iroh::{PublicKey, SecretKey};
 use tokio::sync::{Notify, broadcast};
 
@@ -168,9 +168,13 @@ impl Workspace {
         state.mls.members()
     }
 
-    pub async fn shutdown(&self) {
+    /// Uploads what wasn't sent yet, so a message written just before
+    /// quitting isn't held back until the next start, then closes the network.
+    pub async fn shutdown(&self) -> Result<()> {
+        let uploaded = self.push().await;
         if let Some(net) = &self.inner.net {
             net.shutdown().await;
         }
+        uploaded.context("uploading unsent changes before closing")
     }
 }

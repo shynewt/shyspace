@@ -211,3 +211,21 @@ async fn a_data_folder_opens_in_one_place_at_a_time() {
         .await
         .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutting_down_uploads_what_was_not_sent_yet() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "written just before quitting", None)
+        .unwrap();
+    bob.shutdown().await.unwrap();
+
+    admin.sync().await;
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert!(texts.contains(&"written just before quitting".to_string()));
+}
