@@ -27,3 +27,13 @@ test("creating an invite shows a code to copy", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Copy invite code" })).toBeVisible();
   await expect(page.getByText(/^shy2_/)).toBeVisible();
 });
+
+test("escape closes the members panel right away", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.getByRole("button", { name: /Members & invites/ }).click();
+  await expect(page.getByRole("dialog", { name: "Members" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Members" })).toBeHidden();
+});

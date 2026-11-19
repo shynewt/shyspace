@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Dialog as RadixDialog } from "radix-ui";
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { IconButton } from "./IconButton";
 import { fade, springs } from "./motion";
 
@@ -17,6 +17,7 @@ export function Drawer({
   title: string;
   children: ReactNode;
 }) {
+  const panel = useRef<HTMLElement>(null);
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <AnimatePresence>
@@ -25,8 +26,17 @@ export function Drawer({
             <RadixDialog.Overlay asChild>
               <motion.div {...fade} className="fixed inset-0 z-30 bg-black/20" />
             </RadixDialog.Overlay>
-            <RadixDialog.Content asChild>
+            {/* Focus the panel, not its first button: a focused Close button
+                shows its tooltip, which would take the first Escape. */}
+            <RadixDialog.Content
+              asChild
+              onOpenAutoFocus={(event) => {
+                event.preventDefault();
+                panel.current?.focus();
+              }}
+            >
               <motion.aside
+                ref={panel}
                 initial={{ x: "100%" }}
                 animate={{ x: 0 }}
                 exit={{ x: "100%", transition: { duration: 0.18, ease: "easeIn" } }}
