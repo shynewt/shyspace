@@ -9,7 +9,18 @@ import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 
 /** A thread beside its channel: the first message, its replies, and a reply box. */
-export function ThreadPanel({ root, channelId, onClose }: { root: string; channelId: string; onClose: () => void }) {
+export function ThreadPanel({
+  root,
+  focus,
+  channelId,
+  onClose,
+}: {
+  root: string;
+  /** A reply to scroll to and highlight, from a message link. */
+  focus?: string;
+  channelId: string;
+  onClose: () => void;
+}) {
   const loadThread = useCallback(() => api.thread(root), [root]);
   const thread = useLive(
     loadThread,
@@ -30,6 +41,11 @@ export function ThreadPanel({ root, channelId, onClose }: { root: string; channe
     window.addEventListener("focus", markRead);
     return () => window.removeEventListener("focus", markRead);
   }, [root, latestId, isPresent]);
+
+  const isFocusShown = Boolean(focus && thread?.some((message) => message.id === focus));
+  useEffect(() => {
+    if (isFocusShown) document.getElementById(`message-${focus}`)?.scrollIntoView({ block: "center" });
+  }, [isFocusShown, focus]);
 
   const toggleFollowing = () => {
     if (first) api.setFollowing(root, !first.is_following).catch(reportError);
@@ -80,7 +96,7 @@ export function ThreadPanel({ root, channelId, onClose }: { root: string; channe
             key={reply.id}
             message={reply}
             isContinuation={false}
-            isHighlighted={false}
+            isHighlighted={reply.id === focus}
             onOpenThread={null}
           />
         ))}

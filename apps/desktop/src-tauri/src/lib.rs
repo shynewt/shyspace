@@ -324,6 +324,11 @@ async fn mark_all_read(state: State<'_, AppState>) -> CommandResult<()> {
 }
 
 #[tauri::command]
+async fn linked_message(state: State<'_, AppState>, id: String) -> CommandResult<Option<LinkedMessage>> {
+    current(&state).await?.linked_message(&id).map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
     current(&state)
         .await?
@@ -498,6 +503,7 @@ pub fn run() {
             create_channel,
             rename_channel,
             mark_read,
+            linked_message,
             inbox,
             mark_all_read,
             thread,

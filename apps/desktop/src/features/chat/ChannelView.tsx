@@ -14,6 +14,7 @@ import { ThreadPanel } from "./ThreadPanel";
 const PAGE_SIZE = 100;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const NEAR_EDGE_PX = 80;
+const HIGHLIGHT_MS = 1600;
 
 type Row =
   | { kind: "day"; key: string; label: string }
@@ -49,7 +50,7 @@ function toRows(messages: Message[], unreadFrom: string | null): Row[] {
   return rows;
 }
 
-export function ChannelView({ channelId, thread }: { channelId: string; thread?: string }) {
+export function ChannelView({ channelId, thread, focus }: { channelId: string; thread?: string; focus?: string }) {
   const { channels, session } = useWorkspace();
   const channel = channels.find((candidate) => candidate.id === channelId);
   // Where you left off, as of opening the channel: the line stays put while
@@ -68,6 +69,13 @@ export function ChannelView({ channelId, thread }: { channelId: string; thread?:
   useEffect(() => {
     if (thread) setOpenThread(thread);
   }, [thread]);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+  // A linked message to show: in the channel (loading older history until
+  // it's there), or in the open thread, which handles it.
+  const [pendingFocus, setPendingFocus] = useState(thread ? null : (focus ?? null));
+  useEffect(() => {
+    if (focus && !thread) setPendingFocus(focus);
+  }, [focus, thread]);
   const unreadFrom = useMemo(
     () => (isUnreadLineDismissed ? null : firstUnreadId(messages ?? [], lastReadOnOpen, session.me)),
     [messages, lastReadOnOpen, session.me, isUnreadLineDismissed],
@@ -115,6 +123,28 @@ export function ChannelView({ channelId, thread }: { channelId: string; thread?:
     window.addEventListener("focus", markRead);
     return () => window.removeEventListener("focus", markRead);
   }, [channelId, latestId, isPresent]);
+
+  useEffect(() => {
+    if (!pendingFocus || !messages) return;
+    const target = pendingFocus;
+    if (messages.some((message) => message.id === target)) {
+      setPendingFocus(null);
+      hasScrolledToUnread.current = true;
+      isPinnedToBottom.current = false;
+      document.getElementById(`message-${target}`)?.scrollIntoView({ block: "center" });
+      setHighlighted(target);
+    } else if (hasOlder) {
+      setWindowSize((size) => size + PAGE_SIZE);
+    } else {
+      setPendingFocus(null);
+    }
+  }, [messages, hasOlder, pendingFocus]);
+
+  useEffect(() => {
+    if (!highlighted) return;
+    const timer = setTimeout(() => setHighlighted(null), HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [highlighted]);
 
   const loadOlder = () => {
     if (!hasOlder || heightBeforeLoadingOlder.current !== null || !scroller.current) return;
@@ -171,7 +201,7 @@ export function ChannelView({ channelId, thread }: { channelId: string; thread?:
                   <MessageItem
                     message={row.message}
                     isContinuation={row.isContinuation}
-                    isHighlighted={openThread === row.message.id}
+                    isHighlighted={openThread === row.message.id || highlighted === row.message.id}
                     onOpenThread={() => setOpenThread(row.message.id)}
                   />
                 </motion.div>
@@ -191,7 +221,13 @@ export function ChannelView({ channelId, thread }: { channelId: string; thread?:
       </div>
       <AnimatePresence>
         {openThread && (
-          <ThreadPanel key={openThread} root={openThread} channelId={channelId} onClose={() => setOpenThread(null)} />
+          <ThreadPanel
+            key={openThread}
+            root={openThread}
+            focus={openThread === thread ? focus : undefined}
+            channelId={channelId}
+            onClose={() => setOpenThread(null)}
+          />
         )}
       </AnimatePresence>
     </div>

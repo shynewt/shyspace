@@ -2,8 +2,8 @@ import { createContext, useContext } from "react";
 import type { Channel, Page, Session } from "./api";
 
 export type View =
-  /** `thread` opens that thread beside the channel. */
-  { kind: "channel"; id: string; thread?: string } | { kind: "page"; id: string } | { kind: "inbox" };
+  /** `thread` opens that thread beside the channel; `focus` scrolls to and highlights a message. */
+  { kind: "channel"; id: string; thread?: string; focus?: string } | { kind: "page"; id: string } | { kind: "inbox" };
 
 export function viewKey(view: View): string {
   return view.kind === "inbox" ? "inbox" : `${view.kind}:${view.id}`;

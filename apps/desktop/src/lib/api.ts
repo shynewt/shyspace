@@ -40,6 +40,7 @@ export type InboxItem = {
   thread_root: string | null;
   reason: "mention" | "thread_reply";
 };
+export type LinkedMessage = { message: Message; thread_root: string | null };
 export type Inbox = { attention: InboxItem[]; channels: Channel[] };
 export type MessageCursor = { lamport: number; author: string };
 export type Page = { id: string; parent: string | null; title: string; updated_ms: number; can_delete: boolean };
@@ -119,6 +120,7 @@ export const api = {
   markRead: (channel: string, message: string) => invoke<void>("mark_read", { channel, message }),
   thread: (root: string) => invoke<Message[]>("thread", { root }),
   inbox: () => invoke<Inbox>("inbox"),
+  linkedMessage: (id: string) => invoke<LinkedMessage | null>("linked_message", { id }),
   markAllRead: () => invoke<void>("mark_all_read"),
   setFollowing: (root: string, following: boolean) => invoke<void>("set_following", { root, following }),
   markThreadRead: (root: string, message: string) => invoke<void>("mark_thread_read", { root, message }),
@@ -166,4 +168,6 @@ export function onChange(listener: ChangeListener): () => void {
 }
 
 export const PAGE_LINK_PREFIX = "shy://page/";
+export const MESSAGE_LINK_PREFIX = "shy://message/";
+export const messageLink = (id: string) => `${MESSAGE_LINK_PREFIX}${id}`;
 export const pageLink = (id: string) => `${PAGE_LINK_PREFIX}${id}`;

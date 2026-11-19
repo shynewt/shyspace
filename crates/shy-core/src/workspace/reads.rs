@@ -9,7 +9,7 @@ use crate::{
     ops::Op,
     pages,
     storage::Reply,
-    views::{Channel, Member, Message, MessageCursor, Page, SearchHit},
+    views::{Channel, LinkedMessage, Member, Message, MessageCursor, Page, SearchHit},
 };
 
 impl Workspace {
@@ -55,6 +55,18 @@ impl Workspace {
         let cursor = state.store.message_cursor(message)?.context("no such message")?;
         let messages = state.store.messages(channel, &self.me(), Some(&cursor), limit)?;
         self.as_seen_by_me(&state, channel, messages)
+    }
+
+    /// The message a `shy://message/<id>` link points to, if it still exists.
+    pub fn linked_message(&self, id: &str) -> Result<Option<LinkedMessage>> {
+        let state = self.state();
+        let Some(message) = state.store.message(id, &self.me())? else {
+            return Ok(None);
+        };
+        let thread_root = state.store.thread_root(id)?.filter(|root| root != id);
+        let channel = message.channel.clone();
+        let message = self.as_seen_by_me(&state, &channel, vec![message])?.remove(0);
+        Ok(Some(LinkedMessage { message, thread_root }))
     }
 
     /// The thread starting at `root`: its first message, then every reply.

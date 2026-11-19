@@ -1,12 +1,13 @@
-import { CornerUpLeft, Ellipsis, MessageSquareReply, Pencil, SmilePlus, Trash2 } from "lucide-react";
+import { Copy, CornerUpLeft, Ellipsis, Link2, MessageSquareReply, Pencil, SmilePlus, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useMemo, useState } from "react";
-import { api, type Message } from "../../lib/api";
-import { ChatMarkdown, pageIdsIn } from "../../lib/markdown";
+import { api, type Message, messageLink } from "../../lib/api";
+import { ChatMarkdown, messageIdsIn, pageIdsIn } from "../../lib/markdown";
 import { displayName, formatTime } from "../../lib/people";
-import { reportError } from "../../lib/toast";
+import { reportError, showToast } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs } from "../../ui";
+import { MessageCard } from "./MessageCard";
 import { MessageEditor } from "./MessageEditor";
 import { PageCard } from "./PageCard";
 
@@ -29,6 +30,7 @@ export const MessageItem = memo(function MessageItem({
   const [isEditing, setEditing] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const linkedMessages = useMemo(() => messageIdsIn(message.text).filter((id) => id !== message.id), [message]);
   const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
   const name = displayName(message.author_name, message.author);
 
@@ -92,6 +94,9 @@ export const MessageItem = memo(function MessageItem({
         )}
         {linkedPages.map((id) => (
           <PageCard key={id} pageId={id} />
+        ))}
+        {linkedMessages.map((id) => (
+          <MessageCard key={id} messageId={id} />
         ))}
         {message.reactions.length > 0 && (
           <motion.div layout className="mt-1 flex flex-wrap gap-1">
@@ -179,12 +184,24 @@ export const MessageItem = memo(function MessageItem({
 });
 
 function MessageMenu({ message, onEdit, onDelete }: { message: Message; onEdit: () => void; onDelete: () => void }) {
-  const items: MenuItem[] = [];
+  const copy = (text: string, done: string) =>
+    navigator.clipboard.writeText(text).then(() => showToast(done), reportError);
+  const items: MenuItem[] = [
+    {
+      label: "Copy text",
+      icon: <Copy size={14} />,
+      onSelect: () => copy(message.text, "Copied the message's markdown."),
+    },
+    {
+      label: "Copy link",
+      icon: <Link2 size={14} />,
+      onSelect: () => copy(messageLink(message.id), "Link copied. Paste it in any channel to share this message."),
+    },
+  ];
   if (message.can_edit) items.push({ label: "Edit", icon: <Pencil size={14} />, onSelect: onEdit });
   if (message.can_delete) {
     items.push({ label: "Delete", icon: <Trash2 size={14} />, onSelect: onDelete, isDestructive: true });
   }
-  if (items.length === 0) return null;
   return <Menu trigger={<IconButton label="More actions" icon={<Ellipsis size={15} />} />} items={items} />;
 }
 

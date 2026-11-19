@@ -75,7 +75,7 @@ export function Shell({ session }: { session: Session }) {
                 exit={{ opacity: 0, transition: { duration: 0.1 } }}
                 transition={{ duration: 0.2, ease: "easeOut" }}
               >
-                {view.kind === "channel" && <ChannelView channelId={view.id} thread={view.thread} />}
+                {view.kind === "channel" && <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} />}
                 {view.kind === "page" && <PageView pageId={view.id} />}
                 {view.kind === "inbox" && <InboxView />}
               </motion.div>

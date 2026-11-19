@@ -57,13 +57,12 @@ test("the admin can delete someone else's message but not edit it", async ({ pag
   await expect(page.getByRole("article").filter({ hasText: "Buy cheap watches" })).toHaveCount(0);
 });
 
-test("a regular member gets no actions on others' messages", async ({ page }) => {
+test("a regular member can only copy others' messages", async ({ page }) => {
   await openGeneral(page, "?start=member");
   await page.evaluate(() => window.fake.receiveMessage(window.fake.memberNamed("Ada"), "general", "Welcome!"));
 
-  await page.getByRole("article").filter({ hasText: "Welcome!" }).hover();
-  await expect(page.getByRole("button", { name: "Reply" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "More actions" })).toHaveCount(0);
+  await messageActions(page, "Welcome!");
+  await expect(page.getByRole("menuitem")).toHaveText(["Copy text", "Copy link"]);
 });
 
 test("a channel can be renamed from the sidebar", async ({ page }) => {

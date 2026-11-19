@@ -73,6 +73,13 @@ export class FakeChat {
         return this.channelViews();
       case "inbox":
         return this.inbox();
+      case "linked_message": {
+        const id = requireString(args, "id");
+        const message = this.messages.find((candidate) => candidate.id === id);
+        if (!message) return null;
+        const root = rootOf(this.messages, id);
+        return { message: this.present(message), thread_root: root === id ? null : root };
+      }
       case "mark_all_read":
         return this.markAllRead();
       case "set_notify_level":

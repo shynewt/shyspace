@@ -125,3 +125,26 @@ async fn replies_in_followed_threads_alert_and_do_not_count_as_channel_unread() 
         .unwrap();
     assert_eq!(channel.unread_mentions, 1, "a mention in any thread still counts");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_link_finds_the_message_and_its_thread() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let question = admin.send_message(&general, "release?", None).unwrap();
+    let answer = admin
+        .send_message(&general, "friday", Some(question.clone()))
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let top = bob.linked_message(&question).unwrap().unwrap();
+    assert_eq!((top.message.text.as_str(), top.thread_root), ("release?", None));
+    let reply = bob.linked_message(&answer).unwrap().unwrap();
+    assert_eq!(reply.thread_root.as_deref(), Some(question.as_str()));
+
+    admin.delete_message(&answer).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    assert!(
+        bob.linked_message(&answer).unwrap().is_none(),
+        "a deleted message's link leads nowhere"
+    );
+}

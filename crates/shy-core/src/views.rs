@@ -272,3 +272,11 @@ pub enum InboxReason {
     Mention,
     ThreadReply,
 }
+
+/// A message found from a `shy://message/<id>` link.
+#[derive(Debug, Clone, Serialize)]
+pub struct LinkedMessage {
+    pub message: Message,
+    /// The first message of its thread, if it's a reply.
+    pub thread_root: Option<EntityId>,
+}
