@@ -21,6 +21,7 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 - **Junk can't shadow real ops:** ops are stored only after they verify. Parked ops get one row each, keyed by hash, capped per author and in total.
 - **Commits are admin-signed;** members ignore anything else. The admin saves a commit before applying it, and repairs the bucket copy if it goes missing or changes.
 - **Identity binding:** a joiner's key package must be signed by the identity it claims. The invite pins the admin's MLS key, so a forged Welcome is rejected.
+- **Members-only gossip:** peers that aren't current MLS members are refused at connection time, and we only dial members. See `transport/gossip.rs`.
 - **Chat rendering:** message HTML is sanitized with DOMPurify; only http(s), mailto and `shy://page/` links are allowed. External links open in the system browser.
 
 ## Known gaps
@@ -30,7 +31,6 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 - Bucket credentials are shared, so anyone holding them can cause denial of service (#2).
 - Local data (SQLite, keys) is not encrypted at rest (#3).
 - Single admin: if their device is lost, membership can no longer change (#5).
-- Gossip topic membership is not authenticated; content still is (#6).
 
 Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issues?q=label%3Asecurity>
 

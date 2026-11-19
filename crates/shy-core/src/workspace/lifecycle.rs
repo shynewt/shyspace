@@ -242,7 +242,8 @@ impl Workspace {
                 status: Mutex::new(SyncStatus::default()),
             }),
         };
-        if networking == Networking::Online {
+        if let Some(net) = &workspace.inner.net {
+            net.set_members(&workspace.current_members()?);
             workspace.spawn_background(incoming);
         }
         Ok(workspace)

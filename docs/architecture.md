@@ -50,7 +50,7 @@ Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even i
 3. admin only: repair commits, accept join requests, deliver Welcomes;
 4. pull other members' new segments from the bucket;
 5. push our unpushed ops as one segment;
-6. join gossip with peers listed in the bucket.
+6. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
 
 An incoming op is applied only if it decrypts, its signature is valid, and its author was a member in that op's epoch. Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried.
 

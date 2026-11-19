@@ -50,11 +50,13 @@ impl Workspace {
         Ok(())
     }
 
+    /// Refreshes who may gossip with us, then connects to members online.
     pub(super) async fn join_peers(&self) -> Result<()> {
-        if let Some(net) = &self.inner.net {
-            net.join(self.inner.bucket.peers().await?).await?;
-        }
-        Ok(())
+        let Some(net) = &self.inner.net else {
+            return Ok(());
+        };
+        net.set_members(&self.current_members()?);
+        net.join(self.inner.bucket.peers().await?).await
     }
 
     pub(super) async fn announce_self(&self) {

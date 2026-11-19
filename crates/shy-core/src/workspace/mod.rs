@@ -118,6 +118,15 @@ impl Workspace {
         self.inner.config.admin == self.me()
     }
 
+    /// Current MLS members; empty once we've been removed.
+    pub(crate) fn current_members(&self) -> Result<Vec<PublicKey>> {
+        let state = self.state();
+        if !state.mls.is_active() {
+            return Ok(Vec::new());
+        }
+        state.mls.members()
+    }
+
     pub async fn shutdown(&self) {
         if let Some(net) = &self.inner.net {
             net.shutdown().await;
