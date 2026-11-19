@@ -1,5 +1,14 @@
 /** The chat side of the fake: channels, messages, threads and personal state. */
-import type { Change, Channel, Member, Message, MessageCursor, NotifyLevel } from "../../../src/lib/api";
+import type {
+  Change,
+  Channel,
+  Inbox,
+  InboxItem,
+  Member,
+  Message,
+  MessageCursor,
+  NotifyLevel,
+} from "../../../src/lib/api";
 import { mentions } from "../../../src/lib/mentions";
 import { argument, ownedId, requireString } from "./helpers";
 import { followsByDefault, isInChannel, repliesOf, rootOf } from "./threads";
@@ -61,15 +70,11 @@ export class FakeChat {
   answer(command: string, args: Parameters<typeof argument>[0]): unknown {
     switch (command) {
       case "channels":
-        return this.channels.map((channel) => ({
-          ...channel,
-          can_delete: this.mayDelete(channel.id),
-          unread: this.unreadIn(channel.id).filter((message) => isInChannel(this.messages, message)).length,
-          unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.context.me()))
-            .length,
-          last_read: this.readMarkers.get(channel.id) ?? null,
-          notify: this.notifyLevels.get(channel.id) ?? "mentions",
-        }));
+        return this.channelViews();
+      case "inbox":
+        return this.inbox();
+      case "mark_all_read":
+        return this.markAllRead();
       case "set_notify_level":
         this.notifyLevels.set(requireString(args, "channel"), requireString(args, "level") as NotifyLevel);
         return this.context.notify({ kind: "channels" });
@@ -315,6 +320,69 @@ export class FakeChat {
     this.messages = this.messages.filter((candidate) => candidate.id !== id);
     this.reactions = this.reactions.filter((reaction) => reaction.message !== id);
     if (message) this.context.notify({ kind: "messages", channel: message.channel });
+  }
+
+  private channelViews(): Channel[] {
+    return this.channels.map((channel) => ({
+      ...channel,
+      can_delete: this.mayDelete(channel.id),
+      unread: this.unreadIn(channel.id).filter((message) => isInChannel(this.messages, message)).length,
+      unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.context.me())).length,
+      last_read: this.readMarkers.get(channel.id) ?? null,
+      notify: this.notifyLevels.get(channel.id) ?? "mentions",
+    }));
+  }
+
+  /** Like the core: unread mentions, then new replies in followed threads. */
+  private inbox(): Inbox {
+    const me = this.context.me();
+    const items: InboxItem[] = [];
+    for (const channel of this.channels) {
+      for (const message of this.unreadIn(channel.id).filter((unread) => mentions(unread.text, me))) {
+        const root = rootOf(this.messages, message.id);
+        items.push({
+          message: this.present(message),
+          channel_name: channel.name,
+          thread_root: root === message.id ? null : root,
+          reason: "mention",
+        });
+      }
+      const roots = this.messages.filter(
+        (message) => message.channel === channel.id && isInChannel(this.messages, message),
+      );
+      for (const root of roots) {
+        const replies = repliesOf(this.messages, root.id);
+        if (!(this.followChoices.get(root.id) ?? followsByDefault(me, root, replies))) continue;
+        const read = this.readMarkers.get(root.id);
+        for (const reply of replies) {
+          const isNew = reply.author !== me && (!read || isAfter(reply, read));
+          if (isNew && !items.some((item) => item.message.id === reply.id)) {
+            items.push({
+              message: this.present(reply),
+              channel_name: channel.name,
+              thread_root: root.id,
+              reason: "thread_reply",
+            });
+          }
+        }
+      }
+    }
+    items.sort((left, right) => compareMessages(right.message, left.message));
+    return { attention: items, channels: this.channelViews().filter((channel) => channel.unread > 0) };
+  }
+
+  private markAllRead(): void {
+    for (const channel of this.channels) {
+      const inChannel = this.messages.filter((message) => message.channel === channel.id).sort(compareMessages);
+      const latest = inChannel.at(-1);
+      if (latest) this.readMarkers.set(channel.id, { lamport: latest.lamport, author: latest.author });
+      for (const root of inChannel) {
+        const last = repliesOf(this.messages, root.id).sort(compareMessages).at(-1);
+        if (last) this.readMarkers.set(root.id, { lamport: last.lamport, author: last.author });
+      }
+      this.context.notify({ kind: "messages", channel: channel.id });
+    }
+    this.context.notify({ kind: "channels" });
   }
 
   private mayDelete(id: string): boolean {

@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Session } from "../../lib/api";
 import { useAlerts } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
-import { type View, WorkspaceContext } from "../../lib/workspace";
+import { type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
+import { InboxView } from "../inbox/InboxView";
 import { MembersPanel } from "../members/MembersPanel";
 import { PageView } from "../pages/PageView";
 import { CommandPalette } from "../search/CommandPalette";
@@ -30,7 +31,8 @@ export function Shell({ session }: { session: Session }) {
   const listedIds = useMemo(() => new Set([...channels, ...pages].map((item) => item.id)), [channels, pages]);
   const previouslyListedIds = useRef(listedIds);
   useEffect(() => {
-    if (view && previouslyListedIds.current.has(view.id) && !listedIds.has(view.id)) setView(null);
+    const id = view && view.kind !== "inbox" ? view.id : null;
+    if (id && previouslyListedIds.current.has(id) && !listedIds.has(id)) setView(null);
     previouslyListedIds.current = listedIds;
   }, [view, listedIds]);
 
@@ -66,14 +68,16 @@ export function Shell({ session }: { session: Session }) {
           <AnimatePresence mode="wait" initial={false}>
             {view && (
               <motion.div
-                key={`${view.kind}:${view.id}`}
+                key={viewKey(view)}
                 className="absolute inset-0"
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, transition: { duration: 0.1 } }}
                 transition={{ duration: 0.2, ease: "easeOut" }}
               >
-                {view.kind === "channel" ? <ChannelView channelId={view.id} /> : <PageView pageId={view.id} />}
+                {view.kind === "channel" && <ChannelView channelId={view.id} thread={view.thread} />}
+                {view.kind === "page" && <PageView pageId={view.id} />}
+                {view.kind === "inbox" && <InboxView />}
               </motion.div>
             )}
           </AnimatePresence>

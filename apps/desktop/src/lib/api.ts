@@ -34,6 +34,13 @@ export type Message = {
   unread_replies: number;
   reactions: Reaction[];
 };
+export type InboxItem = {
+  message: Message;
+  channel_name: string;
+  thread_root: string | null;
+  reason: "mention" | "thread_reply";
+};
+export type Inbox = { attention: InboxItem[]; channels: Channel[] };
 export type MessageCursor = { lamport: number; author: string };
 export type Page = { id: string; parent: string | null; title: string; updated_ms: number; can_delete: boolean };
 export type Member = { id: string; name: string; is_bot: boolean; is_admin: boolean; active: boolean };
@@ -111,6 +118,8 @@ export const api = {
   deleteChannel: (channel: string) => invoke<void>("delete_channel", { channel }),
   markRead: (channel: string, message: string) => invoke<void>("mark_read", { channel, message }),
   thread: (root: string) => invoke<Message[]>("thread", { root }),
+  inbox: () => invoke<Inbox>("inbox"),
+  markAllRead: () => invoke<void>("mark_all_read"),
   setFollowing: (root: string, following: boolean) => invoke<void>("set_following", { root, following }),
   markThreadRead: (root: string, message: string) => invoke<void>("mark_thread_read", { root, message }),
   setNotifyLevel: (channel: string, level: NotifyLevel) => invoke<void>("set_notify_level", { channel, level }),

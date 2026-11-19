@@ -1,7 +1,13 @@
 import { createContext, useContext } from "react";
 import type { Channel, Page, Session } from "./api";
 
-export type View = { kind: "channel"; id: string } | { kind: "page"; id: string };
+export type View =
+  /** `thread` opens that thread beside the channel. */
+  { kind: "channel"; id: string; thread?: string } | { kind: "page"; id: string } | { kind: "inbox" };
+
+export function viewKey(view: View): string {
+  return view.kind === "inbox" ? "inbox" : `${view.kind}:${view.id}`;
+}
 
 export type WorkspaceContextValue = {
   session: Session;
@@ -20,5 +26,5 @@ export function useWorkspace() {
 }
 
 export function sameView(left: View | null, right: View | null) {
-  return left?.kind === right?.kind && left?.id === right?.id;
+  return left !== null && right !== null && viewKey(left) === viewKey(right);
 }

@@ -247,3 +247,28 @@ pub enum Change {
     Sync,
     Removed,
 }
+
+/// What needs your attention, across channels and threads.
+#[derive(Debug, Clone, Serialize)]
+pub struct Inbox {
+    /// Unread mentions of you and new replies in threads you follow, newest first.
+    pub attention: Vec<InboxItem>,
+    /// Channels with unread messages.
+    pub channels: Vec<Channel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InboxItem {
+    pub message: Message,
+    pub channel_name: String,
+    /// The first message of the thread it's in, if it's a reply.
+    pub thread_root: Option<EntityId>,
+    pub reason: InboxReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InboxReason {
+    Mention,
+    ThreadReply,
+}

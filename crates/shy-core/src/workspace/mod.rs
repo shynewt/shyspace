@@ -1,6 +1,7 @@
 //! The public entry point: one workspace, stored in one data directory.
 
 mod actions;
+mod inbox;
 mod lifecycle;
 mod reads;
 mod storage;

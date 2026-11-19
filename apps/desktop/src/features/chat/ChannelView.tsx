@@ -49,7 +49,7 @@ function toRows(messages: Message[], unreadFrom: string | null): Row[] {
   return rows;
 }
 
-export function ChannelView({ channelId }: { channelId: string }) {
+export function ChannelView({ channelId, thread }: { channelId: string; thread?: string }) {
   const { channels, session } = useWorkspace();
   const channel = channels.find((candidate) => candidate.id === channelId);
   // Where you left off, as of opening the channel: the line stays put while
@@ -64,7 +64,10 @@ export function ChannelView({ channelId }: { channelId: string }) {
     (change) => (change.kind === "messages" && change.channel === channelId) || change.kind === "members",
   );
   const hasOlder = (messages?.length ?? 0) >= windowSize;
-  const [openThread, setOpenThread] = useState<string | null>(null);
+  const [openThread, setOpenThread] = useState<string | null>(thread ?? null);
+  useEffect(() => {
+    if (thread) setOpenThread(thread);
+  }, [thread]);
   const unreadFrom = useMemo(
     () => (isUnreadLineDismissed ? null : firstUnreadId(messages ?? [], lastReadOnOpen, session.me)),
     [messages, lastReadOnOpen, session.me, isUnreadLineDismissed],

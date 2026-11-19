@@ -9,7 +9,9 @@ use serde::Serialize;
 use shy_core::{
     BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace,
     sync::SyncStatus,
-    views::{Channel, Invite, Member, Message, MessageCursor, NotifyLevel, Page, SearchHit, StorageSettings},
+    views::{
+        Channel, Inbox, Invite, Member, Message, MessageCursor, NotifyLevel, Page, SearchHit, StorageSettings,
+    },
     workspace::StorageUpdate,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, ipc::Response};
@@ -312,6 +314,16 @@ async fn mark_thread_read(state: State<'_, AppState>, root: String, message: Str
 }
 
 #[tauri::command]
+async fn inbox(state: State<'_, AppState>) -> CommandResult<Inbox> {
+    current(&state).await?.inbox().map_err(failed)
+}
+
+#[tauri::command]
+async fn mark_all_read(state: State<'_, AppState>) -> CommandResult<()> {
+    current(&state).await?.mark_all_read().map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
     current(&state)
         .await?
@@ -486,6 +498,8 @@ pub fn run() {
             create_channel,
             rename_channel,
             mark_read,
+            inbox,
+            mark_all_read,
             thread,
             set_following,
             mark_thread_read,

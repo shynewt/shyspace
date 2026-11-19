@@ -1,4 +1,4 @@
-import { ListFilter, Plus, Search, Users } from "lucide-react";
+import { Inbox as InboxIcon, ListFilter, Plus, Search, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useCallback, useState } from "react";
 import { api, type SyncStatus } from "../../lib/api";
@@ -7,6 +7,7 @@ import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { cx, IconButton, Kbd, Logo, SectionLabel, springs } from "../../ui";
 import { ChannelList } from "./ChannelList";
+import { NavItem } from "./NavItem";
 import { PageTree } from "./PageTree";
 import { SyncIndicator } from "./SyncIndicator";
 
@@ -54,6 +55,7 @@ export function Sidebar({
       </div>
 
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto px-2 pb-3">
+        <InboxLink />
         <Section
           title="Channels"
           addLabel="New channel"
@@ -118,6 +120,20 @@ function PendingRequestsBadge() {
         </motion.span>
       )}
     </AnimatePresence>
+  );
+}
+
+/** The inbox, counting mentions and new replies in threads you follow. */
+function InboxLink() {
+  const loadInbox = useCallback(() => api.inbox(), []);
+  const inbox = useLive(loadInbox, (change) => change.kind === "messages" || change.kind === "channels");
+  return (
+    <NavItem
+      view={{ kind: "inbox" }}
+      icon={<InboxIcon size={15} />}
+      label="Inbox"
+      unread={inbox?.attention.length ?? 0}
+    />
   );
 }
 

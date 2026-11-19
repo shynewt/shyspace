@@ -59,6 +59,33 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    pub fn message(&self, id: &str, me: &PublicKey) -> Result<Option<Message>> {
+        let message = self
+            .db
+            .query_row(
+                &format!("SELECT {MESSAGE_COLUMNS} {MESSAGE_JOINS} WHERE m.id = ?"),
+                [id],
+                message_from_row,
+            )
+            .optional()?;
+        Ok(match message {
+            Some(message) => self.with_reactions(vec![message], me)?.pop(),
+            None => None,
+        })
+    }
+
+    /// The newest message in `channel`, thread replies included.
+    pub fn latest_message(&self, channel: &str) -> Result<Option<String>> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT id FROM messages WHERE channel = ? ORDER BY lamport DESC, author DESC LIMIT 1",
+                [channel],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// The thread starting at `root`: its first message, then every reply.
     pub fn thread(&self, root: &str, me: &PublicKey) -> Result<Vec<Message>> {
         let mut statement = self.db.prepare(&format!(

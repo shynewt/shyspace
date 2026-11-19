@@ -1,6 +1,7 @@
 mod collaboration;
 mod editing;
 mod hardening;
+mod inbox;
 mod invites;
 mod mentions;
 mod notifications;

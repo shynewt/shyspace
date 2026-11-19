@@ -67,7 +67,7 @@ impl Workspace {
 
     /// Marks what this member may do with each message, whether it mentions
     /// them, and for a thread's first message, its replies and follow state.
-    fn as_seen_by_me(
+    pub(super) fn as_seen_by_me(
         &self,
         state: &State,
         channel: &str,
