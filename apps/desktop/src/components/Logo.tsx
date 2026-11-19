@@ -1,0 +1,21 @@
+export function Logo({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <defs>
+        <linearGradient id="shy-logo" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#8b7fff" />
+          <stop offset="1" stopColor="#5646f0" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill="url(#shy-logo)" />
+      <path
+        d="M20.5 11.2c-.9-1.4-2.6-2.2-4.6-2.2-2.8 0-4.7 1.5-4.7 3.6 0 4.6 9.6 2.6 9.6 7 0 2.2-2 3.7-5 3.7-2.2 0-4-.9-5-2.5"
+        fill="none"
+        stroke="white"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <circle cx="21.8" cy="9.2" r="1.3" fill="white" />
+    </svg>
+  );
+}
