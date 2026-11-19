@@ -23,6 +23,9 @@ pub struct SyncStatus {
     pub last_sync_ms: Option<i64>,
     pub error: Option<String>,
     pub removed: bool,
+    /// A teammate's newer version sent a change this one can't read, and
+    /// their later changes wait for it until this app is updated.
+    pub needs_update: bool,
 }
 
 impl Workspace {
@@ -82,8 +85,9 @@ impl Workspace {
         if let Err(error) = self.follow_admin_commits().await {
             errors.push(error);
         }
-        if let Err(error) = self.apply_pending() {
-            errors.push(error);
+        match self.apply_pending() {
+            Ok(needs_update) => self.status_lock().needs_update = needs_update,
+            Err(error) => errors.push(error),
         }
         if !self.status().removed {
             // The admin repairs commits as part of its duties, after its

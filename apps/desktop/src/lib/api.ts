@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { reportError } from "./toast";
 
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
-export type Channel = { id: string; name: string };
+export type Channel = { id: string; name: string; can_delete: boolean };
 export type Reaction = { emoji: string; count: number; mine: boolean };
 export type Message = {
   id: string;
@@ -15,10 +15,13 @@ export type Message = {
   reply_to: string | null;
   created_ms: number;
   lamport: number;
+  is_edited: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
   reactions: Reaction[];
 };
 export type MessageCursor = { lamport: number; author: string };
-export type Page = { id: string; parent: string | null; title: string; updated_ms: number };
+export type Page = { id: string; parent: string | null; title: string; updated_ms: number; can_delete: boolean };
 export type Member = { id: string; name: string; is_bot: boolean; is_admin: boolean; active: boolean };
 export type SearchHit = {
   kind: "message" | "page";
@@ -40,7 +43,13 @@ export type Invite = {
   requester_safety_code: string | null;
 };
 export type StorageSettings = { endpoint: string; bucket: string; region: string; access_key_id: string };
-export type SyncStatus = { peers: number; last_sync_ms: number | null; error: string | null; removed: boolean };
+export type SyncStatus = {
+  peers: number;
+  last_sync_ms: number | null;
+  error: string | null;
+  removed: boolean;
+  needs_update: boolean;
+};
 export type BucketConfig = {
   endpoint: string;
   region: string;
@@ -75,14 +84,19 @@ export const api = {
   recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),
   createChannel: (name: string) => invoke<string>("create_channel", { name }),
+  renameChannel: (channel: string, name: string) => invoke<void>("rename_channel", { channel, name }),
+  deleteChannel: (channel: string) => invoke<void>("delete_channel", { channel }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>
     invoke<string>("send_message", { channel, text, replyTo }),
+  editMessage: (message: string, text: string) => invoke<void>("edit_message", { message, text }),
+  deleteMessage: (message: string) => invoke<void>("delete_message", { message }),
   react: (message: string, emoji: string, active: boolean) => invoke<void>("react", { message, emoji, active }),
   pages: () => invoke<Page[]>("pages"),
   createPage: (title: string, parent: string | null) => invoke<string>("create_page", { title, parent }),
   renamePage: (page: string, title: string) => invoke<void>("rename_page", { page, title }),
+  deletePage: (page: string) => invoke<void>("delete_page", { page }),
   pageState: async (page: string) => new Uint8Array(await invoke<ArrayBuffer>("page_state", { page })),
   applyDocUpdate: (page: string, update: Uint8Array) =>
     invoke<void>("apply_doc_update", { page, update: Array.from(update) }),

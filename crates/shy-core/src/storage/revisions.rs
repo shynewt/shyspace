@@ -1,0 +1,556 @@
+//! Edits, renames and deletes. Each is kept apart from what it changes, so it
+//! applies the same whether it arrives before or after its target. Deletes are
+//! permanent markers that win over everything else about their target.
+
+use anyhow::Result;
+use rusqlite::{OptionalExtension, params};
+
+use super::Store;
+use crate::{
+    ops::{Op, is_valid_channel_name, rule_violation},
+    views::Change,
+};
+
+/// What an id names in this workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemKind {
+    Message,
+    Channel,
+    Page,
+}
+
+impl ItemKind {
+    pub fn noun(self) -> &'static str {
+        match self {
+            ItemKind::Message => "message",
+            ItemKind::Channel => "channel",
+            ItemKind::Page => "page",
+        }
+    }
+}
+
+impl Store {
+    pub(crate) fn item_kind(&self, id: &str) -> Result<Option<ItemKind>> {
+        let kind: Option<String> = self
+            .db
+            .query_row(
+                "SELECT 'message' FROM messages WHERE id = ?1
+                 UNION ALL SELECT 'channel' FROM channels WHERE id = ?1
+                 UNION ALL SELECT 'page' FROM pages WHERE id = ?1 AND created_ms IS NOT NULL",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(kind.map(|kind| match kind.as_str() {
+            "message" => ItemKind::Message,
+            "channel" => ItemKind::Channel,
+            _ => ItemKind::Page,
+        }))
+    }
+
+    pub(super) fn is_deleted(&self, id: &str) -> Result<bool> {
+        Ok(self
+            .db
+            .query_row("SELECT 1 FROM deleted WHERE id = ?", [id], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
+    /// Whether `op` can't change anything: its target was deleted, or it
+    /// re-sends a message id that already exists. One author's ops apply in
+    /// the same order everywhere, so "the first message with an id wins"
+    /// gives every member the same result. A message posted into a deleted
+    /// channel is marked deleted itself, so it can't later reappear elsewhere.
+    pub(super) fn has_no_effect(&self, op: &Op) -> Result<bool> {
+        if let Op::Message { id, channel, .. } = op {
+            if self.is_deleted(id)? || self.message_channel(id)?.is_some() {
+                return Ok(true);
+            }
+            if self.is_deleted(channel)? {
+                self.mark_deleted(id)?;
+                return Ok(true);
+            }
+        }
+        let target = match op {
+            Op::ChannelCreate { id, .. }
+            | Op::ChannelRename { id, .. }
+            | Op::Message { id, .. }
+            | Op::MessageEdit { id, .. }
+            | Op::PageCreate { id, .. }
+            | Op::PageRename { id, .. } => id,
+            Op::Reaction { message, .. } => message,
+            Op::DocUpdate { page, .. } => page,
+            Op::Profile { .. } | Op::StorageSettings { .. } | Op::Delete { .. } => return Ok(false),
+        };
+        self.is_deleted(target)
+    }
+
+    /// A message author's edits replace one another in their own order.
+    pub(super) fn apply_message_edit(&self, id: &str, text: &str, lamport: u64) -> Result<Option<Change>> {
+        let changed = self.db.execute(
+            "INSERT INTO message_edits (message, text, lamport) VALUES (?1, ?2, ?3)
+             ON CONFLICT (message) DO UPDATE SET text = ?2, lamport = ?3 WHERE lamport < ?3",
+            params![id, text, lamport],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        let Some(channel) = self.message_channel(id)? else {
+            // The message hasn't arrived yet; it picks the edit up when it does.
+            return Ok(None);
+        };
+        self.reindex_message(id)?;
+        Ok(Some(Change::Messages { channel }))
+    }
+
+    pub(super) fn apply_channel_rename(
+        &self,
+        id: &str,
+        name: &str,
+        lamport: u64,
+        author: &[u8],
+    ) -> Result<Change> {
+        if !is_valid_channel_name(name) {
+            return Err(rule_violation("invalid channel name"));
+        }
+        self.db.execute(
+            "INSERT INTO channel_names (channel, name, lamport, author) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (channel) DO UPDATE SET name = ?2, lamport = ?3, author = ?4
+             WHERE lamport < ?3 OR (lamport = ?3 AND author < ?4)",
+            params![id, name, lamport, author],
+        )?;
+        Ok(Change::Channels)
+    }
+
+    /// Removes whatever `id` names. Ids are random, so in practice it's one
+    /// thing; purging every kind keeps replicas in step whatever it is.
+    pub(super) fn apply_delete(&self, id: &str) -> Result<Option<Change>> {
+        self.mark_deleted(id)?;
+        let kind = self.item_kind(id)?;
+        let message_channel = self.message_channel(id)?;
+        self.purge_message(id)?;
+        self.purge_channel(id)?;
+        self.db.execute("DELETE FROM pages WHERE id = ?", [id])?;
+        self.db
+            .execute("DELETE FROM search WHERE kind = 'page' AND ref = ?", [id])?;
+        Ok(match kind {
+            Some(ItemKind::Channel) => Some(Change::Channels),
+            Some(ItemKind::Page) => Some(Change::Pages),
+            Some(ItemKind::Message) => message_channel.map(|channel| Change::Messages { channel }),
+            None => None,
+        })
+    }
+
+    pub(super) fn reindex_message(&self, id: &str) -> Result<()> {
+        let text: String = self.db.query_row(
+            "SELECT COALESCE(e.text, m.text) FROM messages m
+             LEFT JOIN message_edits e ON e.message = m.id WHERE m.id = ?",
+            [id],
+            |row| row.get(0),
+        )?;
+        self.index_for_search("message", id, "", &text)
+    }
+
+    fn mark_deleted(&self, id: &str) -> Result<()> {
+        self.db
+            .execute("INSERT OR IGNORE INTO deleted (id) VALUES (?)", [id])?;
+        Ok(())
+    }
+
+    fn message_channel(&self, id: &str) -> Result<Option<String>> {
+        Ok(self
+            .db
+            .query_row("SELECT channel FROM messages WHERE id = ?", [id], |row| {
+                row.get(0)
+            })
+            .optional()?)
+    }
+
+    /// Its messages are marked deleted too, so no later op revives them.
+    fn purge_channel(&self, id: &str) -> Result<()> {
+        let messages: Vec<String> = self
+            .db
+            .prepare("SELECT id FROM messages WHERE channel = ?")?
+            .query_map([id], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        for message in messages {
+            self.mark_deleted(&message)?;
+            self.purge_message(&message)?;
+        }
+        self.db.execute("DELETE FROM channels WHERE id = ?", [id])?;
+        self.db
+            .execute("DELETE FROM channel_names WHERE channel = ?", [id])?;
+        Ok(())
+    }
+
+    fn purge_message(&self, id: &str) -> Result<()> {
+        self.db.execute("DELETE FROM messages WHERE id = ?", [id])?;
+        self.db
+            .execute("DELETE FROM message_edits WHERE message = ?", [id])?;
+        self.db.execute("DELETE FROM reactions WHERE message = ?", [id])?;
+        self.db
+            .execute("DELETE FROM search WHERE kind = 'message' AND ref = ?", [id])?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iroh::{PublicKey, SecretKey};
+
+    use super::*;
+    use crate::{
+        ops::{OpBody, VerifiedOp, new_owned_id},
+        storage::TEST_DB_KEY,
+    };
+
+    /// Everything a member could see.
+    type View = (
+        Vec<(String, String)>,
+        Vec<(String, String, bool, usize)>,
+        Vec<(String, Option<String>)>,
+        Vec<String>,
+    );
+
+    /// Ops from several authors. Each author's ops arrive in their order
+    /// (logs are gap-free); across authors, any order is possible.
+    struct Scenario {
+        ops: Vec<VerifiedOp>,
+        channels: Vec<String>,
+    }
+
+    impl Scenario {
+        fn new() -> Self {
+            Self {
+                ops: Vec::new(),
+                channels: Vec::new(),
+            }
+        }
+
+        fn add(&mut self, author: &PublicKey, lamport: u64, op: Op) {
+            if let Op::ChannelCreate { id, .. } = &op {
+                self.channels.push(id.clone());
+            }
+            let seq = self.ops.iter().filter(|op| op.author == *author).count() as u64 + 1;
+            self.ops.push(VerifiedOp {
+                author: *author,
+                seq,
+                body: OpBody {
+                    lamport,
+                    timestamp_ms: lamport as i64,
+                    op,
+                },
+            });
+        }
+
+        fn view_after(&self, order: &[usize]) -> View {
+            let dir = tempfile::tempdir().unwrap();
+            let store = Store::open(&dir.path().join("db"), TEST_DB_KEY).unwrap();
+            for _ in 0..2 {
+                for &index in order {
+                    store.apply(&self.ops[index]).unwrap();
+                }
+            }
+            let reader = self.ops[0].author;
+            let channels = store
+                .channels()
+                .unwrap()
+                .into_iter()
+                .map(|c| (c.id, c.name))
+                .collect();
+            let messages = self
+                .channels
+                .iter()
+                .flat_map(|channel| store.messages(channel, &reader, None, 50).unwrap())
+                .map(|m| (m.channel, m.text, m.is_edited, m.reactions.len()))
+                .collect();
+            let pages = store
+                .pages()
+                .unwrap()
+                .into_iter()
+                .map(|p| (p.id, p.parent))
+                .collect();
+            let hits = store
+                .search("hello", 10)
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.id)
+                .collect();
+            (channels, messages, pages, hits)
+        }
+
+        /// The view is the same for every possible arrival order, applied twice.
+        fn assert_converges(&self) -> View {
+            let orders: Vec<_> = permutations(&(0..self.ops.len()).collect::<Vec<_>>())
+                .into_iter()
+                .filter(|order| self.keeps_each_authors_order(order))
+                .collect();
+            let expected = self.view_after(&orders[0]);
+            for order in &orders[1..] {
+                assert_eq!(self.view_after(order), expected, "order {order:?}");
+            }
+            expected
+        }
+
+        fn keeps_each_authors_order(&self, order: &[usize]) -> bool {
+            order.iter().enumerate().all(|(position, &later)| {
+                order[..position].iter().all(|&earlier| {
+                    let (earlier, later) = (&self.ops[earlier], &self.ops[later]);
+                    earlier.author != later.author || earlier.seq < later.seq
+                })
+            })
+        }
+    }
+
+    fn permutations(items: &[usize]) -> Vec<Vec<usize>> {
+        if items.len() <= 1 {
+            return vec![items.to_vec()];
+        }
+        let mut all = Vec::new();
+        for (position, &first) in items.iter().enumerate() {
+            let rest = [&items[..position], &items[position + 1..]].concat();
+            for mut tail in permutations(&rest) {
+                tail.insert(0, first);
+                all.push(tail);
+            }
+        }
+        all
+    }
+
+    fn people<const N: usize>() -> [PublicKey; N] {
+        std::array::from_fn(|_| SecretKey::generate().public())
+    }
+
+    fn message(id: &str, channel: &str, text: &str) -> Op {
+        Op::Message {
+            id: id.into(),
+            channel: channel.into(),
+            text: text.into(),
+            reply_to: None,
+        }
+    }
+
+    #[test]
+    fn a_deleted_message_stays_deleted_in_any_order() {
+        let [ada, bob, cat] = people();
+        let mut scenario = Scenario::new();
+        let channel = new_owned_id(&ada);
+        let bobs = new_owned_id(&bob);
+        scenario.add(
+            &ada,
+            1,
+            Op::ChannelCreate {
+                id: channel.clone(),
+                name: "general".into(),
+            },
+        );
+        scenario.add(&bob, 2, message(&bobs, &channel, "hello"));
+        scenario.add(
+            &bob,
+            3,
+            Op::MessageEdit {
+                id: bobs.clone(),
+                text: "hello again".into(),
+            },
+        );
+        scenario.add(
+            &cat,
+            4,
+            Op::Reaction {
+                message: bobs.clone(),
+                emoji: "👍".into(),
+                active: true,
+            },
+        );
+        scenario.add(&ada, 5, Op::Delete { id: bobs });
+
+        let (channels, messages, _, hits) = scenario.assert_converges();
+        assert_eq!(channels.len(), 1);
+        assert!(messages.is_empty() && hits.is_empty());
+    }
+
+    #[test]
+    fn edits_reach_everyone_in_their_order() {
+        let [ada, bob] = people();
+        let mut scenario = Scenario::new();
+        let channel = new_owned_id(&ada);
+        let bobs = new_owned_id(&bob);
+        scenario.add(
+            &ada,
+            1,
+            Op::ChannelCreate {
+                id: channel.clone(),
+                name: "general".into(),
+            },
+        );
+        scenario.add(&bob, 2, message(&bobs, &channel, "hello"));
+        scenario.add(
+            &bob,
+            5,
+            Op::MessageEdit {
+                id: bobs.clone(),
+                text: "hello there".into(),
+            },
+        );
+        scenario.add(
+            &ada,
+            6,
+            Op::Reaction {
+                message: bobs.clone(),
+                emoji: "👀".into(),
+                active: true,
+            },
+        );
+        scenario.add(
+            &bob,
+            7,
+            Op::MessageEdit {
+                id: bobs.clone(),
+                text: "hello, final".into(),
+            },
+        );
+
+        let (_, messages, _, hits) = scenario.assert_converges();
+        assert_eq!(messages, vec![(channel, "hello, final".to_string(), true, 1)]);
+        assert_eq!(hits, vec![bobs]);
+    }
+
+    #[test]
+    fn the_latest_channel_rename_wins_and_a_delete_beats_it_in_any_order() {
+        let [ada, bob, cat] = people();
+        let mut scenario = Scenario::new();
+        let channel = new_owned_id(&ada);
+        scenario.add(
+            &ada,
+            1,
+            Op::ChannelCreate {
+                id: channel.clone(),
+                name: "random".into(),
+            },
+        );
+        scenario.add(
+            &bob,
+            3,
+            Op::ChannelRename {
+                id: channel.clone(),
+                name: "fun".into(),
+            },
+        );
+        scenario.add(
+            &cat,
+            4,
+            Op::ChannelRename {
+                id: channel.clone(),
+                name: "off-topic".into(),
+            },
+        );
+        let (channels, ..) = scenario.assert_converges();
+        assert_eq!(channels, vec![(channel.clone(), "off-topic".to_string())]);
+
+        scenario.add(&bob, 5, message(&new_owned_id(&bob), &channel, "hello"));
+        scenario.add(&ada, 6, Op::Delete { id: channel });
+        let (channels, messages, _, hits) = scenario.assert_converges();
+        assert!(channels.is_empty() && messages.is_empty() && hits.is_empty());
+    }
+
+    #[test]
+    fn a_message_moved_out_of_a_deleted_channel_stays_deleted_in_any_order() {
+        let [ada, mallory] = people();
+        let mut scenario = Scenario::new();
+        let (doomed, kept) = (new_owned_id(&ada), new_owned_id(&ada));
+        let moved = new_owned_id(&mallory);
+        scenario.add(
+            &ada,
+            1,
+            Op::ChannelCreate {
+                id: doomed.clone(),
+                name: "doomed".into(),
+            },
+        );
+        scenario.add(
+            &ada,
+            2,
+            Op::ChannelCreate {
+                id: kept.clone(),
+                name: "kept".into(),
+            },
+        );
+        scenario.add(&mallory, 3, message(&moved, &doomed, "hello"));
+        scenario.add(&mallory, 5, message(&moved, &kept, "hello, moved"));
+        scenario.add(&ada, 6, Op::Delete { id: doomed });
+
+        let (channels, messages, _, hits) = scenario.assert_converges();
+        assert_eq!(channels, vec![(kept, "kept".to_string())]);
+        assert!(messages.is_empty() && hits.is_empty());
+    }
+
+    #[test]
+    fn a_reused_message_id_keeps_its_first_message_in_any_order() {
+        let [ada, mallory] = people();
+        let mut scenario = Scenario::new();
+        let (doomed, kept) = (new_owned_id(&ada), new_owned_id(&ada));
+        let reused = new_owned_id(&mallory);
+        scenario.add(
+            &ada,
+            1,
+            Op::ChannelCreate {
+                id: doomed.clone(),
+                name: "doomed".into(),
+            },
+        );
+        scenario.add(
+            &ada,
+            2,
+            Op::ChannelCreate {
+                id: kept.clone(),
+                name: "kept".into(),
+            },
+        );
+        // The second send has the lower clock, so "earliest clock wins" would pick it.
+        scenario.add(&mallory, 5, message(&reused, &doomed, "hello"));
+        scenario.add(&mallory, 3, message(&reused, &kept, "hello, moved"));
+        scenario.add(&ada, 6, Op::Delete { id: doomed });
+
+        let (_, messages, _, hits) = scenario.assert_converges();
+        assert!(messages.is_empty() && hits.is_empty());
+    }
+
+    #[test]
+    fn a_deleted_pages_children_move_to_the_top_in_any_order() {
+        let [ada, bob, cat] = people();
+        let mut scenario = Scenario::new();
+        let parent = new_owned_id(&ada);
+        let child = new_owned_id(&bob);
+        scenario.add(
+            &ada,
+            1,
+            Op::PageCreate {
+                id: parent.clone(),
+                parent: None,
+                title: "hello".into(),
+            },
+        );
+        scenario.add(
+            &bob,
+            2,
+            Op::PageCreate {
+                id: child.clone(),
+                parent: Some(parent.clone()),
+                title: "child".into(),
+            },
+        );
+        scenario.add(
+            &cat,
+            3,
+            Op::PageRename {
+                id: parent.clone(),
+                title: "hello world".into(),
+            },
+        );
+        scenario.add(&ada, 4, Op::Delete { id: parent });
+
+        let (_, _, pages, hits) = scenario.assert_converges();
+        assert_eq!(pages, vec![(child, None)]);
+        assert!(hits.is_empty());
+    }
+}

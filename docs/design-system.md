@@ -37,6 +37,7 @@ Keep feedback under about 250 ms. Reduced-motion settings are respected globally
 | `Avatar`, `Badge`, `Kbd`, `Spinner`, `Logo` | small content pieces |
 | `SegmentedControl` | picking one of a few modes |
 | `CopyField` | codes and commands with a copy button |
+| `ConfirmDialog` | asks before something that can't be undone (deletes); stays open showing the error if it fails |
 | `Toasts` | transient messages; trigger with `showToast` / `reportError` from `lib/toast.ts` |
 
 Dialogs, drawers, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primitives) primitives for focus handling and keyboard support, styled by us.

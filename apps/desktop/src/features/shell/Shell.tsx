@@ -1,6 +1,6 @@
 import { UserX } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Session } from "../../lib/api";
 import { useLive } from "../../lib/useLive";
 import { type View, WorkspaceContext } from "../../lib/workspace";
@@ -22,6 +22,15 @@ export function Shell({ session }: { session: Session }) {
   useEffect(() => {
     if (!view && channels.length > 0) setView({ kind: "channel", id: channels[0].id });
   }, [view, channels]);
+
+  // Leave a channel or page once it's deleted. Only one that was listed
+  // before counts: a brand-new one may not be listed yet.
+  const listedIds = useMemo(() => new Set([...channels, ...pages].map((item) => item.id)), [channels, pages]);
+  const previouslyListedIds = useRef(listedIds);
+  useEffect(() => {
+    if (view && previouslyListedIds.current.has(view.id) && !listedIds.has(view.id)) setView(null);
+    previouslyListedIds.current = listedIds;
+  }, [view, listedIds]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

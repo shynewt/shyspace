@@ -257,6 +257,37 @@ async fn create_page(
 }
 
 #[tauri::command]
+async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .rename_channel(&channel, &name)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn delete_channel(state: State<'_, AppState>, channel: String) -> CommandResult<()> {
+    current(&state).await?.delete_channel(&channel).map_err(failed)
+}
+
+#[tauri::command]
+async fn edit_message(state: State<'_, AppState>, message: String, text: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .edit_message(&message, &text)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn delete_message(state: State<'_, AppState>, message: String) -> CommandResult<()> {
+    current(&state).await?.delete_message(&message).map_err(failed)
+}
+
+#[tauri::command]
+async fn delete_page(state: State<'_, AppState>, page: String) -> CommandResult<()> {
+    current(&state).await?.delete_page(&page).map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_page(state: State<'_, AppState>, page: String, title: String) -> CommandResult<()> {
     current(&state).await?.rename_page(&page, &title).map_err(failed)
 }
@@ -377,12 +408,17 @@ pub fn run() {
             recovery_kit,
             channels,
             create_channel,
+            rename_channel,
+            delete_channel,
+            edit_message,
+            delete_message,
             messages,
             send_message,
             react,
             pages,
             create_page,
             rename_page,
+            delete_page,
             page_state,
             apply_doc_update,
             members,

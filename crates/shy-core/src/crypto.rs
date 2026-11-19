@@ -25,6 +25,20 @@ fn header_bytes(author: &PublicKey, seq: u64, epoch: u64) -> Vec<u8> {
     header
 }
 
+/// A validly signed op this version can't read: a teammate's newer version
+/// added a kind of change. It should wait, not be dropped, so it applies
+/// once this app is updated.
+#[derive(Debug)]
+pub struct NewerFormat;
+
+impl std::fmt::Display for NewerFormat {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a teammate uses a newer version of shyspace; update to see all their changes")
+    }
+}
+
+impl std::error::Error for NewerFormat {}
+
 /// Sign-then-encrypt. The signature covers the cleartext header too, so an
 /// envelope cannot be replayed under another author, sequence or epoch.
 pub fn seal(
@@ -34,9 +48,18 @@ pub fn seal(
     seq: u64,
     body: &OpBody,
 ) -> Result<Envelope> {
+    seal_bytes(identity, epoch_key, epoch, seq, postcard::to_stdvec(body)?)
+}
+
+pub(crate) fn seal_bytes(
+    identity: &SecretKey,
+    epoch_key: &EpochKey,
+    epoch: u64,
+    seq: u64,
+    body_bytes: Vec<u8>,
+) -> Result<Envelope> {
     let author = identity.public();
     let header = header_bytes(&author, seq, epoch);
-    let body_bytes = postcard::to_stdvec(body)?;
     let mut signed_message = header.clone();
     signed_message.extend_from_slice(&body_bytes);
     let signature = identity.sign(&signed_message);
@@ -87,7 +110,7 @@ pub fn open(envelope: &Envelope, epoch_key: &EpochKey) -> Result<VerifiedOp> {
         .author
         .verify(&signed_message, &Signature::from_bytes(&signature_bytes))
         .context("bad signature")?;
-    let body: OpBody = postcard::from_bytes(&signed.body)?;
+    let body: OpBody = postcard::from_bytes(&signed.body).map_err(|_| anyhow::Error::new(NewerFormat))?;
     ensure!(body.lamport > 0, "lamport clock must start at 1");
     Ok(VerifiedOp {
         author: envelope.author,

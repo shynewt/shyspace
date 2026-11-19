@@ -155,6 +155,36 @@ impl Store {
     }
 
     /// The last bucket key we read from `author`'s log.
+    /// Authors with parked ops but not the one that must apply next: it was
+    /// lost (say, pushed out of the bounded parking table) after we read
+    /// past it in the bucket.
+    pub fn authors_missing_next_op(&self) -> Result<Vec<(PublicKey, u64)>> {
+        let mut statement = self.db.prepare(
+            "SELECT gap.author, gap.next FROM (
+                SELECT DISTINCT p.author,
+                       COALESCE((SELECT MAX(o.seq) FROM ops o WHERE o.author = p.author), 0) + 1 AS next
+                FROM pending_ops p) AS gap
+             WHERE NOT EXISTS (SELECT 1 FROM pending_ops q WHERE q.author = gap.author AND q.seq = gap.next)",
+        )?;
+        let rows = statement.query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, u64>(1)?)))?;
+        let mut missing = Vec::new();
+        for row in rows {
+            let (author, next) = row?;
+            let author: [u8; 32] = author
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("corrupt author key in parked ops"))?;
+            missing.push((PublicKey::from_bytes(&author)?, next));
+        }
+        Ok(missing)
+    }
+
+    /// Makes the next pull read all of `author`'s segments again.
+    pub fn forget_cursor(&self, author: &PublicKey) -> Result<()> {
+        self.db
+            .execute("DELETE FROM cursors WHERE author = ?", [author.as_bytes()])?;
+        Ok(())
+    }
+
     pub fn cursor(&self, author: &PublicKey) -> Result<Option<String>> {
         Ok(self
             .db

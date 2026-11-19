@@ -17,13 +17,15 @@ impl Store {
     }
 
     pub fn channels(&self) -> Result<Vec<Channel>> {
-        let mut statement = self
-            .db
-            .prepare("SELECT id, name FROM channels ORDER BY created_ms, id")?;
+        let mut statement = self.db.prepare(
+            "SELECT c.id, COALESCE(n.name, c.name) FROM channels c
+                 LEFT JOIN channel_names n ON n.channel = c.id ORDER BY c.created_ms, c.id",
+        )?;
         let rows = statement.query_map([], |row| {
             Ok(Channel {
                 id: row.get(0)?,
                 name: row.get(1)?,
+                can_delete: false,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -45,8 +47,10 @@ impl Store {
         let mut statement = self.db.prepare(
             "SELECT * FROM (
                 SELECT m.id, m.channel, m.author, COALESCE(p.name, ''), COALESCE(p.is_bot, 0),
-                       m.text, m.reply_to, m.created_ms, m.lamport
-                FROM messages m LEFT JOIN profiles p ON p.member = m.author
+                       COALESCE(e.text, m.text), m.reply_to, m.created_ms, m.lamport, e.message IS NOT NULL
+                FROM messages m
+                LEFT JOIN profiles p ON p.member = m.author
+                LEFT JOIN message_edits e ON e.message = m.id
                 WHERE m.channel = ?1
                   AND (?2 IS NULL OR m.lamport < ?2 OR (m.lamport = ?2 AND m.author < ?3))
                 ORDER BY m.lamport DESC, m.author DESC LIMIT ?4)
@@ -63,6 +67,9 @@ impl Store {
                 reply_to: row.get(6)?,
                 created_ms: row.get(7)?,
                 lamport: row.get(8)?,
+                is_edited: row.get(9)?,
+                can_edit: false,
+                can_delete: false,
                 reactions: Vec::new(),
             })
         })?;
@@ -104,7 +111,10 @@ impl Store {
 
     pub fn pages(&self) -> Result<Vec<Page>> {
         let mut statement = self.db.prepare(
-            "SELECT id, parent, title, updated_ms FROM pages WHERE created_ms IS NOT NULL ORDER BY created_ms, id",
+            // A sub-page of a deleted page shows at the top level.
+            "SELECT id, CASE WHEN parent IN (SELECT id FROM deleted) THEN NULL ELSE parent END,
+                    title, updated_ms
+             FROM pages WHERE created_ms IS NOT NULL ORDER BY created_ms, id",
         )?;
         let rows = statement.query_map([], |row| {
             Ok(Page {
@@ -112,6 +122,7 @@ impl Store {
                 parent: row.get(1)?,
                 title: row.get(2)?,
                 updated_ms: row.get(3)?,
+                can_delete: false,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -153,11 +164,12 @@ impl Store {
             return Ok(Vec::new());
         }
         let mut statement = self.db.prepare(
-            "SELECT s.kind, s.ref, COALESCE(NULLIF(s.title, ''), c.name, ''),
+            "SELECT s.kind, s.ref, COALESCE(NULLIF(s.title, ''), n.name, c.name, ''),
                     snippet(search, 3, '\u{1}', '\u{2}', '…', 12), m.channel
              FROM search s
              LEFT JOIN messages m ON s.kind = 'message' AND m.id = s.ref
              LEFT JOIN channels c ON c.id = m.channel
+             LEFT JOIN channel_names n ON n.channel = m.channel
              WHERE search MATCH ? ORDER BY rank LIMIT ?",
         )?;
         let rows = statement.query_map(params![match_expression, limit], |row| {

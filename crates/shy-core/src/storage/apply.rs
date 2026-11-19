@@ -7,7 +7,7 @@ use rusqlite::{OptionalExtension, named_params, params};
 use super::Store;
 use crate::{
     config,
-    ops::{Op, VerifiedOp, is_owned_by, rule_violation},
+    ops::{Op, VerifiedOp, clean_channel_name, is_owned_by, rule_violation},
     pages,
     views::Change,
 };
@@ -29,6 +29,9 @@ impl Store {
             return Err(rule_violation("op creates an id that belongs to someone else"));
         }
         self.observe_lamport(lamport)?;
+        if self.has_no_effect(&verified.body.op)? {
+            return Ok(None);
+        }
         Ok(Some(match &verified.body.op {
             Op::Profile { name, is_bot } => {
                 self.db.execute(
@@ -39,6 +42,7 @@ impl Store {
                 Change::Members
             }
             Op::ChannelCreate { id, name } => {
+                let name = clean_channel_name(name);
                 self.db.execute(
                     &format!(
                         "INSERT INTO channels (id, name, created_ms, lamport, author)
@@ -56,21 +60,15 @@ impl Store {
                 text,
                 reply_to,
             } => {
-                let changed = self.db.execute(
-                    &format!(
-                        "INSERT INTO messages (id, channel, author, text, reply_to, lamport, created_ms)
-                         VALUES (:id, :channel, :author, :text, :reply_to, :lamport, :now)
-                         ON CONFLICT (id) DO UPDATE SET channel = :channel, author = :author, text = :text,
-                             reply_to = :reply_to, lamport = :lamport, created_ms = :now WHERE {EARLIER_WINS}"
-                    ),
+                self.db.execute(
+                    "INSERT INTO messages (id, channel, author, text, reply_to, lamport, created_ms)
+                     VALUES (:id, :channel, :author, :text, :reply_to, :lamport, :now)",
                     named_params! {
                         ":id": id, ":channel": channel, ":author": author, ":text": text,
                         ":reply_to": reply_to, ":lamport": lamport, ":now": now,
                     },
                 )?;
-                if changed == 1 {
-                    self.index_for_search("message", id, "", text)?;
-                }
+                self.reindex_message(id)?;
                 Change::Messages {
                     channel: channel.clone(),
                 }
@@ -138,6 +136,9 @@ impl Store {
                 }
                 Change::Storage
             }
+            Op::MessageEdit { id, text } => return self.apply_message_edit(id, text, lamport),
+            Op::ChannelRename { id, name } => self.apply_channel_rename(id, name, lamport, author)?,
+            Op::Delete { id } => return self.apply_delete(id),
         }))
     }
 
@@ -159,7 +160,7 @@ impl Store {
         self.index_for_search("page", id, &title, &pages::read(state.as_deref())?)
     }
 
-    fn index_for_search(&self, kind: &str, id: &str, title: &str, body: &str) -> Result<()> {
+    pub(super) fn index_for_search(&self, kind: &str, id: &str, title: &str, body: &str) -> Result<()> {
         self.db
             .execute("DELETE FROM search WHERE kind = ? AND ref = ?", params![kind, id])?;
         self.db.execute(

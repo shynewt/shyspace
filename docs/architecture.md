@@ -23,7 +23,8 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
 2. **Everything is an op.** Any change (message, reaction, page edit, rename…) is an `Op` (`ops.rs`). The author signs it with their identity key, then it is encrypted with the epoch key (`crypto.rs`). The result is an `Envelope`.
 3. **Two ways to deliver, same envelopes.** Envelopes are sent live over iroh gossip and also uploaded to the bucket. A member that was offline catches up from the bucket.
 4. **No ordering needed.** Every op merges the same way whatever order it arrives in. That is why two unordered transports are enough:
-   - names, titles and profiles: last writer wins, by lamport clock;
+   - names, titles, channel renames, message edits and profiles: last writer wins, by lamport clock (edits are kept apart from what they change, so an edit may arrive first);
+   - deletes: permanent markers that win over everything else about their target; later ops touching a deleted item are dropped;
    - reactions: per-author on/off toggles;
    - page content: Yjs CRDT updates;
    - creations (channel, message, page): the id contains the author's key prefix, so only the author can create or overwrite it.
@@ -83,7 +84,7 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 | `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads` |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
-| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `queries` |
+| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `queries` |
 | `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |
 | `crypto.rs` | sign-then-encrypt ops |
 | `ops.rs` | op types, owned ids, timestamps |

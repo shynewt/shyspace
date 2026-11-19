@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("");
-  await page.getByRole("button", { name: /general/ }).click();
+  await page.getByRole("button", { name: "general", exact: true }).click();
 });
 
 test("sending a message shows it once and clears the composer", async ({ page }) => {
@@ -29,7 +29,7 @@ test("a new channel appears once and opens", async ({ page }) => {
   await page.getByLabel("Channel name").fill("design");
   await page.getByLabel("Channel name").press("Enter");
 
-  await expect(page.getByRole("button", { name: /design/ })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "design", exact: true })).toHaveCount(1);
   await expect(page.getByLabel("Message #design")).toBeVisible();
 });
 

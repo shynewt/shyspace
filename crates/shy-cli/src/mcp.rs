@@ -49,6 +49,18 @@ pub struct SendMessage {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct EditMessage {
+    message_id: String,
+    /// The new markdown text.
+    text: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct MessageRef {
+    message_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct React {
     message_id: String,
     emoji: String,
@@ -105,12 +117,13 @@ fn format_messages(messages: Vec<Message>) -> String {
     for message in messages {
         let bot = if message.author_is_bot { " (bot)" } else { "" };
         let reply = message.reply_to.map(|id| format!(" ↩{id}")).unwrap_or_default();
+        let edited = if message.is_edited { " (edited)" } else { "" };
         let author = match message.author_name.as_str() {
             "" => format!("member {}", &message.author[..8]),
             name => name.to_owned(),
         };
         output.push_str(&format!(
-            "[{}] {author}{bot}{reply}: {}",
+            "[{}] {author}{bot}{reply}: {}{edited}",
             message.id, message.text
         ));
         for reaction in message.reactions {
@@ -183,6 +196,22 @@ impl ShyTools {
             .send_message(&channel, &request.text, request.reply_to)
             .map_err(failed)?;
         Ok(format!("sent message {id}"))
+    }
+
+    #[tool(description = "Replace the text of one of your own messages. Everyone sees it marked as edited.")]
+    fn edit_message(&self, Parameters(request): Parameters<EditMessage>) -> ToolResult {
+        self.workspace
+            .edit_message(&request.message_id, &request.text)
+            .map_err(failed)?;
+        Ok("edited".into())
+    }
+
+    #[tool(description = "Delete one of your own messages for everyone.")]
+    fn delete_message(&self, Parameters(request): Parameters<MessageRef>) -> ToolResult {
+        self.workspace
+            .delete_message(&request.message_id)
+            .map_err(failed)?;
+        Ok("deleted".into())
     }
 
     #[tool(description = "Add an emoji reaction to a message.")]

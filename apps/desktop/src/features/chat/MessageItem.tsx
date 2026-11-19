@@ -1,4 +1,4 @@
-import { CornerUpLeft, SmilePlus } from "lucide-react";
+import { CornerUpLeft, Ellipsis, Pencil, SmilePlus, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useMemo, useState } from "react";
 import { api, type Message } from "../../lib/api";
@@ -6,7 +6,8 @@ import { ChatMarkdown, pageIdsIn, plainPreview } from "../../lib/markdown";
 import { displayName, formatTime } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Badge, cx, IconButton, Popover, springs } from "../../ui";
+import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs } from "../../ui";
+import { MessageEditor } from "./MessageEditor";
 import { PageCard } from "./PageCard";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
@@ -28,6 +29,8 @@ export const MessageItem = memo(function MessageItem({
 }) {
   const { pages, navigate } = useWorkspace();
   const [isPickerOpen, setPickerOpen] = useState(false);
+  const [isEditing, setEditing] = useState(false);
+  const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
   const name = displayName(message.author_name, message.author);
@@ -77,13 +80,22 @@ export const MessageItem = memo(function MessageItem({
             <span className="text-[11.5px] text-faint">{formatTime(message.created_ms)}</span>
           </div>
         )}
-        <div className="prose-chat selectable text-[14px]">
-          <ChatMarkdown
-            text={message.text}
-            pageTitle={(id) => titles.get(id)}
-            onOpenPage={(id) => navigate({ kind: "page", id })}
+        {isEditing ? (
+          <MessageEditor
+            initialText={message.text}
+            onSave={(text) => api.editMessage(message.id, text)}
+            onClose={() => setEditing(false)}
           />
-        </div>
+        ) : (
+          <div className="prose-chat selectable text-[14px]">
+            <ChatMarkdown
+              text={message.text}
+              pageTitle={(id) => titles.get(id)}
+              onOpenPage={(id) => navigate({ kind: "page", id })}
+            />
+            {message.is_edited && <span className="text-[11px] text-faint">(edited)</span>}
+          </div>
+        )}
         {linkedPages.map((id) => (
           <PageCard key={id} pageId={id} />
         ))}
@@ -155,7 +167,26 @@ export const MessageItem = memo(function MessageItem({
           </div>
         </Popover>
         <IconButton label="Reply" icon={<CornerUpLeft size={15} />} onClick={onReply} />
+        <MessageMenu message={message} onEdit={() => setEditing(true)} onDelete={() => setConfirmingDelete(true)} />
       </div>
+      <ConfirmDialog
+        open={isConfirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title="Delete this message?"
+        description="It disappears for everyone, along with its reactions. This can't be undone."
+        confirmLabel="Delete message"
+        onConfirm={() => api.deleteMessage(message.id)}
+      />
     </article>
   );
 });
+
+function MessageMenu({ message, onEdit, onDelete }: { message: Message; onEdit: () => void; onDelete: () => void }) {
+  const items: MenuItem[] = [];
+  if (message.can_edit) items.push({ label: "Edit", icon: <Pencil size={14} />, onSelect: onEdit });
+  if (message.can_delete) {
+    items.push({ label: "Delete", icon: <Trash2 size={14} />, onSelect: onDelete, isDestructive: true });
+  }
+  if (items.length === 0) return null;
+  return <Menu trigger={<IconButton label="More actions" icon={<Ellipsis size={15} />} />} items={items} />;
+}

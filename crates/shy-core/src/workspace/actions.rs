@@ -6,8 +6,9 @@ use tracing::warn;
 use super::{Profile, Workspace};
 use crate::{
     crypto,
-    ops::{EntityId, Envelope, Op, OpBody, VerifiedOp, new_owned_id, now_ms},
+    ops::{EntityId, Envelope, Op, OpBody, VerifiedOp, new_owned_id, normalize_channel_name, now_ms},
     pages::{self, Edit},
+    storage::ItemKind,
 };
 
 impl Workspace {
@@ -25,6 +26,9 @@ impl Workspace {
                 .epoch_key(epoch)?
                 .context("missing key for the current epoch")?;
             let author = self.me();
+            if !self.may(&op) {
+                bail!("only its owner or the admin can do that");
+            }
             state.store.atomically(|store| {
                 let body = OpBody {
                     lamport: store.next_lamport()?,
@@ -61,17 +65,28 @@ impl Workspace {
     }
 
     pub fn create_channel(&self, name: &str) -> Result<EntityId> {
-        let name = name
-            .trim()
-            .trim_start_matches('#')
-            .to_lowercase()
-            .replace(' ', "-");
-        if name.is_empty() {
-            bail!("channel name is empty");
-        }
         let id = new_owned_id(&self.me());
-        self.write(Op::ChannelCreate { id: id.clone(), name })?;
+        self.write(Op::ChannelCreate {
+            id: id.clone(),
+            name: normalize_channel_name(name)?,
+        })?;
         Ok(id)
+    }
+
+    pub fn rename_channel(&self, channel: &str, name: &str) -> Result<()> {
+        self.require_item(channel, ItemKind::Channel)?;
+        self.write(Op::ChannelRename {
+            id: channel.to_owned(),
+            name: normalize_channel_name(name)?,
+        })
+    }
+
+    /// Deletes the channel and every message in it. Owner or admin only.
+    pub fn delete_channel(&self, channel: &str) -> Result<()> {
+        self.require_item(channel, ItemKind::Channel)?;
+        self.write(Op::Delete {
+            id: channel.to_owned(),
+        })
     }
 
     pub fn send_message(&self, channel: &str, text: &str, reply_to: Option<EntityId>) -> Result<EntityId> {
@@ -87,6 +102,27 @@ impl Workspace {
             reply_to,
         })?;
         Ok(id)
+    }
+
+    /// Replaces a message's text. Its author only.
+    pub fn edit_message(&self, message: &str, text: &str) -> Result<()> {
+        let text = text.trim();
+        if text.is_empty() {
+            bail!("message is empty");
+        }
+        self.require_item(message, ItemKind::Message)?;
+        self.write(Op::MessageEdit {
+            id: message.to_owned(),
+            text: text.to_owned(),
+        })
+    }
+
+    /// Author or admin only.
+    pub fn delete_message(&self, message: &str) -> Result<()> {
+        self.require_item(message, ItemKind::Message)?;
+        self.write(Op::Delete {
+            id: message.to_owned(),
+        })
     }
 
     pub fn react(&self, message: &str, emoji: &str, active: bool) -> Result<()> {
@@ -112,6 +148,22 @@ impl Workspace {
             id: page.to_owned(),
             title: title.trim().to_owned(),
         })
+    }
+
+    /// Its sub-pages stay, moving to the top level. Owner or admin only.
+    pub fn delete_page(&self, page: &str) -> Result<()> {
+        self.require_item(page, ItemKind::Page)?;
+        self.write(Op::Delete { id: page.to_owned() })
+    }
+
+    /// Edits and deletes name an existing item of the expected kind, so a
+    /// mistaken id fails here instead of silently doing nothing.
+    fn require_item(&self, id: &str, kind: ItemKind) -> Result<()> {
+        let found = self.state().store.item_kind(id)?;
+        if found != Some(kind) {
+            bail!("no such {} here", kind.noun());
+        }
+        Ok(())
     }
 
     /// A Yjs update produced by an editor.

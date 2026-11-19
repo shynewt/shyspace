@@ -321,6 +321,7 @@ impl Workspace {
                 sync_lock: tokio::sync::Mutex::new(()),
                 recovery_lock: tokio::sync::Mutex::new(()),
                 status: Mutex::new(SyncStatus::default()),
+                refetched_gaps: Mutex::new(std::collections::HashSet::new()),
             }),
         };
         if let Some(net) = &workspace.inner.net {

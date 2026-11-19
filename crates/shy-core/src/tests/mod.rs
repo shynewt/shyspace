@@ -1,4 +1,5 @@
 mod collaboration;
+mod editing;
 mod hardening;
 mod invites;
 mod recovery;

@@ -6,10 +6,12 @@ mod epochs;
 mod invites;
 mod oplog;
 mod queries;
+mod revisions;
 mod schema;
 mod snapshot;
 
 pub use invites::PendingRequest;
+pub use revisions::ItemKind;
 pub use snapshot::{snapshot_database, snapshot_store_without_content};
 
 use std::path::Path;

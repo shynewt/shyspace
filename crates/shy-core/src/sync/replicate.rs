@@ -10,6 +10,7 @@ impl Workspace {
     /// also needs the history of people removed before they joined. Our own
     /// log is included so a restored device learns what it already wrote.
     pub(crate) async fn pull(&self) -> Result<()> {
+        self.refetch_gaps()?;
         let authors = self.state().store.everyone_ever()?;
         for author in authors {
             let cursor = self.state().store.cursor(&author)?;
@@ -24,6 +25,24 @@ impl Workspace {
                     }
                 }
                 self.state().store.set_cursor(&author, &key)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Once per gap: if an author's next op went missing after we read past
+    /// it, read their segments again from the start.
+    fn refetch_gaps(&self) -> Result<()> {
+        let state = self.state();
+        let mut refetched = self
+            .inner
+            .refetched_gaps
+            .lock()
+            .expect("gap list lock poisoned by an earlier panic");
+        for (author, next_seq) in state.store.authors_missing_next_op()? {
+            if refetched.insert((author, next_seq)) {
+                warn!("op {next_seq} from {author} went missing; reading their history again");
+                state.store.forget_cursor(&author)?;
             }
         }
         Ok(())

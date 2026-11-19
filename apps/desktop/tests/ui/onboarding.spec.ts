@@ -29,7 +29,7 @@ test("creating a workspace needs a bucket that passed the connection test", asyn
   await expect(page.getByText("The bucket works")).toBeVisible();
   await create.click();
 
-  await expect(page.getByRole("button", { name: /general/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "general", exact: true })).toBeVisible();
 });
 
 test("changing the settings after a passed test asks for a new test", async ({ page }) => {
@@ -49,5 +49,5 @@ test("joining with an invite opens the workspace once approved", async ({ page }
   await page.getByRole("button", { name: /Ask to join/ }).click();
 
   await expect(page.getByText("Team")).toBeVisible();
-  await expect(page.getByRole("button", { name: /general/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "general", exact: true })).toBeVisible();
 });

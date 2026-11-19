@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   CopyField,
   Dialog,
   Drawer,
@@ -28,6 +29,7 @@ import {
 export default function Gallery() {
   const [isDialogOpen, setDialogOpen] = useState(false);
   const [isDrawerOpen, setDrawerOpen] = useState(false);
+  const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [segment, setSegment] = useState<"one" | "two" | "three">("one");
   return (
     <div className="h-full overflow-y-auto bg-surface">
@@ -91,6 +93,7 @@ export default function Gallery() {
         <Example title="Floating surfaces">
           <Button onClick={() => setDialogOpen(true)}>Open dialog</Button>
           <Button onClick={() => setDrawerOpen(true)}>Open drawer</Button>
+          <Button onClick={() => setConfirmOpen(true)}>Confirm a delete</Button>
           <Menu
             trigger={<Button>Open menu</Button>}
             items={[
@@ -157,6 +160,14 @@ export default function Gallery() {
           </Button>
         </div>
       </Dialog>
+      <ConfirmDialog
+        open={isConfirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Delete this?"
+        description="It disappears for everyone. This can't be undone."
+        confirmLabel="Delete"
+        onConfirm={async () => showToast("Deleted")}
+      />
       <Drawer open={isDrawerOpen} onOpenChange={setDrawerOpen} title="A drawer">
         <p className="p-2 text-[13px] text-muted">Panels that slide in from the side.</p>
       </Drawer>

@@ -54,6 +54,8 @@ mod tests {
 pub struct Channel {
     pub id: EntityId,
     pub name: String,
+    /// Whether this member may delete it (its owner or the admin).
+    pub can_delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -75,6 +77,11 @@ pub struct Message {
     pub created_ms: i64,
     /// Position in the channel's order; pass it back as a cursor to page.
     pub lamport: u64,
+    pub is_edited: bool,
+    /// Whether this member may edit it (its author).
+    pub can_edit: bool,
+    /// Whether this member may delete it (its author or the admin).
+    pub can_delete: bool,
     pub reactions: Vec<Reaction>,
 }
 
@@ -92,6 +99,8 @@ pub struct Page {
     pub parent: Option<EntityId>,
     pub title: String,
     pub updated_ms: i64,
+    /// Whether this member may delete it (its owner or the admin).
+    pub can_delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

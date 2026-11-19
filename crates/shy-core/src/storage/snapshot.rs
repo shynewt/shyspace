@@ -20,6 +20,9 @@ const REPLAYABLE_TABLES: &[&str] = &[
     "reactions",
     "pages",
     "search",
+    "message_edits",
+    "channel_names",
+    "deleted",
 ];
 
 /// Copies the database at `source` to `destination`, both under `key`.
