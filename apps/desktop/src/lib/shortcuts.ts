@@ -9,7 +9,15 @@ export const MOD_LABEL = isMac ? "⌘" : "Ctrl";
 
 const hasMod = (event: KeyboardEvent) => (isMac ? event.metaKey : event.ctrlKey);
 
-export type ShortcutId = "search" | "inbox" | "previous" | "next" | "previousUnread" | "nextUnread" | "cheatSheet";
+export type ShortcutId =
+  | "search"
+  | "inbox"
+  | "previous"
+  | "next"
+  | "previousUnread"
+  | "nextUnread"
+  | "cheatSheet"
+  | "settings";
 
 export type Shortcut = {
   id: ShortcutId;
@@ -54,6 +62,12 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["Alt", "Shift", "↓"],
     description: "Next unread channel",
     matches: (event) => event.altKey && event.shiftKey && event.key === "ArrowDown",
+  },
+  {
+    id: "settings",
+    keys: [MOD_LABEL, ","],
+    description: "Open settings",
+    matches: (event) => hasMod(event) && event.key === ",",
   },
   {
     id: "cheatSheet",

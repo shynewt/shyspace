@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { api, onChange } from "./api";
 import { displayName } from "./people";
+import { readPreferences } from "./preferences";
 import { reportError } from "./toast";
 import type { View } from "./workspace";
 
@@ -22,7 +23,8 @@ export function useAlerts(view: View | null) {
         const isLooking = document.hasFocus() && shown?.kind === "channel" && shown.id === change.channel;
         if (isLooking) return;
         const title = `${displayName(change.author_name, change.author)} in #${change.channel_name}`;
-        api.showAlert(title, change.preview).catch(reportError);
+        const body = readPreferences().alertsShowText ? change.preview : "New message";
+        api.showAlert(title, body).catch(reportError);
       }),
     [],
   );

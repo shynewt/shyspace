@@ -159,6 +159,12 @@ export class FakeBackend {
       case "move_channel":
         this.sections.move(requireString(args, "channel"), (argument(args, "section") as string | null) ?? null);
         return this.notify({ kind: "channels" });
+      case "set_profile": {
+        const me = this.members.find((member) => member.id === this.me());
+        if (!me) throw new Error("fake backend: no member for me");
+        me.name = requireString(args, "name").trim();
+        return this.notify({ kind: "members" });
+      }
       case "save_for_later":
         this.later.save(requireString(args, "item"), (argument(args, "remindMs") as number | null) ?? null);
         return this.notifyLater();

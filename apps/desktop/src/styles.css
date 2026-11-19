@@ -21,8 +21,30 @@
   --shadow-lg: 0 2px 6px rgb(30 25 15 / 0.08), 0 24px 64px rgb(30 25 15 / 0.18);
 }
 
+/* Dark: chosen in settings, or the system's choice unless Light was chosen. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #141412;
+  --surface: #1b1b19;
+  --surface-2: #232320;
+  --surface-3: #2d2d29;
+  --border: #2e2e2a;
+  --text: #ecebe6;
+  --text-muted: #9c9a92;
+  --text-faint: #6c6a63;
+  --accent: #8b7fff;
+  --accent-strong: #9d93ff;
+  --accent-soft: #26234a;
+  --accent-text: #b3abff;
+  --danger: #ef6b80;
+  --success: #4cc48c;
+  --warning: #e3a83a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 64px rgb(0 0 0 / 0.55);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #141412;
     --surface: #1b1b19;

@@ -185,6 +185,7 @@ export const api = {
   applyDocUpdate: (page: string, update: Uint8Array) =>
     invoke<void>("apply_doc_update", { page, update: Array.from(update) }),
   members: () => invoke<Member[]>("members"),
+  setProfile: (name: string) => invoke<void>("set_profile", { name }),
   removeMember: (member: string) => invoke<void>("remove_member", { member }),
   invites: () => invoke<Invite[]>("invites"),
   createInvite: (label: string) => invoke<string>("create_invite", { label }),

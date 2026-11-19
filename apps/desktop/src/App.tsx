@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { Shell } from "./features/shell/Shell";
 import { api, type Session } from "./lib/api";
+import { useTheme } from "./lib/preferences";
 import { reportError } from "./lib/toast";
 import { useNoBrowserMenu } from "./lib/useContextMenu";
 import { Logo, Toasts } from "./ui";
@@ -15,6 +16,7 @@ type Phase = { kind: "loading" } | { kind: "onboarding" } | { kind: "ready"; ses
 export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   useNoBrowserMenu();
+  useTheme();
 
   useEffect(() => {
     api.session().then(

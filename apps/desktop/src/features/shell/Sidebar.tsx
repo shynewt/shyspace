@@ -1,4 +1,4 @@
-import { Bookmark, Inbox as InboxIcon, Plus, Search, Users } from "lucide-react";
+import { Bookmark, Inbox as InboxIcon, Plus, Search, Settings, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
@@ -16,10 +16,12 @@ export function Sidebar({
   status,
   onOpenSearch,
   onOpenMembers,
+  onOpenSettings,
 }: {
   status: SyncStatus | undefined;
   onOpenSearch: () => void;
   onOpenMembers: () => void;
+  onOpenSettings: () => void;
 }) {
   const { session, pages, navigate } = useWorkspace();
 
@@ -63,7 +65,7 @@ export function Sidebar({
         </Section>
       </nav>
 
-      <div className="border-t border-line p-2">
+      <div className="flex items-center gap-1 border-t border-line p-2">
         <button
           type="button"
           onClick={onOpenMembers}
@@ -73,6 +75,11 @@ export function Sidebar({
           <span className="flex-1 text-left">Members{session.is_admin ? " & invites" : ""}</span>
           {session.is_admin && <PendingRequestsBadge />}
         </button>
+        <IconButton
+          label={`Settings (${shortcutKeys("settings").join(" ")})`}
+          icon={<Settings size={15} />}
+          onClick={onOpenSettings}
+        />
       </div>
     </aside>
   );

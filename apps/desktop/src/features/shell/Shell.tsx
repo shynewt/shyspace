@@ -14,6 +14,7 @@ import { LaterView } from "../later/LaterView";
 import { MembersPanel } from "../members/MembersPanel";
 import { PageView } from "../pages/PageView";
 import { CommandPalette } from "../search/CommandPalette";
+import { SettingsDialog } from "../settings/SettingsDialog";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
 
@@ -27,6 +28,7 @@ export function Shell({ session }: { session: Session }) {
   const [isPaletteOpen, setPaletteOpen] = useState(false);
   const [isMembersOpen, setMembersOpen] = useState(false);
   const [isShortcutsOpen, setShortcutsOpen] = useState(false);
+  const [isSettingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (!view && channels.length > 0) setView({ kind: "channel", id: channels[0].id });
@@ -72,6 +74,8 @@ export function Shell({ session }: { session: Session }) {
           return step(1, unread);
         case "cheatSheet":
           return setShortcutsOpen(true);
+        case "settings":
+          return setSettingsOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -95,7 +99,12 @@ export function Shell({ session }: { session: Session }) {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
       >
-        <Sidebar status={status} onOpenSearch={() => setPaletteOpen(true)} onOpenMembers={() => setMembersOpen(true)} />
+        <Sidebar
+          status={status}
+          onOpenSearch={() => setPaletteOpen(true)}
+          onOpenMembers={() => setMembersOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
         <main className="relative min-w-0 flex-1 bg-surface">
           <AnimatePresence mode="wait" initial={false}>
             {view && (
@@ -119,6 +128,7 @@ export function Shell({ session }: { session: Session }) {
       <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} onOpenMembers={() => setMembersOpen(true)} />
       <MembersPanel open={isMembersOpen} onOpenChange={setMembersOpen} />
       <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <SettingsDialog open={isSettingsOpen} onOpenChange={setSettingsOpen} />
       <RemovedNotice isRemoved={status?.removed ?? false} />
     </WorkspaceContext.Provider>
   );
