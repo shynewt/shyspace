@@ -73,6 +73,20 @@ impl Store {
         Ok(messages)
     }
 
+    /// Where a message sits in its channel's order, to page from it.
+    pub fn message_cursor(&self, id: &str) -> Result<Option<MessageCursor>> {
+        let row: Option<(u64, Vec<u8>)> = self
+            .db
+            .query_row("SELECT lamport, author FROM messages WHERE id = ?", [id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .optional()?;
+        Ok(row.map(|(lamport, author)| MessageCursor {
+            lamport,
+            author: hex::encode(author),
+        }))
+    }
+
     fn reactions(&self, message: &str, me: &PublicKey) -> Result<Vec<Reaction>> {
         let mut statement = self.db.prepare(
             "SELECT emoji, COUNT(*), MAX(author = ?2), MIN(rowid) AS first FROM reactions

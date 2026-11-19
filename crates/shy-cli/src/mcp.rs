@@ -1,7 +1,7 @@
 //! Exposes a workspace to an AI agent as MCP tools. The agent acts as this
 //! member: everything it writes is signed with this member's key.
 
-use std::{fmt::Write as _, time::Duration};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use rmcp::{
@@ -13,7 +13,10 @@ use rmcp::{
     transport::stdio,
 };
 use serde::Deserialize;
-use shy_core::{Edit, Workspace, views::Change};
+use shy_core::{
+    Edit, Workspace,
+    views::{Change, Message},
+};
 
 type ToolResult = Result<String, String>;
 
@@ -31,6 +34,8 @@ pub struct ReadMessages {
     channel: String,
     /// How many recent messages to return. Defaults to 30.
     limit: Option<u32>,
+    /// Return messages older than this message id, to read further back.
+    before: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -91,6 +96,31 @@ pub struct WaitForMessages {
     timeout_seconds: Option<u64>,
 }
 
+/// One line per message, oldest first, each starting with its id.
+fn format_messages(messages: Vec<Message>) -> String {
+    if messages.is_empty() {
+        return "(no messages yet)".into();
+    }
+    let mut output = String::new();
+    for message in messages {
+        let bot = if message.author_is_bot { " (bot)" } else { "" };
+        let reply = message.reply_to.map(|id| format!(" ↩{id}")).unwrap_or_default();
+        let author = match message.author_name.as_str() {
+            "" => format!("member {}", &message.author[..8]),
+            name => name.to_owned(),
+        };
+        output.push_str(&format!(
+            "[{}] {author}{bot}{reply}: {}",
+            message.id, message.text
+        ));
+        for reaction in message.reactions {
+            output.push_str(&format!(" {}×{}", reaction.emoji, reaction.count));
+        }
+        output.push('\n');
+    }
+    output
+}
+
 fn failed(error: anyhow::Error) -> String {
     format!("{error:#}")
 }
@@ -113,28 +143,6 @@ impl ShyTools {
             .find(|candidate| candidate.id == page || candidate.title == page)
             .map(|found| found.id)
             .with_context(|| format!("no page {page}; call list_pages"))
-    }
-
-    fn format_messages(&self, channel: &str, limit: u32) -> Result<String> {
-        let mut output = String::new();
-        for message in self.workspace.messages(channel, None, limit)? {
-            let bot = if message.author_is_bot { " (bot)" } else { "" };
-            let reply = message.reply_to.map(|id| format!(" ↩{id}")).unwrap_or_default();
-            let author = match message.author_name.as_str() {
-                "" => format!("member {}", &message.author[..8]),
-                name => name.to_owned(),
-            };
-            write!(output, "[{}] {author}{bot}{reply}: {}", message.id, message.text)?;
-            for reaction in message.reactions {
-                write!(output, " {}×{}", reaction.emoji, reaction.count)?;
-            }
-            output.push('\n');
-        }
-        Ok(if output.is_empty() {
-            "(no messages yet)".into()
-        } else {
-            output
-        })
     }
 }
 
@@ -159,8 +167,12 @@ impl ShyTools {
     )]
     fn read_messages(&self, Parameters(request): Parameters<ReadMessages>) -> ToolResult {
         let channel = self.channel_id(&request.channel).map_err(failed)?;
-        self.format_messages(&channel, request.limit.unwrap_or(DEFAULT_MESSAGE_LIMIT))
-            .map_err(failed)
+        let limit = request.limit.unwrap_or(DEFAULT_MESSAGE_LIMIT);
+        let messages = match &request.before {
+            Some(message) => self.workspace.messages_before(&channel, message, limit),
+            None => self.workspace.messages(&channel, None, limit),
+        };
+        messages.map(format_messages).map_err(failed)
     }
 
     #[tool(description = "Post a message to a channel, optionally as a reply.")]
@@ -290,7 +302,11 @@ impl ShyTools {
         })
         .await;
         match arrived {
-            Ok(Some(channel)) => self.format_messages(&channel, 10).map_err(failed),
+            Ok(Some(channel)) => self
+                .workspace
+                .messages(&channel, None, 10)
+                .map(format_messages)
+                .map_err(failed),
             _ => Ok("no new messages".into()),
         }
     }

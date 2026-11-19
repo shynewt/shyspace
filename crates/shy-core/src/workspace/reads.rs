@@ -1,6 +1,6 @@
 //! Read models, straight from the local database.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::Workspace;
 use crate::{
@@ -21,6 +21,13 @@ impl Workspace {
         limit: u32,
     ) -> Result<Vec<Message>> {
         self.state().store.messages(channel, &self.me(), before, limit)
+    }
+
+    /// Up to `limit` messages older than `message`, oldest first.
+    pub fn messages_before(&self, channel: &str, message: &str, limit: u32) -> Result<Vec<Message>> {
+        let state = self.state();
+        let cursor = state.store.message_cursor(message)?.context("no such message")?;
+        state.store.messages(channel, &self.me(), Some(&cursor), limit)
     }
 
     pub fn pages(&self) -> Result<Vec<Page>> {
