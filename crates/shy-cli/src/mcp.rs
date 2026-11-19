@@ -342,7 +342,9 @@ impl ShyTools {
         Ok("replaced".into())
     }
 
-    #[tool(description = "Full-text search across messages and pages.")]
+    #[tool(
+        description = "Full-text search across messages and pages. Filters: from:Name (from:\"Two Words\", from:me), in:#channel, before:2026-11-19, after:2026-11-01; any filter limits results to messages."
+    )]
     fn search(&self, Parameters(request): Parameters<Search>) -> ToolResult {
         let hits = self.workspace.search(&request.query, 20).map_err(failed)?;
         if hits.is_empty() {

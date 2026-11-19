@@ -175,6 +175,8 @@ pub struct SearchHit {
     /// Matches are wrapped in \u{1} … \u{2} markers for highlighting.
     pub snippet: String,
     pub channel: Option<EntityId>,
+    /// For a reply, the first message of its thread.
+    pub thread_root: Option<EntityId>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

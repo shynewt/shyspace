@@ -83,7 +83,7 @@ export function Shell({ session }: { session: Session }) {
           </AnimatePresence>
         </main>
       </motion.div>
-      <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} onOpenMembers={() => setMembersOpen(true)} />
       <MembersPanel open={isMembersOpen} onOpenChange={setMembersOpen} />
       <RemovedNotice isRemoved={status?.removed ?? false} />
     </WorkspaceContext.Provider>

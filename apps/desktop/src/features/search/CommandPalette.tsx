@@ -1,4 +1,14 @@
-import { CornerDownLeft, FileText, Hash, MessageSquare, Search } from "lucide-react";
+import {
+  CheckCheck,
+  CornerDownLeft,
+  FilePlus2,
+  FileText,
+  Hash,
+  Inbox,
+  MessageSquare,
+  Search,
+  Users,
+} from "lucide-react";
 import { motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SearchHit } from "../../lib/api";
@@ -10,18 +20,33 @@ const SEARCH_DELAY_MS = 120;
 const JUMP_LIMIT_WHILE_TYPING = 6;
 const JUMP_LIMIT_EMPTY = 12;
 
-type Item = { key: string; view: View; icon: ReactNode; title: string; detail?: ReactNode; group: string };
+type Item = {
+  key: string;
+  onChoose: () => void;
+  icon: ReactNode;
+  title: string;
+  detail?: ReactNode;
+  group: string;
+};
 
-export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function CommandPalette({
+  open,
+  onOpenChange,
+  onOpenMembers,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onOpenMembers: () => void;
+}) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Search" hideTitle placement="top" width={600}>
-      <PaletteBody onClose={() => onOpenChange(false)} />
+      <PaletteBody onClose={() => onOpenChange(false)} onOpenMembers={onOpenMembers} />
     </Dialog>
   );
 }
 
-function PaletteBody({ onClose }: { onClose: () => void }) {
-  const { channels, pages, navigate } = useWorkspace();
+function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMembers: () => void }) {
+  const { channels, pages, navigate, session } = useWorkspace();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [selected, setSelected] = useState(0);
@@ -39,13 +64,36 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const items = useMemo<Item[]>(() => {
     const needle = query.trim().toLowerCase();
     const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
+    const go = (view: View) => () => navigate(view);
+    const actions: Item[] = [
+      { title: "Open inbox", icon: <Inbox size={15} />, onChoose: go({ kind: "inbox" }) },
+      {
+        title: "New page",
+        icon: <FilePlus2 size={15} />,
+        onChoose: () => {
+          api.createPage("", null).then((id) => navigate({ kind: "page", id }), reportError);
+        },
+      },
+      {
+        title: "Mark all as read",
+        icon: <CheckCheck size={15} />,
+        onChoose: () => api.markAllRead().catch(reportError),
+      },
+      {
+        title: session.is_admin ? "Members and invites" : "Members",
+        icon: <Users size={15} />,
+        onChoose: onOpenMembers,
+      },
+    ]
+      .filter((action) => matches(action.title))
+      .map((action) => ({ ...action, key: `action:${action.title}`, group: "Actions" }));
     const jumpTo: Item[] = [
       ...channels
         .filter((channel) => matches(channel.name))
         .map(
           (channel): Item => ({
             key: `channel:${channel.id}`,
-            view: { kind: "channel", id: channel.id },
+            onChoose: go({ kind: "channel", id: channel.id }),
             icon: <Hash size={15} />,
             title: channel.name,
             group: "Jump to",
@@ -56,7 +104,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         .map(
           (page): Item => ({
             key: `page:${page.id}`,
-            view: { kind: "page", id: page.id },
+            onChoose: go({ kind: "page", id: page.id }),
             icon: <FileText size={15} />,
             title: page.title || "Untitled",
             group: "Jump to",
@@ -68,7 +116,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         return [
           {
             key: `hit:${hit.id}`,
-            view: { kind: "page", id: hit.id },
+            onChoose: go({ kind: "page", id: hit.id }),
             icon: <FileText size={15} />,
             title: hit.title || "Untitled",
             detail: <Snippet text={hit.snippet} />,
@@ -80,7 +128,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       return [
         {
           key: `hit:${hit.id}`,
-          view: { kind: "channel", id: hit.channel },
+          onChoose: go({ kind: "channel", id: hit.channel, thread: hit.thread_root ?? undefined, focus: hit.id }),
           icon: <MessageSquare size={15} />,
           title: `#${hit.title}`,
           detail: <Snippet text={hit.snippet} />,
@@ -88,8 +136,8 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         },
       ];
     });
-    return [...jumpTo, ...found];
-  }, [query, hits, channels, pages]);
+    return [...jumpTo, ...found, ...actions];
+  }, [query, hits, channels, pages, navigate, session.is_admin, onOpenMembers]);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });
@@ -97,7 +145,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
 
   const choose = (item: Item | undefined) => {
     if (!item) return;
-    navigate(item.view);
+    item.onChoose();
     onClose();
   };
 
@@ -126,10 +174,16 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
               choose(items[selected]);
             }
           }}
-          placeholder="Search messages and pages, or jump to…"
+          placeholder="Search, jump to, or run an action…"
           className="h-13 flex-1 bg-transparent text-[15px] outline-none placeholder:text-faint"
         />
       </div>
+      {!query && (
+        <p className="border-b border-line px-4 py-1.5 text-[11.5px] text-faint">
+          Filters: <code>from:name</code> <code>in:#channel</code> <code>before:2026-11-19</code>{" "}
+          <code>after:2026-11-01</code>
+        </p>
+      )}
       <div id="palette-results" ref={list} role="listbox" className="max-h-[420px] overflow-y-auto p-2">
         {items.length === 0 && (
           <p className="px-3 py-8 text-center text-[13px] text-muted">Nothing found for “{query}”</p>

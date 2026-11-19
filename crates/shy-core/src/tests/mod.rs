@@ -7,6 +7,7 @@ mod mentions;
 mod notifications;
 mod reading;
 mod recovery;
+mod search;
 mod storage;
 mod support;
 mod threads;

@@ -7,6 +7,25 @@ use rusqlite::{OptionalExtension, params};
 use super::Store;
 use crate::views::{Channel, Member, Message, MessageCursor, NotifyLevel, Page, Reaction, SearchHit};
 
+/// Message filters for `Store::search`, with names already resolved.
+#[derive(Default)]
+pub struct SearchFilters {
+    /// Only these authors (keys); an empty list matches nothing.
+    pub authors: Option<Vec<Vec<u8>>>,
+    pub channel: Option<String>,
+    pub before_ms: Option<i64>,
+    pub after_ms: Option<i64>,
+}
+
+impl SearchFilters {
+    fn is_empty(&self) -> bool {
+        self.authors.is_none()
+            && self.channel.is_none()
+            && self.before_ms.is_none()
+            && self.after_ms.is_none()
+    }
+}
+
 /// The columns `message_from_row` reads, and the joins they need.
 pub(super) const MESSAGE_COLUMNS: &str =
     "m.id, m.channel, m.author, COALESCE(p.name, ''), COALESCE(p.is_bot, 0),
@@ -179,31 +198,83 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    pub fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
-        let match_expression = query
+    /// Messages and pages matching `text` (each word as a prefix). With
+    /// `filters`, only messages that also pass them; with no text, the
+    /// newest messages that pass them.
+    pub fn search(&self, text: &str, filters: &SearchFilters, limit: u32) -> Result<Vec<SearchHit>> {
+        let match_expression = text
             .split_whitespace()
             .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
             .collect::<Vec<_>>()
             .join(" ");
-        if match_expression.is_empty() {
+        if match_expression.is_empty() && filters.is_empty() {
             return Ok(Vec::new());
         }
-        let mut statement = self.db.prepare(
-            "SELECT s.kind, s.ref, COALESCE(NULLIF(s.title, ''), n.name, c.name, ''),
-                    snippet(search, 3, '\u{1}', '\u{2}', '…', 12), m.channel
-             FROM search s
-             LEFT JOIN messages m ON s.kind = 'message' AND m.id = s.ref
-             LEFT JOIN channels c ON c.id = m.channel
-             LEFT JOIN channel_names n ON n.channel = m.channel
-             WHERE search MATCH ? ORDER BY rank LIMIT ?",
-        )?;
-        let rows = statement.query_map(params![match_expression, limit], |row| {
+        let mut conditions = Vec::new();
+        let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(authors) = &filters.authors {
+            if authors.is_empty() {
+                return Ok(Vec::new());
+            }
+            conditions.push(format!("m.author IN ({})", vec!["?"; authors.len()].join(", ")));
+            values.extend(
+                authors
+                    .iter()
+                    .map(|author| Box::new(author.clone()) as Box<dyn rusqlite::ToSql>),
+            );
+        }
+        if let Some(channel) = &filters.channel {
+            conditions.push("m.channel = ?".into());
+            values.push(Box::new(channel.clone()));
+        }
+        if let Some(before) = filters.before_ms {
+            conditions.push("m.created_ms < ?".into());
+            values.push(Box::new(before));
+        }
+        if let Some(after) = filters.after_ms {
+            conditions.push("m.created_ms >= ?".into());
+            values.push(Box::new(after));
+        }
+        let filter_sql = conditions
+            .iter()
+            .map(|condition| format!(" AND {condition}"))
+            .collect::<String>();
+        let sql = if match_expression.is_empty() {
+            format!(
+                "SELECT 'message', m.id, COALESCE(n.name, c.name, ''), COALESCE(e.text, m.text), m.channel
+                 FROM messages m
+                 LEFT JOIN message_edits e ON e.message = m.id
+                 LEFT JOIN channels c ON c.id = m.channel
+                 LEFT JOIN channel_names n ON n.channel = m.channel
+                 WHERE 1{filter_sql} ORDER BY m.lamport DESC LIMIT ?"
+            )
+        } else {
+            let only_messages = if filters.is_empty() {
+                ""
+            } else {
+                " AND s.kind = 'message'"
+            };
+            values.insert(0, Box::new(match_expression));
+            format!(
+                "SELECT s.kind, s.ref, COALESCE(NULLIF(s.title, ''), n.name, c.name, ''),
+                        snippet(search, 3, '\u{1}', '\u{2}', '…', 12), m.channel
+                 FROM search s
+                 LEFT JOIN messages m ON s.kind = 'message' AND m.id = s.ref
+                 LEFT JOIN channels c ON c.id = m.channel
+                 LEFT JOIN channel_names n ON n.channel = m.channel
+                 WHERE search MATCH ?{only_messages}{filter_sql} ORDER BY rank LIMIT ?"
+            )
+        };
+        values.push(Box::new(limit));
+        let mut statement = self.db.prepare(&sql)?;
+        let rows = statement.query_map(rusqlite::params_from_iter(values.iter()), |row| {
             Ok(SearchHit {
                 kind: row.get(0)?,
                 id: row.get(1)?,
                 title: row.get(2)?,
                 snippet: row.get(3)?,
                 channel: row.get(4)?,
+                thread_root: None,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

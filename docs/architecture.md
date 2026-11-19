@@ -28,7 +28,7 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
    - reactions: per-author on/off toggles;
    - page content: Yjs CRDT updates;
    - creations (channel, message, page): the id contains the author's key prefix, so only the author can create or overwrite it.
-5. **Local first.** Each device stores ops and the views built from them in SQLite (`store.rs`). Reads never touch the network. Search uses SQLite FTS5, on the device.
+5. **Local first.** Each device stores ops and the views built from them in SQLite (`store.rs`). Reads never touch the network. Search uses SQLite FTS5, on the device, with filters parsed in `search.rs` (`from:`, `in:`, `before:`, `after:`).
 6. **Mentions are links in the text** (`mentions.rs`): `[@Ada](shy://member/<id>)`, `[@channel](shy://mention/channel)`, `[@here](shy://mention/here)`. They need no op of their own; each device works out what mentions it, so this works under end-to-end encryption.
 7. **Threads are replies** (`storage/threads.rs`): a message with `reply_to` lives in the thread of the message it eventually answers, in the same channel, worked out when reading so arrival order doesn't matter. A reply whose parent is missing shows in the channel. You follow threads you started, replied in or were mentioned in, unless you choose otherwise; their new replies alert you.
 8. **Alerts are decided on the device** (`sync/alerts.rs`): a new message from someone else raises `Change::Alert` when that channel's level (all, mentions, or nothing) allows it and it was written in the last 10 minutes, so catching up never floods you. The desktop app shows it unless you're looking at that channel, and keeps running in the tray when its window is closed.

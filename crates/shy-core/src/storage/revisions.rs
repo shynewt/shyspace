@@ -271,7 +271,7 @@ mod tests {
                 .map(|p| (p.id, p.parent))
                 .collect();
             let hits = store
-                .search("hello", 10)
+                .search("hello", &crate::storage::SearchFilters::default(), 10)
                 .unwrap()
                 .into_iter()
                 .map(|hit| hit.id)

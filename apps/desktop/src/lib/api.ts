@@ -51,6 +51,7 @@ export type SearchHit = {
   title: string;
   snippet: string;
   channel: string | null;
+  thread_root: string | null;
 };
 export type InviteState = "open" | "requested" | "accepted" | "rejected" | "revoked" | "expired";
 export type Invite = {

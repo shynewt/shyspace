@@ -7,8 +7,8 @@ use super::{State, Workspace};
 use crate::{
     mentions::mentions,
     ops::Op,
-    pages,
-    storage::Reply,
+    pages, search,
+    storage::{Reply, SearchFilters},
     views::{Channel, LinkedMessage, Member, Message, MessageCursor, Page, SearchHit},
 };
 
@@ -148,8 +148,48 @@ impl Workspace {
         self.state().store.members(&self.inner.config.admin)
     }
 
+    /// Searches messages and pages; see `search::parse` for the filters.
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
-        self.state().store.search(query, limit)
+        let query = search::parse(query)?;
+        let state = self.state();
+        let mut filters = SearchFilters {
+            before_ms: query.before_ms,
+            after_ms: query.after_ms,
+            ..SearchFilters::default()
+        };
+        if let Some(from) = &query.from {
+            filters.authors = Some(if from.eq_ignore_ascii_case("me") {
+                vec![self.me().as_bytes().to_vec()]
+            } else {
+                let wanted = from.to_lowercase();
+                state
+                    .store
+                    .members(&self.inner.config.admin)?
+                    .into_iter()
+                    .filter(|member| member.name.to_lowercase().starts_with(&wanted))
+                    .map(|member| hex::decode(&member.id))
+                    .collect::<Result<_, _>>()?
+            });
+        }
+        if let Some(channel) = &query.channel {
+            let wanted = channel.to_lowercase();
+            let Some(found) = state
+                .store
+                .channels()?
+                .into_iter()
+                .find(|c| c.name.to_lowercase() == wanted)
+            else {
+                return Ok(Vec::new());
+            };
+            filters.channel = Some(found.id);
+        }
+        let mut hits = state.store.search(&query.text, &filters, limit)?;
+        for hit in &mut hits {
+            if hit.kind == "message" {
+                hit.thread_root = state.store.thread_root(&hit.id)?.filter(|root| *root != hit.id);
+            }
+        }
+        Ok(hits)
     }
 }
 

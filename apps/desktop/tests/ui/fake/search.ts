@@ -1,11 +1,12 @@
 import type * as Y from "yjs";
 import type { SearchHit } from "../../../src/lib/api";
+import { rootOf } from "./threads";
 
 const HIGHLIGHT_START = "\u0001";
 const HIGHLIGHT_END = "\u0002";
 
 type Searchable = {
-  messages: readonly { id: string; channel: string; text: string }[];
+  messages: readonly { id: string; channel: string; text: string; reply_to: string | null; author: string }[];
   channels: readonly { id: string; name: string }[];
   pages: readonly { id: string; title: string; doc: Y.Doc }[];
 };
@@ -31,12 +32,20 @@ export function search(query: string, { messages, channels, pages }: Searchable)
       title: channel?.name ?? "",
       snippet: highlight(message.text, terms),
       channel: message.channel,
+      thread_root: rootOf(messages, message.id) === message.id ? null : rootOf(messages, message.id),
     });
   }
   for (const page of pages) {
     const body = page.doc.getText("content").toString();
     if (!matches(`${page.title} ${body}`)) continue;
-    hits.push({ kind: "page", id: page.id, title: page.title, snippet: highlight(body, terms), channel: null });
+    hits.push({
+      kind: "page",
+      id: page.id,
+      title: page.title,
+      snippet: highlight(body, terms),
+      channel: null,
+      thread_root: null,
+    });
   }
   return hits;
 }
