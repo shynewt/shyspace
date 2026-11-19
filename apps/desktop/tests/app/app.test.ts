@@ -13,7 +13,7 @@ async function createWorkspace(app: Browser) {
   await app.$("aria/Access key").setValue(BUCKET.accessKey);
   await app.$("aria/Secret key").setValue(BUCKET.secretKey);
   await app.$("button=Test connection").click();
-  await app.$("*=The bucket works").waitForDisplayed(TIMEOUT);
+  await app.$("span*=The bucket works").waitForDisplayed(TIMEOUT);
   await app.$("button*=Create workspace").click();
   await app.$("aria/Message #general").waitForDisplayed(TIMEOUT);
 }
