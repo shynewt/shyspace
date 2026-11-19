@@ -86,3 +86,22 @@ async fn old_messages_caught_up_later_do_not_alert() {
 
     assert!(alerted_texts(&mut changes).is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn being_busy_silences_alerts() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    admin
+        .set_status(crate::views::StatusUpdate {
+            emoji: "🎧",
+            text: "Focus",
+            until_ms: None,
+            is_busy: true,
+        })
+        .unwrap();
+    let mut changes = admin.subscribe();
+    bob.send_message(&general, "anyone?", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    assert!(alerted_texts(&mut changes).is_empty());
+}

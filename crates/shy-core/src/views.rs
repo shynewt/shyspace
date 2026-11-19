@@ -169,6 +169,37 @@ pub struct Member {
     pub is_bot: bool,
     pub is_admin: bool,
     pub active: bool,
+    /// Their status, unless none is set or it expired.
+    pub status: Option<MemberStatus>,
+    /// From live heartbeats; never stored or synced through the bucket.
+    pub presence: PresenceState,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MemberStatus {
+    pub emoji: String,
+    pub text: String,
+    pub until_ms: Option<i64>,
+    pub is_busy: bool,
+}
+
+/// A status to set for yourself.
+pub struct StatusUpdate<'a> {
+    pub emoji: &'a str,
+    pub text: &'a str,
+    pub until_ms: Option<i64>,
+    pub is_busy: bool,
+}
+
+/// Whether a member's device is reachable right now. "Unreachable" rather than
+/// "offline": a network that blocks peers looks the same.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceState {
+    Online,
+    Away,
+    #[default]
+    Unreachable,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

@@ -58,6 +58,8 @@ export class FakeInvites {
       is_bot: invite.requester_is_bot,
       is_admin: false,
       active: true,
+      status: null,
+      presence: "unreachable",
     };
   }
 

@@ -74,7 +74,15 @@ export class FakeBackend {
 
   addMember(name: string, { kind }: Kind = { kind: "person" }): string {
     const id = randomHex(32);
-    this.members.push({ id, name, is_bot: kind === "bot", is_admin: false, active: true });
+    this.members.push({
+      id,
+      name,
+      is_bot: kind === "bot",
+      is_admin: false,
+      active: true,
+      status: null,
+      presence: "unreachable",
+    });
     this.notify({ kind: "members" });
     return id;
   }
@@ -83,6 +91,18 @@ export class FakeBackend {
     const member = this.members.find((candidate) => candidate.name === name);
     if (!member) throw new Error(`fake backend: no member named ${name}`);
     return member.id;
+  }
+
+  /** What the app told the core about this device's presence, in order. */
+  readonly ownPresenceLog: string[] = [];
+  private isAppearingOffline = false;
+
+  /** Sets another member's presence, as their heartbeats would. */
+  setPresence(member: string, presence: "online" | "away" | "unreachable"): void {
+    const found = this.members.find((candidate) => candidate.id === member);
+    if (!found) throw new Error(`fake backend: no member ${member}`);
+    found.presence = presence;
+    this.notify({ kind: "members" });
   }
 
   /** Desktop notifications the app asked to show. */
@@ -159,6 +179,28 @@ export class FakeBackend {
       case "move_channel":
         this.sections.move(requireString(args, "channel"), (argument(args, "section") as string | null) ?? null);
         return this.notify({ kind: "channels" });
+      case "set_status": {
+        const me = this.myMember();
+        me.status = {
+          emoji: requireString(args, "emoji"),
+          text: requireString(args, "text"),
+          until_ms: (argument(args, "untilMs") as number | null) ?? null,
+          is_busy: argument(args, "busy") === true,
+        };
+        return this.notify({ kind: "members" });
+      }
+      case "clear_status":
+        this.myMember().status = null;
+        return this.notify({ kind: "members" });
+      case "set_away":
+        this.ownPresenceLog.push(argument(args, "away") === true ? "away" : "back");
+        return this.refreshOwnPresence();
+      case "appear_offline":
+        return this.isAppearingOffline;
+      case "set_appear_offline":
+        this.isAppearingOffline = argument(args, "offline") === true;
+        this.ownPresenceLog.push(this.isAppearingOffline ? "offline" : "visible");
+        return this.refreshOwnPresence();
       case "set_profile": {
         const me = this.members.find((member) => member.id === this.me());
         if (!me) throw new Error("fake backend: no member for me");
@@ -256,7 +298,7 @@ export class FakeBackend {
 
   private createWorkspace(workspaceName: string, name: string, bucket: BucketConfig): Session {
     const me = randomHex(32);
-    this.members = [{ id: me, name, is_bot: false, is_admin: true, active: true }];
+    this.members = [{ id: me, name, is_bot: false, is_admin: true, active: true, status: null, presence: "online" }];
     this.storage = {
       endpoint: bucket.endpoint,
       bucket: bucket.bucket,
@@ -272,8 +314,8 @@ export class FakeBackend {
     const admin = randomHex(32);
     const me = randomHex(32);
     this.members = [
-      { id: admin, name: "Ada", is_bot: false, is_admin: true, active: true },
-      { id: me, name, is_bot: false, is_admin: false, active: true },
+      { id: admin, name: "Ada", is_bot: false, is_admin: true, active: true, status: null, presence: "unreachable" },
+      { id: me, name, is_bot: false, is_admin: false, active: true, status: null, presence: "online" },
     ];
     this.chat.addChannel(ownedId(admin), "general");
     this.session = { workspace_name: "Team", me, is_admin: false };
@@ -350,6 +392,18 @@ export class FakeBackend {
   }
 
   // ---- Plumbing ---------------------------------------------------------
+
+  private refreshOwnPresence(): void {
+    const isAway = this.ownPresenceLog.findLast((entry) => entry === "away" || entry === "back") === "away";
+    this.myMember().presence = this.isAppearingOffline ? "unreachable" : isAway ? "away" : "online";
+    this.notify({ kind: "members" });
+  }
+
+  private myMember(): Member {
+    const me = this.members.find((member) => member.id === this.me());
+    if (!me) throw new Error("fake backend: no member for me");
+    return me;
+  }
 
   private me(): string {
     if (!this.session) throw new Error("fake backend: no workspace is open");

@@ -5,6 +5,7 @@ import { api, type Session } from "../../lib/api";
 import { SHORTCUTS } from "../../lib/shortcuts";
 import { useAlerts } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
+import { usePresence } from "../../lib/usePresence";
 import { useReminders } from "../../lib/useReminders";
 import { sameView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog } from "../../ui";
@@ -84,6 +85,7 @@ export function Shell({ session }: { session: Session }) {
 
   useAlerts(view);
   useReminders();
+  usePresence();
 
   const navigate = useCallback((next: View) => setView(next), []);
   const context = useMemo(

@@ -7,7 +7,7 @@ use rusqlite::{OptionalExtension, named_params, params};
 use super::Store;
 use crate::{
     config,
-    ops::{Op, VerifiedOp, clean_channel_name, is_owned_by, rule_violation},
+    ops::{Op, VerifiedOp, clean_channel_name, is_owned_by, is_valid_status, rule_violation},
     pages,
     views::Change,
 };
@@ -139,6 +139,24 @@ impl Store {
             Op::MessageEdit { id, text } => return self.apply_message_edit(id, text, lamport),
             Op::ChannelRename { id, name } => self.apply_channel_rename(id, name, lamport, author)?,
             Op::Delete { id } => return self.apply_delete(id),
+            Op::Status {
+                emoji,
+                text,
+                until_ms,
+                is_busy,
+            } => {
+                if !is_valid_status(emoji, text) {
+                    return Err(rule_violation("invalid status"));
+                }
+                self.db.execute(
+                    "INSERT INTO member_status (member, emoji, text, until_ms, is_busy, lamport)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT (member) DO UPDATE SET emoji = ?2, text = ?3, until_ms = ?4, is_busy = ?5, lamport = ?6
+                     WHERE lamport < ?6",
+                    params![author, emoji, text, until_ms, is_busy, lamport],
+                )?;
+                Change::Members
+            }
         }))
     }
 

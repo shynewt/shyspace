@@ -80,7 +80,9 @@ impl Store {
             | Op::PageRename { id, .. } => id,
             Op::Reaction { message, .. } => message,
             Op::DocUpdate { page, .. } => page,
-            Op::Profile { .. } | Op::StorageSettings { .. } | Op::Delete { .. } => return Ok(false),
+            Op::Profile { .. } | Op::StorageSettings { .. } | Op::Delete { .. } | Op::Status { .. } => {
+                return Ok(false);
+            }
         };
         self.is_deleted(target)
     }

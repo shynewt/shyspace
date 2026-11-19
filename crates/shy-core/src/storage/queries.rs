@@ -5,7 +5,9 @@ use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
 use super::Store;
-use crate::views::{Channel, Member, Message, MessageCursor, NotifyLevel, Page, Reaction, SearchHit};
+use crate::views::{
+    Channel, Member, Message, MessageCursor, NotifyLevel, Page, PresenceState, Reaction, SearchHit,
+};
 
 /// Message filters for `Store::search`, with names already resolved.
 #[derive(Default)]
@@ -195,6 +197,8 @@ impl Store {
                 name: row.get(1)?,
                 is_bot: row.get(2)?,
                 active: row.get(3)?,
+                status: None,
+                presence: PresenceState::default(),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -280,5 +284,27 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// A member's status, if set and not expired at `now_ms`.
+    pub fn member_status(&self, member: &[u8], now_ms: i64) -> Result<Option<crate::views::MemberStatus>> {
+        let row: Option<(String, String, Option<i64>, bool)> = self
+            .db
+            .query_row(
+                "SELECT emoji, text, until_ms, is_busy FROM member_status WHERE member = ?",
+                [member],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(emoji, text, until_ms, is_busy)| {
+            let is_set = !emoji.is_empty() || !text.is_empty() || is_busy;
+            let is_current = until_ms.is_none_or(|until| until > now_ms);
+            (is_set && is_current).then_some(crate::views::MemberStatus {
+                emoji,
+                text,
+                until_ms,
+                is_busy,
+            })
+        }))
     }
 }

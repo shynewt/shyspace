@@ -6,7 +6,8 @@ use iroh::SecretKey;
 use super::support::*;
 use crate::{
     DataDir, KeyStorage, Networking, Workspace, crypto,
-    ops::{Envelope, Op, OpBody},
+    ops::{Envelope, Op, OpBody, now_ms},
+    views::PresenceState,
 };
 
 fn rename(lamport: u64, page: &str, title: &str) -> OpBody {
@@ -646,4 +647,165 @@ async fn channels_named_before_the_naming_rule_still_show_for_everyone() {
         names.contains(&"evilname".to_string()),
         "invisible characters are dropped: {names:?}"
     );
+}
+
+fn member_presence(workspace: &Workspace, id: &str) -> PresenceState {
+    workspace
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| member.id == id)
+        .unwrap()
+        .presence
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn statuses_from_others_are_bounded() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    assert!(
+        bob.set_status(crate::views::StatusUpdate {
+            emoji: "x",
+            text: &"y".repeat(500),
+            until_ms: None,
+            is_busy: false
+        })
+        .is_err()
+    );
+
+    let (epoch, key) = current_key(&bob);
+    let seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    let body = OpBody {
+        lamport: 9_000,
+        timestamp_ms: 0,
+        op: Op::Status {
+            emoji: "x".into(),
+            text: "y".repeat(5_000),
+            until_ms: None,
+            is_busy: false,
+        },
+    };
+    admin
+        .receive(crypto::seal(&bob.inner.identity, &key, epoch, seq, &body).unwrap())
+        .unwrap();
+    assert!(
+        admin
+            .members()
+            .unwrap()
+            .into_iter()
+            .find(|member| member.id == bob.my_id())
+            .unwrap()
+            .status
+            .is_none(),
+        "an oversized status is skipped"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn heartbeats_must_be_signed_fresh_and_from_a_member() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let mut forged = bob.heartbeat(PresenceState::Online).unwrap();
+    forged.member = admin.me();
+    assert!(
+        bob.receive_heartbeat(&forged).is_err(),
+        "a heartbeat must be signed by its member"
+    );
+    let mut tampered = bob.heartbeat(PresenceState::Away).unwrap();
+    tampered.state = PresenceState::Online;
+    assert!(
+        admin.receive_heartbeat(&tampered).is_err(),
+        "the state is signed too"
+    );
+    let stale = bob
+        .heartbeat_at(PresenceState::Online, now_ms().unwrap() - 10 * 60 * 1000)
+        .unwrap();
+    assert!(
+        admin.receive_heartbeat(&stale).is_err(),
+        "an old heartbeat, even correctly signed, is refused"
+    );
+    assert_eq!(member_presence(&admin, &bob.my_id()), PresenceState::Unreachable);
+
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let from_carol = carol.heartbeat(PresenceState::Online).unwrap();
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    assert!(
+        admin.receive_heartbeat(&from_carol).is_err(),
+        "a removed member can't appear online"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn statuses_cannot_hide_or_reorder_text() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    for sneaky in [
+        "\u{202E}krow peed",
+        "a\u{200B}b",
+        "line\u{2028}break",
+        "\u{2066}isolated",
+    ] {
+        let status = crate::views::StatusUpdate {
+            emoji: "",
+            text: sneaky,
+            until_ms: None,
+            is_busy: false,
+        };
+        assert!(bob.set_status(status).is_err(), "{sneaky:?} must be refused");
+    }
+    let joined_emoji = crate::views::StatusUpdate {
+        emoji: "👩\u{200D}💻",
+        text: "Coding",
+        until_ms: None,
+        is_busy: false,
+    };
+    bob.set_status(joined_emoji)
+        .expect("emoji built with joiners are fine");
+
+    let (epoch, key) = current_key(&bob);
+    let seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    let body = OpBody {
+        lamport: 9_000,
+        timestamp_ms: 0,
+        op: Op::Status {
+            emoji: String::new(),
+            text: "\u{202E}evil".into(),
+            until_ms: None,
+            is_busy: false,
+        },
+    };
+    admin
+        .receive(crypto::seal(&bob.inner.identity, &key, epoch, seq, &body).unwrap())
+        .unwrap();
+    let status = admin
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| member.id == bob.my_id())
+        .unwrap()
+        .status;
+    assert!(
+        status.is_none(),
+        "a direction override from another member is skipped"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rapid_presence_flips_are_ignored() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let now = now_ms().unwrap();
+    assert!(
+        admin
+            .receive_heartbeat(&bob.heartbeat_at(PresenceState::Online, now - 2).unwrap())
+            .unwrap()
+    );
+    let flip = bob.heartbeat_at(PresenceState::Away, now - 1).unwrap();
+    assert!(
+        !admin.receive_heartbeat(&flip).unwrap(),
+        "a flip right after an accepted heartbeat changes nothing"
+    );
+    assert_eq!(member_presence(&admin, &bob.my_id()), PresenceState::Online);
+
+    // A real change a moment later still gets through at once.
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+    let back = bob.heartbeat(PresenceState::Away).unwrap();
+    assert!(admin.receive_heartbeat(&back).unwrap());
+    assert_eq!(member_presence(&admin, &bob.my_id()), PresenceState::Away);
 }

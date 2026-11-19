@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use super::{State, Workspace};
 use crate::{
     mentions::mentions,
-    ops::Op,
+    ops::{Op, now_ms},
     pages, search,
     storage::{Reply, SearchFilters},
     views::{Channel, LinkedMessage, Member, Message, MessageCursor, Page, SearchHit},
@@ -158,7 +158,14 @@ impl Workspace {
     }
 
     pub fn members(&self) -> Result<Vec<Member>> {
-        self.state().store.members(&self.inner.config.admin)
+        let now = now_ms()?;
+        let mut members = self.state().store.members(&self.inner.config.admin)?;
+        for member in &mut members {
+            let key = crate::views::parse_member_id(&member.id)?;
+            member.status = self.state().store.member_status(key.as_bytes(), now)?;
+            member.presence = self.presence_of(&key, now);
+        }
+        Ok(members)
     }
 
     /// Searches messages and pages; see `search::parse` for the filters.

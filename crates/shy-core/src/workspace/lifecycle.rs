@@ -305,6 +305,7 @@ impl Workspace {
             }
             Networking::Offline => None,
         };
+        let appear_offline = super::presence::load_appear_offline(&state.store)?;
         let workspace = Self {
             inner: Arc::new(Inner {
                 data: data.clone(),
@@ -322,6 +323,12 @@ impl Workspace {
                 recovery_lock: tokio::sync::Mutex::new(()),
                 status: Mutex::new(SyncStatus::default()),
                 refetched_gaps: Mutex::new(std::collections::HashSet::new()),
+                presence: Mutex::new(Default::default()),
+                own_presence: Mutex::new(super::presence::OwnPresence {
+                    is_away: false,
+                    appear_offline,
+                }),
+                heartbeat_now: Notify::new(),
             }),
         };
         if let Some(net) = &workspace.inner.net {

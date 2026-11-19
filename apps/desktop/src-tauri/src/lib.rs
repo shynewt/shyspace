@@ -11,7 +11,7 @@ use shy_core::{
     sync::SyncStatus,
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
-        Page, SearchHit, SectionSort, SidebarSection, StorageSettings,
+        Page, SearchHit, SectionSort, SidebarSection, StatusUpdate, StorageSettings,
     },
     workspace::StorageUpdate,
 };
@@ -437,6 +437,46 @@ async fn move_channel(
 }
 
 #[tauri::command]
+async fn set_status(
+    state: State<'_, AppState>,
+    emoji: String,
+    text: String,
+    until_ms: Option<i64>,
+    busy: bool,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_status(StatusUpdate {
+            emoji: &emoji,
+            text: &text,
+            until_ms,
+            is_busy: busy,
+        })
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn clear_status(state: State<'_, AppState>) -> CommandResult<()> {
+    current(&state).await?.clear_status().map_err(failed)
+}
+
+#[tauri::command]
+async fn set_away(state: State<'_, AppState>, away: bool) -> CommandResult<()> {
+    current(&state).await?.set_away(away);
+    Ok(())
+}
+
+#[tauri::command]
+async fn appear_offline(state: State<'_, AppState>) -> CommandResult<bool> {
+    current(&state).await?.appear_offline().map_err(failed)
+}
+
+#[tauri::command]
+async fn set_appear_offline(state: State<'_, AppState>, offline: bool) -> CommandResult<()> {
+    current(&state).await?.set_appear_offline(offline).map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
     current(&state)
         .await?
@@ -605,6 +645,11 @@ pub fn run() {
             create_channel,
             rename_channel,
             mark_read,
+            set_status,
+            clear_status,
+            set_away,
+            appear_offline,
+            set_appear_offline,
             sidebar_sections,
             create_section,
             rename_section,

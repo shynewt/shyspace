@@ -80,6 +80,11 @@ CREATE TABLE sidebar_sections (
 INSERT INTO sidebar_sections (id, name, position) VALUES ('channels', 'Channels', 0);
 CREATE TABLE sidebar_placement (channel TEXT PRIMARY KEY, section TEXT NOT NULL);
 ",
+    "
+CREATE TABLE member_status (
+    member BLOB PRIMARY KEY, emoji TEXT NOT NULL, text TEXT NOT NULL, until_ms INTEGER,
+    is_busy INTEGER NOT NULL, lamport INTEGER NOT NULL);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

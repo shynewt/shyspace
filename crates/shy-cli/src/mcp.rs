@@ -17,7 +17,7 @@ use rmcp::{
 use serde::Deserialize;
 use shy_core::{
     Edit, Workspace,
-    views::{Change, Message},
+    views::{Change, Message, PresenceState},
 };
 
 type ToolResult = Result<String, String>;
@@ -203,7 +203,7 @@ impl ShyTools {
     }
 
     #[tool(
-        description = "List current members with their ids. Mention someone by writing [@Name](shy://member/<id>) in a message."
+        description = "List current members with their ids, whether they're online, and their status. Mention someone by writing [@Name](shy://member/<id>) in a message."
     )]
     fn list_members(&self) -> ToolResult {
         let members = self.workspace.members().map_err(failed)?;
@@ -212,7 +212,20 @@ impl ShyTools {
             .filter(|member| member.active)
             .map(|member| {
                 let bot = if member.is_bot { " (bot)" } else { "" };
-                format!("{}{bot}: {}", member.name, member.id)
+                let presence = match member.presence {
+                    PresenceState::Online => "online",
+                    PresenceState::Away => "away",
+                    PresenceState::Unreachable => "not reachable",
+                };
+                let status = member
+                    .status
+                    .as_ref()
+                    .map(|status| {
+                        let busy = if status.is_busy { ", busy" } else { "" };
+                        format!(" — {} {}{busy}", status.emoji, status.text)
+                    })
+                    .unwrap_or_default();
+                format!("{}{bot} [{presence}]{status}: {}", member.name, member.id)
             })
             .collect::<Vec<_>>()
             .join("\n"))

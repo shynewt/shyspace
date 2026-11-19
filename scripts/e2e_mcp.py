@@ -164,18 +164,22 @@ def main() -> int:
               f"admin received the agent's message after {latency:.2f}s")
 
         page_id = agent.tool("create_page", title="Plan", markdown="# Plan\n\n- [ ] ship it").split()[-1]
+        # The page and its text are separate changes; wait until both arrived.
         deadline = time.time() + DELIVERY_TIMEOUT_SECONDS
         page_text = None
-        while page_text is None and time.time() < deadline:
+        while page_text != "# Plan\n\n- [ ] ship it" and time.time() < deadline:
             try:
                 page_text = admin.tool("read_page", page=page_id)
             except RuntimeError:
-                time.sleep(0.3)
+                pass
+            time.sleep(0.3)
         check(page_text == "# Plan\n\n- [ ] ship it", "admin reads the agent's new page")
         check(page_id in admin.tool("search", query="ship"), "admin finds the page with local search")
 
-        agent_id = next(line.split(": ")[1] for line in admin.tool("list_members").splitlines()
-                        if line.startswith("Claude"))
+        roster = admin.tool("list_members")
+        agent_line = next(line for line in roster.splitlines() if line.startswith("Claude"))
+        check("[online]" in agent_line, "the admin sees the agent online, from its signed heartbeats")
+        agent_id = agent_line.rsplit(": ", 1)[1]
         mentioned: dict[str, str] = {}
         waiter = threading.Thread(target=lambda: mentioned.update(
             text=agent.tool("wait_for_mentions", timeout_seconds=DELIVERY_TIMEOUT_SECONDS)))

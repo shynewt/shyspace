@@ -94,6 +94,14 @@ pub enum Op {
     Delete {
         id: EntityId,
     },
+    /// The author's own status: emoji and text, until a time, and whether
+    /// they're busy (no alerts). Empty emoji and text clear it.
+    Status {
+        emoji: String,
+        text: String,
+        until_ms: Option<i64>,
+        is_busy: bool,
+    },
 }
 
 /// An op that is validly signed but breaks a rule (someone else's id, an
@@ -154,6 +162,22 @@ pub struct VerifiedOp {
 }
 
 const MAX_CHANNEL_NAME_CHARS: usize = 80;
+const MAX_STATUS_TEXT_CHARS: usize = 100;
+const MAX_STATUS_EMOJI_CHARS: usize = 16;
+
+/// A status shows next to the author's name everywhere: bounded, on one
+/// line, and free of characters that hide or reorder text. Emoji keep their
+/// joiners (U+200D) and variation selectors.
+pub fn is_valid_status(emoji: &str, text: &str) -> bool {
+    let is_sneaky = |c: char| {
+        c.is_control()
+            || matches!(c, '\u{2028}' | '\u{2029}')
+            || (c != '\u{200D}' && is_invisible_format_char(c))
+    };
+    emoji.chars().count() <= MAX_STATUS_EMOJI_CHARS
+        && text.chars().count() <= MAX_STATUS_TEXT_CHARS
+        && !emoji.chars().chain(text.chars()).any(is_sneaky)
+}
 
 /// Turns what someone typed into a channel name: lowercase, words joined by
 /// dashes, no leading `#`.

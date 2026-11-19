@@ -67,7 +67,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               transition={{ duration: 0.15 }}
               className="flex flex-col gap-4"
             >
-              {tab === "profile" && <ProfileSettings />}
+              {tab === "profile" && (
+                <>
+                  <ProfileSettings />
+                  <StatusSettings />
+                  <VisibilitySettings />
+                </>
+              )}
               {tab === "appearance" && <AppearanceSettings />}
               {tab === "notifications" && <NotificationSettings />}
               {tab === "storage" && <Storage />}
@@ -100,6 +106,134 @@ function ProfileSettings() {
         Save
       </Button>
     </form>
+  );
+}
+
+type ClearAfter = "never" | "hour" | "four_hours" | "today";
+
+function clearTime(choice: ClearAfter, now: Date): number | null {
+  const hour = 60 * 60 * 1000;
+  if (choice === "hour") return now.getTime() + hour;
+  if (choice === "four_hours") return now.getTime() + 4 * hour;
+  if (choice === "today") {
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 0);
+    return endOfDay.getTime();
+  }
+  return null;
+}
+
+function StatusSettings() {
+  const { session } = useWorkspace();
+  const loadMembers = useCallback(() => api.members(), []);
+  const members = useLive(loadMembers, (change) => change.kind === "members");
+  const current = members?.find((member) => member.id === session.me)?.status ?? null;
+  const [emoji, setEmoji] = useState("");
+  const [text, setText] = useState("");
+  const [clearAfter, setClearAfter] = useState<ClearAfter>("never");
+  const [isBusy, setBusy] = useState(false);
+  useEffect(() => {
+    setEmoji(current?.emoji ?? "");
+    setText(current?.text ?? "");
+    setBusy(current?.is_busy ?? false);
+  }, [current?.emoji, current?.text, current?.is_busy]);
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    api
+      .setStatus(emoji, text, clearTime(clearAfter, new Date()), isBusy)
+      .then(() => showToast("Status set."), reportError);
+  };
+  return (
+    <form onSubmit={save} aria-label="Your status" className="flex flex-col gap-3 border-t border-line pt-4">
+      <div className="flex gap-2">
+        <Field label="Emoji">
+          {(id) => (
+            <Input
+              id={id}
+              value={emoji}
+              onChange={(event) => setEmoji(event.target.value)}
+              placeholder="🎧"
+              className="w-16"
+            />
+          )}
+        </Field>
+        <div className="flex-1">
+          <Field label="Status">
+            {(id) => (
+              <Input
+                id={id}
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                placeholder="Deep work"
+                maxLength={100}
+              />
+            )}
+          </Field>
+        </div>
+      </div>
+      <Field label="Clear after">
+        {() => (
+          <SegmentedControl<ClearAfter>
+            options={[
+              { value: "never", label: "Never" },
+              { value: "hour", label: "1 hour" },
+              { value: "four_hours", label: "4 hours" },
+              { value: "today", label: "Today" },
+            ]}
+            value={clearAfter}
+            onChange={setClearAfter}
+          />
+        )}
+      </Field>
+      <Field label="Notifications while set">
+        {() => (
+          <SegmentedControl<"available" | "busy">
+            options={[
+              { value: "available", label: "As usual" },
+              { value: "busy", label: "Busy: none" },
+            ]}
+            value={isBusy ? "busy" : "available"}
+            onChange={(choice) => setBusy(choice === "busy")}
+          />
+        )}
+      </Field>
+      <div className="flex gap-2">
+        <Button type="submit" variant="primary" disabled={!emoji.trim() && !text.trim() && !isBusy}>
+          Set status
+        </Button>
+        {current && (
+          <Button
+            variant="ghost"
+            onClick={() => api.clearStatus().then(() => showToast("Status cleared."), reportError)}
+          >
+            Clear status
+          </Button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function VisibilitySettings() {
+  const isOffline = useLive(api.appearOffline, (change) => change.kind === "members");
+  return (
+    <div className="border-t border-line pt-4">
+      <Field
+        label="Show me as"
+        hint="Online and away come from whether you're using shyspace. Appearing offline sends nothing, from the moment the app starts."
+      >
+        {() => (
+          <SegmentedControl<"auto" | "offline">
+            options={[
+              { value: "auto", label: "Online when here" },
+              { value: "offline", label: "Appear offline" },
+            ]}
+            value={isOffline ? "offline" : "auto"}
+            onChange={(choice) => api.setAppearOffline(choice === "offline").catch(reportError)}
+          />
+        )}
+      </Field>
+    </div>
   );
 }
 

@@ -12,9 +12,17 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::{ops::now_ms, transport::gossip::Wire, views::Change, workspace::Workspace};
+use crate::{
+    ops::now_ms,
+    transport::gossip::{Incoming, Wire},
+    views::Change,
+    views::PresenceState,
+    workspace::Workspace,
+};
 
 const SYNC_INTERVAL: Duration = Duration::from_secs(8);
+/// Well under the presence timeout, so one lost heartbeat doesn't count.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
 /// Batches bursts of writes (like typing) into one bucket upload.
 const PUSH_DEBOUNCE: Duration = Duration::from_millis(600);
 
@@ -30,17 +38,56 @@ pub struct SyncStatus {
 }
 
 impl Workspace {
-    pub(crate) fn spawn_background(&self, mut incoming: mpsc::Receiver<Wire>) {
+    pub(crate) fn spawn_background(&self, mut incoming: mpsc::Receiver<Incoming>) {
         let receiver = self.clone();
         tokio::spawn(async move {
             while let Some(wire) = incoming.recv().await {
                 match wire {
-                    Wire::Envelope(envelope) => {
+                    Incoming::NeighborUp => {
+                        receiver.inner.wake.notify_one();
+                        receiver.inner.heartbeat_now.notify_one();
+                    }
+                    Incoming::Lagged => receiver.inner.wake.notify_one(),
+                    Incoming::Message(Wire::Envelope(envelope)) => {
                         if let Err(error) = receiver.receive(envelope) {
                             warn!("dropping live op: {error:#}");
                         }
                     }
-                    Wire::Nudge(_) => receiver.inner.wake.notify_one(),
+                    Incoming::Message(Wire::Nudge(_)) => receiver.inner.wake.notify_one(),
+                    Incoming::Message(Wire::Presence(heartbeat)) => {
+                        match receiver.receive_heartbeat(&heartbeat) {
+                            Ok(true) => receiver.emit(Change::Members),
+                            Ok(false) => {}
+                            Err(error) => warn!("ignoring a heartbeat: {error:#}"),
+                        }
+                    }
+                }
+            }
+        });
+
+        let beater = self.clone();
+        tokio::spawn(async move {
+            let mut reachable = Vec::new();
+            loop {
+                if let Err(error) = beater.send_heartbeat().await {
+                    warn!("could not send a heartbeat: {error:#}");
+                }
+                tokio::select! {
+                    _ = beater.inner.heartbeat_now.notified() => {}
+                    _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => {}
+                }
+                if beater.status().removed {
+                    break;
+                }
+                // Someone whose heartbeats stopped is now unreachable, or
+                // our own presence changed.
+                match beater.reachable_members() {
+                    Ok(now_reachable) if now_reachable != reachable => {
+                        reachable = now_reachable;
+                        beater.emit(Change::Members);
+                    }
+                    Ok(_) => {}
+                    Err(error) => warn!("could not check who is reachable: {error:#}"),
                 }
             }
         });
@@ -119,5 +166,21 @@ impl Workspace {
             }
         }
         self.emit(Change::Sync);
+    }
+
+    async fn send_heartbeat(&self) -> anyhow::Result<()> {
+        let (Some(net), Some(heartbeat)) = (&self.inner.net, self.next_heartbeat()?) else {
+            return Ok(());
+        };
+        net.broadcast_presence(heartbeat).await
+    }
+
+    fn reachable_members(&self) -> anyhow::Result<Vec<(iroh::PublicKey, PresenceState)>> {
+        let now = now_ms()?;
+        Ok(self
+            .current_members()?
+            .into_iter()
+            .map(|member| (member, self.presence_of(&member, now)))
+            .collect())
     }
 }

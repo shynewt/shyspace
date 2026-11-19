@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::ops::Envelope;
+use crate::{ops::Envelope, workspace::Heartbeat};
 
 const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 
@@ -33,6 +33,20 @@ pub enum Wire {
     /// "Something new is in the bucket": MLS changes, join requests, or ops
     /// too large for gossip. The nonce defeats gossip's duplicate filter.
     Nudge(u64),
+    /// A signed "I'm here"; checked by the receiver, never stored.
+    Presence(Heartbeat),
+}
+
+/// What gossip hands the workspace: messages from peers, and local events a
+/// peer can't fake.
+#[derive(Debug)]
+pub enum Incoming {
+    Message(Wire),
+    /// A peer connected: it may have written while we were apart, and it
+    /// hasn't heard our presence yet.
+    NeighborUp,
+    /// Messages were missed; the bucket has them.
+    Lagged,
 }
 
 type Allowlist = Arc<RwLock<HashSet<PublicKey>>>;
@@ -75,7 +89,11 @@ pub struct Net {
 }
 
 impl Net {
-    pub async fn start(identity: SecretKey, topic: [u8; 32], incoming: mpsc::Sender<Wire>) -> Result<Self> {
+    pub async fn start(
+        identity: SecretKey,
+        topic: [u8; 32],
+        incoming: mpsc::Sender<Incoming>,
+    ) -> Result<Self> {
         let endpoint = Endpoint::builder(presets::N0).secret_key(identity).bind().await?;
         Self::start_on(endpoint, topic, incoming).await
     }
@@ -85,7 +103,7 @@ impl Net {
     pub(crate) async fn start_on(
         endpoint: Endpoint,
         topic: [u8; 32],
-        incoming: mpsc::Sender<Wire>,
+        incoming: mpsc::Sender<Incoming>,
     ) -> Result<Self> {
         let gossip = Gossip::builder()
             .max_message_size(MAX_MESSAGE_SIZE)
@@ -110,7 +128,7 @@ impl Net {
                 match event {
                     Ok(Event::Received(message)) => match postcard::from_bytes::<Wire>(&message.content) {
                         Ok(wire) => {
-                            if incoming.send(wire).await.is_err() {
+                            if incoming.send(Incoming::Message(wire)).await.is_err() {
                                 break;
                             }
                         }
@@ -118,14 +136,17 @@ impl Net {
                     },
                     Ok(Event::NeighborUp(_)) => {
                         neighbor_count.fetch_add(1, Ordering::Relaxed);
-                        // A peer that just appeared may have written while we were apart.
-                        let _ = incoming.send(Wire::Nudge(0)).await;
+                        if incoming.send(Incoming::NeighborUp).await.is_err() {
+                            break;
+                        }
                     }
                     Ok(Event::NeighborDown(_)) => {
                         neighbor_count.fetch_sub(1, Ordering::Relaxed);
                     }
                     Ok(Event::Lagged) => {
-                        let _ = incoming.send(Wire::Nudge(0)).await;
+                        if incoming.send(Incoming::Lagged).await.is_err() {
+                            break;
+                        }
                     }
                     Ok(_) => {}
                     Err(error) => {
@@ -185,6 +206,12 @@ impl Net {
         }
     }
 
+    pub async fn broadcast_presence(&self, heartbeat: Heartbeat) -> Result<()> {
+        let encoded = postcard::to_stdvec(&Wire::Presence(heartbeat))?;
+        self.sender.broadcast(Bytes::from(encoded)).await?;
+        Ok(())
+    }
+
     pub async fn nudge(&self) -> Result<()> {
         let encoded = postcard::to_stdvec(&Wire::Nudge(rand::random()))?;
         self.sender.broadcast(Bytes::from(encoded)).await?;
@@ -206,7 +233,7 @@ mod tests {
 
     use super::*;
 
-    async fn local_net(lookup: &MemoryLookup) -> (PublicKey, Net, mpsc::Receiver<Wire>) {
+    async fn local_net(lookup: &MemoryLookup) -> (PublicKey, Net, mpsc::Receiver<Incoming>) {
         let endpoint = Endpoint::builder(presets::Minimal)
             .address_lookup(lookup.clone())
             .bind()
@@ -219,11 +246,11 @@ mod tests {
         (id, net, receiver)
     }
 
-    async fn next_nonce(receiver: &mut mpsc::Receiver<Wire>, within: Duration) -> Option<u64> {
+    async fn next_nonce(receiver: &mut mpsc::Receiver<Incoming>, within: Duration) -> Option<u64> {
         tokio::time::timeout(within, async {
             loop {
                 match receiver.recv().await {
-                    Some(Wire::Nudge(nonce)) if nonce != 0 => return Some(nonce),
+                    Some(Incoming::Message(Wire::Nudge(nonce))) => return Some(nonce),
                     Some(_) => continue,
                     None => return None,
                 }

@@ -1,4 +1,7 @@
 import { Bot } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { cx } from "./cx";
+import { springs } from "./motion";
 
 const HUES = [262, 200, 152, 32, 340, 12, 288, 176];
 
@@ -20,11 +23,14 @@ export function Avatar({
   name,
   isBot = false,
   size = 32,
+  presence,
 }: {
   id: string;
   name: string;
   isBot?: boolean;
   size?: number;
+  /** A small dot: green online, an amber ring when away, none when unreachable. */
+  presence?: "online" | "away" | "unreachable";
 }) {
   const hue = hueFor(id);
   return (
@@ -39,6 +45,21 @@ export function Avatar({
       }}
     >
       {isBot ? <Bot size={size * 0.55} strokeWidth={2.2} /> : initials(name)}
+      <AnimatePresence initial={false}>
+        {(presence === "online" || presence === "away") && (
+          <motion.span
+            initial={{ scale: 0.4, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.4, opacity: 0 }}
+            transition={springs.pop}
+            className={cx(
+              "absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-surface transition-colors duration-300",
+              presence === "online" ? "bg-success" : "bg-surface ring-2 ring-warning ring-inset",
+            )}
+            style={{ width: Math.max(9, size * 0.32), height: Math.max(9, size * 0.32) }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

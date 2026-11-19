@@ -4,12 +4,14 @@ mod actions;
 mod inbox;
 mod later;
 mod lifecycle;
+mod presence;
 mod reads;
 mod sections;
 mod storage;
 
 pub use lifecycle::DataDir;
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
+pub use presence::Heartbeat;
 pub(crate) use reads::follows_by_default;
 pub use storage::StorageUpdate;
 
@@ -103,6 +105,11 @@ pub(crate) struct Inner {
     /// Gaps (author, missing seq) already fetched again this run, so a gap
     /// the bucket can't fill doesn't make every pass re-read everything.
     pub refetched_gaps: Mutex<std::collections::HashSet<(iroh::PublicKey, u64)>>,
+    /// Others' presence, from heartbeats; in memory only.
+    pub presence: Mutex<presence::PresenceBook>,
+    pub own_presence: Mutex<presence::OwnPresence>,
+    /// Sends a heartbeat now instead of at the next tick.
+    pub heartbeat_now: Notify,
 }
 
 #[derive(Clone)]

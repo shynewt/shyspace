@@ -21,9 +21,9 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
 
 1. **One workspace = one MLS group.** OpenMLS handles membership and key agreement. MLS is only used to agree on one secret per *epoch* (a period between membership changes). Content is encrypted with a key derived from that secret.
 2. **Everything is an op.** Any change (message, reaction, page edit, rename…) is an `Op` (`ops.rs`). The author signs it with their identity key, then it is encrypted with the epoch key (`crypto.rs`). The result is an `Envelope`.
-3. **Two ways to deliver, same envelopes.** Envelopes are sent live over iroh gossip and also uploaded to the bucket. A member that was offline catches up from the bucket.
+3. **Two ways to deliver, same envelopes.** Envelopes are sent live over iroh gossip and also uploaded to the bucket. A member that was offline catches up from the bucket. Gossip also carries signed presence heartbeats (every 25 s, and when a peer connects), which are never stored.
 4. **No ordering needed.** Every op merges the same way whatever order it arrives in. That is why two unordered transports are enough:
-   - names, titles, channel renames, message edits and profiles: last writer wins, by lamport clock (edits are kept apart from what they change, so an edit may arrive first);
+   - names, titles, channel renames, message edits, profiles and statuses: last writer wins, by lamport clock (edits are kept apart from what they change, so an edit may arrive first);
    - deletes: permanent markers that win over everything else about their target; later ops touching a deleted item are dropped;
    - reactions: per-author on/off toggles;
    - page content: Yjs CRDT updates;
@@ -86,7 +86,7 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 
 | Path | Job |
 |---|---|
-| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads` |
+| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `presence` (heartbeats and status) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
 | `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `queries` |

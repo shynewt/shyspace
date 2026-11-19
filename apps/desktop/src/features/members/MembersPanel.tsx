@@ -54,6 +54,12 @@ function MemberList() {
   );
 }
 
+const PRESENCE_LABELS: Record<Member["presence"], string> = {
+  online: "Online",
+  away: "Away",
+  unreachable: "Not reachable right now",
+};
+
 function MemberRow({ member, isMe, canRemove }: { member: Member; isMe: boolean; canRemove: boolean }) {
   const [isConfirming, setConfirming] = useState(false);
   const [isRemoving, setRemoving] = useState(false);
@@ -77,7 +83,7 @@ function MemberRow({ member, isMe, canRemove }: { member: Member; isMe: boolean;
       className="group flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-surface-2/60"
       onMouseLeave={() => setConfirming(false)}
     >
-      <Avatar id={member.id} name={name} isBot={member.is_bot} size={32} />
+      <Avatar id={member.id} name={name} isBot={member.is_bot} size={32} presence={member.presence} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-[13.5px] font-medium">
           <span className="truncate">{name}</span>
@@ -93,7 +99,16 @@ function MemberRow({ member, isMe, canRemove }: { member: Member; isMe: boolean;
             </Tooltip>
           )}
         </div>
-        <div className="truncate font-mono text-[11px] text-faint">{member.id.slice(0, 16)}…</div>
+        <div className="truncate text-[11.5px] text-muted">
+          {member.status ? (
+            <span>
+              {member.status.emoji} {member.status.text}
+              {member.status.is_busy && <span className="ml-1 text-warning">· Busy</span>}
+            </span>
+          ) : (
+            <span className="text-faint">{PRESENCE_LABELS[member.presence]}</span>
+          )}
+        </div>
       </div>
       {canRemove && !member.is_admin && member.active && (
         <Button
