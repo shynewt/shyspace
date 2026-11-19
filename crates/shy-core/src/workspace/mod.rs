@@ -5,7 +5,7 @@ mod lifecycle;
 mod reads;
 
 pub use lifecycle::DataDir;
-pub(crate) use lifecycle::{MLS_FILE, STORE_FILE, prepare_empty_dir};
+pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -84,6 +84,7 @@ pub(crate) struct Inner {
     /// Wakes the sync loop early: after a local write or a peer's nudge.
     pub wake: Notify,
     pub sync_lock: tokio::sync::Mutex<()>,
+    pub recovery_lock: tokio::sync::Mutex<()>,
     pub status: Mutex<SyncStatus>,
 }
 
@@ -115,6 +116,10 @@ impl Workspace {
 
     pub fn my_id(&self) -> String {
         member_id(&self.me())
+    }
+
+    pub fn safety_code(&self) -> String {
+        crate::views::safety_code(&self.me())
     }
 
     pub fn name(&self) -> &str {

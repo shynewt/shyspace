@@ -127,6 +127,12 @@ async fn join_workspace(
     Ok(install(&app, &state, workspace).await)
 }
 
+/// Shown while waiting to join, for the admin to compare.
+#[tauri::command]
+async fn safety_code(state: State<'_, AppState>) -> CommandResult<String> {
+    state.data.safety_code().await.map_err(failed)
+}
+
 #[tauri::command]
 async fn restore_workspace(
     app: AppHandle,
@@ -322,6 +328,7 @@ pub fn run() {
             create_workspace,
             join_workspace,
             restore_workspace,
+            safety_code,
             recovery_kit,
             channels,
             create_channel,

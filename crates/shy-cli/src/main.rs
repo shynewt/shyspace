@@ -143,7 +143,9 @@ async fn main() -> Result<()> {
             println!("Invite people with `shy invite create`.");
         }
         Command::Join { invite, name, bot } => {
-            eprintln!("Asked to join. Waiting for the workspace admin to approve…");
+            let code = data.safety_code().await?;
+            eprintln!("Asking to join. Your safety code is {code}");
+            eprintln!("The admin should see the same code before approving. Waiting…");
             let joined = Workspace::join(
                 &data,
                 &invite,
@@ -226,7 +228,8 @@ fn print_invites(invites: &[shy_core::views::Invite]) {
         let requester = match (&invite.requester_name, &invite.requester_id) {
             (Some(name), Some(id)) => {
                 let bot = if invite.requester_is_bot { ", bot" } else { "" };
-                format!(" from {name}{bot}, key {}…", &id[..16])
+                let code = invite.requester_safety_code.as_deref().unwrap_or("?");
+                format!(" from {name}{bot} (key {}…, safety code {code})", &id[..16])
             }
             _ => String::new(),
         };

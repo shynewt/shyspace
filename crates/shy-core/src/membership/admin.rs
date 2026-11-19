@@ -154,10 +154,12 @@ impl Workspace {
         };
         self.emit(Change::Members);
         self.emit(Change::Invites);
+        // Snapshot first: a commit must never be in the bucket before the
+        // recovery snapshot that includes it.
+        self.refresh_recovery_snapshot().await?;
         self.upload_commit(from_epoch, signed).await?;
         self.deliver_answers().await?;
-        self.inner.bucket.delete_invite_request(token).await?;
-        self.refresh_recovery_snapshot().await
+        self.inner.bucket.delete_invite_request(token).await
     }
 
     pub async fn reject_invite(&self, token: &str) -> Result<()> {
@@ -191,10 +193,12 @@ impl Workspace {
     }
 
     pub(crate) async fn admin_duties(&self) -> Result<()> {
+        // The snapshot goes first so commits are only ever (re)published
+        // once the recovery snapshot covers them.
+        self.refresh_recovery_snapshot().await?;
         self.republish_commits().await?;
         self.collect_join_requests().await?;
-        self.deliver_answers().await?;
-        self.refresh_recovery_snapshot().await
+        self.deliver_answers().await
     }
 
     /// Picks up requests posted through open invites, for the admin to decide.
@@ -285,8 +289,8 @@ impl Workspace {
             (from_epoch, signed)
         };
         self.emit(Change::Members);
-        self.upload_commit(from_epoch, signed).await?;
-        self.refresh_recovery_snapshot().await
+        self.refresh_recovery_snapshot().await?;
+        self.upload_commit(from_epoch, signed).await
     }
 
     /// Signs a staged commit and saves it before it is applied, so a crash

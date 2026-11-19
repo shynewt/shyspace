@@ -300,3 +300,59 @@ async fn the_data_directory_alone_reveals_nothing() {
         .unwrap();
     assert!(format!("{error:#}").contains("can't be decrypted"), "{error:#}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gaps_in_a_log_cannot_be_filled_after_removal() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let (epoch, key) = current_key(&bob);
+    let next_seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    let message = |text: &str| OpBody {
+        lamport: 5_000,
+        timestamp_ms: 0,
+        op: Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: text.into(),
+            reply_to: None,
+        },
+    };
+    // Before removal, Bob publishes far ahead, leaving a gap to fill later.
+    let far_ahead = crypto::seal(
+        &bob.inner.identity,
+        &key,
+        epoch,
+        next_seq + 1_000,
+        &message("far ahead"),
+    )
+    .unwrap();
+    admin.receive(far_ahead).unwrap();
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    let in_gap = crypto::seal(
+        &bob.inner.identity,
+        &key,
+        epoch,
+        next_seq,
+        &message("slipped into the gap"),
+    )
+    .unwrap();
+    assert!(admin.receive(in_gap).is_err());
+    admin.sync().await;
+
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text == "far ahead" || text == "slipped into the gap")
+    );
+    assert!(
+        admin.state().store.pending().unwrap().is_empty(),
+        "the parked op is dropped once frozen"
+    );
+}

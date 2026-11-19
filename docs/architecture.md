@@ -56,7 +56,7 @@ Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even i
 5. push our unpushed ops as one segment;
 6. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
 
-An incoming op is applied only if it decrypts, its signature is valid, and its author was a member in that op's epoch. Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried.
+An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried.
 
 ## Bucket layout
 

@@ -10,12 +10,44 @@ pub fn member_id(member: &PublicKey) -> String {
     hex::encode(member.as_bytes())
 }
 
+/// A short code people compare out of band (by phone, in person) to be sure
+/// a join request comes from who they think: 20 digits from the identity key.
+pub fn safety_code(member: &PublicKey) -> String {
+    let digest = blake3::derive_key("shyspace safety code v1", member.as_bytes());
+    let number = u128::from_be_bytes(digest[..16].try_into().expect("a 32-byte digest has 16 bytes"));
+    let digits = format!("{:020}", number % 10u128.pow(20));
+    digits
+        .as_bytes()
+        .chunks(4)
+        .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn parse_member_id(id: &str) -> Result<PublicKey> {
     let bytes: [u8; 32] = hex::decode(id)
         .context("member id is not hex")?
         .try_into()
         .map_err(|_| anyhow::anyhow!("member id must be 32 bytes"))?;
     Ok(PublicKey::from_bytes(&bytes)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safety_codes_are_stable_twenty_digits() {
+        let key = iroh::SecretKey::from_bytes(&[7; 32]).public();
+        let code = safety_code(&key);
+        assert_eq!(code, safety_code(&key));
+        assert_eq!(code.len(), 24);
+        assert!(
+            code.split(' ')
+                .all(|group| group.len() == 4 && group.chars().all(|c| c.is_ascii_digit()))
+        );
+        assert_ne!(code, safety_code(&iroh::SecretKey::from_bytes(&[8; 32]).public()));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -105,6 +137,8 @@ pub struct Invite {
     pub requester_id: Option<String>,
     pub requester_name: Option<String>,
     pub requester_is_bot: bool,
+    /// Compare with the code the requester sees before approving.
+    pub requester_safety_code: Option<String>,
 }
 
 /// What changed, so listeners refresh only the affected view.

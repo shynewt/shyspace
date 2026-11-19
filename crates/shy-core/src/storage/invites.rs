@@ -6,7 +6,7 @@ use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
 use super::{Store, to_public_key};
-use crate::views::{Invite, InviteState, member_id};
+use crate::views::{Invite, InviteState, member_id, safety_code};
 
 fn state_name(state: InviteState) -> &'static str {
     match state {
@@ -73,6 +73,7 @@ impl Store {
         })?;
         rows.map(|row| {
             let (token, label, created_ms, expires_ms, state, joiner, joiner_name, joiner_is_bot) = row?;
+            let joiner = joiner.map(to_public_key).transpose()?;
             let mut state = parse_state(&state)?;
             if matches!(state, InviteState::Open | InviteState::Requested) && expires_ms <= now_ms {
                 state = InviteState::Expired;
@@ -83,7 +84,8 @@ impl Store {
                 created_ms,
                 expires_ms,
                 state,
-                requester_id: joiner.map(to_public_key).transpose()?.map(|key| member_id(&key)),
+                requester_safety_code: joiner.as_ref().map(safety_code),
+                requester_id: joiner.map(|key| member_id(&key)),
                 requester_name: joiner_name,
                 requester_is_bot: joiner_is_bot.unwrap_or(false),
             })

@@ -71,6 +71,25 @@ impl KeyStorage {
         Ok(DeviceKey(Zeroizing::new(key)))
     }
 
+    /// Deletes the key for `dir`. Its data becomes unreadable for good.
+    pub(crate) async fn forget(&self, dir: &Path) -> Result<()> {
+        match self {
+            Self::Keychain => {
+                let account = keychain_account(dir)?;
+                tokio::task::spawn_blocking(move || match keychain_entry(&account)?.delete_credential() {
+                    Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                    Err(error) => Err(anyhow::Error::new(error).context("deleting the device key")),
+                })
+                .await?
+            }
+            Self::File(path) => match std::fs::remove_file(path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error).with_context(|| format!("deleting {}", path.display())),
+            },
+        }
+    }
+
     async fn create(&self, dir: &Path) -> Result<DeviceKey> {
         let key = DeviceKey::from_bytes(rand::random::<[u8; KEY_LEN]>());
         self.save(dir, &key).await?;

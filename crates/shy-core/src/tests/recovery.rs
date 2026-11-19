@@ -91,3 +91,42 @@ async fn only_the_admin_has_a_recovery_kit() {
     let (_root, _bucket, _admin, bob) = admin_and_bob().await;
     assert!(bob.recovery_kit().await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rolled_back_snapshot_is_refused() {
+    let (root, bucket, admin, _bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let old_snapshot = bucket.recovery_snapshot().await.unwrap().unwrap();
+    let _carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+
+    // Someone with bucket access puts back the snapshot from before Carol.
+    bucket.put_recovery_snapshot(old_snapshot.to_vec()).await.unwrap();
+    let error = Workspace::restore_with(
+        &data_dir(&root.path().join("ada-new")),
+        &kit,
+        bucket,
+        Networking::Offline,
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(format!("{error:#}").contains("changed after"), "{error:#}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_needs_an_empty_folder() {
+    let (root, bucket, admin, _bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let busy = root.path().join("busy");
+    std::fs::create_dir_all(&busy).unwrap();
+    std::fs::write(busy.join("notes.txt"), "keep me").unwrap();
+    assert!(
+        Workspace::restore_with(&data_dir(&busy), &kit, bucket, Networking::Offline)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(busy.join("notes.txt")).unwrap(),
+        "keep me"
+    );
+}

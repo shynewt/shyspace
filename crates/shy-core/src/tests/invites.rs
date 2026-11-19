@@ -138,3 +138,26 @@ async fn only_the_admin_manages_invites() {
     assert!(bob.create_test_invite("", Duration::from_secs(600)).is_err());
     assert!(bob.invites().is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admin_sees_the_safety_code_the_joiner_sees() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob_dir = root.path().join("bob");
+    let bob_code = data_dir(&bob_dir).safety_code().await.unwrap();
+    let invite = admin.create_test_invite("", Duration::from_secs(600)).unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &bob_dir, &bucket, "Bob", false);
+    wait_for_request(&admin, &token).await;
+    let request = admin
+        .invites()
+        .unwrap()
+        .into_iter()
+        .find(|invite| invite.token == token)
+        .unwrap();
+    assert_eq!(request.requester_safety_code.as_deref(), Some(bob_code.as_str()));
+    admin.approve_invite(&token).await.unwrap();
+    let bob = joining.await.unwrap().unwrap();
+    assert_eq!(bob.safety_code(), bob_code);
+}

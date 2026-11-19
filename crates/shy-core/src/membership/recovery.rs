@@ -17,11 +17,13 @@ use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use super::commit;
 use crate::{
+    config::{CONFIG_FILE, write_private_file},
     keys::DeviceKey,
     storage::{snapshot_database, snapshot_store_without_content},
-    transport::bucket::BucketConfig,
-    workspace::{DataDir, MLS_FILE, Networking, STORE_FILE, Workspace, prepare_empty_dir},
+    transport::bucket::{Bucket, BucketConfig},
+    workspace::{DataDir, MLS_FILE, Networking, STORE_FILE, Workspace},
 };
 
 const KIT_PREFIX: &str = "shyrec1_";
@@ -68,6 +70,9 @@ impl RecoveryKit {
 /// The admin's local state, minus what the bucket can give back.
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
+    /// The MLS epoch this snapshot is at. Restore refuses it if the bucket
+    /// holds an admin commit from this epoch onward, i.e. it's stale.
+    epoch: u64,
     device_key: [u8; 32],
     workspace_json: Vec<u8>,
     store_db: Vec<u8>,
@@ -167,6 +172,8 @@ impl Workspace {
     /// Uploads a new snapshot if membership changed since the last one. Does
     /// nothing until the admin has created a recovery kit.
     pub(crate) async fn refresh_recovery_snapshot(&self) -> Result<()> {
+        // One refresh at a time, so an older snapshot can't land after a newer one.
+        let _guard = self.inner.recovery_lock.lock().await;
         let (generation_taken, sealed) = {
             let state = self.state();
             let Some(recovery_key) = state.store.meta(RECOVERY_KEY_META)? else {
@@ -185,7 +192,7 @@ impl Workspace {
                     .map_err(|_| anyhow!("the stored recovery key is corrupt"))?,
             );
             // Taken under the state lock so the store and MLS copies agree.
-            let snapshot = self.take_snapshot()?;
+            let snapshot = self.take_snapshot(state.mls.epoch()?)?;
             let sealed = seal_snapshot(&recovery_key, &self.inner.config.workspace_id, &snapshot)?;
             (current, sealed)
         };
@@ -195,7 +202,7 @@ impl Workspace {
             .set_meta(UPLOADED_GENERATION_META, &generation_taken.to_be_bytes())
     }
 
-    fn take_snapshot(&self) -> Result<Snapshot> {
+    fn take_snapshot(&self, epoch: u64) -> Result<Snapshot> {
         let data = &self.inner.data;
         let scratch = tempfile::Builder::new()
             .prefix("recovery-")
@@ -210,8 +217,9 @@ impl Workspace {
         )?;
         snapshot_database(&data.mls_path(), &device_key.database_key(MLS_FILE), &mls_copy)?;
         Ok(Snapshot {
+            epoch,
             device_key: *device_key.to_bytes(),
-            workspace_json: std::fs::read(data.path.join(crate::config::CONFIG_FILE))?,
+            workspace_json: std::fs::read(data.path.join(CONFIG_FILE))?,
             store_db: std::fs::read(&store_copy)?,
             mls_db: std::fs::read(&mls_copy)?,
         })
@@ -228,25 +236,41 @@ impl Workspace {
     pub(crate) async fn restore_with(
         data: &DataDir,
         recovery_kit: &str,
-        bucket: crate::transport::bucket::Bucket,
+        bucket: Bucket,
         networking: Networking,
     ) -> Result<Self> {
         let kit = RecoveryKit::decode(recovery_kit)?;
-        prepare_empty_dir(&data.path)?;
+        ensure_new_empty_dir(&data.path)?;
         let sealed = bucket
             .recovery_snapshot()
             .await?
             .context("no recovery snapshot in the bucket; the kit was never used")?;
         let snapshot = open_snapshot(&kit.recovery_key, &kit.workspace_id, &sealed)?;
+        ensure_snapshot_is_current(&bucket, &kit, snapshot.epoch).await?;
+
+        let restored = Self::install_snapshot(data, &kit, snapshot, bucket, networking).await;
+        if restored.is_err() {
+            // Leave nothing behind, so the restore can simply be retried.
+            let _ = std::fs::remove_dir_all(&data.path);
+            let _ = data.keys.forget(&data.path).await;
+        }
+        restored
+    }
+
+    async fn install_snapshot(
+        data: &DataDir,
+        kit: &RecoveryKit,
+        snapshot: Snapshot,
+        bucket: Bucket,
+        networking: Networking,
+    ) -> Result<Self> {
+        std::fs::create_dir_all(&data.path)?;
         data.keys
             .save(&data.path, &DeviceKey::from_bytes(snapshot.device_key))
             .await?;
-        std::fs::write(data.store_path(), &snapshot.store_db)?;
-        std::fs::write(data.mls_path(), &snapshot.mls_db)?;
-        crate::config::write_private_file(
-            &data.path.join(crate::config::CONFIG_FILE),
-            &snapshot.workspace_json,
-        )?;
+        write_private_file(&data.store_path(), &snapshot.store_db)?;
+        write_private_file(&data.mls_path(), &snapshot.mls_db)?;
+        write_private_file(&data.path.join(CONFIG_FILE), &snapshot.workspace_json)?;
 
         let workspace = Self::open_with(data, |_| Ok(bucket), networking).await?;
         ensure!(workspace.me() == kit.admin, "the snapshot is not the admin's");
@@ -260,6 +284,33 @@ impl Workspace {
     }
 }
 
+/// Restore writes several files; an empty (or new) folder keeps it clean.
+fn ensure_new_empty_dir(dir: &std::path::Path) -> Result<()> {
+    if dir.exists() {
+        let is_empty = std::fs::read_dir(dir)?.next().is_none();
+        ensure!(
+            is_empty,
+            "restore into a new, empty folder ({} isn't empty)",
+            dir.display()
+        );
+    }
+    Ok(())
+}
+
+/// A snapshot is stale if the admin committed after taking it: someone put
+/// an old snapshot back, or the device died between commit and snapshot.
+/// Restoring it would fork the group, so refuse.
+async fn ensure_snapshot_is_current(bucket: &Bucket, kit: &RecoveryKit, epoch: u64) -> Result<()> {
+    if let Some(bytes) = bucket.commit(epoch).await?
+        && commit::verify(&bytes, epoch, &kit.admin).is_ok()
+    {
+        anyhow::bail!(
+            "the workspace changed after this recovery snapshot was taken; restoring it would split the group"
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +318,7 @@ mod tests {
     #[test]
     fn snapshots_open_only_with_their_kit_and_workspace() {
         let snapshot = Snapshot {
+            epoch: 0,
             device_key: [1; 32],
             workspace_json: b"{}".to_vec(),
             store_db: vec![2; 10],

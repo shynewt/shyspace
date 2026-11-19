@@ -21,7 +21,7 @@ impl Workspace {
     /// verifies; envelopes we can't apply yet are parked and retried.
     pub(crate) fn receive(&self, envelope: Envelope) -> Result<()> {
         ensure!(
-            envelope.seq <= MAX_STORED_NUMBER && envelope.epoch <= MAX_STORED_NUMBER,
+            (1..=MAX_STORED_NUMBER).contains(&envelope.seq) && envelope.epoch <= MAX_STORED_NUMBER,
             "op numbering out of range"
         );
         let change = {
@@ -30,7 +30,7 @@ impl Workspace {
                 return Ok(());
             }
             match verify(&state, &envelope)? {
-                Some(verified) if state.store.accepts_clock(verified.body.lamport)? => {
+                Some(verified) if is_ready(&state, &verified)? => {
                     apply_and_record(&state, &envelope, &verified)?
                 }
                 _ => {
@@ -56,7 +56,7 @@ impl Workspace {
                     continue;
                 }
                 match verify(&state, &envelope) {
-                    Ok(Some(verified)) if state.store.accepts_clock(verified.body.lamport)? => {
+                    Ok(Some(verified)) if is_ready(&state, &verified)? => {
                         changes.extend(apply_and_record(&state, &envelope, &verified)?);
                     }
                     Ok(_) => {}
@@ -90,6 +90,15 @@ fn verify(state: &State, envelope: &Envelope) -> Result<Option<VerifiedOp>> {
         "op written after its author was removed"
     );
     Ok(Some(crypto::open(envelope, &key)?))
+}
+
+/// An op applies only right after its author's previous one, so every
+/// author's log has no gaps. That makes a removed member's frozen log exact:
+/// nothing can be slipped in below the freeze. It also waits while its clock
+/// is implausibly far ahead of ours.
+fn is_ready(state: &State, verified: &VerifiedOp) -> Result<bool> {
+    let follows_previous = verified.seq == 1 || state.store.is_applied(&verified.author, verified.seq - 1)?;
+    Ok(follows_previous && state.store.accepts_clock(verified.body.lamport)?)
 }
 
 fn apply_and_record(

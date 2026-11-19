@@ -28,6 +28,7 @@ use crate::{
         gossip::Net,
         presigned::PresignedMailbox,
     },
+    views::safety_code,
 };
 
 pub(crate) const STORE_FILE: &str = "shy.db";
@@ -64,6 +65,13 @@ impl DataDir {
 
     pub(crate) fn mls_path(&self) -> PathBuf {
         self.path.join(MLS_FILE)
+    }
+
+    /// This device's safety code, creating its identity if needed. A joiner
+    /// shows it while waiting, so the admin can check who is asking.
+    pub async fn safety_code(&self) -> Result<String> {
+        std::fs::create_dir_all(&self.path).with_context(|| format!("creating {}", self.path.display()))?;
+        Ok(safety_code(&self.open_local().await?.identity.public()))
     }
 
     async fn open_local(&self) -> Result<Local> {
@@ -297,6 +305,7 @@ impl Workspace {
                 events: broadcast::channel(1024).0,
                 wake: Notify::new(),
                 sync_lock: tokio::sync::Mutex::new(()),
+                recovery_lock: tokio::sync::Mutex::new(()),
                 status: Mutex::new(SyncStatus::default()),
             }),
         };
@@ -332,7 +341,7 @@ async fn wait_for_answer(invite: &Invite, mailbox: &impl JoinMailbox) -> Result<
     }
 }
 
-pub(crate) fn prepare_empty_dir(dir: &Path) -> Result<()> {
+fn prepare_empty_dir(dir: &Path) -> Result<()> {
     if WorkspaceConfig::exists(dir) {
         bail!("a workspace already exists in {}", dir.display());
     }
