@@ -76,7 +76,8 @@ export async function withApp(dataDir: string, body: (app: Browser) => Promise<v
       hostname: "127.0.0.1",
       port: DRIVER_PORT,
       logLevel: "warn",
-      capabilities: { browserName: "wry", "tauri:options": { application: APP_BINARY } },
+      // WebKit's driver speaks classic WebDriver only, not BiDi.
+      capabilities: { "wdio:enforceWebDriverClassic": true, "tauri:options": { application: APP_BINARY } },
     });
     try {
       await body(browser);
