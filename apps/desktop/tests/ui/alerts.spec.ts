@@ -26,7 +26,8 @@ const alertsShown = (page: Page) => page.evaluate(() => window.fake.alertsShown)
 async function setLevel(page: Page, channel: string, choice: string) {
   await page.getByRole("button", { name: channel, exact: true }).hover();
   await page.getByRole("button", { name: `Actions for #${channel}` }).click();
-  await page.getByRole("menuitem", { name: choice }).click();
+  await page.getByRole("menuitem", { name: "Notifications" }).hover();
+  await page.getByRole("menuitemradio", { name: choice }).click();
 }
 
 test("a mention elsewhere shows a desktop notification", async ({ page }) => {
@@ -36,17 +37,27 @@ test("a mention elsewhere shows a desktop notification", async ({ page }) => {
 });
 
 test("a muted channel stays dim and silent", async ({ page }) => {
-  await setLevel(page, "random", "Mute channel");
+  await setLevel(page, "random", "Nothing (muted)");
   await graceSays(page, "random", "[@Ada](shy://member/{me}) muted mention");
   await graceSays(page, "random", "just chatting");
 
   await expect(page.getByRole("button", { name: "random, 2 unread, 1 mentions you" })).toBeVisible();
+  await expect(page.getByLabel("Muted")).toBeVisible();
   expect(await alertsShown(page)).toEqual([]);
 });
 
-test("every message alerts when you choose so", async ({ page }) => {
-  await setLevel(page, "random", "Notify for every message");
+test("mentions only stays quiet for plain messages and shows an @", async ({ page }) => {
+  await setLevel(page, "random", "Mentions only");
+  await expect(page.getByLabel("Mentions only")).toBeVisible();
   await graceSays(page, "random", "lunch?");
+  await graceSays(page, "random", "[@Ada](shy://member/{me}) lunch with me?");
 
-  await expect.poll(() => alertsShown(page)).toEqual([{ title: "Grace in #random", body: "lunch?" }]);
+  await expect.poll(() => alertsShown(page)).toEqual([{ title: "Grace in #random", body: "@Ada lunch with me?" }]);
+});
+
+test("a right-click opens the channel's menu with the current level checked", async ({ page }) => {
+  await page.getByRole("button", { name: "random", exact: true }).click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Rename" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Notifications" }).hover();
+  await expect(page.getByRole("menuitemradio", { name: "Every message" })).toHaveAttribute("aria-checked", "true");
 });

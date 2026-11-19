@@ -98,6 +98,14 @@ export default function Gallery() {
             trigger={<Button>Open menu</Button>}
             items={[
               { label: "Rename", onSelect: () => showToast("Rename") },
+              {
+                label: "Notifications",
+                icon: <Bell size={14} />,
+                choices: [
+                  { label: "Every message", isChosen: true, onSelect: () => showToast("Every message") },
+                  { label: "Mentions only", isChosen: false, onSelect: () => showToast("Mentions only") },
+                ],
+              },
               { label: "Delete", onSelect: () => showToast("Delete"), isDestructive: true, icon: <Trash2 size={14} /> },
             ]}
           />
