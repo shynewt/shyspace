@@ -60,6 +60,7 @@ jobs:
   app:
     name: Desktop app (real UI, real bucket)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: System libraries, WebKit's WebDriver, a virtual display and a keychain

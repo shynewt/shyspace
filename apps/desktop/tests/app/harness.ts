@@ -22,6 +22,7 @@ const REPO = path.resolve(import.meta.dirname, "../../../..");
 const APP_BINARY = process.env.SHY_APP ?? path.join(REPO, "target/debug/shyspace-desktop");
 const CLI_BINARY = process.env.SHY_CLI ?? path.join(REPO, "target/debug/shy");
 const DRIVER_PORT = 4444;
+const NATIVE_DRIVER_PORT = 4445;
 
 export const BUCKET = {
   endpoint: process.env.SHY_TEST_S3_ENDPOINT ?? "http://localhost:9000",
@@ -43,37 +44,47 @@ export async function withTempDirs(purposes: string[], body: (dirs: string[]) =>
   }
 }
 
-async function waitForDriver(): Promise<void> {
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${DRIVER_PORT}/status`)).ok) return;
-    } catch {
-      // Not listening yet.
+/** tauri-driver answers first; WebKit's own driver behind it a moment later. */
+async function waitForDrivers(): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  for (const port of [DRIVER_PORT, NATIVE_DRIVER_PORT]) {
+    while (!(await isListening(port))) {
+      if (Date.now() > deadline) throw new Error(`no WebDriver listening on port ${port}`);
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`tauri-driver did not start on port ${DRIVER_PORT}`);
+}
+
+async function isListening(port: number): Promise<boolean> {
+  try {
+    return (await fetch(`http://127.0.0.1:${port}/status`)).ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Runs `body` against the app on `dataDir`, then quits the app. */
 export async function withApp(dataDir: string, body: (app: Browser) => Promise<void>): Promise<void> {
   // tauri-driver hands its environment to the app, which reads SHY_DIR.
-  const driver = spawn("tauri-driver", ["--port", String(DRIVER_PORT)], {
+  const driver = spawn("tauri-driver", ["--port", String(DRIVER_PORT), "--native-port", String(NATIVE_DRIVER_PORT)], {
     env: { ...process.env, SHY_DIR: dataDir },
     stdio: ["ignore", "inherit", "inherit"],
   });
-  await waitForDriver();
-  const browser = await remote({
-    hostname: "127.0.0.1",
-    port: DRIVER_PORT,
-    logLevel: "warn",
-    capabilities: { browserName: "wry", "tauri:options": { application: APP_BINARY } },
-  });
   try {
-    await body(browser);
+    await waitForDrivers();
+    const browser = await remote({
+      hostname: "127.0.0.1",
+      port: DRIVER_PORT,
+      logLevel: "warn",
+      capabilities: { browserName: "wry", "tauri:options": { application: APP_BINARY } },
+    });
+    try {
+      await body(browser);
+    } finally {
+      await browser.deleteSession();
+    }
   } finally {
-    await browser.deleteSession();
+    // Always, or a leftover driver holds the ports for the next test.
     await stop(driver);
   }
 }
