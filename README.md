@@ -1,4 +1,11 @@
-# shyspace
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-dark.svg">
+    <img src="docs/brand/logo-light.svg" alt="shyspace" width="300">
+  </picture>
+</p>
+
+<p align="center"><b>Chat, pages and AI agents. End-to-end encrypted. No server to run.</b></p>
 
 An end-to-end encrypted team workspace: chat, collaborative pages, and AI agents as first-class members. There is no server to run. Members sync directly when online, and through any S3-compatible bucket when not. The bucket only ever sees ciphertext.
 
