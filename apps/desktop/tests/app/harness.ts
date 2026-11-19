@@ -83,7 +83,10 @@ export async function withApp(dataDir: string, body: (app: Browser) => Promise<v
       await body(browser);
     } catch (error) {
       // What the app showed when it failed, since CI has no screen to look at.
-      const shown = await browser.$("body").getText().catch(() => "(page text unavailable)");
+      const shown = await browser
+        .$("body")
+        .getText()
+        .catch(() => "(page text unavailable)");
       console.error(`--- app text at failure ---\n${shown}\n---`);
       throw error;
     } finally {
