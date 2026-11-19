@@ -57,6 +57,15 @@ impl Workspace {
         self.as_seen_by_me(&state, channel, messages)
     }
 
+    /// The newest message in `channel`, thread replies included.
+    pub fn latest_message(&self, channel: &str) -> Result<Option<LinkedMessage>> {
+        let latest = self.state().store.latest_message(channel)?;
+        match latest {
+            Some(id) => self.linked_message(&id),
+            None => Ok(None),
+        }
+    }
+
     /// The message a `shy://message/<id>` link points to, if it still exists.
     pub fn linked_message(&self, id: &str) -> Result<Option<LinkedMessage>> {
         let state = self.state();

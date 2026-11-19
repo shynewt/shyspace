@@ -1,4 +1,4 @@
-import { Hash, Lock } from "lucide-react";
+import { Bot, Hash, Lock } from "lucide-react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type Message, type MessageCursor } from "../../lib/api";
@@ -6,7 +6,7 @@ import { formatDay } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { EmptyState, Spinner, springs } from "../../ui";
+import { EmptyState, Spinner, springs, Tooltip } from "../../ui";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 import { ThreadPanel } from "./ThreadPanel";
@@ -158,7 +158,8 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
         <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
           <Hash size={17} className="text-faint" />
           <h1 className="text-[15px] font-semibold">{channel?.name ?? "…"}</h1>
-          <span className="ml-auto flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
+          <AgentsNote />
+          <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
             <Lock size={11} /> End-to-end encrypted
           </span>
         </header>
@@ -231,6 +232,31 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** Agents can read every channel; say so where people write. */
+function AgentsNote() {
+  const loadMembers = useCallback(() => api.members(), []);
+  const members = useLive(loadMembers, (change) => change.kind === "members");
+  const agents = members?.filter((member) => member.active && member.is_bot).length ?? 0;
+  return (
+    <span className="ml-auto">
+      {agents > 0 && (
+        <Tooltip
+          label={
+            <span className="block max-w-[260px] whitespace-normal">
+              AI agents are members and can read this channel. What they read goes to their AI provider.
+            </span>
+          }
+          side="bottom"
+        >
+          <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-[11.5px] text-accent-text">
+            <Bot size={12} /> {agents} {agents === 1 ? "agent" : "agents"} can read this
+          </span>
+        </Tooltip>
+      )}
+    </span>
   );
 }
 

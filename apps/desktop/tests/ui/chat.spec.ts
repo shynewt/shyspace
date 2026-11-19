@@ -69,3 +69,10 @@ test("untrusted markdown never becomes live HTML", async ({ page }) => {
   await expect(page.locator("main img")).toHaveCount(0);
   expect(await page.evaluate(() => "pwned" in window)).toBe(false);
 });
+
+test("the channel says when agents can read it", async ({ page }) => {
+  const note = page.getByText(/agents? can read this/);
+  await expect(note).toHaveCount(0);
+  await page.evaluate(() => window.fake.addMember("Claude", { kind: "bot" }));
+  await expect(page.getByText("1 agent can read this")).toBeVisible();
+});

@@ -118,6 +118,12 @@ pub struct WaitForMessages {
 }
 
 /// One line per message, oldest first, each starting with its id.
+/// A new message wakes an agent unless it wrote it, or another bot did
+/// without mentioning it: two agents must not keep waking each other.
+fn should_wake(message: &Message, my_id: &str) -> bool {
+    message.author != my_id && (!message.author_is_bot || message.mentions_me)
+}
+
 fn format_messages(messages: Vec<Message>) -> String {
     if messages.is_empty() {
         return "(no messages yet)".into();
@@ -403,28 +409,40 @@ impl ShyTools {
         let me = self.workspace.my_id();
         let mut changes = self.workspace.subscribe();
         let arrived = tokio::time::timeout(timeout, async {
-            while let Ok(change) = changes.recv().await {
-                let Change::Messages { channel } = change else {
-                    continue;
+            loop {
+                let channel = match changes.recv().await {
+                    Ok(Change::Messages { channel }) => channel,
+                    Ok(_) => continue,
+                    // Missed some changes: nothing to tell which; keep waiting.
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(closed) => return Err(anyhow::Error::from(closed)),
                 };
                 if wanted.as_ref().is_some_and(|wanted| *wanted != channel) {
                     continue;
                 }
-                let latest = self.workspace.messages(&channel, None, 1).ok()?;
-                if latest.first().is_some_and(|message| message.author != me) {
-                    return Some(channel);
+                if let Some(latest) = self.workspace.latest_message(&channel)?
+                    && should_wake(&latest.message, &me)
+                {
+                    return Ok(latest);
                 }
             }
-            None
         })
         .await;
         match arrived {
-            Ok(Some(channel)) => self
-                .workspace
-                .messages(&channel, None, 10)
-                .map(format_messages)
-                .map_err(failed),
-            _ => Ok("no new messages".into()),
+            Ok(Ok(latest)) => match latest.thread_root {
+                Some(root) => self
+                    .workspace
+                    .thread(&root)
+                    .map(|thread| format!("New reply in a thread:\n{}", format_messages(thread)))
+                    .map_err(failed),
+                None => self
+                    .workspace
+                    .messages(&latest.message.channel, None, 10)
+                    .map(format_messages)
+                    .map_err(failed),
+            },
+            Ok(Err(error)) => Err(failed(error)),
+            Err(_) => Ok("no new messages".into()),
         }
     }
 }
@@ -445,4 +463,49 @@ pub async fn serve(workspace: Workspace) -> Result<()> {
     service.waiting().await?;
     workspace.shutdown().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(author: &str, is_bot: bool, mentions_me: bool) -> Message {
+        Message {
+            id: "m".into(),
+            channel: "c".into(),
+            author: author.into(),
+            author_name: String::new(),
+            author_is_bot: is_bot,
+            text: String::new(),
+            reply_to: None,
+            created_ms: 0,
+            lamport: 1,
+            is_edited: false,
+            can_edit: false,
+            can_delete: false,
+            mentions_me,
+            reply_count: 0,
+            last_reply_ms: None,
+            is_following: false,
+            unread_replies: 0,
+            reactions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn agents_wake_for_people_and_for_bots_only_when_mentioned() {
+        assert!(should_wake(&message("ada", false, false), "me"));
+        assert!(
+            !should_wake(&message("me", false, false), "me"),
+            "not for your own message"
+        );
+        assert!(
+            !should_wake(&message("other-bot", true, false), "me"),
+            "bots don't wake each other"
+        );
+        assert!(
+            should_wake(&message("other-bot", true, true), "me"),
+            "unless one mentions the other"
+        );
+    }
 }

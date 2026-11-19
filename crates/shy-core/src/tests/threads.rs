@@ -148,3 +148,19 @@ async fn a_message_link_finds_the_message_and_its_thread() {
         "a deleted message's link leads nowhere"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_latest_message_includes_thread_replies() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let question = admin.send_message(&general, "release?", None).unwrap();
+    // Bob answers after seeing the question, as people do.
+    sync_all(&[&admin, &bob]).await;
+    bob.send_message(&general, "friday", Some(question.clone()))
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let latest = admin.latest_message(&general).unwrap().unwrap();
+    assert_eq!(latest.message.text, "friday");
+    assert_eq!(latest.thread_root.as_deref(), Some(question.as_str()));
+}

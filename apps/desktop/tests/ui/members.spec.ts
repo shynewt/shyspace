@@ -10,6 +10,7 @@ test("a waiting join request shows a badge until it is approved", async ({ page 
 
   await membersButton.click();
   await expect(page.getByText("1234 5678 9012 3456 7890")).toBeVisible();
+  await expect(page.getByText(/end-to-end encryption ends there/)).toBeVisible();
   await page.getByRole("button", { name: "Codes match, let in" }).click();
 
   await expect(page.getByText("Claude wants to join")).toHaveCount(0);
