@@ -9,7 +9,7 @@ use crate::{
     ops::{EntityId, Envelope, Op, OpBody, VerifiedOp, new_owned_id, normalize_channel_name, now_ms},
     pages::{self, Edit},
     storage::ItemKind,
-    views::{Change, Message, NotifyLevel},
+    views::{Change, Draft, Message, NotifyLevel},
 };
 
 const MAX_MENTION_SCAN: u32 = 500;
@@ -104,13 +104,56 @@ impl Workspace {
             text: text.to_owned(),
             reply_to,
         })?;
-        // Replying means you've read what came before.
-        let state = self.state();
-        state.store.mark_read(channel, &id)?;
-        if let Some(root) = state.store.thread_root(&id)?.filter(|root| *root != id) {
-            state.store.mark_thread_read(&root, &id)?;
+        // Replying means you've read what came before, and the draft is done.
+        {
+            let state = self.state();
+            state.store.mark_read(channel, &id)?;
+            let draft_target = match state.store.thread_root(&id)?.filter(|root| *root != id) {
+                Some(root) => {
+                    state.store.mark_thread_read(&root, &id)?;
+                    root
+                }
+                None => channel.to_owned(),
+            };
+            state.store.set_draft(&draft_target, "", now_ms()?)?;
         }
+        self.emit(Change::Drafts);
         Ok(id)
+    }
+
+    /// Keeps unsent text for a channel or a thread (its first message), on
+    /// this device only. Blank text removes the draft.
+    pub fn set_draft(&self, target: &str, text: &str) -> Result<()> {
+        let kind = self.state().store.item_kind(target)?;
+        if !matches!(kind, Some(ItemKind::Channel | ItemKind::Message)) {
+            bail!("drafts belong to a channel or a thread");
+        }
+        self.state().store.set_draft(target, text, now_ms()?)?;
+        self.emit(Change::Drafts);
+        Ok(())
+    }
+
+    /// Your drafts, newest first. Drafts for something since deleted are left out.
+    pub fn drafts(&self) -> Result<Vec<Draft>> {
+        let state = self.state();
+        let mut drafts = Vec::new();
+        for (target, text, updated_ms) in state.store.drafts()? {
+            let channel = match state.store.item_kind(&target)? {
+                Some(ItemKind::Channel) => target.clone(),
+                Some(ItemKind::Message) => match state.store.message(&target, &self.me())? {
+                    Some(message) => message.channel,
+                    None => continue,
+                },
+                _ => continue,
+            };
+            drafts.push(Draft {
+                target,
+                channel,
+                text,
+                updated_ms,
+            });
+        }
+        Ok(drafts)
     }
 
     /// Whether new replies in the thread starting at `root` alert you.

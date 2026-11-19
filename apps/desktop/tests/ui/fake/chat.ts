@@ -175,6 +175,20 @@ export class FakeChat {
     return message.id;
   }
 
+  /** The channel a draft target is in: itself, or a thread's channel. */
+  channelOf(target: string): string | null {
+    if (this.channels.some((channel) => channel.id === target)) return target;
+    return this.messages.find((message) => message.id === target)?.channel ?? null;
+  }
+
+  /** Where a sent message's draft lived: its thread's first message, or its channel. */
+  draftTargetOf(messageId: string): string | null {
+    const message = this.messages.find((candidate) => candidate.id === messageId);
+    if (!message) return null;
+    const root = rootOf(this.messages, messageId);
+    return root && root !== messageId ? root : message.channel;
+  }
+
   /** A channel as a fresh workspace has it. */
   addChannel(id: string, name: string): void {
     this.channels.push({ id, name });

@@ -10,8 +10,8 @@ use shy_core::{
     BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace,
     sync::SyncStatus,
     views::{
-        Channel, Inbox, Invite, LinkedMessage, Member, Message, MessageCursor, NotifyLevel, Page, SearchHit,
-        StorageSettings,
+        Channel, Draft, Inbox, Invite, LinkedMessage, Member, Message, MessageCursor, NotifyLevel, Page,
+        SearchHit, StorageSettings,
     },
     workspace::StorageUpdate,
 };
@@ -330,6 +330,16 @@ async fn linked_message(state: State<'_, AppState>, id: String) -> CommandResult
 }
 
 #[tauri::command]
+async fn set_draft(state: State<'_, AppState>, target: String, text: String) -> CommandResult<()> {
+    current(&state).await?.set_draft(&target, &text).map_err(failed)
+}
+
+#[tauri::command]
+async fn drafts(state: State<'_, AppState>) -> CommandResult<Vec<Draft>> {
+    current(&state).await?.drafts().map_err(failed)
+}
+
+#[tauri::command]
 async fn rename_channel(state: State<'_, AppState>, channel: String, name: String) -> CommandResult<()> {
     current(&state)
         .await?
@@ -498,6 +508,8 @@ pub fn run() {
             create_channel,
             rename_channel,
             mark_read,
+            set_draft,
+            drafts,
             linked_message,
             inbox,
             mark_all_read,

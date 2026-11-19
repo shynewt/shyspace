@@ -33,7 +33,7 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
 7. **Threads are replies** (`storage/threads.rs`): a message with `reply_to` lives in the thread of the message it eventually answers, in the same channel, worked out when reading so arrival order doesn't matter. A reply whose parent is missing shows in the channel. You follow threads you started, replied in or were mentioned in, unless you choose otherwise; their new replies alert you.
 8. **Alerts are decided on the device** (`sync/alerts.rs`): a new message from someone else raises `Change::Alert` when that channel's level (all, mentions, or nothing) allows it and it was written in the last 10 minutes, so catching up never floods you. The desktop app shows it unless you're looking at that channel, and keeps running in the tray when its window is closed.
 9. **The inbox** (`workspace/inbox.rs`) gathers unread mentions and new replies in followed threads across channels, from the same read positions, so reading something anywhere clears it.
-10. **Personal state stays on the device.** Things only you care about, like where you've read up to in each channel or thread, alert levels and which threads you follow (`storage/reading.rs`), are plain local rows, not ops: nobody else sees them, and they don't sync between devices (one member is one device today, #53).
+10. **Personal state stays on the device.** Things only you care about, like where you've read up to in each channel or thread, alert levels, which threads you follow and unsent drafts (`storage/reading.rs`), are plain local rows, not ops: nobody else sees them, and they don't sync between devices (one member is one device today, #53).
 
 ## Identity and local data
 

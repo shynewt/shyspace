@@ -1,4 +1,5 @@
 mod collaboration;
+mod drafts;
 mod editing;
 mod hardening;
 mod inbox;

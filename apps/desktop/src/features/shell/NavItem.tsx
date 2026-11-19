@@ -12,7 +12,7 @@ export function NavItem({
   unread = 0,
   mentions = 0,
   isMuted = false,
-  statusIcon,
+  status,
   onContextMenu,
   depth = 0,
   leading,
@@ -28,7 +28,7 @@ export function NavItem({
   /** Muted: dimmed, and only mentions get a badge. */
   isMuted?: boolean;
   /** A small icon after the label, like a channel's alert level. */
-  statusIcon?: ReactNode;
+  status?: { icon: ReactNode; label: string } | null;
   /** A right-click (or the keyboard's menu key) on the item. */
   onContextMenu?: () => void;
   depth?: number;
@@ -53,7 +53,9 @@ export function NavItem({
       <button
         type="button"
         aria-current={isActive ? "page" : undefined}
-        aria-label={hasUnread ? unreadLabel(label, unread, mentions) : undefined}
+        aria-label={
+          hasUnread || status ? accessibleName(label, status?.label, hasUnread ? unread : 0, mentions) : undefined
+        }
         onClick={() => navigate(view)}
         onContextMenu={
           onContextMenu &&
@@ -71,7 +73,11 @@ export function NavItem({
       >
         <span className={isActive ? "text-accent" : "text-faint"}>{icon}</span>
         <span className="truncate">{label}</span>
-        {statusIcon && <span className="shrink-0 text-faint">{statusIcon}</span>}
+        {status && (
+          <span aria-hidden className="shrink-0 text-faint">
+            {status.icon}
+          </span>
+        )}
         {hasUnread && (
           <motion.span
             aria-hidden
@@ -93,7 +99,11 @@ export function NavItem({
   );
 }
 
-function unreadLabel(label: string, unread: number, mentions: number): string {
-  const mentioning = mentions > 0 ? `, ${mentions} ${mentions === 1 ? "mentions" : "mention"} you` : "";
-  return `${label}, ${unread} unread${mentioning}`;
+/** "random, muted, 2 unread, 1 mentions you": what the badges and icons show. */
+function accessibleName(label: string, status: string | undefined, unread: number, mentions: number): string {
+  const parts = [label];
+  if (status) parts.push(status);
+  if (unread > 0) parts.push(`${unread} unread`);
+  if (unread > 0 && mentions > 0) parts.push(`${mentions} ${mentions === 1 ? "mentions" : "mention"} you`);
+  return parts.join(", ");
 }

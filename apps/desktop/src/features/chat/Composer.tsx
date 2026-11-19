@@ -1,10 +1,11 @@
 import { ArrowUp } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { Button, Kbd } from "../../ui";
+import { useDraft } from "./useDraft";
 import { useMentionPicker } from "./useMentionPicker";
 
 const MAX_HEIGHT_PX = 200;
@@ -28,14 +29,15 @@ export function Composer({
   useFocusOnMount(input);
   const picker = useMentionPicker(input, (next) => updateText(next));
 
-  const updateText = (next: string) => {
+  const updateText = useCallback((next: string) => {
     setText(next);
     // Grows with its content, up to a limit.
     const element = input.current;
     if (!element) return;
     element.style.height = "0px";
     element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT_PX)}px`;
-  };
+  }, []);
+  useDraft(threadRoot ?? channelId, text, updateText);
 
   const send = async () => {
     if (!canSend) return;

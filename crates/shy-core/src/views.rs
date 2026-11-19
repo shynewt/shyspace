@@ -220,6 +220,8 @@ pub struct StorageSettings {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Change {
+    /// Drafts changed on this device.
+    Drafts,
     /// A new message from someone else that this member's level for its
     /// channel says should alert them. Only recent ones: catching up on old
     /// messages never alerts.
@@ -281,4 +283,15 @@ pub struct LinkedMessage {
     pub message: Message,
     /// The first message of its thread, if it's a reply.
     pub thread_root: Option<EntityId>,
+}
+
+/// Unsent text, kept on this device only.
+#[derive(Debug, Clone, Serialize)]
+pub struct Draft {
+    /// A channel, or the first message of the thread being replied in.
+    pub target: EntityId,
+    /// The channel it's in.
+    pub channel: EntityId,
+    pub text: String,
+    pub updated_ms: i64,
 }

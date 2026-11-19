@@ -10,6 +10,7 @@ import { emit } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 import type { BucketConfig, Change, Member, Page, Session, StorageSettings } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
+import { FakeDrafts } from "./drafts";
 import { argument, type Kind, ownedId, randomHex, requireString } from "./helpers";
 import { FakeInvites } from "./invites";
 import { search } from "./search";
@@ -30,6 +31,7 @@ export class FakeBackend {
     tick: () => this.tick(),
     notify: (change) => this.notify(change),
   });
+  private drafts = new FakeDrafts();
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
   private storage: StorageSettings | null = null;
   private lamport = 0;
@@ -103,8 +105,18 @@ export class FakeBackend {
 
   private answer(command: string, args: InvokeArgs | undefined): unknown {
     const chatAnswer = this.chat.answer(command, args);
+    if (command === "send_message" && typeof chatAnswer === "string") {
+      const target = this.chat.draftTargetOf(chatAnswer);
+      if (target) this.drafts.set(target, "");
+      this.notify({ kind: "drafts" });
+    }
     if (chatAnswer !== NOT_CHAT) return chatAnswer;
     switch (command) {
+      case "set_draft":
+        this.drafts.set(requireString(args, "target"), requireString(args, "text"));
+        return this.notify({ kind: "drafts" });
+      case "drafts":
+        return this.drafts.list((target) => this.chat.channelOf(target));
       case "session":
         return this.session;
       case "create_workspace":

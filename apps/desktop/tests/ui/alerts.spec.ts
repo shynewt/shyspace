@@ -41,14 +41,13 @@ test("a muted channel stays dim and silent", async ({ page }) => {
   await graceSays(page, "random", "[@Ada](shy://member/{me}) muted mention");
   await graceSays(page, "random", "just chatting");
 
-  await expect(page.getByRole("button", { name: "random, 2 unread, 1 mentions you" })).toBeVisible();
-  await expect(page.getByLabel("Muted")).toBeVisible();
+  await expect(page.getByRole("button", { name: "random, muted, 2 unread, 1 mentions you" })).toBeVisible();
   expect(await alertsShown(page)).toEqual([]);
 });
 
 test("mentions only stays quiet for plain messages and shows an @", async ({ page }) => {
   await setLevel(page, "random", "Mentions only");
-  await expect(page.getByLabel("Mentions only")).toBeVisible();
+  await expect(page.getByRole("button", { name: "random, mentions only" })).toBeVisible();
   await graceSays(page, "random", "lunch?");
   await graceSays(page, "random", "[@Ada](shy://member/{me}) lunch with me?");
 

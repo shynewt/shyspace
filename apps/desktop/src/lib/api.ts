@@ -40,6 +40,7 @@ export type InboxItem = {
   thread_root: string | null;
   reason: "mention" | "thread_reply";
 };
+export type Draft = { target: string; channel: string; text: string; updated_ms: number };
 export type LinkedMessage = { message: Message; thread_root: string | null };
 export type Inbox = { attention: InboxItem[]; channels: Channel[] };
 export type MessageCursor = { lamport: number; author: string };
@@ -92,6 +93,7 @@ export type Change =
       preview: string;
     }
   | { kind: "channels" }
+  | { kind: "drafts" }
   | { kind: "messages"; channel: string }
   | { kind: "pages" }
   | { kind: "doc"; page: string; update: number[] }
@@ -121,6 +123,8 @@ export const api = {
   markRead: (channel: string, message: string) => invoke<void>("mark_read", { channel, message }),
   thread: (root: string) => invoke<Message[]>("thread", { root }),
   inbox: () => invoke<Inbox>("inbox"),
+  drafts: () => invoke<Draft[]>("drafts"),
+  setDraft: (target: string, text: string) => invoke<void>("set_draft", { target, text }),
   linkedMessage: (id: string) => invoke<LinkedMessage | null>("linked_message", { id }),
   markAllRead: () => invoke<void>("mark_all_read"),
   setFollowing: (root: string, following: boolean) => invoke<void>("set_following", { root, following }),

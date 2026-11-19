@@ -4,6 +4,7 @@ import { type ReactNode, useRef, useState } from "react";
 import { api, type Channel, type NotifyLevel } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
+import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem } from "../../ui";
 import { NavItem } from "./NavItem";
@@ -15,11 +16,12 @@ const NOTIFY_CHOICES: { level: NotifyLevel; label: string; icon: ReactNode }[] =
 ];
 
 /** Shown next to a channel's name when it doesn't alert for every message. */
-const LEVEL_ICONS: Record<NotifyLevel, ReactNode> = {
+const LEVEL_STATUS: Record<NotifyLevel, { icon: ReactNode; label: string } | null> = {
   all: null,
-  mentions: <AtSign size={12} aria-label="Mentions only" />,
-  nothing: <BellOff size={12} aria-label="Muted" />,
+  mentions: { icon: <AtSign size={12} />, label: "mentions only" },
+  nothing: { icon: <BellOff size={12} />, label: "muted" },
 };
+const DRAFT_STATUS = { icon: <Pencil size={12} />, label: "draft" };
 
 export function ChannelList({
   newChannelRound,
@@ -32,6 +34,8 @@ export function ChannelList({
   isUnreadOnly: boolean;
 }) {
   const { channels, view, navigate } = useWorkspace();
+  const drafts = useLive(api.drafts, (change) => change.kind === "drafts");
+  const hasDraft = (channel: string) => drafts?.some((draft) => draft.target === channel) ?? false;
   // The open channel stays listed, so filtering never hides where you are.
   const shown = isUnreadOnly
     ? channels.filter((channel) => channel.unread > 0 || (view?.kind === "channel" && view.id === channel.id))
@@ -40,7 +44,7 @@ export function ChannelList({
   return (
     <>
       {shown.map((channel) => (
-        <ChannelItem key={channel.id} channel={channel} />
+        <ChannelItem key={channel.id} channel={channel} hasDraft={hasDraft(channel.id)} />
       ))}
       <AnimatePresence>
         {newChannelRound !== null && (
@@ -57,7 +61,7 @@ export function ChannelList({
   );
 }
 
-function ChannelItem({ channel }: { channel: Channel }) {
+function ChannelItem({ channel, hasDraft }: { channel: Channel; hasDraft: boolean }) {
   const [isRenaming, setRenaming] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const [isMenuOpen, setMenuOpen] = useState(false);
@@ -102,7 +106,7 @@ function ChannelItem({ channel }: { channel: Channel }) {
         unread={channel.unread}
         mentions={channel.unread_mentions}
         isMuted={channel.notify === "nothing"}
-        statusIcon={LEVEL_ICONS[channel.notify]}
+        status={hasDraft ? DRAFT_STATUS : LEVEL_STATUS[channel.notify]}
         onContextMenu={() => setMenuOpen(true)}
         trailing={
           <span

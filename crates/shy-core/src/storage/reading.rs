@@ -121,4 +121,28 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Keeps `text` as the draft for `target` (a channel, or a thread's first
+    /// message); blank text removes it.
+    pub fn set_draft(&self, target: &str, text: &str, now_ms: i64) -> Result<()> {
+        if text.trim().is_empty() {
+            self.db.execute("DELETE FROM drafts WHERE target = ?", [target])?;
+        } else {
+            self.db.execute(
+                "INSERT INTO drafts (target, text, updated_ms) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (target) DO UPDATE SET text = ?2, updated_ms = ?3",
+                params![target, text, now_ms],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Every draft (target, text, when it last changed), newest first.
+    pub fn drafts(&self) -> Result<Vec<(String, String, i64)>> {
+        let mut statement = self
+            .db
+            .prepare("SELECT target, text, updated_ms FROM drafts ORDER BY updated_ms DESC")?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
 }

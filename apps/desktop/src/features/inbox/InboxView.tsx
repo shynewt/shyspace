@@ -1,7 +1,7 @@
-import { AtSign, CheckCheck, Hash, Inbox as InboxIcon, MessageSquareReply } from "lucide-react";
+import { AtSign, CheckCheck, Hash, Inbox as InboxIcon, MessageSquareReply, Pencil } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo } from "react";
-import { api, type Channel, type InboxItem } from "../../lib/api";
+import { api, type Channel, type Draft, type InboxItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
 import { displayName, formatTime } from "../../lib/people";
 import { reportError } from "../../lib/toast";
@@ -13,7 +13,8 @@ import { Avatar, Button, EmptyState, SectionLabel, springs } from "../../ui";
 export function InboxView() {
   const loadInbox = useCallback(() => api.inbox(), []);
   const inbox = useLive(loadInbox, (change) => change.kind === "messages" || change.kind === "channels");
-  const isEmpty = inbox && inbox.attention.length === 0 && inbox.channels.length === 0;
+  const drafts = useLive(api.drafts, (change) => change.kind === "drafts") ?? [];
+  const isEmpty = inbox && inbox.attention.length === 0 && inbox.channels.length === 0 && drafts.length === 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -45,6 +46,18 @@ export function InboxView() {
               <AnimatePresence initial={false}>
                 {inbox.attention.map((item) => (
                   <AttentionRow key={item.message.id} item={item} />
+                ))}
+              </AnimatePresence>
+            </ul>
+          </section>
+        )}
+        {drafts.length > 0 && (
+          <section aria-label="Drafts" className="mb-6">
+            <SectionLabel>Drafts</SectionLabel>
+            <ul className="flex flex-col gap-1">
+              <AnimatePresence initial={false}>
+                {drafts.map((draft) => (
+                  <DraftRow key={draft.target} draft={draft} />
                 ))}
               </AnimatePresence>
             </ul>
@@ -97,6 +110,35 @@ function AttentionRow({ item }: { item: InboxItem }) {
           <span className="mt-0.5 block truncate text-[13.5px]">
             {plainPreview(message.text, (id) => titles.get(id))}
           </span>
+        </span>
+      </button>
+    </motion.li>
+  );
+}
+
+function DraftRow({ draft }: { draft: Draft }) {
+  const { channels, navigate } = useWorkspace();
+  const channelName = channels.find((channel) => channel.id === draft.channel)?.name ?? "";
+  const isThread = draft.target !== draft.channel;
+  return (
+    <motion.li
+      layout
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={springs.smooth}
+    >
+      <button
+        type="button"
+        onClick={() => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined })}
+        className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
+      >
+        <Pencil size={15} className="mt-0.5 shrink-0 text-faint" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12.5px] text-muted">
+            {isThread ? "Reply in a thread in" : "In"} <b className="font-semibold text-ink">#{channelName}</b>
+          </span>
+          <span className="mt-0.5 block truncate text-[13.5px]">{draft.text}</span>
         </span>
       </button>
     </motion.li>

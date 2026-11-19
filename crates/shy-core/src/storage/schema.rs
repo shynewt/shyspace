@@ -65,6 +65,9 @@ CREATE TABLE channel_notify (channel TEXT PRIMARY KEY, level TEXT NOT NULL);
     "
 CREATE TABLE thread_follows (root TEXT PRIMARY KEY, is_following INTEGER NOT NULL);
 ",
+    "
+CREATE TABLE drafts (target TEXT PRIMARY KEY, text TEXT NOT NULL, updated_ms INTEGER NOT NULL);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
