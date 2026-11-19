@@ -23,7 +23,7 @@ The CLI reads bucket settings from `SHY_S3_ENDPOINT`, `SHY_S3_BUCKET`, `SHY_S3_A
 
 - **Desktop:** `cd apps/desktop && pnpm tauri dev`. `SHY_DIR=<dir>` picks the data directory, so you can run several members on one machine.
 - **CLI:** `cargo run -p shy-cli -- --dir <dir> <create|join|invite|mcp>`. The binary is called `shy`.
-- **An agent as a member:** `shy join --bot --name Claude <invite>` (the admin's app must be open), then `claude mcp add shyspace -- shy mcp`.
+- **An agent as a member:** the admin creates an invite (app or `shy invite create`), then `shy join --bot --name Claude <invite>` waits until the admin approves; then `claude mcp add shyspace -- shy mcp`.
 
 Note: one identity can only be online once. Don't run the CLI and the app on the same data directory at the same time.
 

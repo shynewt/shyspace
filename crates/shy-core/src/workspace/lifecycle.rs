@@ -15,25 +15,24 @@ use crate::{
     config::WorkspaceConfig,
     identity,
     membership::{
-        invite::Invite,
-        keyring::KeyHistory,
+        invite::{Answer, Grant, Invite, JoinMailbox, JoinRequest, ensure_not_expired},
         mls::{Mls, binding_message},
     },
-    ops::{Op, new_owned_id, new_random_id},
+    ops::{Op, new_owned_id, new_random_id, now_ms},
     pages::Edit,
     storage::Store,
     sync::SyncStatus,
     transport::{
-        bucket::{Bucket, BucketConfig, JoinRequest},
+        bucket::{Bucket, BucketConfig},
         gossip::Net,
+        presigned::PresignedMailbox,
     },
 };
 
 const STORE_FILE: &str = "shy.db";
 const MLS_FILE: &str = "mls.db";
 const SIGNER_META: &str = "mls_signer_public";
-const WELCOME_POLL: Duration = Duration::from_secs(2);
-const KEYRING_TIMEOUT: Duration = Duration::from_secs(120);
+const ANSWER_POLL: Duration = Duration::from_secs(2);
 
 const GETTING_STARTED: &str = "# Welcome to shyspace\n\n\
 Everything here is end-to-end encrypted. Your bucket only ever stores ciphertext.\n\n\
@@ -75,7 +74,8 @@ impl Workspace {
         .await
     }
 
-    /// Asks the admin to let us in and waits until they do.
+    /// Asks the admin to let us in and waits until they decide or the invite
+    /// expires. The admin approves from their app.
     pub async fn join(
         dir: &Path,
         invite_code: &str,
@@ -83,8 +83,17 @@ impl Workspace {
         networking: Networking,
     ) -> Result<Self> {
         let invite = Invite::decode(invite_code)?;
-        let bucket = invite.bucket.connect(&invite.workspace_id)?;
-        Self::join_with(dir, invite, profile, bucket, networking).await
+        let mailbox = PresignedMailbox::for_invite(&invite);
+        let workspace_id = invite.workspace_id.clone();
+        Self::join_with(
+            dir,
+            invite,
+            profile,
+            &mailbox,
+            |bucket| bucket.connect(&workspace_id),
+            networking,
+        )
+        .await
     }
 
     pub(crate) async fn create_with(
@@ -107,7 +116,6 @@ impl Workspace {
             name: workspace_name.to_owned(),
             admin: identity.public(),
             bucket: bucket_config,
-            invite_token: Some(new_random_id()),
         };
         config.save(dir)?;
         let workspace = Self::start(identity, config, State { store, mls }, bucket, networking).await?;
@@ -128,9 +136,11 @@ impl Workspace {
         dir: &Path,
         invite: Invite,
         profile: Profile<'_>,
-        bucket: Bucket,
+        mailbox: &impl JoinMailbox,
+        connect: impl FnOnce(&BucketConfig) -> Result<Bucket>,
         networking: Networking,
     ) -> Result<Self> {
+        ensure_not_expired(&invite, now_ms()?)?;
         prepare_empty_dir(dir)?;
         let identity = identity::load_or_create(dir)?;
         let store = Store::open(&dir.join(STORE_FILE))?;
@@ -144,46 +154,26 @@ impl Workspace {
                 .sign(&binding_message(mls.signer_public()))
                 .to_bytes()
                 .to_vec(),
+            name: profile.name.trim().to_owned(),
+            is_bot: profile.is_bot,
         };
-        bucket
-            .request_join(&invite.token, &identity.public(), &request)
-            .await?;
-        let welcome = loop {
-            if let Some(welcome) = bucket.welcome(&identity.public()).await? {
-                break welcome;
-            }
-            tokio::time::sleep(WELCOME_POLL).await;
-        };
+        mailbox.post_request(postcard::to_stdvec(&request)?).await?;
+        let (welcome, sealed_grant) = wait_for_answer(&invite, mailbox).await?;
         mls.join(
             &welcome,
             invite.workspace_id.as_bytes(),
             &invite.admin,
             &invite.admin_mls_key,
         )?;
-        let epoch = mls.epoch()?;
-        // The admin re-uploads the key history until we post our first op,
-        // so an overwritten copy gets repaired; give up if it never does.
-        let deadline = tokio::time::Instant::now() + KEYRING_TIMEOUT;
-        let history: KeyHistory = loop {
-            if let Some(sealed) = bucket.keyring(epoch).await?
-                && let Ok(payload) = mls.open_from_admin(&sealed, &invite.admin)
-            {
-                break postcard::from_bytes(&payload)?;
-            }
-            ensure!(
-                tokio::time::Instant::now() < deadline,
-                "the admin's key history never arrived; ask for a new invite"
-            );
-            tokio::time::sleep(WELCOME_POLL).await;
-        };
-        history.store_into(&store)?;
+        let grant: Grant = postcard::from_bytes(&mls.open_from_admin(&sealed_grant, &invite.admin)?)?;
+        grant.history.store_into(&store)?;
 
+        let bucket = connect(&grant.bucket)?;
         let config = WorkspaceConfig {
             workspace_id: invite.workspace_id,
             name: invite.workspace_name,
             admin: invite.admin,
-            bucket: invite.bucket,
-            invite_token: None,
+            bucket: grant.bucket,
         };
         config.save(dir)?;
         let workspace = Self::start(identity, config, State { store, mls }, bucket, networking).await?;
@@ -245,6 +235,30 @@ impl Workspace {
             workspace.spawn_background(incoming);
         }
         Ok(workspace)
+    }
+}
+
+/// Polls for the admin's answer until the invite expires.
+async fn wait_for_answer(invite: &Invite, mailbox: &impl JoinMailbox) -> Result<(Vec<u8>, Vec<u8>)> {
+    loop {
+        // Undecodable bytes are junk from someone with bucket access; the
+        // admin re-sends the real answer, so keep polling.
+        if let Some(bytes) = mailbox.fetch_answer().await?
+            && let Ok(answer) = postcard::from_bytes::<Answer>(&bytes)
+        {
+            match answer {
+                Answer::Accepted {
+                    welcome,
+                    sealed_grant,
+                } => return Ok((welcome, sealed_grant)),
+                Answer::Rejected => bail!("the admin declined this request"),
+            }
+        }
+        ensure!(
+            now_ms()? < invite.expires_ms,
+            "the invite expired before the admin answered"
+        );
+        tokio::time::sleep(ANSWER_POLL).await;
     }
 }
 

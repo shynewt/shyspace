@@ -126,34 +126,92 @@ function MemberRow({ member, isMe, canRemove }: { member: Member; isMe: boolean;
 }
 
 function InviteCard() {
-  const [code, setCode] = useState<string>();
+  const invites = useLive(api.invites, [], (change) => change.kind === "invites" || change.kind === "members") ?? [];
+  const [label, setLabel] = useState("");
+  const [newCode, setNewCode] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  useEffect(() => {
-    api.inviteCode().then(setCode, reportError);
-  }, []);
+  const requests = invites.filter((invite) => invite.state === "requested");
+  const open = invites.filter((invite) => invite.state === "open");
 
-  const copy = async (label: string, text: string) => {
+  const copy = async (key: string, text: string) => {
     await navigator.clipboard.writeText(text);
-    setCopied(label);
+    setCopied(key);
     setTimeout(() => setCopied(null), 1400);
   };
+  const create = async () => {
+    try {
+      setNewCode(await api.createInvite(label));
+      setLabel("");
+    } catch (error) {
+      reportError(error);
+    }
+  };
+  const decide = (action: (token: string) => Promise<void>, token: string) => action(token).catch(reportError);
 
-  if (!code) return null;
-  const agentCommand = `shy join --bot --name "Claude" ${code}\nclaude mcp add shyspace -- shy mcp`;
   return (
-    <div className="rounded-xl border border-line bg-bg p-3">
-      <div className="text-[13px] font-semibold">Invite people and agents</div>
-      <p className="mt-0.5 text-[12px] leading-relaxed text-muted">
-        Anyone with this code can ask to join; your app lets them in while it's open. Share it privately.
-      </p>
-      <CopyBlock text={code} isCopied={copied === "code"} onCopy={() => copy("code", code)} />
-      <div className="mt-3 flex items-center gap-1.5 text-[12px] font-medium text-muted">
-        <Terminal size={13} /> Add an AI agent (Claude Code)
+    <div className="flex flex-col gap-3">
+      {requests.map((invite) => (
+        <motion.div key={invite.token} layout className="rounded-xl border border-accent/40 bg-accent-soft/40 p-3">
+          <div className="text-[13px] font-semibold">
+            {invite.requester_name} wants to join{invite.requester_is_bot ? " (bot)" : ""}
+          </div>
+          <div className="mt-0.5 font-mono text-[11px] text-muted">key {invite.requester_id?.slice(0, 16)}…</div>
+          {invite.label && <div className="mt-0.5 text-[12px] text-muted">Invite: {invite.label}</div>}
+          <div className="mt-2 flex gap-2">
+            <button onClick={() => decide(api.approveInvite, invite.token)} className="h-7 rounded-md bg-accent px-3 text-[12px] font-medium text-white">
+              Let in
+            </button>
+            <button onClick={() => decide(api.rejectInvite, invite.token)} className="h-7 rounded-md px-3 text-[12px] text-muted hover:bg-surface-2">
+              Decline
+            </button>
+          </div>
+        </motion.div>
+      ))}
+      <div className="rounded-xl border border-line bg-bg p-3">
+        <div className="text-[13px] font-semibold">Invite someone</div>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-muted">
+          Each code works once, for 7 days, and you approve the request. It contains no passwords.
+        </p>
+        <div className="mt-2 flex gap-2">
+          <input
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+            placeholder="Who is it for? (optional)"
+            className="h-8 min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 text-[12.5px] outline-none focus:border-accent"
+          />
+          <button onClick={create} className="h-8 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-white">
+            Create
+          </button>
+        </div>
+        {newCode && <CopyBlock text={newCode} isCopied={copied === "code"} onCopy={() => copy("code", newCode)} />}
+        <div className="mt-3 flex items-center gap-1.5 text-[12px] font-medium text-muted">
+          <Terminal size={13} /> Add an AI agent (Claude Code)
+        </div>
+        <CopyBlock
+          text={AGENT_COMMAND}
+          isCopied={copied === "agent"}
+          onCopy={() => copy("agent", AGENT_COMMAND)}
+        />
       </div>
-      <CopyBlock text={agentCommand} isCopied={copied === "agent"} onCopy={() => copy("agent", agentCommand)} />
+      {open.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <div className="px-1 text-[11px] font-semibold tracking-wide text-faint uppercase">Waiting to be used</div>
+          {open.map((invite) => (
+            <div key={invite.token} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] hover:bg-surface-2/60">
+              <span className="min-w-0 flex-1 truncate">{invite.label || "Unlabeled invite"}</span>
+              <span className="text-[11px] text-faint">expires {new Date(invite.expires_ms).toLocaleDateString()}</span>
+              <button onClick={() => decide(api.revokeInvite, invite.token)} className="rounded px-1.5 text-[11.5px] text-muted hover:text-danger">
+                Revoke
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
+const AGENT_COMMAND = `shy join --bot --name "Claude" <invite code>\nclaude mcp add shyspace -- shy mcp`;
 
 function CopyBlock({ text, isCopied, onCopy }: { text: string; isCopied: boolean; onCopy: () => void }) {
   return (

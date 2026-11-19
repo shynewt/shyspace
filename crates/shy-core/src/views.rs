@@ -81,6 +81,32 @@ pub struct SearchHit {
     pub channel: Option<EntityId>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InviteState {
+    /// Waiting for someone to use it.
+    Open,
+    /// Someone asked to join; the admin decides.
+    Requested,
+    Accepted,
+    Rejected,
+    Revoked,
+    Expired,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Invite {
+    pub token: String,
+    /// Who the admin made it for, as a reminder ("Claude agent").
+    pub label: String,
+    pub created_ms: i64,
+    pub expires_ms: i64,
+    pub state: InviteState,
+    pub requester_id: Option<String>,
+    pub requester_name: Option<String>,
+    pub requester_is_bot: bool,
+}
+
 /// What changed, so listeners refresh only the affected view.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -90,6 +116,7 @@ pub enum Change {
     Pages,
     Doc { page: EntityId, update: Vec<u8> },
     Members,
+    Invites,
     Sync,
     Removed,
 }

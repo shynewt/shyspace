@@ -20,6 +20,17 @@ export type MessageCursor = { lamport: number; author: string };
 export type Page = { id: string; parent: string | null; title: string; updated_ms: number };
 export type Member = { id: string; name: string; is_bot: boolean; is_admin: boolean; active: boolean };
 export type SearchHit = { kind: "message" | "page"; id: string; title: string; snippet: string; channel: string | null };
+export type InviteState = "open" | "requested" | "accepted" | "rejected" | "revoked" | "expired";
+export type Invite = {
+  token: string;
+  label: string;
+  created_ms: number;
+  expires_ms: number;
+  state: InviteState;
+  requester_id: string | null;
+  requester_name: string | null;
+  requester_is_bot: boolean;
+};
 export type SyncStatus = { peers: number; last_sync_ms: number | null; error: string | null; removed: boolean };
 export type BucketConfig = {
   endpoint: string;
@@ -35,6 +46,7 @@ export type Change =
   | { kind: "pages" }
   | { kind: "doc"; page: string; update: number[] }
   | { kind: "members" }
+  | { kind: "invites" }
   | { kind: "sync" }
   | { kind: "removed" };
 
@@ -58,7 +70,11 @@ export const api = {
     invoke<void>("apply_doc_update", { page, update: Array.from(update) }),
   members: () => invoke<Member[]>("members"),
   removeMember: (member: string) => invoke<void>("remove_member", { member }),
-  inviteCode: () => invoke<string>("invite_code"),
+  invites: () => invoke<Invite[]>("invites"),
+  createInvite: (label: string) => invoke<string>("create_invite", { label }),
+  approveInvite: (token: string) => invoke<void>("approve_invite", { token }),
+  rejectInvite: (token: string) => invoke<void>("reject_invite", { token }),
+  revokeInvite: (token: string) => invoke<void>("revoke_invite", { token }),
   search: (query: string) => invoke<SearchHit[]>("search", { query }),
   status: () => invoke<SyncStatus>("status"),
 };

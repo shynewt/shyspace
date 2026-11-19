@@ -164,14 +164,14 @@ function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
         <textarea
           value={invite}
           onChange={(event) => setInvite(event.target.value)}
-          placeholder="shy1_…"
+          placeholder="shy2_…"
           rows={4}
           autoFocus
           className="resize-none rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[12px] leading-relaxed outline-none transition focus:border-accent focus:ring-3 focus:ring-accent/15"
         />
       </label>
       <Field label="Your name" value={name} onChange={setName} placeholder="Grace Hopper" />
-      <SubmitButton busy={false} disabled={!invite.trim().startsWith("shy1_") || !name.trim()} icon={<Ticket size={15} />}>
+      <SubmitButton busy={false} disabled={!invite.trim().startsWith("shy2_") || !name.trim()} icon={<Ticket size={15} />}>
         Join workspace
       </SubmitButton>
     </form>
@@ -197,7 +197,7 @@ function WaitingForAdmin() {
       </div>
       <h2 className="mt-4 text-[15px] font-semibold">Asking to join…</h2>
       <p className="mt-1 max-w-[320px] text-[13px] leading-relaxed text-muted">
-        The admin's app lets you in automatically the next time it's online. Your keys are being exchanged securely.
+        The admin approves your request from their app. You'll be in as soon as they do; keep this window open.
       </p>
     </div>
   );

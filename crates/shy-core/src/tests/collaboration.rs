@@ -142,7 +142,7 @@ async fn reopening_keeps_state_and_keys() {
 async fn bucket_never_sees_plaintext() {
     let root = tempfile::tempdir().unwrap();
     let memory = Arc::new(InMemory::new());
-    let bucket = Bucket::new(memory.clone());
+    let bucket = Bucket::without_signing(memory.clone());
     let admin = create_admin(&root.path().join("ada"), &bucket).await;
     let general = channel_id(&admin, "general");
     admin.send_message(&general, "TOP-SECRET-PLAN", None).unwrap();

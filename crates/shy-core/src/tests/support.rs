@@ -2,11 +2,15 @@
 
 use std::{path::Path, sync::Arc, time::Duration};
 
+use anyhow::Result;
 use object_store::memory::InMemory;
+use tokio::task::JoinHandle;
 
 use crate::{
-    BucketConfig, Networking, Profile, Workspace, crypto, membership::invite::Invite,
+    BucketConfig, Networking, Profile, Workspace, crypto,
+    membership::invite::{Invite, JoinMailbox},
     transport::bucket::Bucket,
+    views::InviteState,
 };
 
 pub fn test_bucket_config() -> BucketConfig {
@@ -36,28 +40,82 @@ pub async fn create_admin(dir: &Path, bucket: &Bucket) -> Workspace {
     .unwrap()
 }
 
-/// Bob asks to join while the admin's sync loop (driven here) accepts him.
-pub async fn join(admin: &Workspace, dir: &Path, bucket: &Bucket, name: &str, is_bot: bool) -> Workspace {
-    let invite = Invite::decode(&admin.invite_code().unwrap()).unwrap();
+/// An invitee's mailbox that talks to the in-memory bucket directly, where
+/// production uses presigned links.
+pub struct BucketMailbox {
+    pub bucket: Bucket,
+    pub token: String,
+}
+
+impl JoinMailbox for BucketMailbox {
+    async fn post_request(&self, request: Vec<u8>) -> Result<()> {
+        self.bucket.put_invite_request(&self.token, request).await
+    }
+
+    async fn fetch_answer(&self) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .bucket
+            .invite_answer(&self.token)
+            .await?
+            .map(|bytes| bytes.to_vec()))
+    }
+}
+
+/// Starts joining with `invite` in the background.
+pub fn start_join(
+    invite: Invite,
+    dir: &Path,
+    bucket: &Bucket,
+    name: &str,
+    is_bot: bool,
+) -> JoinHandle<Result<Workspace>> {
     let dir = dir.to_path_buf();
-    let bucket_for_joiner = bucket.clone();
+    let bucket = bucket.clone();
     let name = name.to_owned();
-    let joining = tokio::spawn(async move {
+    tokio::spawn(async move {
+        let mailbox = BucketMailbox {
+            bucket: bucket.clone(),
+            token: invite.token.clone(),
+        };
+        let profile = Profile { name: &name, is_bot };
         Workspace::join_with(
             &dir,
             invite,
-            Profile { name: &name, is_bot },
-            bucket_for_joiner,
+            profile,
+            &mailbox,
+            |_| Ok(bucket),
             Networking::Offline,
         )
         .await
-        .unwrap()
-    });
-    while !joining.is_finished() {
+    })
+}
+
+/// Syncs the admin until the invite's request arrives.
+pub async fn wait_for_request(admin: &Workspace, token: &str) {
+    for _ in 0..200 {
         admin.sync().await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        let invite = admin
+            .invites()
+            .unwrap()
+            .into_iter()
+            .find(|invite| invite.token == token)
+            .unwrap();
+        if invite.state == InviteState::Requested {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    joining.await.unwrap()
+    panic!("the join request never arrived");
+}
+
+/// A new member joins with a fresh invite, which the admin approves.
+pub async fn join(admin: &Workspace, dir: &Path, bucket: &Bucket, name: &str, is_bot: bool) -> Workspace {
+    let invite = admin.create_test_invite(name, Duration::from_secs(600)).unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, dir, bucket, name, is_bot);
+    wait_for_request(admin, &token).await;
+    admin.approve_invite(&token).await.unwrap();
+    joining.await.unwrap().unwrap()
 }
 
 pub async fn sync_all(members: &[&Workspace]) {
@@ -80,7 +138,7 @@ pub fn channel_id(workspace: &Workspace, name: &str) -> String {
 }
 
 pub fn memory_bucket() -> Bucket {
-    Bucket::new(Arc::new(InMemory::new()))
+    Bucket::without_signing(Arc::new(InMemory::new()))
 }
 
 /// A workspace with an admin (Ada) and one member (Bob), in sync.

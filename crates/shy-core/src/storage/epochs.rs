@@ -1,5 +1,5 @@
-//! Epoch keys, who belonged to each epoch, and the admin's records of
-//! commits and Welcomes still to deliver.
+//! Epoch keys, who belonged to each epoch, removed members' frozen logs, and
+//! the admin's records of commits.
 
 use anyhow::Result;
 use iroh::PublicKey;
@@ -137,32 +137,6 @@ impl Store {
             .prepare("SELECT from_epoch, signed FROM commits ORDER BY from_epoch")?;
         let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
-    }
-
-    pub fn put_delivery(&self, joiner: &PublicKey, payload: &[u8]) -> Result<()> {
-        self.db.execute(
-            "INSERT OR REPLACE INTO deliveries (joiner, payload) VALUES (?, ?)",
-            params![joiner.as_bytes(), payload],
-        )?;
-        Ok(())
-    }
-
-    pub fn deliveries(&self) -> Result<Vec<(PublicKey, Vec<u8>)>> {
-        let mut statement = self.db.prepare("SELECT joiner, payload FROM deliveries")?;
-        let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-        })?;
-        rows.map(|row| {
-            let (joiner, payload) = row?;
-            Ok((to_public_key(joiner)?, payload))
-        })
-        .collect()
-    }
-
-    pub fn delete_delivery(&self, joiner: &PublicKey) -> Result<()> {
-        self.db
-            .execute("DELETE FROM deliveries WHERE joiner = ?", [joiner.as_bytes()])?;
-        Ok(())
     }
 }
 

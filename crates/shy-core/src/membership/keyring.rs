@@ -6,7 +6,7 @@ use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 
 use super::commit::FrozenAuthor;
-use crate::{crypto::EpochKey, storage::Store, workspace::State};
+use crate::{crypto::EpochKey, storage::Store};
 
 /// One past epoch: its key and who could write in it.
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,7 +23,7 @@ pub(crate) struct KeyHistory {
 }
 
 impl KeyHistory {
-    fn collect(store: &Store) -> Result<Self> {
+    pub fn collect(store: &Store) -> Result<Self> {
         let mut epochs = Vec::new();
         for (epoch, key) in store.epoch_keys()? {
             epochs.push(KeyringEntry {
@@ -49,15 +49,4 @@ impl KeyHistory {
         }
         Ok(())
     }
-}
-
-/// Encrypts the whole history for the members of the current epoch. Returns
-/// the epoch it was sealed in, which is where the newcomer looks for it.
-pub(crate) fn seal(state: &mut State) -> Result<(u64, Vec<u8>)> {
-    let history = KeyHistory::collect(&state.store)?;
-    let epoch = state.mls.epoch()?;
-    Ok((
-        epoch,
-        state.mls.seal_for_members(&postcard::to_stdvec(&history)?)?,
-    ))
 }

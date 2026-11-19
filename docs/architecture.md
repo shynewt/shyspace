@@ -37,7 +37,8 @@ Each member has an iroh ed25519 key (`identity.key` in their data directory). It
 
 Only the admin (the workspace creator) changes membership. This keeps a single, linear chain of epochs without needing a server to order commits.
 
-- **Joining:** an invite code (`invite.rs`) carries the workspace id, bucket settings, admin key, admin MLS key and a token. The joiner uploads a key package with their identity binding to `join/<token>/<joiner>`. The admin's app accepts automatically when online: it signs and saves the commit, applies it, then uploads it with a Welcome and the *key history* (all older epoch keys, their members, and frozen logs of removed members), so the newcomer can read history.
+- **Inviting:** the admin creates an invite (`membership/invite.rs`). Its code is single-use, expires after 7 days, and holds the workspace id, the admin's keys, a token and two presigned links: one to upload a join request, one to download the answer. It contains no bucket credentials.
+- **Joining:** the joiner posts their key package, identity binding and name through the request link. The admin's app shows the request; the admin approves or declines. On approval it signs and saves the commit, applies it, and answers with the MLS Welcome plus an encrypted *grant*: the key history (older epoch keys, their members, removed members' frozen logs) and the bucket credentials. The answer is re-sent until the newcomer posts, then deleted.
 - **Removing:** the admin pulls the member's latest ops, then commits the removal with their last sequence number. The new epoch's key never reaches them, and later ops from them are rejected.
 - **Commits** are wrapped in the admin's signature (`SignedCommit`). Members ignore anything else in a commit slot. The admin re-uploads its commits if they go missing or are altered.
 
@@ -47,7 +48,7 @@ Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even i
 
 1. apply new admin commits (advance epochs);
 2. retry parked ops;
-3. admin only: repair commits, accept join requests, deliver Welcomes;
+3. admin only: repair commits, collect join requests, deliver answers;
 4. pull new segments from everyone who was ever a member (newcomers need removed members' history too);
 5. push our unpushed ops as one segment;
 6. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
@@ -62,9 +63,8 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 |---|---|
 | `ops/<author>/<first seq>-<last seq>` | a segment of that author's envelopes |
 | `mls/commit/<from epoch>` | admin-signed MLS commits |
-| `mls/keyring/<epoch>` | key history for newcomers, MLS-encrypted |
-| `join/<token>/<joiner>` | join requests |
-| `welcome/<joiner>` | the admin's answer |
+| `invites/<token>/request` | a joiner's request, written through a presigned link |
+| `invites/<token>/answer` | the admin's answer, read through a presigned link |
 | `peers/<id>` | gossip bootstrap hints |
 
 ## Pages

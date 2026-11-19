@@ -95,8 +95,19 @@ def run_shy(*arguments: str, timeout: int = 120) -> str:
     environment = {**LOCAL_BUCKET, **os.environ}
     finished = subprocess.run([SHY, *arguments], env=environment, capture_output=True, text=True, timeout=timeout)
     if finished.returncode != 0:
-        raise RuntimeError(f"shy {arguments[2]} failed:\n{finished.stderr}")
+        raise RuntimeError(f"shy {' '.join(arguments[2:4])} failed:\n{finished.stderr}")
     return finished.stdout
+
+
+def wait_for_request() -> str:
+    """Polls the admin's invite list until the agent's request shows up."""
+    deadline = time.time() + DELIVERY_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        for line in run_shy("--dir", str(WORK_DIR / "admin"), "invite", "list").splitlines():
+            if "Requested" in line and "from Claude" in line:
+                return line.split()[0]
+        time.sleep(1)
+    raise AssertionError("the agent's join request never reached the admin")
 
 
 def main() -> int:
@@ -106,19 +117,26 @@ def main() -> int:
     shutil.rmtree(WORK_DIR, ignore_errors=True)
     WORK_DIR.mkdir(parents=True)
 
-    invite = run_shy("--dir", str(WORK_DIR / "admin"), "create", "--workspace", "E2E", "--name", "Ada")
-    invite = invite.strip().splitlines()[-1]
-    check(invite.startswith("shy1_"), "admin created a workspace and got an invite code")
+    run_shy("--dir", str(WORK_DIR / "admin"), "create", "--workspace", "E2E", "--name", "Ada")
+    invite = run_shy("--dir", str(WORK_DIR / "admin"), "invite", "create", "--label", "e2e agent").strip()
+    check(invite.startswith("shy2_") and "shysecret123" not in invite,
+          "admin created a single-use invite that carries no bucket credentials")
 
     members: list[McpMember] = []
+    joiner = None
     try:
+        started = time.time()
+        joiner = subprocess.Popen([SHY, "--dir", str(WORK_DIR / "agent"), "join", "--name", "Claude", "--bot", invite],
+                                  stdout=subprocess.DEVNULL, stderr=open(WORK_DIR / "join.log", "w"))
+        token = wait_for_request()
+        check(joiner.poll() is None, "the agent waits for approval")
+        run_shy("--dir", str(WORK_DIR / "admin"), "invite", "approve", token)
+        check(joiner.wait(timeout=DELIVERY_TIMEOUT_SECONDS) == 0,
+              f"agent joined {time.time() - started:.1f}s after asking, once approved")
+        check((WORK_DIR / "agent/workspace.json").exists(), "agent has the workspace, bucket settings included")
+
         admin = McpMember("admin")
         members.append(admin)
-        started = time.time()
-        run_shy("--dir", str(WORK_DIR / "agent"), "join", "--name", "Claude", "--bot", invite)
-        check((WORK_DIR / "agent/workspace.json").exists(),
-              f"agent joined in {time.time() - started:.1f}s (admin accepted automatically)")
-
         agent = McpMember("agent")
         members.append(agent)
         tools = {tool["name"] for tool in agent.request("tools/list", {})["tools"]}
@@ -150,6 +168,8 @@ def main() -> int:
         check(page_text == "# Plan\n\n- [ ] ship it", "admin reads the agent's new page")
         check(page_id in admin.tool("search", query="ship"), "admin finds the page with local search")
     finally:
+        if joiner and joiner.poll() is None:
+            joiner.kill()
         for member in members:
             member.close()
     print("all end-to-end checks passed")

@@ -16,8 +16,6 @@ pub struct WorkspaceConfig {
     pub name: String,
     pub admin: PublicKey,
     pub bucket: BucketConfig,
-    /// Set only on the admin's device: the token join requests must carry.
-    pub invite_token: Option<String>,
 }
 
 impl WorkspaceConfig {

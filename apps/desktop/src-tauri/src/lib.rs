@@ -7,7 +7,7 @@ use serde::Serialize;
 use shy_core::{
     BucketConfig, Networking, Profile, Workspace,
     sync::SyncStatus,
-    views::{Channel, Member, Message, MessageCursor, Page, SearchHit},
+    views::{Channel, Invite, Member, Message, MessageCursor, Page, SearchHit},
 };
 use tauri::{AppHandle, Emitter, Manager, State, ipc::Response};
 use tokio::sync::Mutex;
@@ -225,8 +225,32 @@ async fn remove_member(state: State<'_, AppState>, member: String) -> CommandRes
 }
 
 #[tauri::command]
-async fn invite_code(state: State<'_, AppState>) -> CommandResult<String> {
-    current(&state).await?.invite_code().map_err(failed)
+async fn invites(state: State<'_, AppState>) -> CommandResult<Vec<Invite>> {
+    current(&state).await?.invites().map_err(failed)
+}
+
+#[tauri::command]
+async fn create_invite(state: State<'_, AppState>, label: String) -> CommandResult<String> {
+    current(&state).await?.create_invite(&label).await.map_err(failed)
+}
+
+#[tauri::command]
+async fn approve_invite(state: State<'_, AppState>, token: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .approve_invite(&token)
+        .await
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn reject_invite(state: State<'_, AppState>, token: String) -> CommandResult<()> {
+    current(&state).await?.reject_invite(&token).await.map_err(failed)
+}
+
+#[tauri::command]
+async fn revoke_invite(state: State<'_, AppState>, token: String) -> CommandResult<()> {
+    current(&state).await?.revoke_invite(&token).await.map_err(failed)
 }
 
 #[tauri::command]
@@ -291,7 +315,11 @@ pub fn run() {
             apply_doc_update,
             members,
             remove_member,
-            invite_code,
+            invites,
+            create_invite,
+            approve_invite,
+            reject_invite,
+            revoke_invite,
             search,
             status,
             set_profile,

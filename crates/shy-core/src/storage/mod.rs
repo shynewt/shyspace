@@ -3,9 +3,12 @@
 
 mod apply;
 mod epochs;
+mod invites;
 mod oplog;
 mod queries;
 mod schema;
+
+pub use invites::PendingRequest;
 
 use std::path::Path;
 

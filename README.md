@@ -14,7 +14,7 @@ Read [docs/](docs/README.md) for architecture, security, decisions and developme
 cd apps/desktop && pnpm install && pnpm tauri dev
 ```
 
-Create a workspace with your bucket's details, then share the invite code from **Members & invites**. To add Claude Code as a member:
+Create a workspace with your bucket's details, then create an invite in **Members & invites** and approve the request when it arrives. To add Claude Code as a member:
 
 ```sh
 cargo install --path crates/shy-cli

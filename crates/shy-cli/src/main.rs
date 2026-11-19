@@ -30,7 +30,7 @@ enum Command {
         #[command(flatten)]
         bucket: BucketArgs,
     },
-    /// Join a workspace with an invite code. Waits until the admin's app accepts.
+    /// Join a workspace with an invite code. Waits until the admin approves.
     Join {
         invite: String,
         #[arg(long)]
@@ -39,10 +39,29 @@ enum Command {
         #[arg(long)]
         bot: bool,
     },
-    /// Print an invite code (admin only).
-    Invite,
+    /// Manage invites (admin only).
+    #[command(subcommand)]
+    Invite(InviteCommand),
     /// Serve the workspace to an AI agent over MCP on stdin/stdout.
     Mcp,
+}
+
+#[derive(Subcommand)]
+enum InviteCommand {
+    /// Create a single-use invite and print its code.
+    Create {
+        /// A note for yourself, like who it's for.
+        #[arg(long, default_value = "")]
+        label: String,
+    },
+    /// List invites and pending join requests.
+    List,
+    /// Let in the person who requested to join with this invite.
+    Approve { token: String },
+    /// Decline the request made with this invite.
+    Reject { token: String },
+    /// Stop this invite from being used.
+    Revoke { token: String },
 }
 
 #[derive(clap::Args)]
@@ -107,10 +126,10 @@ async fn main() -> Result<()> {
             created.sync().await;
             report_sync_error(&created)?;
             println!("Created \"{workspace}\" in {}", dir.display());
-            println!("Invite code:\n{}", created.invite_code()?);
+            println!("Invite people with `shy invite create`.");
         }
         Command::Join { invite, name, bot } => {
-            eprintln!("Waiting for the workspace admin's app to accept this member…");
+            eprintln!("Asked to join. Waiting for the workspace admin to approve…");
             let joined = Workspace::join(
                 &dir,
                 &invite,
@@ -129,9 +148,9 @@ async fn main() -> Result<()> {
                 dir.display()
             );
         }
-        Command::Invite => {
+        Command::Invite(command) => {
             let workspace = Workspace::open(&dir, Networking::Offline).await?;
-            println!("{}", workspace.invite_code()?);
+            run_invite_command(&workspace, command).await?;
         }
         Command::Mcp => {
             if !Workspace::exists(&dir) {
@@ -142,6 +161,50 @@ async fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+async fn run_invite_command(workspace: &Workspace, command: InviteCommand) -> Result<()> {
+    // Syncing first picks up requests that arrived since we last looked.
+    workspace.sync().await;
+    report_sync_error(workspace)?;
+    match command {
+        InviteCommand::Create { label } => println!("{}", workspace.create_invite(&label).await?),
+        InviteCommand::List => print_invites(&workspace.invites()?),
+        InviteCommand::Approve { token } => {
+            workspace.approve_invite(&token).await?;
+            println!("Approved.");
+        }
+        InviteCommand::Reject { token } => {
+            workspace.reject_invite(&token).await?;
+            println!("Rejected.");
+        }
+        InviteCommand::Revoke { token } => {
+            workspace.revoke_invite(&token).await?;
+            println!("Revoked.");
+        }
+    }
+    Ok(())
+}
+
+fn print_invites(invites: &[shy_core::views::Invite]) {
+    if invites.is_empty() {
+        println!("No invites yet. Create one with `shy invite create`.");
+    }
+    for invite in invites {
+        let label = if invite.label.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", invite.label)
+        };
+        let requester = match (&invite.requester_name, &invite.requester_id) {
+            (Some(name), Some(id)) => {
+                let bot = if invite.requester_is_bot { ", bot" } else { "" };
+                format!(" from {name}{bot}, key {}…", &id[..16])
+            }
+            _ => String::new(),
+        };
+        println!("{}  {:?}{label}{requester}", invite.token, invite.state);
+    }
 }
 
 fn report_sync_error(workspace: &Workspace) -> Result<()> {
