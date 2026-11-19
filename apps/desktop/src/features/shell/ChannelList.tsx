@@ -1,18 +1,25 @@
-import { AtSign, Bell, BellOff, Check, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
+import { AtSign, Bell, BellOff, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Channel, type NotifyLevel } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useWorkspace } from "../../lib/workspace";
-import { ConfirmDialog, IconButton, Menu, type MenuItem } from "../../ui";
+import { ConfirmDialog, cx, IconButton, Menu, type MenuItem } from "../../ui";
 import { NavItem } from "./NavItem";
 
 const NOTIFY_CHOICES: { level: NotifyLevel; label: string; icon: ReactNode }[] = [
-  { level: "all", label: "Notify for every message", icon: <Bell size={14} /> },
-  { level: "mentions", label: "Notify for mentions", icon: <AtSign size={14} /> },
-  { level: "nothing", label: "Mute channel", icon: <BellOff size={14} /> },
+  { level: "all", label: "Every message", icon: <Bell size={14} /> },
+  { level: "mentions", label: "Mentions only", icon: <AtSign size={14} /> },
+  { level: "nothing", label: "Nothing (muted)", icon: <BellOff size={14} /> },
 ];
+
+/** Shown next to a channel's name when it doesn't alert for every message. */
+const LEVEL_ICONS: Record<NotifyLevel, ReactNode> = {
+  all: null,
+  mentions: <AtSign size={12} aria-label="Mentions only" />,
+  nothing: <BellOff size={12} aria-label="Muted" />,
+};
 
 export function ChannelList({
   newChannelRound,
@@ -53,6 +60,7 @@ export function ChannelList({
 function ChannelItem({ channel }: { channel: Channel }) {
   const [isRenaming, setRenaming] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
+  const [isMenuOpen, setMenuOpen] = useState(false);
   if (isRenaming) {
     return (
       <ChannelNameInput
@@ -66,11 +74,16 @@ function ChannelItem({ channel }: { channel: Channel }) {
   const setLevel = (level: NotifyLevel) => api.setNotifyLevel(channel.id, level).catch(reportError);
   const items: MenuItem[] = [
     { label: "Rename", icon: <Pencil size={14} />, onSelect: () => setRenaming(true) },
-    ...NOTIFY_CHOICES.map((choice) => ({
-      label: choice.label,
-      icon: channel.notify === choice.level ? <Check size={14} /> : choice.icon,
-      onSelect: () => setLevel(choice.level),
-    })),
+    {
+      label: "Notifications",
+      icon: <Bell size={14} />,
+      choices: NOTIFY_CHOICES.map((choice) => ({
+        label: choice.label,
+        icon: choice.icon,
+        isChosen: channel.notify === choice.level,
+        onSelect: () => setLevel(choice.level),
+      })),
+    },
   ];
   if (channel.can_delete) {
     items.push({
@@ -89,11 +102,20 @@ function ChannelItem({ channel }: { channel: Channel }) {
         unread={channel.unread}
         mentions={channel.unread_mentions}
         isMuted={channel.notify === "nothing"}
+        statusIcon={LEVEL_ICONS[channel.notify]}
+        onContextMenu={() => setMenuOpen(true)}
         trailing={
-          <span className="absolute right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+          <span
+            className={cx(
+              "absolute right-1.5 group-hover:opacity-100 focus-within:opacity-100",
+              isMenuOpen ? "opacity-100" : "opacity-0",
+            )}
+          >
             <Menu
               trigger={<IconButton label={`Actions for #${channel.name}`} size="sm" icon={<Ellipsis size={13} />} />}
               items={items}
+              open={isMenuOpen}
+              onOpenChange={setMenuOpen}
             />
           </span>
         }

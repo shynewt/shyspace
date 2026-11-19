@@ -12,6 +12,8 @@ export function NavItem({
   unread = 0,
   mentions = 0,
   isMuted = false,
+  statusIcon,
+  onContextMenu,
   depth = 0,
   leading,
   trailing,
@@ -25,6 +27,10 @@ export function NavItem({
   mentions?: number;
   /** Muted: dimmed, and only mentions get a badge. */
   isMuted?: boolean;
+  /** A small icon after the label, like a channel's alert level. */
+  statusIcon?: ReactNode;
+  /** A right-click (or the keyboard's menu key) on the item. */
+  onContextMenu?: () => void;
   depth?: number;
   /** Rendered before the item, outside its button (like a fold toggle). */
   leading?: ReactNode;
@@ -49,6 +55,13 @@ export function NavItem({
         aria-current={isActive ? "page" : undefined}
         aria-label={hasUnread ? unreadLabel(label, unread, mentions) : undefined}
         onClick={() => navigate(view)}
+        onContextMenu={
+          onContextMenu &&
+          ((event) => {
+            event.preventDefault();
+            onContextMenu();
+          })
+        }
         className={cx(
           "relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-[13.5px] transition-colors",
           isActive ? "font-medium text-ink" : "text-muted hover:bg-surface-2/70 hover:text-ink",
@@ -58,6 +71,7 @@ export function NavItem({
       >
         <span className={isActive ? "text-accent" : "text-faint"}>{icon}</span>
         <span className="truncate">{label}</span>
+        {statusIcon && <span className="shrink-0 text-faint">{statusIcon}</span>}
         {hasUnread && (
           <motion.span
             aria-hidden

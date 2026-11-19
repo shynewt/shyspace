@@ -468,8 +468,7 @@ impl ServerHandler for ShyTools {
 pub async fn serve(workspace: Workspace) -> Result<()> {
     let service = ShyTools::new(workspace.clone()).serve(stdio()).await?;
     service.waiting().await?;
-    workspace.shutdown().await;
-    Ok(())
+    workspace.shutdown().await
 }
 
 #[cfg(test)]

@@ -70,8 +70,8 @@ pub struct Channel {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NotifyLevel {
-    All,
     #[default]
+    All,
     Mentions,
     Nothing,
 }

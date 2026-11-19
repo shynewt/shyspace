@@ -49,7 +49,7 @@ impl Workspace {
     }
 
     /// Uploads our ops that aren't in the bucket yet, as one segment.
-    pub(super) async fn push(&self) -> Result<()> {
+    pub(crate) async fn push(&self) -> Result<()> {
         let me = self.me();
         let unpushed = self.state().store.unpushed(&me)?;
         let Some(last) = unpushed.last().map(|envelope| envelope.seq) else {

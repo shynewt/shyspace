@@ -18,16 +18,20 @@ fn alerted_texts(changes: &mut tokio::sync::broadcast::Receiver<Change>) -> Vec<
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn by_default_only_mentions_alert() {
+async fn every_message_alerts_by_default_and_mentions_only_narrows_it() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");
     let mut changes = admin.subscribe();
     bob.send_message(&general, "just chatting", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    assert_eq!(alerted_texts(&mut changes), vec!["just chatting".to_string()]);
+
+    admin.set_notify_level(&general, NotifyLevel::Mentions).unwrap();
+    bob.send_message(&general, "more chatting", None).unwrap();
     let mention = mentions::member_link("Ada", &admin.my_id());
     bob.send_message(&general, &format!("{mention} need you"), None)
         .unwrap();
     sync_all(&[&admin, &bob]).await;
-
     assert_eq!(alerted_texts(&mut changes), vec!["@Ada need you".to_string()]);
 }
 

@@ -145,7 +145,7 @@ export class FakeChat {
   receiveMessage(author: string, channelName: string, text: string): string {
     const channel = this.channelNamed(channelName);
     const id = this.writeMessage(author, channel.id, text, null);
-    const level = this.notifyLevels.get(channel.id) ?? "mentions";
+    const level = this.notifyLevels.get(channel.id) ?? "all";
     if (level === "all" || (level === "mentions" && mentions(text, this.context.me()))) {
       const member = this.context.members().find((candidate) => candidate.id === author);
       this.context.notify({
@@ -336,7 +336,7 @@ export class FakeChat {
       unread: this.unreadIn(channel.id).filter((message) => isInChannel(this.messages, message)).length,
       unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.context.me())).length,
       last_read: this.readMarkers.get(channel.id) ?? null,
-      notify: this.notifyLevels.get(channel.id) ?? "mentions",
+      notify: this.notifyLevels.get(channel.id) ?? "all",
     }));
   }
 

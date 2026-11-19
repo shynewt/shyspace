@@ -1,8 +1,9 @@
-import { ChevronRight, FileText, Plus } from "lucide-react";
+import { ChevronRight, Ellipsis, FileText, Link2, Plus, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
-import type { Page } from "../../lib/api";
-import { IconButton, springs } from "../../ui";
+import { api, type Page, pageLink } from "../../lib/api";
+import { reportError, showToast } from "../../lib/toast";
+import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs } from "../../ui";
 import { NavItem } from "./NavItem";
 
 export function PageTree({
@@ -38,6 +39,24 @@ function PageNode({
   onCreateChild: (parent: string) => void;
 }) {
   const [isOpen, setOpen] = useState(true);
+  const [isMenuOpen, setMenuOpen] = useState(false);
+  const [isConfirmingDelete, setConfirmingDelete] = useState(false);
+  const copyLink = () =>
+    navigator.clipboard
+      .writeText(pageLink(page.id))
+      .then(() => showToast("Link copied. Paste it in any channel to share this page."), reportError);
+  const items: MenuItem[] = [
+    { label: "New sub-page", icon: <Plus size={14} />, onSelect: () => onCreateChild(page.id) },
+    { label: "Copy link", icon: <Link2 size={14} />, onSelect: copyLink },
+  ];
+  if (page.can_delete) {
+    items.push({
+      label: "Delete page",
+      icon: <Trash2 size={14} />,
+      onSelect: () => setConfirmingDelete(true),
+      isDestructive: true,
+    });
+  }
   const hasChildren = pages.some((candidate) => candidate.parent === page.id);
   const title = page.title || "Untitled";
   return (
@@ -47,6 +66,7 @@ function PageNode({
         depth={depth}
         label={title}
         icon={<FileText size={15} />}
+        onContextMenu={() => setMenuOpen(true)}
         leading={
           hasChildren && (
             <button
@@ -63,14 +83,34 @@ function PageNode({
           )
         }
         trailing={
-          <IconButton
-            label="New sub-page"
-            size="sm"
-            icon={<Plus size={13} />}
-            onClick={() => onCreateChild(page.id)}
-            className="absolute right-1.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-          />
+          <span
+            className={cx(
+              "absolute right-1.5 flex group-hover:opacity-100 focus-within:opacity-100",
+              isMenuOpen ? "opacity-100" : "opacity-0",
+            )}
+          >
+            <IconButton
+              label="New sub-page"
+              size="sm"
+              icon={<Plus size={13} />}
+              onClick={() => onCreateChild(page.id)}
+            />
+            <Menu
+              trigger={<IconButton label={`Actions for ${title}`} size="sm" icon={<Ellipsis size={13} />} />}
+              items={items}
+              open={isMenuOpen}
+              onOpenChange={setMenuOpen}
+            />
+          </span>
         }
+      />
+      <ConfirmDialog
+        open={isConfirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title={`Delete "${title}"?`}
+        description="The page disappears for everyone. Its sub-pages stay and move to the top level. This can't be undone."
+        confirmLabel="Delete page"
+        onConfirm={() => api.deletePage(page.id)}
       />
       <AnimatePresence initial={false}>
         {hasChildren && isOpen && (

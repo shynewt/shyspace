@@ -1,10 +1,11 @@
 import { Copy, CornerUpLeft, Ellipsis, Link2, MessageSquareReply, Pencil, SmilePlus, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { memo, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink } from "../../lib/api";
 import { ChatMarkdown, messageIdsIn, pageIdsIn } from "../../lib/markdown";
 import { displayName, formatTime } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
+import { useContextMenu } from "../../lib/useContextMenu";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs } from "../../ui";
 import { MessageCard } from "./MessageCard";
@@ -29,6 +30,10 @@ export const MessageItem = memo(function MessageItem({
   const [isPickerOpen, setPickerOpen] = useState(false);
   const [isEditing, setEditing] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
+  const [isMenuOpen, setMenuOpen] = useState(false);
+  const article = useRef<HTMLElement>(null);
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+  useContextMenu(article, openMenu);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const linkedMessages = useMemo(() => messageIdsIn(message.text).filter((id) => id !== message.id), [message]);
   const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
@@ -42,6 +47,7 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <article
+      ref={article}
       id={`message-${message.id}`}
       aria-label={`${name} at ${formatTime(message.created_ms)}`}
       className={cx(
@@ -141,7 +147,9 @@ export const MessageItem = memo(function MessageItem({
       <div
         className={cx(
           "absolute -top-3 right-5 flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5 shadow-card transition",
-          isPickerOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+          isPickerOpen || isMenuOpen
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
         )}
       >
         <Popover
@@ -169,7 +177,13 @@ export const MessageItem = memo(function MessageItem({
         {onOpenThread && (
           <IconButton label="Reply in thread" icon={<MessageSquareReply size={15} />} onClick={onOpenThread} />
         )}
-        <MessageMenu message={message} onEdit={() => setEditing(true)} onDelete={() => setConfirmingDelete(true)} />
+        <MessageMenu
+          message={message}
+          open={isMenuOpen}
+          onOpenChange={setMenuOpen}
+          onEdit={() => setEditing(true)}
+          onDelete={() => setConfirmingDelete(true)}
+        />
       </div>
       <ConfirmDialog
         open={isConfirmingDelete}
@@ -183,7 +197,19 @@ export const MessageItem = memo(function MessageItem({
   );
 });
 
-function MessageMenu({ message, onEdit, onDelete }: { message: Message; onEdit: () => void; onDelete: () => void }) {
+function MessageMenu({
+  message,
+  open,
+  onOpenChange,
+  onEdit,
+  onDelete,
+}: {
+  message: Message;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const copy = (text: string, done: string) =>
     navigator.clipboard.writeText(text).then(() => showToast(done), reportError);
   const items: MenuItem[] = [
@@ -202,7 +228,14 @@ function MessageMenu({ message, onEdit, onDelete }: { message: Message; onEdit: 
   if (message.can_delete) {
     items.push({ label: "Delete", icon: <Trash2 size={14} />, onSelect: onDelete, isDestructive: true });
   }
-  return <Menu trigger={<IconButton label="More actions" icon={<Ellipsis size={15} />} />} items={items} />;
+  return (
+    <Menu
+      trigger={<IconButton label="More actions" icon={<Ellipsis size={15} />} />}
+      items={items}
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  );
 }
 
 function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
