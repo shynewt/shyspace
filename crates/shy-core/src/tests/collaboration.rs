@@ -191,3 +191,19 @@ async fn older_messages_load_page_by_page() {
     let older = admin.messages(&general, Some(&cursor), 2).unwrap();
     assert_eq!(texts(&older), ["message 1", "message 2"]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_data_folder_opens_in_one_place_at_a_time() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("ada");
+    let bucket = memory_bucket();
+    let admin = create_admin(&dir, &bucket).await;
+    let second = Workspace::open_with(&data_dir(&dir), |_| Ok(bucket.clone()), Networking::Offline).await;
+    let error = second.err().unwrap();
+    assert!(format!("{error:#}").contains("already open"), "{error:#}");
+
+    drop(admin);
+    Workspace::open_with(&data_dir(&dir), |_| Ok(bucket), Networking::Offline)
+        .await
+        .unwrap();
+}

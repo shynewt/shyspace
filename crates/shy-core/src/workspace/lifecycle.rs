@@ -34,6 +34,7 @@ use crate::{
 pub(crate) const STORE_FILE: &str = "shy.db";
 pub(crate) const MLS_FILE: &str = "mls.db";
 const SIGNER_META: &str = "mls_signer_public";
+const LOCK_FILE: &str = "shyspace.lock";
 const ANSWER_POLL: Duration = Duration::from_secs(2);
 
 const GETTING_STARTED: &str = "# Welcome to shyspace\n\n\
@@ -75,19 +76,38 @@ impl DataDir {
     }
 
     async fn open_local(&self) -> Result<Local> {
+        let lock = self.lock()?;
         let device_key = self.keys.load_or_create(&self.path).await?;
         let store = Store::open(&self.store_path(), &device_key.database_key(STORE_FILE))?;
         let identity = identity::load_or_create(&store)?;
         Ok(Local {
+            lock,
             store,
             identity,
             device_key,
         })
     }
+
+    /// Two processes on one folder would corrupt it (and fight over the same
+    /// network identity), so the folder is locked while it's open.
+    fn lock(&self) -> Result<std::fs::File> {
+        let path = self.path.join(LOCK_FILE);
+        let file = std::fs::File::create(&path).with_context(|| format!("creating {}", path.display()))?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                bail!("this workspace is already open in another shyspace window or `shy` process")
+            }
+            Err(std::fs::TryLockError::Error(error)) => {
+                Err(error).with_context(|| format!("locking {}", path.display()))
+            }
+        }
+    }
 }
 
 /// The decrypted local pieces every workspace starts from.
 struct Local {
+    lock: std::fs::File,
     store: Store,
     identity: SecretKey,
     device_key: DeviceKey,
@@ -282,6 +302,7 @@ impl Workspace {
         networking: Networking,
     ) -> Result<Self> {
         let Local {
+            lock,
             store,
             identity,
             device_key,
@@ -300,6 +321,7 @@ impl Workspace {
         let workspace = Self {
             inner: Arc::new(Inner {
                 data: data.clone(),
+                _data_lock: lock,
                 device_key,
                 identity,
                 config,

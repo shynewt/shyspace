@@ -38,6 +38,24 @@ async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>> {
     Ok(body)
 }
 
+/// The provider's reason for refusing, like "403 Forbidden: Request has
+/// expired" or "403 Forbidden: not entitled" (the bucket key can't write).
+async fn refusal(response: reqwest::Response) -> String {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    match xml_tag(&body, "Message").or_else(|| xml_tag(&body, "Code")) {
+        Some(reason) => format!("{status}: {reason}"),
+        None => status.to_string(),
+    }
+}
+
+/// The text of the first `<tag>` in an S3 error document.
+fn xml_tag<'a>(body: &'a str, tag: &str) -> Option<&'a str> {
+    let start = body.find(&format!("<{tag}>"))? + tag.len() + 2;
+    let end = start + body[start..].find(&format!("</{tag}>"))?;
+    Some(body[start..end].trim()).filter(|text| !text.is_empty())
+}
+
 impl JoinMailbox for PresignedMailbox {
     async fn post_request(&self, request: Vec<u8>) -> Result<()> {
         let response = self
@@ -47,11 +65,12 @@ impl JoinMailbox for PresignedMailbox {
             .send()
             .await
             .context("can't reach the workspace's storage")?;
-        ensure!(
-            response.status().is_success(),
-            "the workspace's storage refused the join request ({}); the invite may have expired",
-            response.status()
-        );
+        if !response.status().is_success() {
+            anyhow::bail!(
+                "the workspace's storage refused the join request: {}",
+                refusal(response).await
+            );
+        }
         Ok(())
     }
 
@@ -65,7 +84,24 @@ impl JoinMailbox for PresignedMailbox {
         match response.status() {
             StatusCode::NOT_FOUND => Ok(None),
             status if status.is_success() => read_capped(response).await.map(Some),
-            status => anyhow::bail!("the workspace's storage refused to send the answer ({status})"),
+            _ => anyhow::bail!(
+                "the workspace's storage refused to send the answer: {}",
+                refusal(response).await
+            ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::xml_tag;
+
+    #[test]
+    fn reads_the_reason_from_an_s3_error() {
+        let body =
+            "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>not entitled</Message></Error>";
+        assert_eq!(xml_tag(body, "Message"), Some("not entitled"));
+        assert_eq!(xml_tag(body, "Code"), Some("AccessDenied"));
+        assert_eq!(xml_tag("plain text", "Message"), None);
     }
 }

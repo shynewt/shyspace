@@ -73,6 +73,9 @@ impl State {
 
 pub(crate) struct Inner {
     pub data: DataDir,
+    /// Never read: holding it keeps the data folder locked until the
+    /// workspace is dropped. See `DataDir::lock`.
+    pub _data_lock: std::fs::File,
     /// Kept for the admin's recovery snapshots, which carry it.
     pub device_key: DeviceKey,
     pub identity: SecretKey,
