@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -20,16 +22,19 @@
     "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-opener": "^2.7.3",
     "codemirror": "^6.0.2",
-    "dompurify": "^3.4.18",
     "lucide-react": "^1.76.0",
-    "marked": "^18.2.1",
     "motion": "^14.14.0",
+    "radix-ui": "^1.8.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "y-codemirror.next": "^0.3.6",
     "yjs": "^13.6.33"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
     "@tailwindcss/vite": "^4.3.5",
     "@tauri-apps/cli": "^2.12.6",
     "@types/react": "^19.3.0",

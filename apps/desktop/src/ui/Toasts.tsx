@@ -1,5 +1,5 @@
-import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, Check } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { dismissToast, useToasts } from "../lib/toast";
 
 export function Toasts() {

@@ -35,7 +35,7 @@ Run all of these before committing:
 cargo fmt --check
 cargo clippy --workspace --all-targets
 cargo test --workspace
-(cd apps/desktop && pnpm typecheck)
+(cd apps/desktop && pnpm typecheck && pnpm lint)
 ```
 
 `scripts/e2e_mcp.py` is the end-to-end test: two real `shy` processes, real networking and a real bucket. It needs the local bucket above and `cargo build -p shy-cli`:
@@ -46,11 +46,11 @@ python3 scripts/e2e_mcp.py
 
 ## Testing the UI
 
-There is no UI test suite yet. To check a change, run the app on a pre-filled workspace and drive a second member through the CLI or MCP so you can watch live updates arrive.
+There is no UI test suite yet (#11). To see every shared component, open the app with `#gallery` in development. To check a change, run the app on a pre-filled workspace and drive a second member through the CLI or MCP so you can watch live updates arrive.
 
 ## Conventions
 
-Coding rules, testing and commit conventions are in [AGENTS.md](../AGENTS.md). Clippy enforces some of them (`[workspace.lints]` in `Cargo.toml`).
+Coding rules, testing and commit conventions are in [AGENTS.md](../AGENTS.md). Clippy (`[workspace.lints]` in `Cargo.toml`) and Biome (`apps/desktop/biome.json`; `pnpm format` fixes formatting) enforce some of them. UI conventions are in [design-system.md](design-system.md).
 
 ## Local scratch space
 

@@ -1,26 +1,31 @@
-import { useEffect, useState } from "react";
-import { motion } from "motion/react";
 import { ChevronRight, FilePlus2, Link2 } from "lucide-react";
-import { api, pageLink } from "../lib/api";
-import { reportError, showToast } from "../lib/toast";
-import { useWorkspace } from "../lib/workspace";
+import { motion } from "motion/react";
+import { useEffect, useState } from "react";
+import { api, type Page, pageLink } from "../../lib/api";
+import { reportError, showToast } from "../../lib/toast";
+import { useWorkspace } from "../../lib/workspace";
+import { Button } from "../../ui";
 import { Editor } from "./Editor";
 
-export function PageView({ pageId }: { pageId: string }) {
-  const { pages, navigate } = useWorkspace();
-  const page = pages.find((candidate) => candidate.id === pageId);
-  const ancestors = [];
+function ancestorsOf(page: Page | undefined, pages: Page[]): Page[] {
+  const ancestors: Page[] = [];
   for (let parent = page?.parent; parent; ) {
     const ancestor = pages.find((candidate) => candidate.id === parent);
     if (!ancestor) break;
     ancestors.unshift(ancestor);
     parent = ancestor.parent;
   }
+  return ancestors;
+}
 
-  const copyLink = async () => {
-    await navigator.clipboard.writeText(pageLink(pageId));
-    showToast("Link copied. Paste it in any channel to share this page.");
-  };
+export function PageView({ pageId }: { pageId: string }) {
+  const { pages, navigate } = useWorkspace();
+  const page = pages.find((candidate) => candidate.id === pageId);
+
+  const copyLink = () =>
+    navigator.clipboard
+      .writeText(pageLink(pageId))
+      .then(() => showToast("Link copied. Paste it in any channel to share this page."), reportError);
 
   const createSubpage = async () => {
     try {
@@ -33,22 +38,28 @@ export function PageView({ pageId }: { pageId: string }) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-13 shrink-0 items-center gap-1 border-b border-line px-5 text-[13px] text-muted">
-        {ancestors.map((ancestor) => (
-          <span key={ancestor.id} className="flex items-center gap-1">
-            <button onClick={() => navigate({ kind: "page", id: ancestor.id })} className="rounded px-1 hover:bg-surface-2 hover:text-ink">
-              {ancestor.title || "Untitled"}
-            </button>
-            <ChevronRight size={13} className="text-faint" />
-          </span>
-        ))}
-        <span className="truncate px-1 text-ink">{page?.title || "Untitled"}</span>
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1">
+          {ancestorsOf(page, pages).map((ancestor) => (
+            <span key={ancestor.id} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => navigate({ kind: "page", id: ancestor.id })}
+                className="rounded px-1 hover:bg-surface-2 hover:text-ink"
+              >
+                {ancestor.title || "Untitled"}
+              </button>
+              <ChevronRight size={13} className="text-faint" />
+            </span>
+          ))}
+          <span className="truncate px-1 text-ink">{page?.title || "Untitled"}</span>
+        </nav>
         <div className="ml-auto flex items-center gap-1">
-          <HeaderButton onClick={createSubpage} label="Sub-page">
-            <FilePlus2 size={14} />
-          </HeaderButton>
-          <HeaderButton onClick={copyLink} label="Copy link">
-            <Link2 size={14} />
-          </HeaderButton>
+          <Button variant="ghost" size="sm" icon={<FilePlus2 size={14} />} onClick={createSubpage}>
+            Sub-page
+          </Button>
+          <Button variant="ghost" size="sm" icon={<Link2 size={14} />} onClick={copyLink}>
+            Copy link
+          </Button>
         </div>
       </header>
       <div className="flex-1 overflow-y-auto">
@@ -84,31 +95,18 @@ function TitleInput({ pageId, title }: { pageId: string; title: string }) {
 
   return (
     <input
+      aria-label="Page title"
       value={draft}
       onFocus={() => setEditing(true)}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={save}
       onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          (event.currentTarget.closest("article")?.querySelector(".cm-content") as HTMLElement | null)?.focus();
-        }
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        event.currentTarget.closest("article")?.querySelector<HTMLElement>(".cm-content")?.focus();
       }}
       placeholder="Untitled"
       className="w-full bg-transparent text-[38px] leading-tight font-bold tracking-tight outline-none placeholder:text-surface-3"
     />
-  );
-}
-
-function HeaderButton({ onClick, label, children }: { onClick: () => void; label: string; children: React.ReactNode }) {
-  return (
-    <motion.button
-      whileTap={{ scale: 0.94 }}
-      onClick={onClick}
-      className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-muted transition hover:bg-surface-2 hover:text-ink"
-    >
-      {children}
-      {label}
-    </motion.button>
   );
 }

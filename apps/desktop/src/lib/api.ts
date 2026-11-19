@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { reportError } from "./toast";
 
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
 export type Channel = { id: string; name: string };
@@ -19,7 +20,13 @@ export type Message = {
 export type MessageCursor = { lamport: number; author: string };
 export type Page = { id: string; parent: string | null; title: string; updated_ms: number };
 export type Member = { id: string; name: string; is_bot: boolean; is_admin: boolean; active: boolean };
-export type SearchHit = { kind: "message" | "page"; id: string; title: string; snippet: string; channel: string | null };
+export type SearchHit = {
+  kind: "message" | "page";
+  id: string;
+  title: string;
+  snippet: string;
+  channel: string | null;
+};
 export type InviteState = "open" | "requested" | "accepted" | "rejected" | "revoked" | "expired";
 export type Invite = {
   token: string;
@@ -30,6 +37,7 @@ export type Invite = {
   requester_id: string | null;
   requester_name: string | null;
   requester_is_bot: boolean;
+  requester_safety_code: string | null;
 };
 export type SyncStatus = { peers: number; last_sync_ms: number | null; error: string | null; removed: boolean };
 export type BucketConfig = {
@@ -55,6 +63,9 @@ export const api = {
   createWorkspace: (workspaceName: string, name: string, bucket: BucketConfig) =>
     invoke<Session>("create_workspace", { workspaceName, name, bucket }),
   joinWorkspace: (invite: string, name: string) => invoke<Session>("join_workspace", { invite, name }),
+  restoreWorkspace: (kit: string) => invoke<Session>("restore_workspace", { kit }),
+  safetyCode: () => invoke<string>("safety_code"),
+  recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),
   createChannel: (name: string) => invoke<string>("create_channel", { name }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
@@ -81,11 +92,16 @@ export const api = {
 
 type ChangeListener = (change: Change) => void;
 const listeners = new Set<ChangeListener>();
-let listening: Promise<unknown> | null = null;
+let isListening = false;
 
 /** One native subscription, fanned out to every component that cares. */
 export function onChange(listener: ChangeListener): () => void {
-  listening ??= listen<Change>("change", (event) => listeners.forEach((notify) => notify(event.payload)));
+  if (!isListening) {
+    isListening = true;
+    listen<Change>("change", (event) => {
+      for (const notify of listeners) notify(event.payload);
+    }).catch(reportError);
+  }
   listeners.add(listener);
   return () => listeners.delete(listener);
 }

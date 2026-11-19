@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Onboarding } from "./features/onboarding/Onboarding";
+import { Shell } from "./features/shell/Shell";
 import { api, type Session } from "./lib/api";
 import { reportError } from "./lib/toast";
-import { Onboarding } from "./components/Onboarding";
-import { Shell } from "./components/Shell";
-import { Toasts } from "./components/Toasts";
-import { Logo } from "./components/Logo";
+import { Logo, Toasts } from "./ui";
+
+/** The component gallery, only in development builds (open with #gallery). */
+const Gallery = import.meta.env.DEV ? lazy(() => import("./dev/Gallery")) : null;
 
 type Phase = { kind: "loading" } | { kind: "onboarding" } | { kind: "ready"; session: Session };
 
@@ -22,6 +24,14 @@ export function App() {
     );
   }, []);
 
+  if (Gallery && window.location.hash === "#gallery") {
+    return (
+      <Suspense>
+        <Gallery />
+      </Suspense>
+    );
+  }
+
   return (
     <>
       <AnimatePresence mode="wait">
@@ -34,7 +44,7 @@ export function App() {
           >
             <motion.div
               animate={{ scale: [1, 1.06, 1], opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+              transition={{ duration: 1.6, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
             >
               <Logo size={44} />
             </motion.div>

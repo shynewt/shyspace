@@ -37,7 +37,8 @@ Keep the diff to what the task needs. If you notice an unrelated problem, open a
 | `crates/shy-cli` | argument parsing, MCP tool definitions, terminal output | contain business logic |
 | `apps/desktop/src-tauri` | one Tauri command per `Workspace` call, event forwarding | contain business logic |
 | `apps/desktop/src/lib` | the `invoke` bridge (`api.ts`), hooks, pure helpers | render UI |
-| `apps/desktop/src/components` | one component per file, UI only | call `invoke` directly (go through `api.ts`) |
+| `apps/desktop/src/ui` | the design system: tokens, motion presets, shared components | know about workspaces, chat or pages |
+| `apps/desktop/src/features/<feature>` | one folder per feature (`shell`, `chat`, `pages`, `members`, `search`, `onboarding`) | call `invoke` directly (go through `api.ts`), restyle `ui` components |
 
 Inside `shy-core`, each file has one job (see the file map in `docs/architecture.md`). A new concern gets a new module. Past ~400 lines, split the file by responsibility.
 
@@ -61,10 +62,9 @@ Inside `shy-core`, each file has one job (see the file map in `docs/architecture
 
 - `strict` TypeScript. No `any`, no `as` casts to silence errors, no non-null `!` except on values the code just checked.
 - Types for core data live in `lib/api.ts` and must match the Rust `views.rs` exactly.
-- Data loading goes through `useLive`; local state stays in the component that needs it.
-- Colors, shadows and fonts come from the tokens in `styles.css`. No raw hex values in components (the brand logo is the one exception).
-- Animations use Motion, stay short (under ~250 ms for UI feedback), and respect reduced motion (`MotionConfig` handles it; don't override it).
-- Anything rendered from message or page content is untrusted: sanitize HTML (`lib/markdown.ts`) and never use `dangerouslySetInnerHTML` on unsanitized input.
+- Build screens from the design system (`docs/design-system.md`). Colors come from tokens, motion from `ui/motion.ts`.
+- Data loading goes through `useLive` with a stable loader; local state stays in the component that needs it.
+- Content from other members is untrusted: render markdown with `ChatMarkdown` (`lib/markdown.tsx`), which never injects HTML. No `dangerouslySetInnerHTML`.
 - Every interactive element is reachable by keyboard and has an accessible label.
 
 ## Comments
@@ -94,7 +94,7 @@ All must pass before every commit; never commit red:
 cargo fmt --check
 cargo clippy --workspace --all-targets
 cargo test --workspace
-(cd apps/desktop && pnpm typecheck)
+(cd apps/desktop && pnpm typecheck && pnpm lint)
 ```
 
 For changes to sync, networking or the CLI, also run `python3 scripts/e2e_mcp.py` (needs the local bucket; see `docs/development.md`). For UI changes, run the app and check the change by hand.

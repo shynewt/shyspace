@@ -1,22 +1,26 @@
-import { useMemo } from "react";
-import { motion } from "motion/react";
 import { ArrowUpRight, FileText } from "lucide-react";
-import { api } from "../lib/api";
-import { pagePreview } from "../lib/pageText";
-import { useLive } from "../lib/useLive";
-import { useWorkspace } from "../lib/workspace";
+import { motion } from "motion/react";
+import { useCallback, useMemo } from "react";
+import { api } from "../../lib/api";
+import { useLive } from "../../lib/useLive";
+import { useWorkspace } from "../../lib/workspace";
+import { springs } from "../../ui";
+import { pagePreview } from "../pages/pageText";
 
 /** A page shared in chat. It stays live: edits to the page show up here. */
 export function PageCard({ pageId }: { pageId: string }) {
   const { pages, navigate } = useWorkspace();
   const page = pages.find((candidate) => candidate.id === pageId);
-  const state = useLive(() => api.pageState(pageId), [pageId], (change) => change.kind === "doc" && change.page === pageId);
+  const loadState = useCallback(() => api.pageState(pageId), [pageId]);
+  const state = useLive(loadState, (change) => change.kind === "doc" && change.page === pageId);
   const preview = useMemo(() => (state ? pagePreview(state) : ""), [state]);
   if (!page) return null;
   return (
     <motion.button
+      type="button"
       layout
       whileHover={{ y: -2 }}
+      transition={springs.snappy}
       onClick={() => navigate({ kind: "page", id: pageId })}
       className="group/card mt-1.5 flex w-full max-w-[440px] items-start gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-card transition-colors hover:border-accent/40"
     >
@@ -26,7 +30,10 @@ export function PageCard({ pageId }: { pageId: string }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1 text-[13.5px] font-semibold">
           <span className="truncate">{page.title || "Untitled"}</span>
-          <ArrowUpRight size={14} className="shrink-0 text-faint transition group-hover/card:translate-x-0.5 group-hover/card:-translate-y-0.5 group-hover/card:text-accent" />
+          <ArrowUpRight
+            size={14}
+            className="shrink-0 text-faint transition group-hover/card:translate-x-0.5 group-hover/card:-translate-y-0.5 group-hover/card:text-accent"
+          />
         </div>
         <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted">{preview || "Empty page"}</p>
       </div>

@@ -1,36 +1,48 @@
 import { motion } from "motion/react";
-import type { SyncStatus } from "../lib/api";
+import type { SyncStatus } from "../../lib/api";
+import { cx, Tooltip } from "../../ui";
 
-export function SyncIndicator({ status }: { status: SyncStatus | undefined }) {
-  const { tone, label, title } = describe(status);
-  return (
-    <div className="flex items-center gap-1.5 text-[11.5px] text-muted" title={title}>
-      <span className="relative grid h-2 w-2 place-items-center">
-        {tone === "live" && (
-          <motion.span
-            className="absolute inset-0 rounded-full bg-success"
-            animate={{ scale: [1, 2.2], opacity: [0.5, 0] }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-          />
-        )}
-        <span
-          className={`relative h-2 w-2 rounded-full ${
-            tone === "live" ? "bg-success" : tone === "error" ? "bg-danger" : tone === "idle" ? "bg-warning" : "bg-faint"
-          }`}
-        />
-      </span>
-      <span className="truncate">{label}</span>
-    </div>
-  );
+type Tone = "live" | "idle" | "error" | "pending";
+
+const DOT: Record<Tone, string> = {
+  live: "bg-success",
+  idle: "bg-warning",
+  error: "bg-danger",
+  pending: "bg-faint",
+};
+
+function describe(status: SyncStatus | undefined): { tone: Tone; label: string; detail: string } {
+  if (!status) return { tone: "pending", label: "Connecting…", detail: "Starting up." };
+  if (status.error) return { tone: "error", label: "Sync problem", detail: status.error };
+  if (status.peers > 0) {
+    return {
+      tone: "live",
+      label: `Live · ${status.peers} ${status.peers === 1 ? "peer" : "peers"}`,
+      detail: "Connected directly to teammates; the bucket keeps everything in sync.",
+    };
+  }
+  if (status.last_sync_ms)
+    return { tone: "idle", label: "Synced via bucket", detail: "No teammates online right now." };
+  return { tone: "pending", label: "Connecting…", detail: "Reaching the bucket and peers." };
 }
 
-function describe(status: SyncStatus | undefined) {
-  if (!status) return { tone: "pending", label: "Connecting…", title: undefined };
-  if (status.error) return { tone: "error", label: "Sync problem", title: status.error };
-  if (status.peers > 0) {
-    const label = `Live · ${status.peers} ${status.peers === 1 ? "peer" : "peers"}`;
-    return { tone: "live", label, title: "Connected directly to teammates; the bucket keeps everything in sync." };
-  }
-  if (status.last_sync_ms) return { tone: "idle", label: "Synced via bucket", title: "No teammates online right now." };
-  return { tone: "pending", label: "Connecting…", title: undefined };
+export function SyncIndicator({ status }: { status: SyncStatus | undefined }) {
+  const { tone, label, detail } = describe(status);
+  return (
+    <Tooltip label={<span className="block max-w-[260px] whitespace-normal">{detail}</span>} side="bottom">
+      <div className="flex w-fit items-center gap-1.5 text-[11.5px] text-muted">
+        <span className="relative grid h-2 w-2 place-items-center">
+          {tone === "live" && (
+            <motion.span
+              className="absolute inset-0 rounded-full bg-success"
+              animate={{ scale: [1, 2.2], opacity: [0.5, 0] }}
+              transition={{ duration: 1.8, repeat: Number.POSITIVE_INFINITY, ease: "easeOut" }}
+            />
+          )}
+          <span className={cx("relative h-2 w-2 rounded-full", DOT[tone])} />
+        </span>
+        <span className="truncate">{label}</span>
+      </div>
+    </Tooltip>
+  );
 }

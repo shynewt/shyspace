@@ -1,13 +1,19 @@
+import { MotionConfig } from "motion/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { MotionConfig } from "motion/react";
 import { App } from "./App";
+import { springs, TooltipProvider } from "./ui";
 import "./styles.css";
 
-createRoot(document.getElementById("root")!).render(
+const root = document.getElementById("root");
+if (!root) throw new Error("index.html has no #root element");
+
+createRoot(root).render(
   <StrictMode>
-    <MotionConfig reducedMotion="user" transition={{ type: "spring", stiffness: 520, damping: 38, mass: 0.8 }}>
-      <App />
+    <MotionConfig reducedMotion="user" transition={springs.snappy}>
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
     </MotionConfig>
   </StrictMode>,
 );

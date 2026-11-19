@@ -1,16 +1,22 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { Hash, Lock } from "lucide-react";
-import { api, type Message } from "../lib/api";
-import { useLive } from "../lib/useLive";
-import { formatDay } from "../lib/people";
-import { useWorkspace } from "../lib/workspace";
-import { MessageItem } from "./MessageItem";
+import { AnimatePresence, motion } from "motion/react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { api, type Message } from "../../lib/api";
+import { formatDay } from "../../lib/people";
+import { useLive } from "../../lib/useLive";
+import { useWorkspace } from "../../lib/workspace";
+import { EmptyState, Spinner, springs } from "../../ui";
 import { Composer } from "./Composer";
+import { MessageItem } from "./MessageItem";
 
+const PAGE_SIZE = 100;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
+const NEAR_EDGE_PX = 80;
+const HIGHLIGHT_MS = 1600;
 
-type Row = { kind: "day"; key: string; label: string } | { kind: "message"; key: string; message: Message; isContinuation: boolean };
+type Row =
+  | { kind: "day"; key: string; label: string }
+  | { kind: "message"; key: string; message: Message; isContinuation: boolean };
 
 function toRows(messages: Message[]): Row[] {
   const rows: Row[] = [];
@@ -33,28 +39,45 @@ function toRows(messages: Message[]): Row[] {
 export function ChannelView({ channelId }: { channelId: string }) {
   const { channels } = useWorkspace();
   const channel = channels.find((candidate) => candidate.id === channelId);
+  // Loading older messages grows the window, so new arrivals never leave gaps.
+  const [windowSize, setWindowSize] = useState(PAGE_SIZE);
+  const loadMessages = useCallback(() => api.messages(channelId, null, windowSize), [channelId, windowSize]);
   const messages = useLive(
-    () => api.messages(channelId),
-    [channelId],
+    loadMessages,
     (change) => (change.kind === "messages" && change.channel === channelId) || change.kind === "members",
   );
+  const hasOlder = (messages?.length ?? 0) >= windowSize;
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
   const rows = useMemo(() => toRows(messages ?? []), [messages]);
   const byId = useMemo(() => new Map((messages ?? []).map((message) => [message.id, message])), [messages]);
   const scroller = useRef<HTMLDivElement>(null);
   const isPinnedToBottom = useRef(true);
-  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const heightBeforeLoadingOlder = useRef<number | null>(null);
 
+  // Keeps the view anchored whenever the rows change.
   useLayoutEffect(() => {
     const element = scroller.current;
-    if (element && isPinnedToBottom.current) element.scrollTop = element.scrollHeight;
+    if (!element || rows.length === 0) return;
+    if (heightBeforeLoadingOlder.current !== null) {
+      element.scrollTop += element.scrollHeight - heightBeforeLoadingOlder.current;
+      heightBeforeLoadingOlder.current = null;
+    } else if (isPinnedToBottom.current) {
+      element.scrollTop = element.scrollHeight;
+    }
   }, [rows]);
 
   useEffect(() => {
     if (!highlighted) return;
-    const timer = setTimeout(() => setHighlighted(null), 1600);
+    const timer = setTimeout(() => setHighlighted(null), HIGHLIGHT_MS);
     return () => clearTimeout(timer);
   }, [highlighted]);
+
+  const loadOlder = () => {
+    if (!hasOlder || heightBeforeLoadingOlder.current !== null || !scroller.current) return;
+    heightBeforeLoadingOlder.current = scroller.current.scrollHeight;
+    setWindowSize((size) => size + PAGE_SIZE);
+  };
 
   const jumpTo = (id: string) => {
     document.getElementById(`message-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -75,11 +98,21 @@ export function ChannelView({ channelId }: { channelId: string }) {
         ref={scroller}
         onScroll={(event) => {
           const element = event.currentTarget;
-          isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+          isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
+          if (element.scrollTop < NEAR_EDGE_PX) loadOlder();
         }}
         className="flex-1 overflow-y-auto py-3"
       >
-        {messages && messages.length === 0 && <EmptyChannel name={channel?.name ?? ""} />}
+        {hasOlder && (
+          <div className="flex justify-center py-2 text-faint">
+            <Spinner size={14} />
+          </div>
+        )}
+        {messages && messages.length === 0 && (
+          <EmptyState icon={<Hash size={22} />} title={`This is the start of #${channel?.name ?? ""}`}>
+            Say hi. Only workspace members can read what you write.
+          </EmptyState>
+        )}
         <AnimatePresence initial={false}>
           {rows.map((row) =>
             row.kind === "day" ? (
@@ -90,7 +123,7 @@ export function ChannelView({ channelId }: { channelId: string }) {
                 layout="position"
                 initial={{ opacity: 0, y: 10, scale: 0.99 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ type: "spring", stiffness: 460, damping: 34 }}
+                transition={springs.smooth}
               >
                 <MessageItem
                   message={row.message}
@@ -127,19 +160,5 @@ function DayDivider({ label }: { label: string }) {
       <span className="text-[11.5px] font-medium text-faint">{label}</span>
       <div className="h-px flex-1 bg-line" />
     </div>
-  );
-}
-
-function EmptyChannel({ name }: { name: string }) {
-  return (
-    <motion.div className="grid h-full place-items-center px-6 text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <div>
-        <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent-soft text-accent-text">
-          <Hash size={22} />
-        </div>
-        <h2 className="mt-3 font-semibold">This is the start of #{name}</h2>
-        <p className="mt-1 text-[13px] text-muted">Say hi. Only workspace members can read what you write.</p>
-      </div>
-    </motion.div>
   );
 }

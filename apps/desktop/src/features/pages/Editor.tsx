@@ -1,16 +1,16 @@
-import { useEffect, useRef } from "react";
-import * as Y from "yjs";
-import { yCollab } from "y-codemirror.next";
-import { EditorView, drawSelection, highlightActiveLine, keymap, placeholder } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
+import { EditorState } from "@codemirror/state";
+import { drawSelection, EditorView, highlightActiveLine, keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { api, onChange } from "../lib/api";
-import { PAGE_TEXT } from "../lib/pageText";
-import { reportError } from "../lib/toast";
+import { useEffect, useRef } from "react";
+import { yCollab } from "y-codemirror.next";
+import * as Y from "yjs";
+import { api, onChange } from "../../lib/api";
+import { reportError } from "../../lib/toast";
+import { PAGE_TEXT } from "./pageText";
 
 /** Local keystrokes are batched before being sealed and sent. */
 const SEND_DELAY_MS = 120;

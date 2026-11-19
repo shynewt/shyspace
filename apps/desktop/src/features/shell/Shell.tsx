@@ -1,19 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { UserX } from "lucide-react";
-import { api, type Session } from "../lib/api";
-import { useLive } from "../lib/useLive";
-import { type View, WorkspaceContext } from "../lib/workspace";
+import { AnimatePresence, motion } from "motion/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, type Session } from "../../lib/api";
+import { useLive } from "../../lib/useLive";
+import { type View, WorkspaceContext } from "../../lib/workspace";
+import { Dialog } from "../../ui";
+import { ChannelView } from "../chat/ChannelView";
+import { MembersPanel } from "../members/MembersPanel";
+import { PageView } from "../pages/PageView";
+import { CommandPalette } from "../search/CommandPalette";
 import { Sidebar } from "./Sidebar";
-import { ChannelView } from "./ChannelView";
-import { PageView } from "./PageView";
-import { CommandPalette } from "./CommandPalette";
-import { MembersPanel } from "./MembersPanel";
 
 export function Shell({ session }: { session: Session }) {
-  const channels = useLive(api.channels, [], (change) => change.kind === "channels") ?? [];
-  const pages = useLive(api.pages, [], (change) => change.kind === "pages") ?? [];
-  const status = useLive(api.status, [], (change) => change.kind === "sync" || change.kind === "removed");
+  const channels = useLive(api.channels, (change) => change.kind === "channels") ?? [];
+  const pages = useLive(api.pages, (change) => change.kind === "pages") ?? [];
+  const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
   const [view, setView] = useState<View | null>(null);
   const [isPaletteOpen, setPaletteOpen] = useState(false);
   const [isMembersOpen, setMembersOpen] = useState(false);
@@ -34,7 +35,10 @@ export function Shell({ session }: { session: Session }) {
   }, []);
 
   const navigate = useCallback((next: View) => setView(next), []);
-  const context = useMemo(() => ({ session, channels, pages, view, navigate }), [session, channels, pages, view, navigate]);
+  const context = useMemo(
+    () => ({ session, channels, pages, view, navigate }),
+    [session, channels, pages, view, navigate],
+  );
 
   return (
     <WorkspaceContext.Provider value={context}>
@@ -62,34 +66,27 @@ export function Shell({ session }: { session: Session }) {
           </AnimatePresence>
         </main>
       </motion.div>
-      <CommandPalette open={isPaletteOpen} onClose={() => setPaletteOpen(false)} />
-      <MembersPanel open={isMembersOpen} onClose={() => setMembersOpen(false)} />
-      <AnimatePresence>{status?.removed && <RemovedNotice />}</AnimatePresence>
+      <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} />
+      <MembersPanel open={isMembersOpen} onOpenChange={setMembersOpen} />
+      <RemovedNotice isRemoved={status?.removed ?? false} />
     </WorkspaceContext.Provider>
   );
 }
 
-function RemovedNotice() {
+function RemovedNotice({ isRemoved }: { isRemoved: boolean }) {
   return (
-    <motion.div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-sm"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
+    <Dialog
+      open={isRemoved}
+      onOpenChange={() => {}}
+      title="You were removed from this workspace"
+      description="You can still read what you already had, but new messages and edits use keys you no longer receive."
+      width={380}
     >
-      <motion.div
-        className="max-w-sm rounded-2xl border border-line bg-surface p-6 text-center shadow-float"
-        initial={{ scale: 0.92, y: 10 }}
-        animate={{ scale: 1, y: 0 }}
-      >
-        <div className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-danger/12 text-danger">
+      <div className="flex justify-center px-5 pt-4 pb-5">
+        <div className="grid h-11 w-11 place-items-center rounded-xl bg-danger/12 text-danger">
           <UserX size={20} />
         </div>
-        <h2 className="mt-3 font-semibold">You were removed from this workspace</h2>
-        <p className="mt-1 text-[13px] text-muted">
-          You can still read what you already had, but new messages and edits are encrypted with keys you no longer
-          receive.
-        </p>
-      </motion.div>
-    </motion.div>
+      </div>
+    </Dialog>
   );
 }

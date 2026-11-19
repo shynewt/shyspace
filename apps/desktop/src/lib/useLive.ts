@@ -4,33 +4,38 @@ import { reportError } from "./toast";
 
 /**
  * Loads data now and again whenever a relevant change arrives. Returns
- * undefined until the first load finishes. `deps` decides when to start over
- * (like useEffect); the callbacks may change freely between renders.
+ * undefined until the first load finishes. `load` must be stable (a module
+ * function or a useCallback): a new `load` starts over, like a new query.
  */
-export function useLive<T>(load: () => Promise<T>, deps: unknown[], isRelevant: (change: Change) => boolean) {
+export function useLive<T>(load: () => Promise<T>, isRelevant: (change: Change) => boolean) {
   const [value, setValue] = useState<T>();
-  const loadRef = useRef(load);
+  // Only consulted when a change arrives, so the latest one is always right.
   const relevantRef = useRef(isRelevant);
-  loadRef.current = load;
   relevantRef.current = isRelevant;
 
   useEffect(() => {
-    let cancelled = false;
+    let isCancelled = false;
     let generation = 0;
     const refresh = () => {
       const current = ++generation;
-      loadRef.current().then(
-        (next) => !cancelled && current === generation && setValue(next),
-        (error) => !cancelled && reportError(error),
+      load().then(
+        (next) => {
+          if (!isCancelled && current === generation) setValue(next);
+        },
+        (error) => {
+          if (!isCancelled) reportError(error);
+        },
       );
     };
     refresh();
-    const unsubscribe = onChange((change) => relevantRef.current(change) && refresh());
+    const unsubscribe = onChange((change) => {
+      if (relevantRef.current(change)) refresh();
+    });
     return () => {
-      cancelled = true;
+      isCancelled = true;
       unsubscribe();
     };
-  }, deps);
+  }, [load]);
 
   return value;
 }

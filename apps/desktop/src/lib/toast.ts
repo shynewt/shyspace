@@ -5,7 +5,9 @@ export type Toast = { id: number; text: string; tone: "error" | "info" };
 let toasts: Toast[] = [];
 let nextId = 1;
 const subscribers = new Set<() => void>();
-const publish = () => subscribers.forEach((notify) => notify());
+function publish() {
+  for (const notify of subscribers) notify();
+}
 
 export function showToast(text: string, tone: Toast["tone"] = "info") {
   const toast = { id: nextId++, text, tone };
