@@ -6,7 +6,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 
-use crate::bucket::BucketConfig;
+use crate::transport::bucket::BucketConfig;
 
 const PREFIX: &str = "shy1_";
 

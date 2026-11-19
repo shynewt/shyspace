@@ -1,0 +1,75 @@
+//! Moving envelopes between the local log, the bucket, and online peers.
+
+use anyhow::Result;
+use tracing::warn;
+
+use crate::{views::parse_member_id, workspace::Workspace};
+
+impl Workspace {
+    /// Reads every other member's new segments from the bucket.
+    pub(super) async fn pull(&self) -> Result<()> {
+        let me = self.me();
+        let authors: Vec<_> = self
+            .members()?
+            .iter()
+            .filter_map(|member| parse_member_id(&member.id).ok())
+            .filter(|author| *author != me)
+            .collect();
+        for author in authors {
+            let cursor = self.state().store.cursor(&author)?;
+            for (key, envelopes) in self
+                .inner
+                .bucket
+                .segments_after(&author, cursor.as_deref())
+                .await?
+            {
+                for envelope in envelopes {
+                    if envelope.author != author {
+                        warn!("segment {key} contains an op by someone else; skipping it");
+                        continue;
+                    }
+                    if let Err(error) = self.receive(envelope) {
+                        warn!("dropping op from {key}: {error:#}");
+                    }
+                }
+                self.state().store.set_cursor(&author, &key)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Uploads our ops that aren't in the bucket yet, as one segment.
+    pub(super) async fn push(&self) -> Result<()> {
+        let me = self.me();
+        let unpushed = self.state().store.unpushed(&me)?;
+        let Some(last) = unpushed.last().map(|envelope| envelope.seq) else {
+            return Ok(());
+        };
+        self.inner.bucket.put_segment(&unpushed).await?;
+        self.state().store.mark_pushed(&me, last)?;
+        Ok(())
+    }
+
+    pub(super) async fn join_peers(&self) -> Result<()> {
+        if let Some(net) = &self.inner.net {
+            net.join(self.inner.bucket.peers().await?).await?;
+        }
+        Ok(())
+    }
+
+    pub(super) async fn announce_self(&self) {
+        if let Err(error) = self.inner.bucket.announce_peer(&self.me()).await {
+            warn!("could not announce ourselves in the bucket: {error:#}");
+        }
+        self.nudge_peers().await;
+    }
+
+    /// Tells online peers to sync now rather than at their next interval.
+    pub(crate) async fn nudge_peers(&self) {
+        if let Some(net) = &self.inner.net
+            && let Err(error) = net.nudge().await
+        {
+            warn!("could not nudge peers: {error:#}");
+        }
+    }
+}

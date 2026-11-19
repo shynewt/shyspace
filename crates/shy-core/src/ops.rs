@@ -1,7 +1,17 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::{Context, Result};
 use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 
 pub type EntityId = String;
+
+pub fn now_ms() -> Result<i64> {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("the system clock is set before 1970")?;
+    Ok(i64::try_from(elapsed.as_millis())?)
+}
 
 const OWNER_PREFIX_BYTES: usize = 16;
 

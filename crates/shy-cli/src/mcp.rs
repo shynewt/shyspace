@@ -117,7 +117,7 @@ impl ShyTools {
 
     fn format_messages(&self, channel: &str, limit: u32) -> Result<String> {
         let mut output = String::new();
-        for message in self.workspace.messages(channel, limit)? {
+        for message in self.workspace.messages(channel, None, limit)? {
             let bot = if message.author_is_bot { " (bot)" } else { "" };
             let reply = message.reply_to.map(|id| format!(" ↩{id}")).unwrap_or_default();
             let author = match message.author_name.as_str() {
@@ -281,7 +281,7 @@ impl ShyTools {
                 if wanted.as_ref().is_some_and(|wanted| *wanted != channel) {
                     continue;
                 }
-                let latest = self.workspace.messages(&channel, 1).ok()?;
+                let latest = self.workspace.messages(&channel, None, 1).ok()?;
                 if latest.first().is_some_and(|message| message.author != me) {
                     return Some(channel);
                 }

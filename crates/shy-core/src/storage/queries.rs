@@ -1,0 +1,152 @@
+//! Read models for the UI and agents.
+
+use anyhow::Result;
+use iroh::PublicKey;
+use rusqlite::{OptionalExtension, params};
+
+use super::Store;
+use crate::views::{Channel, Member, Message, MessageCursor, Page, Reaction, SearchHit};
+
+impl Store {
+    pub fn page_state(&self, id: &str) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .db
+            .query_row("SELECT doc FROM pages WHERE id = ?", [id], |row| row.get(0))
+            .optional()?
+            .flatten())
+    }
+
+    pub fn channels(&self) -> Result<Vec<Channel>> {
+        let mut statement = self
+            .db
+            .prepare("SELECT id, name FROM channels ORDER BY created_ms, id")?;
+        let rows = statement.query_map([], |row| {
+            Ok(Channel {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Up to `limit` messages in `channel`, oldest first. With `before`, only
+    /// messages older than that one, for loading history page by page.
+    pub fn messages(
+        &self,
+        channel: &str,
+        me: &PublicKey,
+        before: Option<&MessageCursor>,
+        limit: u32,
+    ) -> Result<Vec<Message>> {
+        let (before_lamport, before_author) = match before {
+            Some(cursor) => (Some(cursor.lamport), Some(hex::decode(&cursor.author)?)),
+            None => (None, None),
+        };
+        let mut statement = self.db.prepare(
+            "SELECT * FROM (
+                SELECT m.id, m.channel, m.author, COALESCE(p.name, ''), COALESCE(p.is_bot, 0),
+                       m.text, m.reply_to, m.created_ms, m.lamport
+                FROM messages m LEFT JOIN profiles p ON p.member = m.author
+                WHERE m.channel = ?1
+                  AND (?2 IS NULL OR m.lamport < ?2 OR (m.lamport = ?2 AND m.author < ?3))
+                ORDER BY m.lamport DESC, m.author DESC LIMIT ?4)
+             ORDER BY lamport, author",
+        )?;
+        let rows = statement.query_map(params![channel, before_lamport, before_author, limit], |row| {
+            Ok(Message {
+                id: row.get(0)?,
+                channel: row.get(1)?,
+                author: hex::encode(row.get::<_, Vec<u8>>(2)?),
+                author_name: row.get(3)?,
+                author_is_bot: row.get(4)?,
+                text: row.get(5)?,
+                reply_to: row.get(6)?,
+                created_ms: row.get(7)?,
+                lamport: row.get(8)?,
+                reactions: Vec::new(),
+            })
+        })?;
+        let mut messages: Vec<Message> = rows.collect::<Result<_, _>>()?;
+        for message in &mut messages {
+            message.reactions = self.reactions(&message.id, me)?;
+        }
+        Ok(messages)
+    }
+
+    fn reactions(&self, message: &str, me: &PublicKey) -> Result<Vec<Reaction>> {
+        let mut statement = self.db.prepare(
+            "SELECT emoji, COUNT(*), MAX(author = ?2), MIN(rowid) AS first FROM reactions
+             WHERE message = ?1 AND active = 1 GROUP BY emoji ORDER BY first",
+        )?;
+        let rows = statement.query_map(params![message, me.as_bytes()], |row| {
+            Ok(Reaction {
+                emoji: row.get(0)?,
+                count: row.get(1)?,
+                mine: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn pages(&self) -> Result<Vec<Page>> {
+        let mut statement = self.db.prepare(
+            "SELECT id, parent, title, updated_ms FROM pages WHERE created_ms IS NOT NULL ORDER BY created_ms, id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(Page {
+                id: row.get(0)?,
+                parent: row.get(1)?,
+                title: row.get(2)?,
+                updated_ms: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn members(&self, admin: &PublicKey) -> Result<Vec<Member>> {
+        let mut statement = self.db.prepare(
+            "SELECT m.member, COALESCE(p.name, ''), COALESCE(p.is_bot, 0), m.active
+             FROM members m LEFT JOIN profiles p ON p.member = m.member ORDER BY m.active DESC, p.name",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let id: Vec<u8> = row.get(0)?;
+            Ok(Member {
+                is_admin: id == admin.as_bytes(),
+                id: hex::encode(id),
+                name: row.get(1)?,
+                is_bot: row.get(2)?,
+                active: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>> {
+        let match_expression = query
+            .split_whitespace()
+            .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if match_expression.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut statement = self.db.prepare(
+            "SELECT s.kind, s.ref, COALESCE(NULLIF(s.title, ''), c.name, ''),
+                    snippet(search, 3, '\u{1}', '\u{2}', '…', 12), m.channel
+             FROM search s
+             LEFT JOIN messages m ON s.kind = 'message' AND m.id = s.ref
+             LEFT JOIN channels c ON c.id = m.channel
+             WHERE search MATCH ? ORDER BY rank LIMIT ?",
+        )?;
+        let rows = statement.query_map(params![match_expression, limit], |row| {
+            Ok(SearchHit {
+                kind: row.get(0)?,
+                id: row.get(1)?,
+                title: row.get(2)?,
+                snippet: row.get(3)?,
+                channel: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+}

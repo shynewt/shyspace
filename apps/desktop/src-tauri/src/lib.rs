@@ -7,7 +7,7 @@ use serde::Serialize;
 use shy_core::{
     BucketConfig, Networking, Profile, Workspace,
     sync::SyncStatus,
-    views::{Channel, Member, Message, Page, SearchHit},
+    views::{Channel, Member, Message, MessageCursor, Page, SearchHit},
 };
 use tauri::{AppHandle, Emitter, Manager, State, ipc::Response};
 use tokio::sync::Mutex;
@@ -138,8 +138,16 @@ async fn create_channel(state: State<'_, AppState>, name: String) -> CommandResu
 }
 
 #[tauri::command]
-async fn messages(state: State<'_, AppState>, channel: String, limit: u32) -> CommandResult<Vec<Message>> {
-    current(&state).await?.messages(&channel, limit).map_err(failed)
+async fn messages(
+    state: State<'_, AppState>,
+    channel: String,
+    before: Option<MessageCursor>,
+    limit: u32,
+) -> CommandResult<Vec<Message>> {
+    current(&state)
+        .await?
+        .messages(&channel, before.as_ref(), limit)
+        .map_err(failed)
 }
 
 #[tauri::command]

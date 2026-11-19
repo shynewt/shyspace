@@ -18,15 +18,15 @@ fn encode(doc: &Doc) -> Vec<u8> {
     doc.transact().encode_state_as_update_v1(&StateVector::default())
 }
 
-pub fn text(doc: &Doc) -> String {
+fn text(doc: &Doc) -> String {
     doc.get_or_insert_text(CONTENT).get_string(&doc.transact())
 }
 
-/// Returns the merged state and its plain text.
-pub fn merge(state: Option<&[u8]>, update: &[u8]) -> Result<(Vec<u8>, String)> {
+/// Applies a Yjs update to a page's state and returns the new state.
+pub fn merge(state: Option<&[u8]>, update: &[u8]) -> Result<Vec<u8>> {
     let doc = load(state)?;
     doc.transact_mut().apply_update(Update::decode_v1(update)?)?;
-    Ok((encode(&doc), text(&doc)))
+    Ok(encode(&doc))
 }
 
 pub fn read(state: Option<&[u8]>) -> Result<String> {
@@ -101,11 +101,10 @@ mod tests {
 
     #[test]
     fn concurrent_edits_converge() {
-        let base = edit(None, Edit::Append("# Plan\n\nShip it.")).unwrap();
-        let (state, _) = merge(None, &base).unwrap();
-        let ours = edit(Some(&state), Edit::Append("- step one")).unwrap();
+        let base = merge(None, &edit(None, Edit::Append("# Plan\n\nShip it.")).unwrap()).unwrap();
+        let ours = edit(Some(&base), Edit::Append("- step one")).unwrap();
         let theirs = edit(
-            Some(&state),
+            Some(&base),
             Edit::Replace {
                 find: "Ship it.",
                 with: "Ship it soon.",
@@ -113,17 +112,18 @@ mod tests {
         )
         .unwrap();
 
-        let (left, _) = merge(Some(&state), &ours).unwrap();
-        let (_, left_text) = merge(Some(&left), &theirs).unwrap();
-        let (right, _) = merge(Some(&state), &theirs).unwrap();
-        let (_, right_text) = merge(Some(&right), &ours).unwrap();
-        assert_eq!(left_text, right_text);
-        assert_eq!(left_text, "# Plan\n\nShip it soon.\n\n- step one");
+        let left = merge(Some(&merge(Some(&base), &ours).unwrap()), &theirs).unwrap();
+        let right = merge(Some(&merge(Some(&base), &theirs).unwrap()), &ours).unwrap();
+        assert_eq!(read(Some(&left)).unwrap(), read(Some(&right)).unwrap());
+        assert_eq!(
+            read(Some(&left)).unwrap(),
+            "# Plan\n\nShip it soon.\n\n- step one"
+        );
     }
 
     #[test]
     fn replace_requires_a_unique_match() {
-        let (state, _) = merge(None, &edit(None, Edit::Append("a b a")).unwrap()).unwrap();
+        let state = merge(None, &edit(None, Edit::Append("a b a")).unwrap()).unwrap();
         assert!(edit(Some(&state), Edit::Replace { find: "a", with: "c" }).is_err());
         assert!(edit(Some(&state), Edit::Replace { find: "z", with: "c" }).is_err());
     }

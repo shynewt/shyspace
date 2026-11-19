@@ -13,8 +13,10 @@ export type Message = {
   text: string;
   reply_to: string | null;
   created_ms: number;
+  lamport: number;
   reactions: Reaction[];
 };
+export type MessageCursor = { lamport: number; author: string };
 export type Page = { id: string; parent: string | null; title: string; updated_ms: number };
 export type Member = { id: string; name: string; is_bot: boolean; is_admin: boolean; active: boolean };
 export type SearchHit = { kind: "message" | "page"; id: string; title: string; snippet: string; channel: string | null };
@@ -43,7 +45,8 @@ export const api = {
   joinWorkspace: (invite: string, name: string) => invoke<Session>("join_workspace", { invite, name }),
   channels: () => invoke<Channel[]>("channels"),
   createChannel: (name: string) => invoke<string>("create_channel", { name }),
-  messages: (channel: string, limit = 200) => invoke<Message[]>("messages", { channel, limit }),
+  messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
+    invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>
     invoke<string>("send_message", { channel, text, replyTo }),
   react: (message: string, emoji: string, active: boolean) => invoke<void>("react", { message, emoji, active }),

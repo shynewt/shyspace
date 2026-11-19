@@ -1,18 +1,21 @@
-pub mod bucket;
+//! The shyspace engine. Clients (desktop app, CLI, agents) are thin layers
+//! over [`Workspace`]. See `docs/architecture.md` for how the parts fit.
+
+pub mod config;
 pub mod crypto;
-pub mod docs;
-pub mod invite;
-pub mod mls;
-pub mod net;
+pub mod identity;
+pub mod membership;
 pub mod ops;
-pub mod store;
+pub mod pages;
+pub mod storage;
 pub mod sync;
+pub mod transport;
 pub mod views;
 pub mod workspace;
 
-pub use bucket::BucketConfig;
-pub use docs::Edit;
-pub use workspace::{Networking, Profile, Workspace};
-
 #[cfg(test)]
-mod workspace_tests;
+mod tests;
+
+pub use pages::Edit;
+pub use transport::bucket::BucketConfig;
+pub use workspace::{Networking, Profile, Workspace};

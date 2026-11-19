@@ -73,16 +73,20 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 
 ## Files in shy-core
 
-| File | Job |
+| Path | Job |
 |---|---|
-| `workspace.rs` | public API: create, join, open, read and write |
-| `sync.rs` | sync loop, receiving ops, admin membership duties |
-| `mls.rs` | OpenMLS wrapper |
+| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads` |
+| `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (accepting and removing members), `follow` (members applying commits) |
+| `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
+| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `queries` |
+| `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |
 | `crypto.rs` | sign-then-encrypt ops |
-| `ops.rs` | op types and owned ids |
-| `store.rs` | SQLite schema, applying ops, queries |
-| `docs.rs` | Yjs page helpers |
-| `bucket.rs` | S3 layout and access |
-| `net.rs` | iroh endpoint and gossip |
-| `invite.rs` | invite codes |
+| `ops.rs` | op types, owned ids, timestamps |
+| `pages.rs` | Yjs page helpers |
 | `views.rs` | read models sent to the UI and agents |
+| `config.rs`, `identity.rs` | files in a member's data directory |
+| `tests/` | multi-member scenarios (`collaboration`) and attacks (`hardening`) |
+
+## Database migrations
+
+The schema is a list of migrations in `storage/schema.rs`, applied in order and tracked by SQLite's `user_version`. Never edit a released migration; append a new one. A database from a newer version is refused rather than misread.

@@ -1,12 +1,21 @@
 //! Read models handed to the UI and to agents. Member ids are hex public keys.
 
+use anyhow::{Context, Result};
 use iroh::PublicKey;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::ops::EntityId;
 
 pub fn member_id(member: &PublicKey) -> String {
     hex::encode(member.as_bytes())
+}
+
+pub fn parse_member_id(id: &str) -> Result<PublicKey> {
+    let bytes: [u8; 32] = hex::decode(id)
+        .context("member id is not hex")?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("member id must be 32 bytes"))?;
+    Ok(PublicKey::from_bytes(&bytes)?)
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -32,7 +41,17 @@ pub struct Message {
     pub text: String,
     pub reply_to: Option<EntityId>,
     pub created_ms: i64,
+    /// Position in the channel's order; pass it back as a cursor to page.
+    pub lamport: u64,
     pub reactions: Vec<Reaction>,
+}
+
+/// Where to continue when loading older messages: the oldest one loaded.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MessageCursor {
+    pub lamport: u64,
+    /// The message author's member id (hex).
+    pub author: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

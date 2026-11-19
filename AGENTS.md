@@ -53,7 +53,8 @@ Inside `shy-core`, each file has one job (see the file map in `docs/architecture
 - No `unwrap`, `dbg!`, `todo!`, `unimplemented!` or `unsafe` outside tests; lints deny them. `expect` only for true invariants, with a message saying why it can't fail.
 - Treat everything from gossip, the bucket or another member as hostile: verify before storing, bound sizes and counts, never panic on it.
 - Never hold a lock across `.await`. Keep `Mutex` sections short and synchronous.
-- SQL is always parameterized. Schema changes need a migration plan and an issue first.
+- SQL is always parameterized. Schema changes are a new migration in `storage/schema.rs`; never edit a released one.
+- Writes that must happen together go through `Store::atomically`.
 - Every op type must merge the same way in any order and when applied twice. Add a test proving it.
 
 ### TypeScript and React
@@ -81,8 +82,8 @@ Inside `shy-core`, each file has one job (see the file map in `docs/architecture
 - Tests must be deterministic. If one fails only sometimes, treat that as a real bug, not as flakiness.
 - Where tests live:
   - unit tests next to the code (`#[cfg(test)] mod tests`);
-  - multi-member scenarios in `crates/shy-core/src/workspace_tests.rs`, using an in-memory bucket;
-  - attacks in its `hardening` module: every security rule has a test that tries to break it;
+  - multi-member scenarios in `crates/shy-core/src/tests/collaboration.rs`, using an in-memory bucket;
+  - attacks in `crates/shy-core/src/tests/hardening.rs`: every security rule has a test that tries to break it;
   - real processes, network and bucket in `scripts/e2e_mcp.py`.
 
 ## Checks
