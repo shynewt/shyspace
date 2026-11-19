@@ -169,7 +169,12 @@ async fn the_admin_shows_a_newcomer_by_their_requested_name_right_away() {
     let admin = create_admin(&root.path().join("ada"), &bucket).await;
     let _claude = join(&admin, &root.path().join("claude"), &bucket, "Claude", true).await;
     // The newcomer's own profile hasn't reached the admin yet.
-    let newcomer = admin.members().unwrap().into_iter().find(|member| !member.is_admin).unwrap();
+    let newcomer = admin
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| !member.is_admin)
+        .unwrap();
     assert_eq!(newcomer.name, "Claude");
     assert!(newcomer.is_bot);
 }
