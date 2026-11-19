@@ -131,6 +131,10 @@ impl Workspace {
     ) -> Result<Self> {
         let workspace_id = new_random_id();
         let connected = bucket.connect(&workspace_id)?;
+        connected
+            .check_access()
+            .await
+            .context("checking the bucket settings")?;
         Self::create_with(
             data,
             workspace_id,

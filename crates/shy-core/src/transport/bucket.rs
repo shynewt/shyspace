@@ -11,7 +11,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use bytes::Bytes;
 use futures_lite::StreamExt;
 use iroh::PublicKey;
@@ -28,6 +28,7 @@ use tracing::warn;
 use crate::{ops::Envelope, views::member_id};
 
 const RECOVERY_SNAPSHOT: &str = "recovery/snapshot";
+const ACCESS_CHECK: &str = "access-check";
 
 /// Objects larger than this are ignored, so a hostile writer can't make us
 /// load arbitrary amounts of data into memory.
@@ -48,10 +49,34 @@ pub struct BucketConfig {
 }
 
 impl BucketConfig {
+    /// The endpoint as a full URL. People often paste just the host (as
+    /// providers show it), so a missing scheme means https.
+    pub fn endpoint_url(&self) -> Result<String> {
+        let trimmed = self.endpoint.trim();
+        ensure!(!trimmed.is_empty(), "the bucket endpoint is empty");
+        let with_scheme = if trimmed.contains("://") {
+            trimmed.to_owned()
+        } else {
+            format!("https://{trimmed}")
+        };
+        let url = reqwest::Url::parse(&with_scheme)
+            .with_context(|| format!("the bucket endpoint {:?} isn't a valid address", self.endpoint))?;
+        ensure!(
+            matches!(url.scheme(), "https" | "http"),
+            "the bucket endpoint must start with https:// (or http:// for a local server)"
+        );
+        ensure!(
+            url.host_str().is_some_and(|host| !host.is_empty()),
+            "the bucket endpoint has no host"
+        );
+        Ok(with_scheme.trim_end_matches('/').to_owned())
+    }
+
     pub fn connect(&self, workspace_id: &str) -> Result<Bucket> {
+        let endpoint = self.endpoint_url()?;
         let s3 = AmazonS3Builder::new()
-            .with_endpoint(&self.endpoint)
-            .with_allow_http(self.endpoint.starts_with("http://"))
+            .with_endpoint(&endpoint)
+            .with_allow_http(endpoint.starts_with("http://"))
             .with_region(&self.region)
             .with_bucket_name(&self.bucket)
             .with_access_key_id(&self.access_key_id)
@@ -246,6 +271,23 @@ impl Bucket {
         self.get(&Path::from(RECOVERY_SNAPSHOT)).await
     }
 
+    /// Writes, reads back and deletes a small object, so wrong credentials,
+    /// bucket names or endpoints fail now with a clear error rather than
+    /// later in the middle of something else.
+    pub async fn check_access(&self) -> Result<()> {
+        let path = Path::from(ACCESS_CHECK);
+        let probe = rand::random::<[u8; 16]>().to_vec();
+        self.put(&path, probe.clone())
+            .await
+            .context("can't write to the bucket")?;
+        let read = self.get(&path).await.context("can't read from the bucket")?;
+        ensure!(
+            read.as_deref() == Some(probe.as_slice()),
+            "the bucket didn't return what was written"
+        );
+        self.delete(&path).await.context("can't delete from the bucket")
+    }
+
     pub async fn announce_peer(&self, peer: &PublicKey) -> Result<()> {
         self.put(&Path::from(format!("peers/{}", member_id(peer))), Vec::new())
             .await
@@ -282,6 +324,48 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn endpoints_get_a_scheme_and_bad_ones_are_refused() {
+        let endpoint = |value: &str| {
+            BucketConfig {
+                endpoint: value.into(),
+                ..test_config()
+            }
+            .endpoint_url()
+        };
+        assert_eq!(
+            endpoint("s3.us-west-000.backblazeb2.com").unwrap(),
+            "https://s3.us-west-000.backblazeb2.com"
+        );
+        assert_eq!(
+            endpoint(" https://s3.example.com/ ").unwrap(),
+            "https://s3.example.com"
+        );
+        assert_eq!(
+            endpoint("http://localhost:9000").unwrap(),
+            "http://localhost:9000"
+        );
+        assert!(endpoint("").is_err());
+        assert!(endpoint("ftp://files.example.com").is_err());
+        assert!(endpoint("https://").is_err());
+    }
+
+    #[tokio::test]
+    async fn access_check_round_trips_through_the_bucket() {
+        let bucket = Bucket::without_signing(Arc::new(object_store::memory::InMemory::new()));
+        bucket.check_access().await.unwrap();
+    }
+
+    fn test_config() -> BucketConfig {
+        BucketConfig {
+            endpoint: "http://localhost:9".into(),
+            region: "us-east-1".into(),
+            bucket: "team".into(),
+            access_key_id: "AKIDEXAMPLE".into(),
+            secret_access_key: "very-secret-key".into(),
+        }
+    }
 
     #[tokio::test]
     async fn presigned_invite_links_carry_no_secret() {
