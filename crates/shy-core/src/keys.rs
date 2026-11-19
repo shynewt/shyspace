@@ -26,6 +26,14 @@ pub enum KeyStorage {
 pub struct DeviceKey(Zeroizing<[u8; KEY_LEN]>);
 
 impl DeviceKey {
+    pub(crate) fn from_bytes(bytes: [u8; KEY_LEN]) -> Self {
+        Self(Zeroizing::new(bytes))
+    }
+
+    pub(crate) fn to_bytes(&self) -> Zeroizing<[u8; KEY_LEN]> {
+        self.0.clone()
+    }
+
     /// The SQLCipher key for one database, as a raw-key literal.
     pub fn database_key(&self, database: &str) -> Zeroizing<String> {
         let context = format!("shyspace local database {database} v1");
@@ -64,16 +72,28 @@ impl KeyStorage {
     }
 
     async fn create(&self, dir: &Path) -> Result<DeviceKey> {
-        let key = Zeroizing::new(rand::random::<[u8; KEY_LEN]>());
+        let key = DeviceKey::from_bytes(rand::random::<[u8; KEY_LEN]>());
+        self.save(dir, &key).await?;
+        Ok(key)
+    }
+
+    /// Stores an existing key for `dir`, as when restoring onto a new device.
+    pub(crate) async fn save(&self, dir: &Path, device_key: &DeviceKey) -> Result<()> {
+        let key = device_key.to_bytes();
         match self {
             Self::Keychain => {
                 let account = keychain_account(dir)?;
                 let secret = key.clone();
                 tokio::task::spawn_blocking(move || write_keychain(&account, secret.as_slice())).await??;
             }
-            Self::File(path) => write_private_file(path, key.as_slice())?,
+            Self::File(path) => {
+                if path.exists() {
+                    bail!("{} already exists; choose a new key file", path.display());
+                }
+                write_private_file(path, key.as_slice())?;
+            }
         }
-        Ok(DeviceKey(key))
+        Ok(())
     }
 }
 

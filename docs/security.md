@@ -26,13 +26,14 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 - **Invites:** single-use, expire after 7 days, need the admin's approval, and carry only presigned links (no credentials). The admin sees the requester's name and key fingerprint before deciding. Credentials reach the newcomer only inside the MLS-encrypted answer. See `membership/admin.rs`.
 - **Identity binding:** a joiner's key package must be signed by the identity it claims. The invite pins the admin's MLS key, so a forged Welcome is rejected.
 - **Members-only gossip:** peers that aren't current MLS members are refused at connection time, and we only dial members. See `transport/gossip.rs`.
+- **Admin recovery:** the recovery kit is a secret (recovery key plus bucket credentials). Snapshots in the bucket are encrypted with a key derived from the recovery key and bound to the workspace id. See `membership/recovery.rs`.
 - **Encryption at rest:** both local databases use SQLCipher with keys derived from a device key kept in the OS keychain (or a key file the user places elsewhere). The identity key and bucket credentials are inside the encrypted database; `workspace.json` holds only public settings. See `keys.rs`, `storage/mod.rs`.
 - **Chat rendering:** message HTML is sanitized with DOMPurify; only http(s), mailto and `shy://page/` links are allowed. External links open in the system browser.
 
 ## Known gaps
 
 - Bucket credentials are shared by all members, so any member can cause denial of service, and a removed member keeps them until the admin rotates them at the provider (#25).
-- Single admin: if their device is lost, membership can no longer change (#5).
+- Single admin. A recovery kit restores a lost admin device, but there is still only one admin at a time; restoring while the old device is alive would cause conflicting membership changes (#5).
 
 Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issues?q=label%3Asecurity>
 

@@ -7,6 +7,7 @@
 //!   invites/<token>/request               a joiner's request (via presigned link)
 //!   invites/<token>/answer                the admin's answer (via presigned link)
 //!   peers/<endpoint id>                   gossip bootstrap hints
+//!   recovery/snapshot                     the admin's encrypted recovery snapshot
 
 use std::{sync::Arc, time::Duration};
 
@@ -25,6 +26,8 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::{ops::Envelope, views::member_id};
+
+const RECOVERY_SNAPSHOT: &str = "recovery/snapshot";
 
 /// Objects larger than this are ignored, so a hostile writer can't make us
 /// load arbitrary amounts of data into memory.
@@ -224,6 +227,14 @@ impl Bucket {
             Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(error) => Err(error.into()),
         }
+    }
+
+    pub async fn put_recovery_snapshot(&self, sealed: Vec<u8>) -> Result<()> {
+        self.put(&Path::from(RECOVERY_SNAPSHOT), sealed).await
+    }
+
+    pub async fn recovery_snapshot(&self) -> Result<Option<Bytes>> {
+        self.get(&Path::from(RECOVERY_SNAPSHOT)).await
     }
 
     pub async fn announce_peer(&self, peer: &PublicKey) -> Result<()> {

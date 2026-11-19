@@ -178,6 +178,12 @@ def main() -> int:
             joiner.kill()
         for member in members:
             member.close()
+    kit = run_shy(*member_args("admin"), "recovery-kit").strip()
+    check(kit.startswith("shyrec1_"), "admin exported a recovery kit")
+    restored = run_shy(*member_args("admin-restored"), "restore", kit)
+    check("Restored the admin" in restored, "a new device restored the admin from the kit")
+    invites = run_shy(*member_args("admin-restored"), "invite", "list")
+    check("Accepted" in invites, "the restored admin still knows its invites")
     print("all end-to-end checks passed")
     return 0
 

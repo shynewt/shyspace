@@ -7,8 +7,10 @@ mod invites;
 mod oplog;
 mod queries;
 mod schema;
+mod snapshot;
 
 pub use invites::PendingRequest;
+pub use snapshot::{snapshot_database, snapshot_store_without_content};
 
 use std::path::Path;
 
@@ -54,6 +56,11 @@ impl Store {
             "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    pub fn delete_meta(&self, key: &str) -> Result<()> {
+        self.db.execute("DELETE FROM meta WHERE key = ?", [key])?;
         Ok(())
     }
 

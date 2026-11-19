@@ -46,6 +46,11 @@ enum Command {
     /// Manage invites (admin only).
     #[command(subcommand)]
     Invite(InviteCommand),
+    /// Print the admin's recovery kit. Store it in a password manager.
+    RecoveryKit,
+    /// Restore the admin onto this device from a recovery kit. Only do this
+    /// if the old admin device is gone.
+    Restore { kit: String },
     /// Serve the workspace to an AI agent over MCP on stdin/stdout.
     Mcp,
 }
@@ -160,6 +165,19 @@ async fn main() -> Result<()> {
         Command::Invite(command) => {
             let workspace = Workspace::open(&data, Networking::Offline).await?;
             run_invite_command(&workspace, command).await?;
+        }
+        Command::RecoveryKit => {
+            let workspace = Workspace::open(&data, Networking::Offline).await?;
+            println!("{}", workspace.recovery_kit().await?.as_str());
+            eprintln!("Keep this secret: it restores the admin role and holds the bucket credentials.");
+        }
+        Command::Restore { kit } => {
+            let workspace = Workspace::restore(&data, &kit, Networking::Offline).await?;
+            println!(
+                "Restored the admin of \"{}\" into {}",
+                workspace.name(),
+                data.path.display()
+            );
         }
         Command::Mcp => {
             if !Workspace::exists(&data.path) {

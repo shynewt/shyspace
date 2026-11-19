@@ -41,6 +41,7 @@ Only the admin (the workspace creator) changes membership. This keeps a single, 
 
 - **Inviting:** the admin creates an invite (`membership/invite.rs`). Its code is single-use, expires after 7 days, and holds the workspace id, the admin's keys, a token and two presigned links: one to upload a join request, one to download the answer. It contains no bucket credentials.
 - **Joining:** the joiner posts their key package, identity binding and name through the request link. The admin's app shows the request; the admin approves or declines. On approval it signs and saves the commit, applies it, and answers with the MLS Welcome plus an encrypted *grant*: the key history (older epoch keys, their members, removed members' frozen logs) and the bucket credentials. The answer is re-sent until the newcomer posts, then deleted.
+- **Recovery:** the admin can export a *recovery kit* (a code holding a random recovery key and the bucket settings). After every membership change, the admin's app uploads an encrypted snapshot of its admin state (MLS state, identity, keys, members, commits, invites; not content) to `recovery/snapshot`. `restore` on a new device decrypts it, then re-downloads everything else from the bucket, including the admin's own log so its sequence numbers continue. See `membership/recovery.rs`.
 - **Removing:** the admin pulls the member's latest ops, then commits the removal with their last sequence number. The new epoch's key never reaches them, and later ops from them are rejected.
 - **Commits** are wrapped in the admin's signature (`SignedCommit`). Members ignore anything else in a commit slot. The admin re-uploads its commits if they go missing or are altered.
 
@@ -51,7 +52,7 @@ Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even i
 1. apply new admin commits (advance epochs);
 2. retry parked ops;
 3. admin only: repair commits, collect join requests, deliver answers;
-4. pull new segments from everyone who was ever a member (newcomers need removed members' history too);
+4. pull new segments from everyone who was ever a member, ourselves included (newcomers need removed members' history; a restored device needs its own);
 5. push our unpushed ops as one segment;
 6. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
 
@@ -67,6 +68,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 | `mls/commit/<from epoch>` | admin-signed MLS commits |
 | `invites/<token>/request` | a joiner's request, written through a presigned link |
 | `invites/<token>/answer` | the admin's answer, read through a presigned link |
+| `recovery/snapshot` | the admin's recovery snapshot, encrypted with the recovery key |
 | `peers/<id>` | gossip bootstrap hints |
 
 ## Pages
@@ -78,7 +80,7 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 | Path | Job |
 |---|---|
 | `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads` |
-| `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (accepting and removing members), `follow` (members applying commits) |
+| `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
 | `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `queries` |
 | `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |

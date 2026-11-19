@@ -1,4 +1,4 @@
-//! Creating, joining and reopening a workspace.
+//! Creating, joining, reopening and restoring a workspace.
 
 use std::{
     path::{Path, PathBuf},
@@ -9,13 +9,12 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use iroh::SecretKey;
 use tokio::sync::{Notify, broadcast, mpsc};
-use zeroize::Zeroizing;
 
 use super::{Inner, Networking, Profile, State, Workspace};
 use crate::{
     config::WorkspaceConfig,
     identity,
-    keys::KeyStorage,
+    keys::{DeviceKey, KeyStorage},
     membership::{
         invite::{Answer, Grant, Invite, JoinMailbox, JoinRequest, ensure_not_expired},
         mls::{Mls, binding_message},
@@ -31,8 +30,8 @@ use crate::{
     },
 };
 
-const STORE_FILE: &str = "shy.db";
-const MLS_FILE: &str = "mls.db";
+pub(crate) const STORE_FILE: &str = "shy.db";
+pub(crate) const MLS_FILE: &str = "mls.db";
 const SIGNER_META: &str = "mls_signer_public";
 const ANSWER_POLL: Duration = Duration::from_secs(2);
 
@@ -51,13 +50,6 @@ pub struct DataDir {
     pub keys: KeyStorage,
 }
 
-/// The decrypted local pieces every workspace starts from.
-struct Local {
-    store: Store,
-    identity: SecretKey,
-    mls_key: Zeroizing<String>,
-}
-
 impl DataDir {
     pub fn new(path: impl Into<PathBuf>, keys: KeyStorage) -> Self {
         Self {
@@ -66,19 +58,45 @@ impl DataDir {
         }
     }
 
+    pub(crate) fn store_path(&self) -> PathBuf {
+        self.path.join(STORE_FILE)
+    }
+
+    pub(crate) fn mls_path(&self) -> PathBuf {
+        self.path.join(MLS_FILE)
+    }
+
     async fn open_local(&self) -> Result<Local> {
         let device_key = self.keys.load_or_create(&self.path).await?;
-        let store = Store::open(&self.path.join(STORE_FILE), &device_key.database_key(STORE_FILE))?;
+        let store = Store::open(&self.store_path(), &device_key.database_key(STORE_FILE))?;
         let identity = identity::load_or_create(&store)?;
         Ok(Local {
             store,
             identity,
-            mls_key: device_key.database_key(MLS_FILE),
+            device_key,
         })
     }
+}
 
-    fn mls_path(&self) -> PathBuf {
-        self.path.join(MLS_FILE)
+/// The decrypted local pieces every workspace starts from.
+struct Local {
+    store: Store,
+    identity: SecretKey,
+    device_key: DeviceKey,
+}
+
+impl Local {
+    fn open_mls(&self, data: &DataDir, group_id: Option<&[u8]>) -> Result<Mls> {
+        let signer = self.store.meta(SIGNER_META)?;
+        let mls = Mls::open(
+            &data.mls_path(),
+            &self.device_key.database_key(MLS_FILE),
+            &self.identity,
+            signer.as_deref(),
+            group_id,
+        )?;
+        self.store.set_meta(SIGNER_META, mls.signer_public())?;
+        Ok(mls)
     }
 }
 
@@ -149,22 +167,17 @@ impl Workspace {
         networking: Networking,
     ) -> Result<Self> {
         prepare_empty_dir(&data.path)?;
-        let Local {
-            store,
-            identity,
-            mls_key,
-        } = data.open_local().await?;
-        let mut mls = Mls::open(&data.mls_path(), &mls_key, &identity, None, None)?;
+        let local = data.open_local().await?;
+        let mut mls = local.open_mls(data, None)?;
         mls.create_group(workspace_id.as_bytes())?;
-        store.set_meta(SIGNER_META, mls.signer_public())?;
         let config = WorkspaceConfig {
             workspace_id,
             name: workspace_name.to_owned(),
-            admin: identity.public(),
+            admin: local.identity.public(),
             bucket: bucket_config,
         };
-        config.save(&data.path, &store)?;
-        let workspace = Self::start(identity, config, State { store, mls }, bucket, networking).await?;
+        config.save(&data.path, &local.store)?;
+        let workspace = Self::start(data, local, mls, config, bucket, networking).await?;
         workspace.write(Op::Profile {
             name: profile.name.to_owned(),
             is_bot: profile.is_bot,
@@ -188,18 +201,12 @@ impl Workspace {
     ) -> Result<Self> {
         ensure_not_expired(&invite, now_ms()?)?;
         prepare_empty_dir(&data.path)?;
-        let Local {
-            store,
-            identity,
-            mls_key,
-        } = data.open_local().await?;
-        let signer = store.meta(SIGNER_META)?;
-        let mut mls = Mls::open(&data.mls_path(), &mls_key, &identity, signer.as_deref(), None)?;
-        store.set_meta(SIGNER_META, mls.signer_public())?;
-
+        let local = data.open_local().await?;
+        let mut mls = local.open_mls(data, None)?;
         let request = JoinRequest {
             key_package: mls.key_package()?,
-            binding: identity
+            binding: local
+                .identity
                 .sign(&binding_message(mls.signer_public()))
                 .to_bytes()
                 .to_vec(),
@@ -215,7 +222,7 @@ impl Workspace {
             &invite.admin_mls_key,
         )?;
         let grant: Grant = postcard::from_bytes(&mls.open_from_admin(&sealed_grant, &invite.admin)?)?;
-        grant.history.store_into(&store)?;
+        grant.history.store_into(&local.store)?;
 
         let bucket = connect(&grant.bucket)?;
         let config = WorkspaceConfig {
@@ -224,8 +231,8 @@ impl Workspace {
             admin: invite.admin,
             bucket: grant.bucket,
         };
-        config.save(&data.path, &store)?;
-        let workspace = Self::start(identity, config, State { store, mls }, bucket, networking).await?;
+        config.save(&data.path, &local.store)?;
+        let workspace = Self::start(data, local, mls, config, bucket, networking).await?;
         workspace.write(Op::Profile {
             name: profile.name.to_owned(),
             is_bot: profile.is_bot,
@@ -243,33 +250,31 @@ impl Workspace {
             "no workspace in {}",
             data.path.display()
         );
-        let Local {
-            store,
-            identity,
-            mls_key,
-        } = data.open_local().await?;
-        let config = WorkspaceConfig::load(&data.path, &store)?;
-        let signer = store
-            .meta(SIGNER_META)?
-            .context("MLS signing key reference missing")?;
-        let mls = Mls::open(
-            &data.mls_path(),
-            &mls_key,
-            &identity,
-            Some(&signer),
-            Some(config.workspace_id.as_bytes()),
-        )?;
+        let local = data.open_local().await?;
+        let config = WorkspaceConfig::load(&data.path, &local.store)?;
+        ensure!(
+            local.store.meta(SIGNER_META)?.is_some(),
+            "the MLS signing key reference is missing"
+        );
+        let mls = local.open_mls(data, Some(config.workspace_id.as_bytes()))?;
         let bucket = connect(&config)?;
-        Self::start(identity, config, State { store, mls }, bucket, networking).await
+        Self::start(data, local, mls, config, bucket, networking).await
     }
 
     async fn start(
-        identity: SecretKey,
+        data: &DataDir,
+        local: Local,
+        mls: Mls,
         config: WorkspaceConfig,
-        mut state: State,
         bucket: Bucket,
         networking: Networking,
     ) -> Result<Self> {
+        let Local {
+            store,
+            identity,
+            device_key,
+        } = local;
+        let mut state = State { store, mls };
         state.recover_staged_commit()?;
         state.record_epoch()?;
         let (incoming_sender, incoming) = mpsc::channel(1024);
@@ -282,6 +287,8 @@ impl Workspace {
         };
         let workspace = Self {
             inner: Arc::new(Inner {
+                data: data.clone(),
+                device_key,
                 identity,
                 config,
                 state: Mutex::new(state),
@@ -325,7 +332,7 @@ async fn wait_for_answer(invite: &Invite, mailbox: &impl JoinMailbox) -> Result<
     }
 }
 
-fn prepare_empty_dir(dir: &Path) -> Result<()> {
+pub(crate) fn prepare_empty_dir(dir: &Path) -> Result<()> {
     if WorkspaceConfig::exists(dir) {
         bail!("a workspace already exists in {}", dir.display());
     }

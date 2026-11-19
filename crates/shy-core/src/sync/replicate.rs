@@ -7,16 +7,10 @@ use crate::workspace::Workspace;
 
 impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
-    /// also needs the history of people removed before they joined.
+    /// also needs the history of people removed before they joined. Our own
+    /// log is included so a restored device learns what it already wrote.
     pub(crate) async fn pull(&self) -> Result<()> {
-        let me = self.me();
-        let authors: Vec<_> = self
-            .state()
-            .store
-            .everyone_ever()?
-            .into_iter()
-            .filter(|author| *author != me)
-            .collect();
+        let authors = self.state().store.everyone_ever()?;
         for author in authors {
             let cursor = self.state().store.cursor(&author)?;
             for (key, envelopes) in self

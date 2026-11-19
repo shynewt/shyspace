@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{storage::Store, transport::bucket::BucketConfig};
 
-const CONFIG_FILE: &str = "workspace.json";
+pub(crate) const CONFIG_FILE: &str = "workspace.json";
 const BUCKET_META: &str = "bucket_config";
 
 #[derive(Debug, Clone)]

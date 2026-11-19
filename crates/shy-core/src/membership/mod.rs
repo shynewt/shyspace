@@ -7,3 +7,4 @@ mod follow;
 pub mod invite;
 pub(crate) mod keyring;
 pub mod mls;
+pub mod recovery;

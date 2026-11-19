@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Admin recovery: kit plus snapshots in the bucket (2026-11)
+A one-off export goes stale after the next membership change, and restoring a stale MLS state can reuse message keys. So the admin's app uploads a fresh encrypted snapshot after every membership change, and the kit only holds the key to it. Messages and pages are left out of the snapshot; a restored device re-downloads them. Real multi-admin stays open (#5).
+
 ## Local encryption: SQLCipher plus a device key in the OS keychain (2026-11)
 SQLCipher encrypts the whole database, including indexes and the search index, with little code on our side. The key lives in the OS keychain so the data directory alone is useless. Servers without a keychain use an explicit key file (`--key-file`); there is no silent fallback. SQLCipher links the system OpenSSL; macOS and Windows release builds will need a decision (see #24).
 

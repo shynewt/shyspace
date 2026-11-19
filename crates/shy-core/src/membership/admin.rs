@@ -149,13 +149,15 @@ impl Workspace {
             state
                 .store
                 .change_invite_state(token, &[InviteState::Requested], InviteState::Accepted)?;
+            Workspace::mark_recovery_snapshot_stale(&state.store)?;
             (from_epoch, signed)
         };
         self.emit(Change::Members);
         self.emit(Change::Invites);
         self.upload_commit(from_epoch, signed).await?;
         self.deliver_answers().await?;
-        self.inner.bucket.delete_invite_request(token).await
+        self.inner.bucket.delete_invite_request(token).await?;
+        self.refresh_recovery_snapshot().await
     }
 
     pub async fn reject_invite(&self, token: &str) -> Result<()> {
@@ -191,7 +193,8 @@ impl Workspace {
     pub(crate) async fn admin_duties(&self) -> Result<()> {
         self.republish_commits().await?;
         self.collect_join_requests().await?;
-        self.deliver_answers().await
+        self.deliver_answers().await?;
+        self.refresh_recovery_snapshot().await
     }
 
     /// Picks up requests posted through open invites, for the admin to decide.
@@ -278,10 +281,12 @@ impl Workspace {
             let signed = self.record_commit(&state, from_epoch, commit, vec![frozen])?;
             state.mls.merge_pending_commit()?;
             state.record_epoch()?;
+            Workspace::mark_recovery_snapshot_stale(&state.store)?;
             (from_epoch, signed)
         };
         self.emit(Change::Members);
-        self.upload_commit(from_epoch, signed).await
+        self.upload_commit(from_epoch, signed).await?;
+        self.refresh_recovery_snapshot().await
     }
 
     /// Signs a staged commit and saves it before it is applied, so a crash

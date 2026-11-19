@@ -128,6 +128,24 @@ async fn join_workspace(
 }
 
 #[tauri::command]
+async fn restore_workspace(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    kit: String,
+) -> CommandResult<Session> {
+    let workspace = Workspace::restore(&state.data, &kit, Networking::Online)
+        .await
+        .map_err(failed)?;
+    Ok(install(&app, &state, workspace).await)
+}
+
+#[tauri::command]
+async fn recovery_kit(state: State<'_, AppState>) -> CommandResult<String> {
+    let kit = current(&state).await?.recovery_kit().await.map_err(failed)?;
+    Ok(kit.as_str().to_owned())
+}
+
+#[tauri::command]
 async fn channels(state: State<'_, AppState>) -> CommandResult<Vec<Channel>> {
     current(&state).await?.channels().map_err(failed)
 }
@@ -303,6 +321,8 @@ pub fn run() {
             session,
             create_workspace,
             join_workspace,
+            restore_workspace,
+            recovery_kit,
             channels,
             create_channel,
             messages,

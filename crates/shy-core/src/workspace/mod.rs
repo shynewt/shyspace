@@ -5,6 +5,7 @@ mod lifecycle;
 mod reads;
 
 pub use lifecycle::DataDir;
+pub(crate) use lifecycle::{MLS_FILE, STORE_FILE, prepare_empty_dir};
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -14,6 +15,7 @@ use tokio::sync::{Notify, broadcast};
 
 use crate::{
     config::WorkspaceConfig,
+    keys::DeviceKey,
     membership::{admin::drop_unsealed_deliveries, mls::Mls},
     storage::Store,
     sync::SyncStatus,
@@ -70,6 +72,9 @@ impl State {
 }
 
 pub(crate) struct Inner {
+    pub data: DataDir,
+    /// Kept for the admin's recovery snapshots, which carry it.
+    pub device_key: DeviceKey,
     pub identity: SecretKey,
     pub config: WorkspaceConfig,
     pub state: Mutex<State>,
