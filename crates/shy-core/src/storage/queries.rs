@@ -119,8 +119,16 @@ impl Store {
 
     pub fn members(&self, admin: &PublicKey) -> Result<Vec<Member>> {
         let mut statement = self.db.prepare(
-            "SELECT m.member, COALESCE(p.name, ''), COALESCE(p.is_bot, 0), m.active
-             FROM members m LEFT JOIN profiles p ON p.member = m.member ORDER BY m.active DESC, p.name",
+            // Until a newcomer's own profile arrives, the admin knows them by the
+            // name in their approved join request.
+            "SELECT m.member,
+                    COALESCE(p.name, i.joiner_name, ''),
+                    COALESCE(p.is_bot, i.joiner_is_bot, 0),
+                    m.active
+             FROM members m
+             LEFT JOIN profiles p ON p.member = m.member
+             LEFT JOIN invites i ON i.joiner = m.member AND i.state = 'accepted'
+             ORDER BY m.active DESC, COALESCE(p.name, i.joiner_name)",
         )?;
         let rows = statement.query_map([], |row| {
             let id: Vec<u8> = row.get(0)?;

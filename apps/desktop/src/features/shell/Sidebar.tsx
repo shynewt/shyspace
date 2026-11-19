@@ -1,9 +1,10 @@
 import { ChevronRight, FileText, Hash, Plus, Search, Users } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Page, type SyncStatus } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
+import { useLive } from "../../lib/useLive";
 import { sameView, useWorkspace, type View } from "../../lib/workspace";
 import { cx, IconButton, Kbd, Logo, SectionLabel, springs } from "../../ui";
 import { SyncIndicator } from "./SyncIndicator";
@@ -80,9 +81,34 @@ export function Sidebar({
         >
           <Users size={15} />
           <span className="flex-1 text-left">Members{session.is_admin ? " & invites" : ""}</span>
+          {session.is_admin && <PendingRequestsBadge />}
         </button>
       </div>
     </aside>
+  );
+}
+
+/** How many join requests wait for the admin's decision. */
+function PendingRequestsBadge() {
+  const loadInvites = useCallback(() => api.invites(), []);
+  const invites = useLive(loadInvites, (change) => change.kind === "invites" || change.kind === "members");
+  const waiting = invites?.filter((invite) => invite.state === "requested").length ?? 0;
+  return (
+    <AnimatePresence>
+      {waiting > 0 && (
+        <motion.span
+          key={waiting}
+          initial={{ scale: 0.4, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.4, opacity: 0 }}
+          transition={springs.pop}
+          aria-label={`${waiting} join ${waiting === 1 ? "request" : "requests"} waiting`}
+          className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white tabular-nums"
+        >
+          {waiting}
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }
 
