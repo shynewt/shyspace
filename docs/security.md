@@ -25,14 +25,14 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 
 ## Known gaps
 
-- Anyone with the invite code can join, because the admin's app accepts automatically. The code also contains the bucket credentials.
-- A removed member could still forge back-dated ops in epochs they belonged to.
-- Bucket credentials are shared, so anyone holding them can cause denial of service.
-- Local data (SQLite, keys) is not encrypted at rest.
-- Single admin: if their device is lost, membership can no longer change.
-- Gossip topic membership is not authenticated (content still is).
+- Anyone with the invite code can join, because the admin's app accepts automatically (#1). The code also contains the bucket credentials (#2).
+- A removed member could still forge back-dated ops in epochs they belonged to (#4).
+- Bucket credentials are shared, so anyone holding them can cause denial of service (#2).
+- Local data (SQLite, keys) is not encrypted at rest (#3).
+- Single admin: if their device is lost, membership can no longer change (#5).
+- Gossip topic membership is not authenticated; content still is (#6).
 
-Open issues on GitHub track the fixes worth doing.
+Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issues?q=label%3Asecurity>
 
 ## History
 
