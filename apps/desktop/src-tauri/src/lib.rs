@@ -21,6 +21,9 @@ use tokio::sync::Mutex;
 
 type CommandResult<T> = Result<T, String>;
 
+/// How long quitting may wait to upload unsent changes.
+const EXIT_UPLOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 struct AppState {
     data: DataDir,
     workspace: Mutex<Option<Workspace>>,
@@ -652,13 +655,29 @@ pub fn run() {
         .run(on_run_event);
 }
 
-/// macOS: clicking the dock icon brings the hidden window back.
-#[cfg(target_os = "macos")]
 fn on_run_event(app: &AppHandle, event: tauri::RunEvent) {
-    if let tauri::RunEvent::Reopen { .. } = event {
-        tray::show_main_window(app);
+    match event {
+        tauri::RunEvent::Exit => upload_before_exit(app),
+        // macOS: clicking the dock icon brings the hidden window back.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => tray::show_main_window(app),
+        _ => {}
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn on_run_event(_app: &AppHandle, _event: tauri::RunEvent) {}
+/// Sends what wasn't uploaded yet, so a message written just before quitting
+/// isn't held back until the next start. Quitting never waits longer than
+/// `EXIT_UPLOAD_LIMIT`.
+fn upload_before_exit(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    tauri::async_runtime::block_on(async {
+        let Some(workspace) = state.workspace.lock().await.clone() else {
+            return;
+        };
+        match tokio::time::timeout(EXIT_UPLOAD_LIMIT, workspace.shutdown()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!("could not upload unsent changes before quitting: {error:#}"),
+            Err(_) => tracing::warn!("gave up uploading unsent changes: quitting took too long"),
+        }
+    });
+}
