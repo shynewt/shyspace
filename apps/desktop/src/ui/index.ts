@@ -9,6 +9,7 @@ export { Dialog } from "./Dialog";
 export { Drawer } from "./Drawer";
 export { EmptyState } from "./EmptyState";
 export { Field } from "./Field";
+export { FormError } from "./FormError";
 export { IconButton } from "./IconButton";
 export { Input, TextArea } from "./Input";
 export { Kbd } from "./Kbd";

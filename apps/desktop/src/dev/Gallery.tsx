@@ -12,6 +12,7 @@ import {
   Drawer,
   EmptyState,
   Field,
+  FormError,
   IconButton,
   Input,
   Kbd,
@@ -73,6 +74,7 @@ export default function Gallery() {
               {(id) => <Input id={id} placeholder="Ada Lovelace" />}
             </Field>
             <Field label="Notes">{(id) => <TextArea id={id} rows={2} placeholder="Write something…" />}</Field>
+            <FormError message="The bucket refused these keys: 403 Forbidden" />
           </div>
         </Example>
 

@@ -44,8 +44,12 @@ export function showReminderToast(text: string, open: () => void) {
 
 export function reportError(error: unknown) {
   console.error(error);
-  const text = typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
-  show({ text, tone: "error" }, ERROR_TOAST_MS);
+  show({ text: errorMessage(error), tone: "error" }, ERROR_TOAST_MS);
+}
+
+/** The core reports errors as strings; anything else is a bug in the app. */
+export function errorMessage(error: unknown): string {
+  return typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
 }
 
 export function dismissToast(id: number) {

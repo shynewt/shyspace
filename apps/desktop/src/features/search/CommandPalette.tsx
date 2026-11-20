@@ -7,12 +7,14 @@ import {
   Inbox,
   MessageSquare,
   Search,
+  Settings,
   Users,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SearchHit } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
+import { SETTINGS_SECTIONS } from "../../lib/settings";
 import { shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
@@ -66,7 +68,7 @@ function PaletteBody({
   onOpenMembers: () => void;
   onMarkAllRead: () => void;
 }) {
-  const { channels, pages, navigate, session } = useWorkspace();
+  const { channels, pages, navigate, session, openSettings } = useWorkspace();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [selected, setSelected] = useState(0);
@@ -111,6 +113,14 @@ function PaletteBody({
         icon: <Users size={15} />,
         onChoose: onOpenMembers,
       },
+      // Settings sections show only while searching, so the empty palette stays short.
+      ...(needle
+        ? SETTINGS_SECTIONS.map((section) => ({
+            title: `Settings: ${section.label}`,
+            icon: <Settings size={15} />,
+            onChoose: () => openSettings({ section: section.id }),
+          }))
+        : []),
     ]
       .filter((action) => matches(action.title))
       .map((action) => ({ ...action, key: `action:${action.title}`, group: "Actions" }));
@@ -164,7 +174,7 @@ function PaletteBody({
       ];
     });
     return [...jumpTo, ...found, ...actions];
-  }, [query, hits, channels, pages, navigate, session.is_admin, onOpenMembers, onMarkAllRead]);
+  }, [query, hits, channels, pages, navigate, session.is_admin, onOpenMembers, onMarkAllRead, openSettings]);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });

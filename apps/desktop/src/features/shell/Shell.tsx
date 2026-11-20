@@ -2,6 +2,7 @@ import { UserX } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LaterItem, type Session } from "../../lib/api";
+import type { SettingsTarget } from "../../lib/settings";
 import { SHORTCUTS } from "../../lib/shortcuts";
 import { showToast } from "../../lib/toast";
 import { useAlerts } from "../../lib/useAlerts";
@@ -30,7 +31,7 @@ export function Shell({ session }: { session: Session }) {
   const [isPaletteOpen, setPaletteOpen] = useState(false);
   const [isMembersOpen, setMembersOpen] = useState(false);
   const [isShortcutsOpen, setShortcutsOpen] = useState(false);
-  const [isSettingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(null);
 
   useEffect(() => {
     if (!view && channels.length > 0) setView({ kind: "channel", id: channels[0].id });
@@ -79,7 +80,7 @@ export function Shell({ session }: { session: Session }) {
         case "cheatSheet":
           return setShortcutsOpen(true);
         case "settings":
-          return setSettingsOpen(true);
+          return setSettingsTarget((current) => current ?? { section: "profile" });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -96,9 +97,11 @@ export function Shell({ session }: { session: Session }) {
   useAlerts(view);
   useReminders(openSaved);
   usePresence();
+
+  const openSettings = useCallback((target: SettingsTarget = { section: "profile" }) => setSettingsTarget(target), []);
   const context = useMemo(
-    () => ({ session, channels, pages, view, navigate }),
-    [session, channels, pages, view, navigate],
+    () => ({ session, channels, pages, view, navigate, openSettings }),
+    [session, channels, pages, view, navigate, openSettings],
   );
 
   return (
@@ -113,7 +116,7 @@ export function Shell({ session }: { session: Session }) {
           status={status}
           onOpenSearch={() => setPaletteOpen(true)}
           onOpenMembers={() => setMembersOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => openSettings()}
         />
         <main className="relative min-w-0 flex-1 bg-surface">
           <AnimatePresence mode="wait" initial={false}>
@@ -138,7 +141,7 @@ export function Shell({ session }: { session: Session }) {
       <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} onOpenMembers={() => setMembersOpen(true)} />
       <MembersPanel open={isMembersOpen} onOpenChange={setMembersOpen} />
       <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setShortcutsOpen} />
-      <SettingsDialog open={isSettingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog target={settingsTarget} onNavigate={setSettingsTarget} onClose={() => setSettingsTarget(null)} />
       <RemovedNotice isRemoved={status?.removed ?? false} />
     </WorkspaceContext.Provider>
   );

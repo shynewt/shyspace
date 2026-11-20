@@ -34,6 +34,7 @@ Keep feedback under about 250 ms. Reduced-motion settings are respected globally
 | `Button` | actions; variants `primary`, `secondary`, `ghost`, `danger`; sizes `sm`, `md`, `lg`; `isLoading` |
 | `IconButton` | icon-only actions; `label` is required and becomes the tooltip and accessible name |
 | `Input`, `TextArea`, `Field` | form controls; `Field` links its label to the control through a render function |
+| `FormError` | why a form's last save failed, under the form; announced to screen readers |
 | `Dialog` | modal surfaces (centered, or `placement="top"` like the search palette); never taller than the window, longer content scrolls inside; `hasCloseButton` for dialogs without their own Cancel or Done |
 | `Drawer` | side panels, like Members |
 | `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger; a menu sets destructive actions apart below a line |
@@ -54,4 +55,6 @@ Dialogs, drawers, menus, popovers and tooltips use [Radix](https://www.radix-ui.
 - New components go in `ui/`, get an entry in `ui/index.ts`, and appear in the gallery.
 - Every interactive element works with the keyboard and has an accessible name.
 - Focus rings are for keyboard use. After a click, focus that Radix moves (back to a menu's trigger, into a dialog) gets no ring: `lib/useInputModality.ts` marks how the app was last used. Controls that show on hover also show for keyboard focus with `keyboard-focus-within:`, not `focus-within:`, which stays on after a click.
+- Saving: choices and toggles apply at once. Text forms have one Save button named for what it does ("Save profile"). Never mix the two in one form. A failed save keeps what the user typed and shows why with `FormError` (`lib/useFormAction.ts` does both).
+- Settings is one fixed-size window: sections under "You" and under the workspace's name. Open it at a section from anywhere with `useWorkspace().openSettings({ section })`; every section is also in the command palette ("Settings: Notifications").
 - Sidebar counts mean "this needs you" (unread messages, mentions, a reminder that's due): a coloured badge and a bold label. Things that are only waiting, like saved items, get no count.

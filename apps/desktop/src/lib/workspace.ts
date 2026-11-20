@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import type { Channel, LaterItem, LinkedMessage, Page, Session } from "./api";
+import type { SettingsTarget } from "./settings";
 
 export type View =
   /** `thread` opens that thread beside the channel; `focus` scrolls to and highlights a message. */
@@ -18,6 +19,8 @@ export type WorkspaceContextValue = {
   pages: Page[];
   view: View | null;
   navigate: (view: View) => void;
+  /** Opens Settings, at Profile unless a section is given. */
+  openSettings: (target?: SettingsTarget) => void;
 };
 
 export const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
