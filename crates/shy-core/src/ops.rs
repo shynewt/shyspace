@@ -229,6 +229,23 @@ pub(crate) fn cut_to(text: &str, max: usize) -> &str {
     }
 }
 const MAX_STATUS_TEXT_CHARS: usize = 100;
+pub const MAX_PROFILE_NAME_CHARS: usize = 80;
+/// Enough for any emoji sequence, and for a custom emoji's `:name:` later.
+pub const MAX_EMOJI_CHARS: usize = 32;
+/// The longest id an op may name. Real ones are under about 120 (a private
+/// message's), so only forged ops come near.
+pub const MAX_ID_CHARS: usize = 200;
+/// How much of a page goes into the search index.
+pub const MAX_INDEXED_PAGE_CHARS: usize = 200_000;
+
+/// A display name or emoji from someone else, as every device shows it:
+/// without control or invisible characters (which can disguise it), cut short.
+pub fn clean_label(raw: &str, max: usize) -> String {
+    raw.chars()
+        .filter(|c| (!c.is_control() && !is_invisible_format_char(*c)) || *c == '\u{200D}')
+        .take(max)
+        .collect()
+}
 
 const MAX_STATUS_EMOJI_CHARS: usize = 16;
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../lib/api";
+import { MAX_PROFILE_NAME_CHARS } from "../../lib/limits";
 import { showToast } from "../../lib/toast";
 import { useFormAction } from "../../lib/useFormAction";
 import { useLive } from "../../lib/useLive";
@@ -20,7 +21,14 @@ export function ProfileSettings() {
   return (
     <form onSubmit={save.run} className="flex flex-col gap-3">
       <Field label="Display name" hint="Everyone in the workspace sees this name.">
-        {(id) => <Input id={id} value={name} onChange={(event) => setName(event.target.value)} />}
+        {(id) => (
+          <Input
+            id={id}
+            value={name}
+            maxLength={MAX_PROFILE_NAME_CHARS}
+            onChange={(event) => setName(event.target.value)}
+          />
+        )}
       </Field>
       <FormError message={save.error} />
       <Button

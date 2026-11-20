@@ -9,7 +9,8 @@ use super::Store;
 use crate::{
     config,
     ops::{
-        MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, Op, VerifiedOp, clean_channel_name, cut_to, is_owned_by,
+        MAX_EMOJI_CHARS, MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS,
+        MAX_PROFILE_NAME_CHARS, Op, VerifiedOp, clean_channel_name, clean_label, cut_to, is_owned_by,
         is_valid_status, rule_violation,
     },
     pages,
@@ -93,12 +94,22 @@ impl Store {
         {
             return Err(rule_violation("op creates an id that belongs to someone else"));
         }
+        if verified
+            .body
+            .op
+            .named_ids()
+            .iter()
+            .any(|id| id.len() > MAX_ID_CHARS)
+        {
+            return Err(rule_violation("op names an id far longer than any real one"));
+        }
         self.observe_lamport(lamport)?;
         if self.has_no_effect(&verified.body.op, verified.seq)? {
             return Ok(None);
         }
         Ok(Some(match &verified.body.op {
             Op::Profile { name, is_bot } => {
+                let name = clean_label(name, MAX_PROFILE_NAME_CHARS);
                 self.db.execute(
                     "INSERT INTO profiles (member, name, is_bot, lamport) VALUES (?1, ?2, ?3, ?4)
                      ON CONFLICT (member) DO UPDATE SET name = ?2, is_bot = ?3, lamport = ?4 WHERE lamport < ?4",
@@ -137,6 +148,7 @@ impl Store {
                 emoji,
                 active,
             } => {
+                let emoji = clean_label(emoji, MAX_EMOJI_CHARS);
                 self.db.execute(
                     "INSERT INTO reactions (message, author, emoji, active, lamport) VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT (message, author, emoji) DO UPDATE SET active = ?4, lamport = ?5 WHERE lamport < ?5",
@@ -273,7 +285,8 @@ impl Store {
                 .query_row("SELECT title, doc FROM pages WHERE id = ?", [id], |row| {
                     Ok((row.get(0)?, row.get(1)?))
                 })?;
-        self.index_for_search("page", id, &title, &pages::read(state.as_deref())?)
+        let text = pages::read(state.as_deref())?;
+        self.index_for_search("page", id, &title, cut_to(&text, MAX_INDEXED_PAGE_CHARS))
     }
 
     pub(super) fn index_for_search(&self, kind: &str, id: &str, title: &str, body: &str) -> Result<()> {

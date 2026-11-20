@@ -1,6 +1,7 @@
-/** Must match `MAX_MESSAGE_CHARS` and `MAX_PAGE_TITLE_CHARS` in shy-core's ops.rs. */
+/** Must match `MAX_MESSAGE_CHARS`, `MAX_PAGE_TITLE_CHARS` and `MAX_PROFILE_NAME_CHARS` in shy-core's ops.rs. */
 export const MAX_MESSAGE_CHARS = 40_000;
 export const MAX_PAGE_TITLE_CHARS = 200;
+export const MAX_PROFILE_NAME_CHARS = 80;
 /** Where the composer starts showing how close a message is to the limit. */
 export const SHOW_COUNT_FROM_CHARS = 36_000;
 

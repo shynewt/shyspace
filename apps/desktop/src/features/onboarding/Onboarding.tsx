@@ -13,6 +13,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { api, type BucketConfig, type Session } from "../../lib/api";
+import { MAX_PROFILE_NAME_CHARS } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { Button, Field, Input, Logo, rise, SegmentedControl, TextArea } from "../../ui";
@@ -133,7 +134,13 @@ function CreateForm({ onReady }: { onReady: (session: Session) => void }) {
         </Field>
         <Field label="Your name">
           {(id) => (
-            <Input id={id} value={name} onChange={(event) => setName(event.target.value)} placeholder="Ada Lovelace" />
+            <Input
+              id={id}
+              value={name}
+              maxLength={MAX_PROFILE_NAME_CHARS}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Ada Lovelace"
+            />
           )}
         </Field>
       </div>
@@ -293,7 +300,13 @@ function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
       </Field>
       <Field label="Your name">
         {(id) => (
-          <Input id={id} value={name} onChange={(event) => setName(event.target.value)} placeholder="Grace Hopper" />
+          <Input
+            id={id}
+            value={name}
+            maxLength={MAX_PROFILE_NAME_CHARS}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Grace Hopper"
+          />
         )}
       </Field>
       <SubmitButton

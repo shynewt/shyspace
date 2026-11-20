@@ -1147,3 +1147,116 @@ async fn a_mention_hidden_past_the_limit_does_not_alert() {
     }
     assert_eq!(alerts, 1, "a mention people can see still alerts");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn names_and_emoji_from_others_are_bounded_and_plain() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "react to me", None).unwrap();
+    let mut forger = Forger::new(&bob);
+    let disguised = format!("Ada\u{202E}nimda{}", "x".repeat(10_000));
+    admin
+        .receive(forger.seal(Op::Profile {
+            name: disguised,
+            is_bot: false,
+        }))
+        .unwrap();
+    admin
+        .receive(forger.seal(Op::Reaction {
+            message: message.clone(),
+            emoji: format!("👍\u{0007}{}", "🎉".repeat(5_000)),
+            active: true,
+        }))
+        .unwrap();
+
+    let name = admin
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| member.id == bob.my_id())
+        .unwrap()
+        .name;
+    assert!(name.chars().count() <= 80, "{} characters", name.chars().count());
+    assert!(!name.contains('\u{202E}'));
+    let messages = admin.messages(&general, None, 50).unwrap();
+    let reactions = &messages.last().unwrap().reactions;
+    assert_eq!(reactions.len(), 1);
+    assert!(reactions[0].emoji.chars().count() <= 32);
+    assert!(!reactions[0].emoji.contains('\u{0007}'));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ops_naming_huge_ids_are_skipped() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal(Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: "reply to a giant".into(),
+            reply_to: Some("x".repeat(100_000)),
+        }))
+        .unwrap();
+    admin
+        .receive(forger.seal(Op::Reaction {
+            message: "y".repeat(100_000),
+            emoji: "👍".into(),
+            active: true,
+        }))
+        .unwrap();
+    assert!(!texts_in(&admin, &general).contains(&"reply to a giant".to_string()));
+    assert_eq!(
+        admin
+            .state()
+            .store
+            .count_where("reactions", "message", &"y".repeat(100_000)),
+        0
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_huge_page_is_only_partly_searchable() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = bob.create_page("Big", None).unwrap();
+    let filler = "lorem ".repeat(50_000);
+    bob.edit_page(&page, crate::Edit::Append(&format!("{filler}NEEDLEATTHEEND")))
+        .unwrap();
+    bob.sync().await;
+    admin.sync().await;
+    assert!(admin.search("NEEDLEATTHEEND", 10).unwrap().is_empty());
+    assert!(!admin.search("lorem", 10).unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn your_own_name_and_emoji_over_the_limit_are_refused() {
+    let (_root, _bucket, admin, _bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "hi", None).unwrap();
+    let too_long = "a".repeat(81);
+    assert!(
+        admin
+            .set_profile(crate::Profile {
+                name: &too_long,
+                is_bot: false,
+            })
+            .is_err()
+    );
+    assert!(
+        admin
+            .set_profile(crate::Profile {
+                name: "Ada\u{202E}",
+                is_bot: false,
+            })
+            .is_err()
+    );
+    assert!(admin.react(&message, &"🎉".repeat(33), true).is_err());
+    let longest = "a".repeat(80);
+    admin
+        .set_profile(crate::Profile {
+            name: &longest,
+            is_bot: false,
+        })
+        .unwrap();
+    admin.react(&message, "👍🏽", true).unwrap();
+}

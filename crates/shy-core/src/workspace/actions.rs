@@ -7,8 +7,8 @@ use super::{Profile, Workspace};
 use crate::{
     crypto,
     ops::{
-        EntityId, Envelope, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, Op, OpBody, VerifiedOp, new_owned_id,
-        normalize_channel_name, now_ms,
+        EntityId, Envelope, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, MAX_PROFILE_NAME_CHARS,
+        Op, OpBody, VerifiedOp, clean_label, new_owned_id, normalize_channel_name, now_ms,
     },
     pages::{self, Edit},
     private::ids::{new_private_message_id, private_channel_of, private_kind},
@@ -280,6 +280,10 @@ impl Workspace {
     }
 
     pub fn react(&self, message: &str, emoji: &str, active: bool) -> Result<()> {
+        ensure!(
+            clean_label(emoji, MAX_EMOJI_CHARS) == emoji,
+            "a reaction is one emoji (up to {MAX_EMOJI_CHARS} characters)"
+        );
         self.write(Op::Reaction {
             message: message.to_owned(),
             emoji: emoji.to_owned(),
@@ -337,8 +341,13 @@ impl Workspace {
     }
 
     pub fn set_profile(&self, profile: Profile<'_>) -> Result<()> {
+        let name = profile.name.trim();
+        ensure!(
+            clean_label(name, MAX_PROFILE_NAME_CHARS) == name,
+            "a name has up to {MAX_PROFILE_NAME_CHARS} characters, without invisible ones"
+        );
         self.write(Op::Profile {
-            name: profile.name.trim().to_owned(),
+            name: name.to_owned(),
             is_bot: profile.is_bot,
         })
     }
