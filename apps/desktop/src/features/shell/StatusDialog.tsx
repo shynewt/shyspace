@@ -7,7 +7,7 @@ import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useFormAction } from "../../lib/useFormAction";
 import { Button, cx, Dialog, EmojiPicker, Field, FormError, Input, Popover, SegmentedControl } from "../../ui";
 
-/** "unchanged" keeps the current status's end time, offered only when it has one. */
+/** "unchanged" keeps the current status's end time, offered only while that's still ahead. */
 type ClearAfter = "unchanged" | "never" | "hour" | "four_hours" | "today";
 
 type Preset = { emoji: string; text: string; clearAfter: ClearAfter; alerts: NotifyLevel; detail: string };
@@ -22,8 +22,8 @@ const PRESETS: Preset[] = [
 
 const HOUR_MS = 60 * 60 * 1000;
 
-function clearTime(choice: ClearAfter, current: MemberStatus | null, now: Date): number | null {
-  if (choice === "unchanged") return current?.until_ms ?? null;
+function clearTime(choice: ClearAfter, currentEnd: number | null, now: Date): number | null {
+  if (choice === "unchanged") return currentEnd;
   if (choice === "hour") return now.getTime() + HOUR_MS;
   if (choice === "four_hours") return now.getTime() + 4 * HOUR_MS;
   if (choice === "today") {
@@ -32,6 +32,12 @@ function clearTime(choice: ClearAfter, current: MemberStatus | null, now: Date):
     return endOfDay.getTime();
   }
   return null;
+}
+
+/** "17:00" for later today, "Sat 02:00" for another day. */
+function describeEnd(ms: number): string {
+  const isToday = new Date(ms).toDateString() === new Date().toDateString();
+  return isToday ? formatTime(ms) : `${new Date(ms).toLocaleDateString([], { weekday: "short" })} ${formatTime(ms)}`;
 }
 
 /** Sets your status: what others see by your name, and how quiet your alerts are meanwhile. */
@@ -54,12 +60,14 @@ export function StatusDialog({
 function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone: () => void }) {
   const [emoji, setEmoji] = useState(current?.emoji ?? "");
   const [text, setText] = useState(current?.text ?? "");
-  const [clearAfter, setClearAfter] = useState<ClearAfter>(current?.until_ms ? "unchanged" : "never");
+  // Taken once: the status can end or change elsewhere while this is open.
+  const [currentEnd] = useState(() => (current?.until_ms && current.until_ms > Date.now() ? current.until_ms : null));
+  const [clearAfter, setClearAfter] = useState<ClearAfter>(currentEnd ? "unchanged" : "never");
   const [alerts, setAlerts] = useState<NotifyLevel>(current?.alerts ?? "all");
   const textInput = useRef<HTMLInputElement>(null);
   useFocusOnMount(textInput);
   const save = useFormAction(async () => {
-    await api.setStatus(emoji.trim(), text.trim(), clearTime(clearAfter, current, new Date()), alerts);
+    await api.setStatus(emoji.trim(), text.trim(), clearTime(clearAfter, currentEnd, new Date()), alerts);
     showToast("Status set.");
     onDone();
   });
@@ -70,7 +78,7 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
     setAlerts(preset.alerts);
   };
   const clearChoices: Array<{ value: ClearAfter; label: string }> = [
-    ...(current?.until_ms ? [{ value: "unchanged" as const, label: `Until ${formatTime(current.until_ms)}` }] : []),
+    ...(currentEnd ? [{ value: "unchanged" as const, label: `Until ${describeEnd(currentEnd)}` }] : []),
     { value: "never", label: "Never" },
     { value: "hour", label: "1 hour" },
     { value: "four_hours", label: "4 hours" },

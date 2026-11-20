@@ -138,3 +138,14 @@ test("the me menu opens settings", async ({ page }) => {
     "true",
   );
 });
+
+test("editing a status whose time has passed doesn't keep the old end", async ({ page }) => {
+  await page.evaluate(() =>
+    window.fake.handle("set_status", { emoji: "", text: "Lunch", untilMs: Date.now() - 60_000, alerts: "all" }),
+  );
+  await expect(meButton(page)).toContainText("Lunch");
+
+  const dialog = await openStatusDialog(page);
+  await expect(dialog.getByRole("radio", { name: /^Until / })).toHaveCount(0);
+  await expect(dialog.getByRole("radio", { name: "Never" })).toBeChecked();
+});
