@@ -104,8 +104,9 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
   }, [rows, unreadFrom]);
 
   useEffect(() => {
+    // Escape that closed something else, like a menu or the palette, isn't for the line.
     const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setUnreadLineDismissed(true);
+      if (event.key === "Escape" && !event.defaultPrevented) setUnreadLineDismissed(true);
     };
     window.addEventListener("keydown", dismissOnEscape);
     return () => window.removeEventListener("keydown", dismissOnEscape);

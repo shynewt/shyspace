@@ -145,7 +145,7 @@ export function Composer({
                 } else if (event.key === "Escape" && editing) {
                   event.preventDefault();
                   finishEditing();
-                } else if (event.key === "ArrowUp" && !text && !editing && onEditLast) {
+                } else if (event.key === "ArrowUp" && !hasModifier(event) && !text && !editing && onEditLast) {
                   event.preventDefault();
                   onEditLast();
                 }
@@ -178,6 +178,10 @@ export function Composer({
       </p>
     </div>
   );
+}
+
+function hasModifier(event: React.KeyboardEvent): boolean {
+  return event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
 }
 
 function LengthCount({ length, isTooLong }: { length: number; isTooLong: boolean }) {

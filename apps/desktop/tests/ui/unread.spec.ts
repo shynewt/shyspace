@@ -56,3 +56,21 @@ test("the unread filter hides channels you've read", async ({ page }) => {
 
   await page.getByRole("button", { name: "Show all channels" }).click();
 });
+
+test("closing something else with Escape keeps the new-messages line", async ({ page }) => {
+  await page.getByRole("button", { name: "random", exact: true }).click();
+  await page.getByLabel("Message #random").fill("Morning all");
+  await page.getByLabel("Message #random").press("Enter");
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await receiveInRandom(page, "Coffee?");
+  await page.getByRole("button", { name: "random, 1 unread" }).click();
+  const line = page.getByRole("separator", { name: "New messages" });
+  await expect(line).toBeVisible();
+
+  await page.keyboard.press("Control+k");
+  await expect(page.getByLabel("Search messages and pages")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Search messages and pages")).toHaveCount(0);
+  // A dismissed line fades out before it goes, so check it stays fully shown.
+  await expect(line).toHaveCSS("opacity", "1");
+});

@@ -39,3 +39,22 @@ test("shortcuts open the inbox and the cheat sheet", async ({ page }) => {
   const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
   await expect(sheet).toContainText("Next unread channel");
 });
+
+test("keys the page editor uses stay in the editor", async ({ page }) => {
+  for (const title of ["Alpha", "Beta"]) {
+    await page.getByRole("button", { name: "New page" }).click();
+    await expect(page.getByLabel("Page title")).toHaveValue("");
+    await page.getByLabel("Page title").fill(title);
+    await page.getByLabel("Page title").press("Enter");
+  }
+  const alpha = page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Alpha", exact: true });
+  await alpha.click();
+  await expect(page.getByLabel("Page title")).toHaveValue("Alpha");
+  await page.locator(".cm-content").click();
+  await page.keyboard.type("one\ntwo");
+  await page.keyboard.press("ArrowUp");
+
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Alpha"))).toBe("two\none");
+  await expect(alpha).toHaveAttribute("aria-current", "page");
+});

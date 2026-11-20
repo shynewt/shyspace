@@ -47,6 +47,8 @@ export function Shell({ session }: { session: Session }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Keys something focused already used, like the page editor's Alt+↓, stay theirs.
+      if (event.defaultPrevented) return;
       const shortcut = SHORTCUTS.find((candidate) => candidate.matches(event));
       if (!shortcut) return;
       event.preventDefault();
