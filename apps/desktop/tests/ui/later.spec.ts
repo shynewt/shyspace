@@ -13,25 +13,45 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole("article").filter({ hasText: "Read the spec" })).toBeVisible();
 });
 
-test("a saved message waits in Later until done", async ({ page }) => {
+function later(page: Page) {
+  return page.getByRole("button", { name: "Later", exact: true });
+}
+
+test("a saved message waits in Later until done, and done can be undone", async ({ page }) => {
   await messageMenu(page, "Read the spec");
   await page.getByRole("menuitem", { name: "Save for later" }).click();
 
-  await page.getByRole("button", { name: "Later, 1 saved" }).click();
+  await later(page).click();
   const list = page.getByRole("list", { name: "Saved for later" });
   await expect(list).toContainText("Read the spec");
+  await list.getByRole("listitem").hover();
   await list.getByRole("button", { name: "Mark as done" }).click();
 
   await expect(list.getByRole("listitem")).toHaveCount(0);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(list).toContainText("Read the spec");
+
+  await list.getByRole("button", { name: "Mark as done" }).click();
   await page.getByRole("button", { name: /Completed/ }).click();
   await expect(page.getByRole("list", { name: "Completed" })).toContainText("Read the spec");
-  await expect(page.getByRole("button", { name: "Later", exact: true })).toBeVisible();
+});
+
+test("a saved item has its actions on right-click", async ({ page }) => {
+  await messageMenu(page, "Read the spec");
+  await page.getByRole("menuitem", { name: "Save for later" }).click();
+  await later(page).click();
+
+  await page.getByRole("list", { name: "Saved for later" }).getByRole("listitem").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Remove from Later" }).click();
+  await expect(page.getByText("Nothing saved for later")).toBeVisible();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByRole("list", { name: "Saved for later" })).toContainText("Read the spec");
 });
 
 test("a reminder fires when it comes due", async ({ page }) => {
   await messageMenu(page, "Read the spec");
   await chooseInSubmenu(page, "Remind me", "In 20 minutes");
-  await page.getByRole("button", { name: "Later, 1 saved" }).click();
+  await later(page).click();
   await expect(page.getByRole("list", { name: "Saved for later" })).toContainText(/Today|Tomorrow/);
 
   // Move the reminder two seconds ahead, as if twenty minutes had passed.
@@ -49,8 +69,7 @@ test("Later stands out only when a reminder is due", async ({ page }) => {
   await messageMenu(page, "Read the spec");
   await chooseInSubmenu(page, "Remind me", "In 20 minutes");
   await page.getByRole("button", { name: "general", exact: true }).click();
-  const quiet = page.getByRole("button", { name: "Later, 1 saved" });
-  await expect(quiet).toHaveCSS("font-weight", "400");
+  await expect(later(page)).toHaveCSS("font-weight", "400");
 
   await page.evaluate(() =>
     window.fake.handle("save_for_later", {
@@ -58,13 +77,13 @@ test("Later stands out only when a reminder is due", async ({ page }) => {
       remindMs: Date.now() + 1000,
     }),
   );
-  const due = page.getByRole("button", { name: "Later, 1 due, 1 saved" });
+  const due = page.getByRole("button", { name: "Later, 1 due" });
   await expect(due).toBeVisible({ timeout: 10_000 });
   await expect(due).toHaveCSS("font-weight", "600");
 
   await due.click();
   await page.getByRole("list", { name: "Saved for later" }).getByRole("button", { name: "Mark as done" }).click();
-  await expect(page.getByRole("button", { name: "Later", exact: true })).toBeVisible();
+  await expect(later(page)).toBeVisible();
 });
 
 test("a page can be saved from its header", async ({ page }) => {
@@ -74,6 +93,6 @@ test("a page can be saved from its header", async ({ page }) => {
   await page.getByRole("button", { name: "Save for later" }).click();
 
   await expect(page.getByRole("button", { name: "Saved", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Later, 1 saved" }).click();
+  await later(page).click();
   await expect(page.getByRole("list", { name: "Saved for later" })).toContainText("Spec");
 });

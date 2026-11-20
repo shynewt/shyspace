@@ -1,14 +1,15 @@
 import { AlarmClock, Bookmark, Check, ChevronRight, Ellipsis, FileText, Trash2, Undo2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type LaterItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
 import { displayName } from "../../lib/people";
 import { describeReminder, REMINDER_CHOICES } from "../../lib/reminders";
-import { reportError } from "../../lib/toast";
+import { reportError, showUndoToast } from "../../lib/toast";
+import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { cx, EmptyState, IconButton, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
+import { Avatar, cx, EmptyState, IconButton, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
 
 /** Messages and pages you saved for yourself, with their reminders. */
 export function LaterView() {
@@ -77,6 +78,10 @@ export function LaterView() {
 
 function LaterRow({ item }: { item: LaterItem }) {
   const { channels, pages, navigate } = useWorkspace();
+  const row = useRef<HTMLLIElement>(null);
+  const [isMenuOpen, setMenuOpen] = useState(false);
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+  useContextMenu(row, openMenu);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const linked = item.message;
   const openItem = () => {
@@ -87,11 +92,23 @@ function LaterRow({ item }: { item: LaterItem }) {
       navigate({ kind: "page", id: item.page.id });
     }
   };
+  const author = linked ? displayName(linked.message.author_name, linked.message.author) : null;
   const where = linked
-    ? `${displayName(linked.message.author_name, linked.message.author)} in #${channels.find((channel) => channel.id === linked.message.channel)?.name ?? ""}`
+    ? `${author} in #${channels.find((channel) => channel.id === linked.message.channel)?.name ?? ""}`
     : "Page";
   const preview = linked ? plainPreview(linked.message.text, (id) => titles.get(id)) : item.page?.title || "Untitled";
   const isOverdue = item.remind_ms !== null && item.remind_ms <= Date.now() && !item.is_done;
+
+  const setDone = (isDone: boolean) =>
+    api
+      .markLaterDone(item.id, isDone)
+      .then(() => isDone && showUndoToast("Marked as done.", () => api.markLaterDone(item.id, false)))
+      .catch(reportError);
+  const remove = () =>
+    api
+      .removeFromLater(item.id)
+      .then(() => showUndoToast("Removed from Later.", () => api.saveForLater(item.id, item.remind_ms)))
+      .catch(reportError);
   const menu: MenuItem[] = [
     {
       label: "Remind me",
@@ -103,32 +120,39 @@ function LaterRow({ item }: { item: LaterItem }) {
       })),
     },
     {
-      label: "Remove from Later",
-      icon: <Trash2 size={14} />,
-      onSelect: () => api.removeFromLater(item.id).catch(reportError),
-      isDestructive: true,
+      label: item.is_done ? "Mark as not done" : "Mark as done",
+      icon: item.is_done ? <Undo2 size={14} /> : <Check size={14} />,
+      onSelect: () => setDone(!item.is_done),
     },
+    { label: "Remove from Later", icon: <Trash2 size={14} />, onSelect: remove, isDestructive: true },
   ];
+
   return (
     <motion.li
+      ref={row}
       layout
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, height: 0 }}
+      exit={{ opacity: 0, x: 24, height: 0, transition: { duration: 0.22, ease: "easeIn" } }}
       transition={springs.smooth}
-      className="group flex items-start gap-2 rounded-xl px-2 py-1.5 hover:bg-surface-2"
+      className={cx(
+        "group flex items-center gap-3 rounded-xl px-2.5 py-2 hover:bg-surface-2",
+        isMenuOpen && "bg-surface-2",
+      )}
     >
-      <IconButton
-        label={item.is_done ? "Mark as not done" : "Mark as done"}
-        size="sm"
-        icon={item.is_done ? <Undo2 size={13} /> : <Check size={13} />}
-        onClick={() => api.markLaterDone(item.id, !item.is_done).catch(reportError)}
-        className="mt-1"
-      />
+      {linked ? (
+        <Avatar id={linked.message.author} name={author ?? ""} isBot={linked.message.author_is_bot} size={30} />
+      ) : (
+        <span
+          aria-hidden
+          className="grid size-[30px] shrink-0 place-items-center rounded-[30%] bg-surface-2 text-muted"
+        >
+          <FileText size={15} />
+        </span>
+      )}
       <button type="button" onClick={openItem} className="min-w-0 flex-1 text-left">
         <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
-          {!linked && <FileText size={12} />}
-          {where}
+          <span className="truncate">{where}</span>
           {item.remind_ms !== null && !item.is_done && (
             <span
               className={cx(
@@ -144,8 +168,24 @@ function LaterRow({ item }: { item: LaterItem }) {
           {preview}
         </span>
       </button>
-      <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100">
-        <Menu trigger={<IconButton label="Later actions" size="sm" icon={<Ellipsis size={13} />} />} items={menu} />
+      <span
+        className={cx(
+          "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
+          isMenuOpen && "opacity-100",
+        )}
+      >
+        <IconButton
+          label={item.is_done ? "Mark as not done" : "Mark as done"}
+          size="sm"
+          icon={item.is_done ? <Undo2 size={14} /> : <Check size={14} />}
+          onClick={() => setDone(!item.is_done)}
+        />
+        <Menu
+          open={isMenuOpen}
+          onOpenChange={setMenuOpen}
+          trigger={<IconButton label="Later actions" size="sm" icon={<Ellipsis size={14} />} />}
+          items={menu}
+        />
       </span>
     </motion.li>
   );

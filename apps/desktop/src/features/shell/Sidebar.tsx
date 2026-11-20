@@ -126,21 +126,11 @@ function InboxLink() {
 /** Later, counting what's saved and not done yet. */
 function LaterLink() {
   const later = useLive(api.later, (change) => change.kind === "later" || change.kind === "messages");
-  const open = later?.filter((item) => !item.is_done) ?? [];
   // A reminder comes due exactly when the core hands it out, which also
   // reloads this list, so checking the clock here is enough.
   const now = Date.now();
-  const due = open.filter((item) => item.remind_ms !== null && item.remind_ms <= now).length;
-  return (
-    <NavItem
-      view={{ kind: "later" }}
-      icon={<Bookmark size={15} />}
-      label="Later"
-      unread={due}
-      countNoun="due"
-      quietCount={{ value: open.length, noun: "saved" }}
-    />
-  );
+  const due = later?.filter((item) => !item.is_done && item.remind_ms !== null && item.remind_ms <= now).length ?? 0;
+  return <NavItem view={{ kind: "later" }} icon={<Bookmark size={15} />} label="Later" unread={due} countNoun="due" />;
 }
 
 function Section({

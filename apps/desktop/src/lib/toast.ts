@@ -1,6 +1,14 @@
 import { useSyncExternalStore } from "react";
 
-export type Toast = { id: number; text: string; tone: "error" | "info" };
+export type Toast = {
+  id: number;
+  text: string;
+  tone: "error" | "info";
+  /** Offers an Undo button that runs this. */
+  undo?: () => Promise<void>;
+};
+
+const UNDO_TOAST_MS = 5000;
 
 let toasts: Toast[] = [];
 let nextId = 1;
@@ -14,6 +22,14 @@ export function showToast(text: string, tone: Toast["tone"] = "info") {
   toasts = [...toasts, toast];
   publish();
   setTimeout(() => dismissToast(toast.id), tone === "error" ? 6000 : 2600);
+}
+
+/** A confirmation with an Undo button, shown long enough to reach it. */
+export function showUndoToast(text: string, undo: () => Promise<void>) {
+  const toast: Toast = { id: nextId++, text, tone: "info", undo };
+  toasts = [...toasts, toast];
+  publish();
+  setTimeout(() => dismissToast(toast.id), UNDO_TOAST_MS);
 }
 
 export function reportError(error: unknown) {

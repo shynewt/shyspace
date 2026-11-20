@@ -14,7 +14,6 @@ export function NavItem({
   mentions = 0,
   isMuted = false,
   status,
-  quietCount,
   onContextMenu,
   depth = 0,
   leading,
@@ -33,8 +32,6 @@ export function NavItem({
   isMuted?: boolean;
   /** A small icon after the label, like a channel's alert level. */
   status?: { icon: ReactNode; label: string } | null;
-  /** Things waiting that don't need attention: a grey number, never bold. */
-  quietCount?: { value: number; noun: string };
   /** A right-click (or the keyboard's menu key) on the item. */
   onContextMenu?: () => void;
   depth?: number;
@@ -45,7 +42,6 @@ export function NavItem({
   const { view: current, navigate } = useWorkspace();
   const isActive = sameView(current, view);
   const hasUnread = !isActive && (isMuted ? mentions > 0 : unread > 0);
-  const quiet = quietCount && quietCount.value > 0 ? quietCount : null;
   return (
     <div className="group relative flex items-center" style={{ paddingLeft: depth * INDENT_PX }}>
       {isActive && (
@@ -61,8 +57,8 @@ export function NavItem({
         type="button"
         aria-current={isActive ? "page" : undefined}
         aria-label={
-          hasUnread || status || quiet
-            ? accessibleName(label, status?.label, hasUnread ? unread : 0, mentions, countNoun, quiet)
+          hasUnread || status
+            ? accessibleName(label, status?.label, hasUnread ? unread : 0, mentions, countNoun)
             : undefined
         }
         onClick={() => navigate(view)}
@@ -102,18 +98,6 @@ export function NavItem({
             {mentions > 0 ? `@${mentions}` : unread}
           </motion.span>
         )}
-        {quiet && !hasUnread && (
-          <motion.span
-            aria-hidden
-            key={quiet.value}
-            initial={{ opacity: 0, y: 2 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={springs.snappy}
-            className="ml-auto text-[11.5px] text-faint tabular-nums"
-          >
-            {quiet.value}
-          </motion.span>
-        )}
       </button>
       {trailing}
     </div>
@@ -127,12 +111,10 @@ function accessibleName(
   unread: number,
   mentions: number,
   countNoun: string,
-  quiet: { value: number; noun: string } | null,
 ): string {
   const parts = [label];
   if (status) parts.push(status);
   if (unread > 0) parts.push(`${unread} ${countNoun}`);
   if (unread > 0 && mentions > 0) parts.push(`${mentions} ${mentions === 1 ? "mentions" : "mention"} you`);
-  if (quiet) parts.push(`${quiet.value} ${quiet.noun}`);
   return parts.join(", ");
 }
