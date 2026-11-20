@@ -167,7 +167,7 @@ export function Composer({
                 }
               }}
               placeholder={label}
-              className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent py-1 text-[14px] leading-6 outline-none placeholder:text-faint"
+              className="max-h-[200px] min-h-8 flex-1 resize-none bg-transparent py-[5.5px] text-[14px] leading-[1.5] outline-none placeholder:text-faint"
             />
             <Popover
               open={isEmojiOpen}

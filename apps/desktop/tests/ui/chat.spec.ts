@@ -161,3 +161,17 @@ test("a short code block doesn't fold", async ({ page }) => {
   await expect(message.locator("pre")).toBeVisible();
   await expect(message.getByRole("button", { name: "Show more" })).toHaveCount(0);
 });
+
+test("the composer's lines are as tall as a message's, and one line fits beside the buttons", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("Same height");
+  await composer.press("Enter");
+  const message = page.getByRole("article").locator(".prose-chat");
+  await expect(message).toContainText("Same height");
+
+  const lineHeight = (element: HTMLElement) => getComputedStyle(element).lineHeight;
+  expect(await composer.evaluate(lineHeight)).toBe(await message.evaluate(lineHeight));
+  const composerBox = await composer.boundingBox();
+  const sendBox = await page.getByRole("button", { name: "Send" }).boundingBox();
+  expect(composerBox?.height).toBe(sendBox?.height);
+});
