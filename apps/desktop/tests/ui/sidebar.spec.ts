@@ -20,10 +20,15 @@ test("a channel's actions never cover its name", async ({ page }) => {
   await item.hover();
   const actions = page.getByRole("button", { name: `Actions for #${LONG_NAME}` });
   await expect(actions).toHaveCSS("opacity", "1");
-  const name = await item.getByText(LONG_NAME).boundingBox();
-  const button = await actions.boundingBox();
-  if (!name || !button) throw new Error("sidebar not laid out");
-  expect(name.x + name.width).toBeLessThanOrEqual(button.x);
+  // The actions grow into place, so measure both at once until they settle.
+  const name = item.getByText(LONG_NAME);
+  await expect
+    .poll(async () => {
+      const [nameBox, buttonBox] = await Promise.all([name.boundingBox(), actions.boundingBox()]);
+      if (!nameBox || !buttonBox) throw new Error("sidebar not laid out");
+      return buttonBox.x - (nameBox.x + nameBox.width);
+    })
+    .toBeGreaterThanOrEqual(0);
 });
 
 test("a channel's alert level doesn't look like a mention", async ({ page }) => {
