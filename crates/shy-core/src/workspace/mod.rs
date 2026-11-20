@@ -13,6 +13,7 @@ mod storage;
 pub use lifecycle::DataDir;
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
 pub use presence::Heartbeat;
+pub(crate) use presence::NextBeat;
 pub(crate) use reads::follows_by_default;
 pub use storage::StorageUpdate;
 

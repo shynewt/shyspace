@@ -18,7 +18,7 @@ use crate::{
     transport::gossip::{Incoming, Wire},
     views::Change,
     views::PresenceState,
-    workspace::Workspace,
+    workspace::{NextBeat, Workspace},
 };
 
 const SYNC_INTERVAL: Duration = Duration::from_secs(8);
@@ -77,12 +77,16 @@ impl Workspace {
         tokio::spawn(async move {
             let mut reachable = Vec::new();
             loop {
-                if let Err(error) = beater.send_heartbeat().await {
-                    warn!("could not send a heartbeat: {error:#}");
-                }
+                let wait = match beater.send_heartbeat().await {
+                    Ok(held_back) => held_back.unwrap_or(HEARTBEAT_INTERVAL),
+                    Err(error) => {
+                        warn!("could not send a heartbeat: {error:#}");
+                        HEARTBEAT_INTERVAL
+                    }
+                };
                 tokio::select! {
                     _ = beater.inner.heartbeat_now.notified() => {}
-                    _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => {}
+                    _ = tokio::time::sleep(wait) => {}
                     _ = stopped.changed() => break,
                 }
                 if beater.status().removed {
@@ -191,11 +195,16 @@ impl Workspace {
         self.emit(Change::Sync);
     }
 
-    async fn send_heartbeat(&self) -> anyhow::Result<()> {
-        let (Some(net), Some(heartbeat)) = (&self.inner.net, self.next_heartbeat()?) else {
-            return Ok(());
+    /// Returns how soon to try again when the beat was held back.
+    async fn send_heartbeat(&self) -> anyhow::Result<Option<Duration>> {
+        let Some(net) = &self.inner.net else {
+            return Ok(None);
         };
-        net.broadcast_presence(heartbeat).await
+        match self.next_heartbeat()? {
+            NextBeat::Now(heartbeat) => net.broadcast_presence(heartbeat).await.map(|()| None),
+            NextBeat::After(wait) => Ok(Some(wait)),
+            NextBeat::Silent => Ok(None),
+        }
     }
 
     fn reachable_members(&self) -> anyhow::Result<Vec<(iroh::PublicKey, PresenceState)>> {

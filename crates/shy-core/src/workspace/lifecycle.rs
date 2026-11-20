@@ -328,6 +328,7 @@ impl Workspace {
                 own_presence: Mutex::new(super::presence::OwnPresence {
                     is_away: false,
                     appear_offline,
+                    last_sent: None,
                 }),
                 heartbeat_now: Notify::new(),
                 stopped: tokio::sync::watch::Sender::new(false),
