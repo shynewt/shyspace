@@ -82,6 +82,7 @@ Rules for changing it:
 - The logo lives in `docs/brand/`: `mark.svg` (the app icon and `ui/Logo`), `logo-light.svg` and `logo-dark.svg` (wordmarks). After changing the mark, copy it to `apps/desktop/app-icon.svg` and run `pnpm tauri icon app-icon.svg`.
 - Need something new? First check whether an existing component (or a variant of it) fits. Add a component to `ui/` only when a third screen needs the same thing.
 - New components go in `ui/`, get an entry in `ui/index.ts`, and appear in the gallery.
+- `tests/ui/design-rules.spec.ts` keeps this from drifting: it fails on a hand-picked font size anywhere, and in `features/` on raw colours (`text-white`, palette colours like `bg-red-500`, hex, `rgb()`) and on native `<button>`s with a solid accent, danger, success or warning fill (use `Button`).
 - Every interactive element works with the keyboard and has an accessible name.
 - Focus rings are for keyboard use. After a click, focus that Radix moves (back to a menu's trigger, into a dialog) gets no ring: `lib/useInputModality.ts` marks how the app was last used. Controls that show on hover also show for keyboard focus with `keyboard-focus-within:`, not `focus-within:`, which stays on after a click.
 - Saving: choices and toggles apply at once. Text forms have one Save button named for what it does ("Save profile"). Never mix the two in one form. A failed save keeps what the user typed and shows why with `FormError` (`lib/useFormAction.ts` does both).
