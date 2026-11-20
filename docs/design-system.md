@@ -36,12 +36,12 @@ Keep feedback under about 250 ms. Reduced-motion settings are respected globally
 | `Input`, `TextArea`, `Field` | form controls; `Field` links its label to the control through a render function |
 | `Dialog` | modal surfaces (centered, or `placement="top"` like the search palette) |
 | `Drawer` | side panels, like Members |
-| `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger |
+| `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger; a menu sets destructive actions apart below a line |
 | `Card`, `SectionLabel`, `EmptyState` | grouping and empty screens |
 | `Avatar`, `Badge`, `Kbd`, `Spinner`, `Logo` | small content pieces |
 | `SegmentedControl` | picking one of a few modes |
 | `CopyField` | codes and commands with a copy button |
-| `ConfirmDialog` | asks before something that can't be undone (deletes); stays open showing the error if it fails |
+| `ConfirmDialog` | asks before something that can't be undone (deletes), showing what it applies to; stays open showing the error if it fails |
 | `Toasts` | transient messages above the message box, from `lib/toast.ts`: `showToast` (a success, or `"info"`), `showUndoToast`, `showReminderToast` (with Open) and `reportError` (announced as an alert) |
 
 Dialogs, drawers, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primitives) primitives for focus handling and keyboard support, styled by us.

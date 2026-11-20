@@ -14,7 +14,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink } from "../../lib/api";
-import { ChatMarkdown, messageIdsIn, pageIdsIn } from "../../lib/markdown";
+import { ChatMarkdown, messageIdsIn, pageIdsIn, plainPreview } from "../../lib/markdown";
 import { displayName, formatFullDate, formatTime, formatWhen } from "../../lib/people";
 import { REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showToast } from "../../lib/toast";
@@ -213,7 +213,11 @@ export const MessageItem = memo(function MessageItem({
         description="It disappears for everyone, along with its reactions. This can't be undone."
         confirmLabel="Delete message"
         onConfirm={() => api.deleteMessage(message.id)}
-      />
+      >
+        <blockquote className="selectable line-clamp-3 border-l-3 border-surface-3 pl-2.5 text-[13px] text-ink">
+          {plainPreview(message.text, (id) => titles.get(id))}
+        </blockquote>
+      </ConfirmDialog>
     </article>
   );
 });

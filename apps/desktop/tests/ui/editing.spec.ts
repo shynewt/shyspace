@@ -148,3 +148,15 @@ test("deleting a page keeps its sub-pages at the top level", async ({ page }) =>
   await expect(sidebar.getByRole("button", { name: "Notes", exact: true })).toBeVisible();
   await expect(sidebar.getByRole("button", { name: "Collapse Projects" })).toHaveCount(0);
 });
+
+test("deleting a message asks with the message in view", async ({ page }) => {
+  await openGeneral(page);
+  await page.evaluate(() =>
+    window.fake.receiveMessage(window.fake.addMember("Mallory"), "general", "Buy **cheap** watches"),
+  );
+
+  await messageActions(page, "Buy cheap watches");
+  await expect(page.getByRole("menu").getByRole("separator")).toHaveCount(1);
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await expect(page.getByRole("dialog", { name: "Delete this message?" })).toContainText("Buy cheap watches");
+});
