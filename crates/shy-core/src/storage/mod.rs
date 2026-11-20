@@ -7,11 +7,13 @@ mod invites;
 mod later;
 mod oplog;
 mod private;
+mod private_members;
 mod queries;
 mod reading;
 mod rebuild;
 mod revisions;
 mod schema;
+mod sealed;
 mod sealing;
 mod sections;
 mod snapshot;
@@ -19,10 +21,12 @@ mod threads;
 
 pub use apply::{Applied, ApplyContext};
 pub use invites::PendingRequest;
-pub use private::{Origin, Owner, StoredKey, WaitingSealed};
+pub use private::{Origin, StoredKey};
+pub use private_members::{Ending, Membership};
 pub use queries::SearchFilters;
 pub use reading::UnreadMessage;
 pub use revisions::ItemKind;
+pub use sealed::WaitingSealed;
 pub use sections::BUILTIN_SECTION;
 pub use snapshot::{snapshot_database, snapshot_store_without_content};
 pub use threads::Reply;
@@ -53,6 +57,9 @@ pub(crate) const TEST_DB_KEY: &str = "x'0000000000000000000000000000000000000000
 
 pub struct Store {
     db: Connection,
+    /// While a rebuild settles who belongs, private content waits, so it is
+    /// judged against the final membership rather than the replay's order.
+    pub(crate) defers_private_content: std::cell::Cell<bool>,
 }
 
 impl Store {
@@ -62,7 +69,10 @@ impl Store {
         let mut db = open_encrypted(path, key)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         schema::migrate(&mut db)?;
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            defers_private_content: std::cell::Cell::new(false),
+        })
     }
 
     /// Runs `work` atomically: either everything it wrote is kept, or nothing.

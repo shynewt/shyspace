@@ -29,8 +29,6 @@ const SHARED_VIEW_TABLES: &[&str] = &[
     "deleted",
     "member_status",
     "sealing_keys",
-    "sealed_pending",
-    "private_applied",
 ];
 
 /// A page's updates gathered during a replay, written once at the end.
@@ -60,19 +58,30 @@ impl Store {
             if dropped == 0 {
                 return Ok(false);
             }
-            store.delete_private_rows_after(member, last_seq)?;
             store.rebuild_views(context)?;
             Ok(true)
         })
     }
 
-    /// Replays every stored op, in the order they were first applied, into
-    /// empty views. Ops merge the same way in any order, so this gives what a
-    /// device that never saw the dropped ops has. Runs inside a transaction.
+    /// Replays every stored op into empty views and private state, in the
+    /// order they were first applied. Ops merge the same way in any order, so
+    /// this gives what a device that never saw the dropped ops has. Private
+    /// content waits until who belongs is settled, then is judged against
+    /// that. Runs inside a transaction.
     pub(crate) fn rebuild_views(&self, context: ApplyContext<'_>) -> Result<()> {
         for table in SHARED_VIEW_TABLES {
             self.db.execute(&format!("DELETE FROM {table}"), [])?;
         }
+        self.clear_private_state()?;
+        self.defers_private_content.set(true);
+        let replayed = self.replay_log(context);
+        self.defers_private_content.set(false);
+        replayed?;
+        self.retry_sealed(&self.waiting_channels()?, context)?;
+        Ok(())
+    }
+
+    fn replay_log(&self, context: ApplyContext<'_>) -> Result<()> {
         let stored: Vec<Vec<u8>> = self
             .db
             .prepare("SELECT envelope FROM ops ORDER BY rowid")?

@@ -33,6 +33,7 @@ const REPLAYABLE_TABLES: &[&str] = &[
     "sealing_keys",
     "private_channels",
     "private_owners",
+    "private_positions",
     "private_generations",
     "private_keys",
     "private_adds",

@@ -94,7 +94,7 @@ impl Store {
             return Err(rule_violation("op creates an id that belongs to someone else"));
         }
         self.observe_lamport(lamport)?;
-        if self.has_no_effect(&verified.body.op)? {
+        if self.has_no_effect(&verified.body.op, verified.seq)? {
             return Ok(None);
         }
         Ok(Some(match &verified.body.op {
@@ -117,12 +117,14 @@ impl Store {
                 reply_to,
             } => {
                 self.db.execute(
-                    "INSERT INTO messages (id, channel, author, text, reply_to, lamport, created_ms)
-                     VALUES (:id, :channel, :author, :text, :reply_to, :lamport, :now)",
+                    "INSERT INTO messages (id, channel, author, text, reply_to, lamport, created_ms, seq)
+                     VALUES (:id, :channel, :author, :text, :reply_to, :lamport, :now, :seq)
+                     ON CONFLICT (id) DO UPDATE SET channel = :channel, author = :author, text = :text,
+                         reply_to = :reply_to, lamport = :lamport, created_ms = :now, seq = :seq",
                     named_params! {
                         ":id": id, ":channel": channel, ":author": author,
                         ":text": cut_to(text, MAX_MESSAGE_CHARS),
-                        ":reply_to": reply_to, ":lamport": lamport, ":now": now,
+                        ":reply_to": reply_to, ":lamport": lamport, ":now": now, ":seq": verified.seq,
                     },
                 )?;
                 self.reindex_message(id)?;

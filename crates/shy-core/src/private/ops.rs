@@ -23,14 +23,15 @@ pub struct PrivateBody {
 
 /// Someone joining a private channel, and the last op of theirs the owner had
 /// seen: only their later ops can count as theirs in the channel.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Invitee {
     pub member: PublicKey,
     pub after_seq: u64,
 }
 
-/// Owner-only ops carry `owner_index`, the owner's place in the channel's
-/// line of owners (0 is its creator).
+/// Owner ops form the channel's own numbered log: each names its `position`
+/// (the creation is 1) and counts only as exactly the next one, written by
+/// whoever owns the channel at that position.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PrivateOp {
     /// Starts a private channel; only the creator its id names may.
@@ -42,7 +43,7 @@ pub enum PrivateOp {
     Add {
         invitee: Invitee,
         from_generation: u64,
-        owner_index: u32,
+        position: u64,
     },
     /// Ends a member's time in the channel after their `last_seq`, and starts
     /// the key generation they don't get.
@@ -51,19 +52,25 @@ pub enum PrivateOp {
         last_seq: u64,
         generation: u64,
         commitment: Commitment,
-        owner_index: u32,
+        position: u64,
     },
     Rotate {
         generation: u64,
         commitment: Commitment,
-        owner_index: u32,
+        position: u64,
     },
     HandOver {
         to: PublicKey,
-        owner_index: u32,
+        position: u64,
+    },
+    /// The owner deletes a message (or the whole channel).
+    OwnerDelete {
+        id: EntityId,
+        position: u64,
     },
     Leave,
-    /// A message, reaction, edit, delete or rename inside the channel.
+    /// A message, reaction, edit, delete (of the author's own) or rename
+    /// inside the channel.
     Content(Op),
 }
 

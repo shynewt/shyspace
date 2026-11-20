@@ -64,6 +64,25 @@ pub struct SealedPayload {
     pub ciphertext: Vec<u8>,
 }
 
+/// A channel key with the channel and generation it was made for. Content
+/// and hints derive from all three, so a key handed out under another label
+/// opens nothing.
+#[derive(Clone, Copy)]
+pub struct LabeledKey<'a> {
+    pub key: &'a ChannelKey,
+    pub channel: &'a str,
+    pub generation: u64,
+}
+
+impl LabeledKey<'_> {
+    fn derive(&self, context: &str) -> Result<[u8; 32]> {
+        let mut hasher = blake3::Hasher::new_derive_key(context);
+        hasher.update(self.key);
+        hasher.update(&postcard::to_stdvec(&(self.channel, self.generation))?);
+        Ok(*hasher.finalize().as_bytes())
+    }
+}
+
 pub fn new_channel_key() -> ChannelKey {
     rand::random()
 }
@@ -72,8 +91,8 @@ pub fn commitment(key: &ChannelKey) -> Commitment {
     blake3::derive_key(COMMITMENT_CONTEXT, key)
 }
 
-pub fn key_hint(key: &ChannelKey, slot: Slot<'_>) -> Result<KeyHint> {
-    let hint_key = blake3::derive_key(HINT_KEY_CONTEXT, key);
+pub fn key_hint(key: LabeledKey<'_>, slot: Slot<'_>) -> Result<KeyHint> {
+    let hint_key = key.derive(HINT_KEY_CONTEXT)?;
     let hash = blake3::keyed_hash(&hint_key, &slot.bytes()?);
     let mut hint = KeyHint::default();
     let length = hint.len();
@@ -81,8 +100,8 @@ pub fn key_hint(key: &ChannelKey, slot: Slot<'_>) -> Result<KeyHint> {
     Ok(hint)
 }
 
-pub fn seal(key: &ChannelKey, slot: Slot<'_>, plaintext: &[u8]) -> Result<SealedPayload> {
-    let content_key = blake3::derive_key(CONTENT_KEY_CONTEXT, key);
+pub fn seal(key: LabeledKey<'_>, slot: Slot<'_>, plaintext: &[u8]) -> Result<SealedPayload> {
+    let content_key = key.derive(CONTENT_KEY_CONTEXT)?;
     let nonce = XNonce::generate();
     let ciphertext = XChaCha20Poly1305::new(&content_key.into())
         .encrypt(
@@ -100,9 +119,9 @@ pub fn seal(key: &ChannelKey, slot: Slot<'_>, plaintext: &[u8]) -> Result<Sealed
     })
 }
 
-/// Fails for the wrong key or a payload copied from another slot.
-pub fn open(key: &ChannelKey, slot: Slot<'_>, payload: &SealedPayload) -> Result<Vec<u8>> {
-    let content_key = blake3::derive_key(CONTENT_KEY_CONTEXT, key);
+/// Fails for the wrong key or label, or a payload copied from another slot.
+pub fn open(key: LabeledKey<'_>, slot: Slot<'_>, payload: &SealedPayload) -> Result<Vec<u8>> {
+    let content_key = key.derive(CONTENT_KEY_CONTEXT)?;
     XChaCha20Poly1305::new(&content_key.into())
         .decrypt(
             &payload.nonce.into(),
@@ -201,6 +220,14 @@ mod tests {
 
     use super::*;
 
+    fn labeled(key: &ChannelKey) -> LabeledKey<'_> {
+        LabeledKey {
+            key,
+            channel: "p:channel",
+            generation: 1,
+        }
+    }
+
     #[test]
     fn a_payload_opens_only_with_its_key_in_its_slot() {
         let author = SecretKey::generate().public();
@@ -210,11 +237,11 @@ mod tests {
             seq: 7,
         };
         let key = new_channel_key();
-        let sealed = seal(&key, slot, b"secret").unwrap();
-        assert_eq!(open(&key, slot, &sealed).unwrap(), b"secret");
-        assert_eq!(sealed.hint, key_hint(&key, slot).unwrap());
+        let sealed = seal(labeled(&key), slot, b"secret").unwrap();
+        assert_eq!(open(labeled(&key), slot, &sealed).unwrap(), b"secret");
+        assert_eq!(sealed.hint, key_hint(labeled(&key), slot).unwrap());
 
-        assert!(open(&new_channel_key(), slot, &sealed).is_err());
+        assert!(open(labeled(&new_channel_key()), slot, &sealed).is_err());
         let other_author = SecretKey::generate().public();
         for copied_to in [
             Slot { seq: 8, ..slot },
@@ -227,7 +254,32 @@ mod tests {
                 ..slot
             },
         ] {
-            assert!(open(&key, copied_to, &sealed).is_err());
+            assert!(open(labeled(&key), copied_to, &sealed).is_err());
+        }
+    }
+
+    #[test]
+    fn a_key_under_another_label_opens_nothing() {
+        let author = SecretKey::generate().public();
+        let slot = Slot {
+            workspace_id: "w",
+            author: &author,
+            seq: 7,
+        };
+        let key = new_channel_key();
+        let sealed = seal(labeled(&key), slot, b"secret").unwrap();
+        for relabeled in [
+            LabeledKey {
+                channel: "dm:other",
+                ..labeled(&key)
+            },
+            LabeledKey {
+                generation: 2,
+                ..labeled(&key)
+            },
+        ] {
+            assert!(open(relabeled, slot, &sealed).is_err());
+            assert_ne!(key_hint(relabeled, slot).unwrap(), sealed.hint);
         }
     }
 
@@ -237,7 +289,7 @@ mod tests {
         let key = new_channel_key();
         let hint = |seq| {
             key_hint(
-                &key,
+                labeled(&key),
                 Slot {
                     workspace_id: "w",
                     author: &author,

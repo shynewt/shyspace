@@ -5,10 +5,11 @@
 use super::support::*;
 use crate::{
     Workspace,
-    ops::Op,
+    ops::{Envelope, Op},
     private::{
         crypto::{Granting, commitment, new_channel_key, wrap_key},
-        ops::{GrantBody, PrivateOp},
+        ids::private_channel_id,
+        ops::{GrantBody, Invitee, PrivateOp},
     },
     storage::StoredKey,
     transport::bucket::Bucket,
@@ -71,6 +72,53 @@ fn forged_grant(
     }
 }
 
+/// The creation of `key`'s channel, sealed by its creator as their next op.
+fn forged_create(forger: &mut Forger, key: &StoredKey, name: &str, members: &[&Workspace]) -> Envelope {
+    let members = members
+        .iter()
+        .map(|member| Invitee {
+            member: member.me(),
+            after_seq: own_last_seq(member),
+        })
+        .collect();
+    forger.seal_private(
+        key,
+        PrivateOp::Create {
+            name: name.into(),
+            commitment: commitment(&key.key),
+            members,
+        },
+    )
+}
+
+fn own_last_seq(member: &Workspace) -> u64 {
+    member.state().store.last_seq(&member.me()).unwrap()
+}
+
+/// Hands `from`'s ops after `after` straight to `to`, as gossip would, so a
+/// test decides the order each device hears things in.
+fn deliver(from: &Workspace, after: u64, to: &Workspace) {
+    for envelope in from.state().store.envelopes_after(&from.me(), after).unwrap() {
+        to.receive(envelope).unwrap();
+    }
+}
+
+fn owner(member: &Workspace, channel: &str) -> Option<String> {
+    member.private_members(channel).unwrap().owner
+}
+
+fn members_of(member: &Workspace, channel: &str) -> Vec<String> {
+    member.private_members(channel).unwrap().members
+}
+
+fn listed(member: &Workspace, channel: &str) -> Option<crate::views::Channel> {
+    member
+        .channels()
+        .unwrap()
+        .into_iter()
+        .find(|listed| listed.id == channel)
+}
+
 async fn four_members() -> (
     tempfile::TempDir,
     Bucket,
@@ -131,7 +179,7 @@ async fn a_key_the_owner_never_announced_is_never_trusted_or_used() {
         PrivateOp::Rotate {
             generation: 2,
             commitment: commitment(&fake),
-            owner_index: 0,
+            position: 2,
         },
     ))
     .unwrap();
@@ -156,7 +204,7 @@ async fn a_key_the_owner_never_announced_is_never_trusted_or_used() {
 async fn only_the_creator_its_id_names_can_start_a_channel() {
     let (_root, _bucket, admin, bob, carol, _dave) = four_members().await;
     let key = new_channel_key();
-    let channel = crate::private::ids::new_private_channel_id(&bob.me());
+    let channel = private_channel_id(&bob.me(), &commitment(&key), "bobs-secrets", &[]).unwrap();
     let first = StoredKey {
         channel: channel.clone(),
         generation: 1,
@@ -203,7 +251,7 @@ async fn key_generations_count_up_one_at_a_time() {
             PrivateOp::Rotate {
                 generation: 9,
                 commitment: commitment(&jump),
-                owner_index: 0,
+                position: 2,
             },
         ))
         .unwrap();
@@ -326,4 +374,214 @@ async fn outsiders_cannot_join_a_dm_by_granting_themselves_into_it() {
         .unwrap();
     assert_eq!(texts(&carol, &dm), ["just us"]);
     assert_eq!(carol.state().store.dm_members(&dm).unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_granted_under_another_label_hides_nothing() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    bob.rotate_private_channel_key(&channel).unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    // Carol hands Dave the channel's real key again, labelled as an older
+    // generation of it and as another channel, hoping his device files Bob's
+    // ops under the wrong label and drops them.
+    let real = newest_key(&carol, &channel);
+    let mut forger = Forger::new(&carol);
+    for (label, generation) in [(channel.as_str(), 1), ("p:!", 1)] {
+        dave.receive(forger.seal(forged_grant(&carol, &dave, label, generation, real.key)))
+            .unwrap();
+    }
+    let bob_before = own_last_seq(&bob);
+    bob.send_message(&channel, "hello dave", None).unwrap();
+    deliver(&bob, bob_before, &dave);
+    assert_eq!(texts(&dave, &channel), ["hello dave"]);
+    assert!(listed(&dave, "p:!").is_none());
+
+    let dave_before = own_last_seq(&dave);
+    dave.send_message(&channel, "hello bob", None).unwrap();
+    deliver(&dave, dave_before, &bob);
+    assert_eq!(texts(&bob, &channel), ["hello dave", "hello bob"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hand_over_racing_the_new_owners_leave_converges() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id(), admin.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    let (bob_before, carol_before) = (own_last_seq(&bob), own_last_seq(&carol));
+    carol.leave_private_channel(&channel).unwrap();
+    bob.hand_over_private_channel(&channel, &carol.my_id()).unwrap();
+    // Dave hears the hand-over first, the admin hears Carol leave first.
+    deliver(&bob, bob_before, &dave);
+    deliver(&carol, carol_before, &dave);
+    deliver(&carol, carol_before, &admin);
+    deliver(&bob, bob_before, &admin);
+
+    assert_eq!(owner(&dave, &channel), owner(&admin, &channel));
+    assert_eq!(members_of(&dave, &channel), members_of(&admin, &channel));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_owners_delete_counts_where_the_hand_over_arrives_later() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id(), admin.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    let daves = dave.send_message(&channel, "from dave", None).unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    let bob_before = own_last_seq(&bob);
+    bob.hand_over_private_channel(&channel, &carol.my_id()).unwrap();
+    deliver(&bob, bob_before, &carol);
+    let carol_before = own_last_seq(&carol);
+    carol.delete_message(&daves).unwrap();
+    // The admin hears Carol's delete before Bob's hand-over; Dave in order.
+    deliver(&carol, carol_before, &admin);
+    deliver(&bob, bob_before, &admin);
+    deliver(&bob, bob_before, &dave);
+    deliver(&carol, carol_before, &dave);
+
+    assert_eq!(texts(&admin, &channel), texts(&dave, &channel));
+    assert!(texts(&dave, &channel).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_former_owners_delete_survives_a_rebuild() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let everyone = [&admin, &bob, &carol, &dave];
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id(), admin.my_id()])
+        .unwrap();
+    sync_all(&everyone).await;
+    let carols = carol
+        .send_message(&channel, "DELETED-BY-OLD-OWNER", None)
+        .unwrap();
+    sync_all(&everyone).await;
+    bob.delete_message(&carols).unwrap();
+    bob.hand_over_private_channel(&channel, &carol.my_id()).unwrap();
+    sync_all(&everyone).await;
+    assert!(texts(&dave, &channel).is_empty());
+
+    // Dave applies a message of the admin's that Carol, the new owner, hasn't
+    // seen when she removes the admin, so Dave rebuilds his views.
+    let admin_before = own_last_seq(&admin);
+    admin.send_message(&channel, "RACING", None).unwrap();
+    deliver(&admin, admin_before, &dave);
+    assert_eq!(texts(&dave, &channel), ["RACING"]);
+    let carol_before = own_last_seq(&carol);
+    carol
+        .remove_from_private_channel(&channel, &admin.my_id())
+        .unwrap();
+    deliver(&carol, carol_before, &dave);
+
+    assert!(texts(&dave, &channel).is_empty(), "{:?}", texts(&dave, &channel));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_by_an_owner_behind_on_the_members_log_still_removes_them() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let everyone = [&admin, &bob, &carol, &dave];
+    let channel = bob.create_private_channel("plans", &[carol.my_id()]).unwrap();
+    sync_all(&everyone).await;
+
+    // Bob has seen Dave's latest public messages when he adds him; Carol,
+    // who then takes the channel over, hasn't.
+    let general = channel_id(&admin, "general");
+    let dave_before = own_last_seq(&dave);
+    for index in 0..3 {
+        dave.send_message(&general, &format!("public {index}"), None)
+            .unwrap();
+    }
+    deliver(&dave, dave_before, &bob);
+    let bob_before = own_last_seq(&bob);
+    bob.add_to_private_channel(&channel, &dave.my_id()).unwrap();
+    bob.hand_over_private_channel(&channel, &carol.my_id()).unwrap();
+    deliver(&bob, bob_before, &carol);
+    carol
+        .remove_from_private_channel(&channel, &dave.my_id())
+        .unwrap();
+    sync_all(&everyone).await;
+
+    for member in [&bob, &carol, &dave] {
+        assert!(!members_of(member, &channel).contains(&dave.my_id()));
+    }
+    assert!(listed(&dave, &channel).is_some_and(|listed| !listed.is_member));
+    let still_writing = dave.send_message(&channel, "STILL-WRITING", None);
+    sync_all(&everyone).await;
+    assert!(
+        !texts(&bob, &channel).contains(&"STILL-WRITING".to_string()),
+        "Dave wrote after his removal: {still_writing:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hand_over_undone_by_a_workspace_removal_leaves_devices_agreeing() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    // Bob hands the channel over live, before Carol hears of his removal;
+    // the removal then undoes it. Carol acts as owner meanwhile.
+    let bob_before = own_last_seq(&bob);
+    bob.hand_over_private_channel(&channel, &carol.my_id()).unwrap();
+    deliver(&bob, bob_before, &carol);
+    carol.rotate_private_channel_key(&channel).unwrap();
+    carol.send_message(&channel, "after rotate", None).unwrap();
+    for _ in 0..2 {
+        for member in [&carol, &admin, &dave] {
+            member.sync().await;
+        }
+    }
+
+    assert_eq!(texts(&carol, &channel), texts(&dave, &channel));
+    assert_eq!(owner(&carol, &channel), owner(&dave, &channel));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn starting_a_channel_twice_ends_the_same_on_every_device() {
+    let (_root, _bucket, _admin, bob, carol, dave) = four_members().await;
+    let [first_key, second_key] = [new_channel_key(), new_channel_key()];
+    let invitees: Vec<Invitee> = [&carol, &dave]
+        .iter()
+        .map(|member| Invitee {
+            member: member.me(),
+            after_seq: own_last_seq(member),
+        })
+        .collect();
+    // The id commits to the first start; the second claims the same channel.
+    let channel = private_channel_id(&bob.me(), &commitment(&first_key), "first", &invitees).unwrap();
+    let [first, second] = [first_key, second_key].map(|key| StoredKey {
+        channel: channel.clone(),
+        generation: 1,
+        key,
+    });
+
+    // Bob starts his channel twice with different keys, handing them out in
+    // a different order to Carol and Dave so each opens a different start first.
+    let mut forger = Forger::new(&bob);
+    let ops = [
+        forger.seal(forged_grant(&bob, &carol, &channel, 1, first.key)),
+        forged_create(&mut forger, &first, "first", &[&carol, &dave]),
+        forger.seal(forged_grant(&bob, &dave, &channel, 1, second.key)),
+        forged_create(&mut forger, &second, "second", &[&carol, &dave]),
+        forger.seal(forged_grant(&bob, &dave, &channel, 1, first.key)),
+        forger.seal(forged_grant(&bob, &carol, &channel, 1, second.key)),
+    ];
+    for envelope in ops {
+        carol.receive(envelope.clone()).unwrap();
+        dave.receive(envelope).unwrap();
+    }
+
+    let name = |member: &Workspace| listed(member, &channel).map(|listed| listed.name);
+    assert_eq!(name(&carol), name(&dave));
 }

@@ -6,12 +6,12 @@ use iroh::PublicKey;
 
 use super::{
     crypto::{ChannelKey, Granting, Slot, commitment, new_channel_key, seal, wrap_key},
-    ids::{MAX_DM_MEMBERS, PrivateKind, dm_id, new_private_channel_id, private_kind},
+    ids::{MAX_DM_MEMBERS, PrivateKind, dm_id, private_channel_id, private_kind},
     ops::{GrantBody, Invitee, MAX_WRAPS_PER_GRANT, PrivateBody, PrivateOp},
 };
 use crate::{
-    ops::{EntityId, Op, normalize_channel_name},
-    storage::{Store, StoredKey},
+    ops::{EntityId, Op, is_owned_by, normalize_channel_name},
+    storage::{Ending, Store, StoredKey},
     views::parse_member_id,
     workspace::Workspace,
 };
@@ -23,12 +23,7 @@ impl Workspace {
         let name = normalize_channel_name(name)?;
         let me = self.me();
         let others = self.members_to_seal_for(members)?;
-        let channel = new_private_channel_id(&me);
-        let key = new_channel_key();
-        let mut recipients = others.clone();
-        recipients.push(me);
-        self.grant(&channel, &[(1, key)], &recipients, &[])?;
-        let invitees = {
+        let invitees: Vec<Invitee> = {
             let state = self.state();
             others
                 .iter()
@@ -40,6 +35,12 @@ impl Workspace {
                 })
                 .collect::<Result<_>>()?
         };
+        let key = new_channel_key();
+        let announced = commitment(&key);
+        let channel = private_channel_id(&me, &announced, &name, &invitees)?;
+        let mut recipients = others;
+        recipients.push(me);
+        self.grant(&channel, &[(1, key)], &recipients, &[])?;
         let first_key = StoredKey {
             channel: channel.clone(),
             generation: 1,
@@ -49,7 +50,7 @@ impl Workspace {
             first_key,
             PrivateOp::Create {
                 name,
-                commitment: commitment(&key),
+                commitment: announced,
                 members: invitees,
             },
         )?;
@@ -58,41 +59,38 @@ impl Workspace {
 
     /// Adds someone to a private channel you own. They can read its history.
     pub fn add_to_private_channel(&self, channel: &str, member_id: &str) -> Result<()> {
-        let owner_index = self.my_owner_index(channel)?;
+        self.ensure_owner(channel)?;
         let [member] = self.members_to_seal_for(&[member_id.to_owned()])?[..] else {
             bail!("pick someone other than yourself");
         };
-        let has_left_since_latest_key = {
-            let state = self.state();
-            ensure!(
-                !state.store.current_private_members(channel)?.contains(&member),
-                "they are already in this channel"
-            );
-            state.store.last_closure_generation(channel, &member)? > state.store.latest_generation(channel)?
+        let (is_listed, has_left) = {
+            let store = &self.state().store;
+            (
+                store.owner_membership(channel, &member)?.is_some(),
+                !store.private_members(channel, Ending::Left)?.contains(&member),
+            )
         };
-        // Their leaving ends times that start before the next key, so they
-        // come back with a new one.
-        if has_left_since_latest_key {
-            self.rotate(channel, None)?;
+        ensure!(!is_listed || has_left, "they are already in this channel");
+        // Someone who left still counts until the owner removes them, which
+        // also makes a key they don't have.
+        if is_listed {
+            self.rotate(channel, Some(member))?;
         }
         let (keys, after_seq, latest) = {
-            let state = self.state();
+            let store = &self.state().store;
             (
-                verified_keys(&state.store, channel)?,
-                state.store.last_seq(&member)?,
-                state.store.latest_generation(channel)?,
+                vouched_keys(store, channel)?,
+                store.last_seq(&member)?,
+                store.latest_generation(channel)?,
             )
         };
         let history: Vec<(u64, ChannelKey)> = keys.iter().map(|key| (key.generation, key.key)).collect();
         self.grant(channel, &history, &[member], &[])?;
-        self.write_private(
-            channel,
-            PrivateOp::Add {
-                invitee: Invitee { member, after_seq },
-                from_generation: latest,
-                owner_index,
-            },
-        )
+        self.write_owner_op(channel, |position| PrivateOp::Add {
+            invitee: Invitee { member, after_seq },
+            from_generation: latest,
+            position,
+        })
     }
 
     /// Removes someone from a private channel you own. They keep what they
@@ -103,15 +101,11 @@ impl Workspace {
             member != self.me(),
             "to leave a channel you own, hand it over first"
         );
-        let last_seq = {
-            let state = self.state();
-            ensure!(
-                state.store.current_private_members(channel)?.contains(&member),
-                "they aren't in this channel"
-            );
-            state.store.last_seq(&member)?
-        };
-        self.rotate(channel, Some((member, last_seq)))
+        ensure!(
+            self.state().store.owner_membership(channel, &member)?.is_some(),
+            "they aren't in this channel"
+        );
+        self.rotate(channel, Some(member))
     }
 
     /// Starts a new key for a private channel you own, for its current members.
@@ -119,49 +113,45 @@ impl Workspace {
         self.rotate(channel, None)
     }
 
-    pub(crate) fn rotate(&self, channel: &str, removing: Option<(PublicKey, u64)>) -> Result<()> {
-        let owner_index = self.my_owner_index(channel)?;
-        let (recipients, generation) = {
-            let state = self.state();
-            let members = state.store.current_private_members(channel)?;
-            let recipients: Vec<PublicKey> = members
+    fn rotate(&self, channel: &str, removing: Option<PublicKey>) -> Result<()> {
+        self.ensure_owner(channel)?;
+        let (recipients, generation, last_seq) = {
+            let store = &self.state().store;
+            let recipients: Vec<PublicKey> = store
+                .private_members(channel, Ending::Left)?
                 .into_iter()
-                .filter(|member| removing.is_none_or(|(removed, _)| removed != *member))
+                .filter(|member| Some(*member) != removing)
                 .collect();
-            (recipients, state.store.latest_generation(channel)? + 1)
+            let last_seq = removing.map(|member| store.last_seq(&member)).transpose()?;
+            (recipients, store.latest_generation(channel)? + 1, last_seq)
         };
         let key = new_channel_key();
         self.grant(channel, &[(generation, key)], &recipients, &[])?;
         let commitment = commitment(&key);
-        self.write_private(
-            channel,
-            match removing {
-                Some((member, last_seq)) => PrivateOp::Remove {
-                    member,
-                    last_seq,
-                    generation,
-                    commitment,
-                    owner_index,
-                },
-                None => PrivateOp::Rotate {
-                    generation,
-                    commitment,
-                    owner_index,
-                },
+        self.write_owner_op(channel, |position| match (removing, last_seq) {
+            (Some(member), Some(last_seq)) => PrivateOp::Remove {
+                member,
+                last_seq,
+                generation,
+                commitment,
+                position,
             },
-        )
+            _ => PrivateOp::Rotate {
+                generation,
+                commitment,
+                position,
+            },
+        })
     }
 
     /// Leaves a private channel. Its owner hands it over first, unless
     /// they're the last one in it.
     pub fn leave_private_channel(&self, channel: &str) -> Result<()> {
         {
-            let state = self.state();
-            let owners = state.store.private_owners(channel)?;
-            let is_owner = owners.last().is_some_and(|owner| owner.member == self.me());
-            let others = state
-                .store
-                .current_private_members(channel)?
+            let store = &self.state().store;
+            let is_owner = store.current_owner(channel)? == Some(self.me());
+            let others = store
+                .private_members(channel, Ending::Left)?
                 .len()
                 .saturating_sub(1);
             ensure!(
@@ -174,41 +164,10 @@ impl Workspace {
 
     /// Makes another member the channel's owner.
     pub fn hand_over_private_channel(&self, channel: &str, member_id: &str) -> Result<()> {
-        let owner_index = self.my_owner_index(channel)?;
+        self.ensure_owner(channel)?;
         let to = parse_member_id(member_id)?;
         ensure!(to != self.me(), "you already own this channel");
-        self.write_private(channel, PrivateOp::HandOver { to, owner_index })
-    }
-
-    /// On channels we own, keeps out who left or was removed from the
-    /// workspace: they get no newer key.
-    pub(crate) fn tend_private_channels(&self) -> Result<()> {
-        let me = self.me();
-        let workspace_members = self.current_members()?;
-        let channel_ids = self.state().store.private_channel_ids()?;
-        for channel in channel_ids {
-            if private_kind(&channel) != Some(PrivateKind::Channel) || self.my_owner_index(&channel).is_err()
-            {
-                continue;
-            }
-            let (gone, have_left) = {
-                let state = self.state();
-                let mut gone = Vec::new();
-                for member in state.store.current_private_members(&channel)? {
-                    if member != me && !workspace_members.contains(&member) {
-                        gone.push((member, state.store.last_seq(&member)?));
-                    }
-                }
-                (gone, !state.store.left_since_latest_key(&channel)?.is_empty())
-            };
-            for removed in &gone {
-                self.rotate(&channel, Some(*removed))?;
-            }
-            if gone.is_empty() && have_left {
-                self.rotate(&channel, None)?;
-            }
-        }
-        Ok(())
+        self.write_owner_op(channel, |position| PrivateOp::HandOver { to, position })
     }
 
     /// The DM with exactly these members (member ids) and you. Opening it
@@ -230,8 +189,54 @@ impl Workspace {
         Ok(channel)
     }
 
+    /// On channels we own, keeps out who left or was removed from the
+    /// workspace: the owner removes them, which makes a key they don't get.
+    pub(crate) fn tend_private_channels(&self) -> Result<()> {
+        let me = self.me();
+        let workspace_members = self.current_members()?;
+        let channel_ids = self.state().store.private_channel_ids()?;
+        for channel in channel_ids {
+            if private_kind(&channel) != Some(PrivateKind::Channel) || self.ensure_owner(&channel).is_err() {
+                continue;
+            }
+            let to_remove: Vec<PublicKey> = {
+                let store = &self.state().store;
+                let staying = store.private_members(&channel, Ending::Left)?;
+                store
+                    .private_members(&channel, Ending::RemovedByOwner)?
+                    .into_iter()
+                    .filter(|member| {
+                        *member != me && (!staying.contains(member) || !workspace_members.contains(member))
+                    })
+                    .collect()
+            };
+            for member in to_remove {
+                self.rotate(&channel, Some(member))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Seals `op` into `channel`. A delete of someone else's message (or of
+    /// the channel) is the owner's to make.
+    pub(crate) fn write_private_op(&self, channel: &str, op: Op) -> Result<()> {
+        match op {
+            Op::Delete { id } if !is_owned_by(&id, &self.me()) => {
+                self.ensure_owner(channel)?;
+                self.write_owner_op(channel, |position| PrivateOp::OwnerDelete { id, position })
+            }
+            other => self.write_private(channel, PrivateOp::Content(other)),
+        }
+    }
+
+    /// Writes the channel's next owner op.
+    fn write_owner_op(&self, channel: &str, make_op: impl FnOnce(u64) -> PrivateOp) -> Result<()> {
+        let position = self.state().store.next_position(channel)?;
+        self.write_private(channel, make_op(position))
+    }
+
     /// Seals `op` into `channel` with the newest key we may use there.
-    pub(crate) fn write_private(&self, channel: &str, op: PrivateOp) -> Result<()> {
+    fn write_private(&self, channel: &str, op: PrivateOp) -> Result<()> {
         let key = sending_key(&self.state().store, channel)?;
         self.write_sealed(key, op)
     }
@@ -250,7 +255,7 @@ impl Workspace {
                 author: &me,
                 seq,
             };
-            let payload = seal(&key.key, slot, &postcard::to_stdvec(&body)?)?;
+            let payload = seal(key.labeled(), slot, &postcard::to_stdvec(&body)?)?;
             Ok(Op::Sealed { payload })
         })
     }
@@ -308,37 +313,37 @@ impl Workspace {
         Ok(members)
     }
 
-    fn my_owner_index(&self, channel: &str) -> Result<u32> {
+    fn ensure_owner(&self, channel: &str) -> Result<()> {
         ensure!(
             private_kind(channel) == Some(PrivateKind::Channel),
             "only private channels have owners"
         );
-        let owners = self.state().store.private_owners(channel)?;
-        match owners.last() {
-            Some(owner) if owner.member == self.me() => Ok(u32::try_from(owners.len() - 1)?),
-            _ => bail!("only the channel's owner can do that"),
-        }
+        ensure!(
+            self.state().store.current_owner(channel)? == Some(self.me()),
+            "only the channel's owner can do that"
+        );
+        Ok(())
     }
 }
 
 /// Keys of `channel` its owners vouched for, oldest first. For a DM, every
 /// key we hold (they were checked when granted).
-fn verified_keys(store: &Store, channel: &str) -> Result<Vec<StoredKey>> {
-    let mut verified = Vec::new();
+fn vouched_keys(store: &Store, channel: &str) -> Result<Vec<StoredKey>> {
+    let mut vouched = Vec::new();
     for key in store.channel_keys(Some(channel))? {
         let is_vouched = match private_kind(channel) {
             Some(PrivateKind::Dm) => true,
             _ => store.commitment_of(channel, key.generation)? == Some(commitment(&key.key)),
         };
         if is_vouched {
-            verified.push(key);
+            vouched.push(key);
         }
     }
-    Ok(verified)
+    Ok(vouched)
 }
 
 fn sending_key(store: &Store, channel: &str) -> Result<StoredKey> {
-    verified_keys(store, channel)?
+    vouched_keys(store, channel)?
         .pop()
         .context("you aren't a member of this channel")
 }

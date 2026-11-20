@@ -11,10 +11,7 @@ use crate::{
         normalize_channel_name, now_ms,
     },
     pages::{self, Edit},
-    private::{
-        ids::{new_private_message_id, private_channel_of, private_kind},
-        ops::PrivateOp,
-    },
+    private::ids::{new_private_message_id, private_channel_of, private_kind},
     storage::{ItemKind, Store},
     views::{Change, Draft, Message, NotifyLevel},
 };
@@ -32,7 +29,7 @@ impl Workspace {
             .find_map(private_channel_of)
             .map(str::to_owned);
         match private_channel {
-            Some(channel) => self.write_private(&channel, PrivateOp::Content(op)),
+            Some(channel) => self.write_private_op(&channel, op),
             None => self.write_with(|_, _| Ok(op)),
         }
     }

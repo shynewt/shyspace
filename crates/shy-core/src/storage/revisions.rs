@@ -57,13 +57,15 @@ impl Store {
     }
 
     /// Whether `op` can't change anything: its target was deleted, or it
-    /// re-sends a message id that already exists. One author's ops apply in
-    /// the same order everywhere, so "the first message with an id wins"
-    /// gives every member the same result. A message posted into a deleted
-    /// channel is marked deleted itself, so it can't later reappear elsewhere.
-    pub(super) fn has_no_effect(&self, op: &Op) -> Result<bool> {
+    /// re-sends a message id that already exists. Only its author can use an
+    /// id, and the one earliest in their log wins (private content can open
+    /// out of order), so every member keeps the same one. A message posted
+    /// into a deleted channel is marked deleted itself, so it can't later
+    /// reappear elsewhere.
+    pub(super) fn has_no_effect(&self, op: &Op, seq: u64) -> Result<bool> {
         if let Op::Message { id, channel, .. } = op {
-            if self.is_deleted(id)? || self.message_channel(id)?.is_some() {
+            let is_earlier_kept = self.message_seq(id)?.is_some_and(|kept| kept <= seq);
+            if self.is_deleted(id)? || is_earlier_kept {
                 return Ok(true);
             }
             if self.is_deleted(channel)? {
@@ -175,6 +177,19 @@ impl Store {
             .query_row("SELECT channel FROM messages WHERE id = ?", [id], |row| {
                 row.get(0)
             })
+            .optional()?)
+    }
+
+    /// Where the kept message with this id sits in its author's log (0 for
+    /// messages stored before that was recorded).
+    fn message_seq(&self, id: &str) -> Result<Option<u64>> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT COALESCE(seq, 0) FROM messages WHERE id = ?",
+                [id],
+                |row| row.get(0),
+            )
             .optional()?)
     }
 

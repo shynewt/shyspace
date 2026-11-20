@@ -1,8 +1,8 @@
-//! Applying key grants and sealed ops. Keys from grants are only candidates
-//! until the channel's owner vouches for them with a commitment; a sealed op
-//! waits until its key is vouched for and its author belongs, then applies in
-//! its author's order. Opening one op can let others apply, so every change
-//! retries the ops still waiting.
+//! Applying key grants and sealed ops. A sealed op waits until we hold its
+//! key, the channel's owner has vouched for that key, and the channel's rules
+//! let it count. Each change retries the ops still waiting in that channel.
+
+use std::collections::BTreeSet;
 
 use anyhow::{Result, bail};
 use tracing::warn;
@@ -10,12 +10,12 @@ use tracing::warn;
 use super::{
     crypto::{Granting, SealedPayload, Slot, Wrap, key_hint, open, unwrap_key},
     ids::{MAX_DM_MEMBERS, PrivateKind, dm_id, private_kind},
-    ops::{GrantBody, MAX_WRAPS_PER_GRANT, PrivateBody},
+    ops::{GrantBody, MAX_WRAPS_PER_GRANT, PrivateBody, PrivateOp},
     rules::Verdict,
 };
 use crate::{
-    ops::{Op, RuleViolation, VerifiedOp, rule_violation},
-    storage::{Applied, ApplyContext, Origin, Store, StoredKey, WaitingSealed},
+    ops::{Op, OpBody, RuleViolation, VerifiedOp, clean_channel_name, rule_violation},
+    storage::{Applied, ApplyContext, Ending, Membership, Origin, Store, StoredKey, WaitingSealed},
     views::Change,
 };
 
@@ -25,11 +25,11 @@ enum Settled {
     Waiting,
 }
 
-fn slot<'a>(verified: &'a VerifiedOp, context: ApplyContext<'a>) -> Slot<'a> {
+fn slot<'a>(author: &'a iroh::PublicKey, seq: u64, context: ApplyContext<'a>) -> Slot<'a> {
     Slot {
         workspace_id: context.workspace_id,
-        author: &verified.author,
-        seq: verified.seq,
+        author,
+        seq,
     }
 }
 
@@ -67,8 +67,8 @@ impl Store {
             }
         }
         if !new_keys.is_empty() {
-            self.match_new_keys(&new_keys, context)?;
-            applied.extend(self.retry_sealed(context)?);
+            let channels = self.match_new_keys(&new_keys, context)?;
+            applied.extend(self.retry_sealed(&channels, context)?);
         }
         Ok(applied)
     }
@@ -87,7 +87,12 @@ impl Store {
             seq: verified.seq,
         };
         match private_kind(&grant.channel) {
-            Some(PrivateKind::Channel) if grant.dm_members.is_empty() && grant.generation >= 1 => {}
+            Some(PrivateKind::Channel) if grant.dm_members.is_empty() && grant.generation >= 1 => {
+                if self.has_too_many_unvouched_keys(&verified.author)? {
+                    warn!("ignoring a key grant: too many keys nobody vouched for from one member");
+                    return Ok(None);
+                }
+            }
             Some(PrivateKind::Dm) if is_valid_dm_grant(&grant, verified, context) => {
                 self.record_private_channel(&grant.channel, PrivateKind::Dm, origin)?;
                 self.put_dm_members(&grant.channel, &grant.dm_members)?;
@@ -108,23 +113,19 @@ impl Store {
         Ok(self.put_channel_key(&key, origin)?.then_some(key))
     }
 
-    /// Notes which channel each unopened sealed op belongs to, for the keys
-    /// that just arrived.
-    fn match_new_keys(&self, new_keys: &[StoredKey], context: ApplyContext<'_>) -> Result<()> {
-        for waiting in self.waiting_sealed(false)? {
-            let slot = Slot {
-                workspace_id: context.workspace_id,
-                author: &waiting.author,
-                seq: waiting.seq,
-            };
+    /// Notes which channel each unmatched sealed op belongs to, for the keys
+    /// that just arrived. Returns the channels that gained keys.
+    fn match_new_keys(&self, new_keys: &[StoredKey], context: ApplyContext<'_>) -> Result<BTreeSet<String>> {
+        for waiting in self.unmatched_sealed()? {
+            let slot = slot(&waiting.author, waiting.seq, context);
             for key in new_keys {
-                if key_hint(&key.key, slot)? == waiting.hint {
+                if key_hint(key.labeled(), slot)? == waiting.hint {
                     self.match_waiting_sealed(&waiting.author, waiting.seq, &key.channel)?;
                     break;
                 }
             }
         }
-        Ok(())
+        Ok(new_keys.iter().map(|key| key.channel.clone()).collect())
     }
 
     pub(crate) fn apply_sealed(
@@ -133,10 +134,10 @@ impl Store {
         payload: &SealedPayload,
         context: ApplyContext<'_>,
     ) -> Result<Applied> {
-        let slot = slot(verified, context);
+        let slot = slot(&verified.author, verified.seq, context);
         let mut channel = None;
         for key in self.channel_keys(None)? {
-            if key_hint(&key.key, slot)? == payload.hint {
+            if key_hint(key.labeled(), slot)? == payload.hint {
                 channel = Some(key.channel);
                 break;
             }
@@ -152,33 +153,36 @@ impl Store {
         };
         match self.settle_sealed(verified, payload, &channel, context)? {
             Settled::Applied(mut applied) => {
-                applied.extend(self.retry_sealed(context)?);
+                applied.extend(self.retry_sealed(&BTreeSet::from([channel]), context)?);
                 Ok(applied)
             }
             Settled::Void | Settled::Waiting => Ok(Applied::default()),
         }
     }
 
-    /// Tries every matched waiting op until none moves.
-    pub(crate) fn retry_sealed(&self, context: ApplyContext<'_>) -> Result<Applied> {
+    /// Tries the waiting ops of `channels` until none moves.
+    pub(crate) fn retry_sealed(
+        &self,
+        channels: &BTreeSet<String>,
+        context: ApplyContext<'_>,
+    ) -> Result<Applied> {
         let mut applied = Applied::default();
         loop {
             let mut has_progress = false;
-            for waiting in self.waiting_sealed(true)? {
-                let Some(channel) = &waiting.channel else {
-                    continue;
-                };
-                let verified = self.stored_op(&waiting.author, waiting.seq)?;
-                let Op::Sealed { payload } = &verified.body.op else {
-                    bail!("a waiting sealed op isn't sealed");
-                };
-                match self.settle_sealed(&verified, payload, channel, context)? {
-                    Settled::Applied(more) => {
-                        applied.extend(more);
-                        has_progress = true;
+            for channel in channels {
+                for waiting in self.waiting_in(channel)? {
+                    let verified = self.stored_op(&waiting.author, waiting.seq)?;
+                    let Op::Sealed { payload } = &verified.body.op else {
+                        bail!("a waiting sealed op isn't sealed");
+                    };
+                    match self.settle_sealed(&verified, payload, channel, context)? {
+                        Settled::Applied(more) => {
+                            applied.extend(more);
+                            has_progress = true;
+                        }
+                        Settled::Void => has_progress = true,
+                        Settled::Waiting => {}
                     }
-                    Settled::Void => has_progress = true,
-                    Settled::Waiting => {}
                 }
             }
             if !has_progress {
@@ -196,18 +200,21 @@ impl Store {
         channel: &str,
         context: ApplyContext<'_>,
     ) -> Result<Settled> {
-        let slot = slot(verified, context);
+        let slot = slot(&verified.author, verified.seq, context);
         for key in self.channel_keys(Some(channel))? {
-            if key_hint(&key.key, slot)? != payload.hint {
+            if key_hint(key.labeled(), slot)? != payload.hint {
                 continue;
             }
-            let Ok(plaintext) = open(&key.key, slot, payload) else {
+            let Ok(plaintext) = open(key.labeled(), slot, payload) else {
                 continue;
             };
             let Ok(body) = postcard::from_bytes::<PrivateBody>(&plaintext) else {
                 // A kind of private op a newer version added.
                 return Ok(Settled::Waiting);
             };
+            if self.defers_private_content.get() && matches!(body.op, PrivateOp::Content(_)) {
+                return Ok(Settled::Waiting);
+            }
             return match self.judge(verified, &body, &key)? {
                 Verdict::Wait => Ok(Settled::Waiting),
                 Verdict::Void(reason) => {
@@ -238,6 +245,134 @@ impl Store {
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// Applies an op the rules allowed.
+    fn apply_private(&self, verified: &VerifiedOp, body: &PrivateBody) -> Result<Applied> {
+        let channel = body.channel.as_str();
+        let author = &verified.author;
+        let origin = Origin {
+            author,
+            seq: verified.seq,
+        };
+        let mut applied = Applied::default();
+        match &body.op {
+            PrivateOp::Create {
+                name,
+                commitment,
+                members,
+            } => {
+                self.record_private_channel(channel, PrivateKind::Channel, origin)?;
+                self.record_position(channel, 1, origin)?;
+                self.set_owner_from(channel, 1, author, origin)?;
+                self.record_generation(channel, 1, commitment, origin)?;
+                let creator = Membership {
+                    after_seq: verified.seq - 1,
+                    from_generation: 1,
+                };
+                self.record_add(channel, author, creator, origin)?;
+                for invitee in members {
+                    let membership = Membership {
+                        after_seq: invitee.after_seq,
+                        from_generation: 1,
+                    };
+                    self.record_add(channel, &invitee.member, membership, origin)?;
+                }
+                self.show_channel(channel, &clean_channel_name(name), verified)?;
+                applied.changes.push(Change::Channels);
+            }
+            PrivateOp::Add {
+                invitee,
+                from_generation,
+                position,
+            } => {
+                self.record_position(channel, *position, origin)?;
+                let membership = Membership {
+                    after_seq: invitee.after_seq,
+                    from_generation: *from_generation,
+                };
+                self.record_add(channel, &invitee.member, membership, origin)?;
+                applied.changes.push(Change::Channels);
+            }
+            PrivateOp::Remove {
+                member,
+                last_seq,
+                generation,
+                commitment,
+                position,
+            } => {
+                // Ends their latest time even if the owner hadn't seen that
+                // far into their log.
+                let started_after = self
+                    .owner_membership(channel, member)?
+                    .map_or(0, |membership| membership.after_seq);
+                let at_seq = (*last_seq).max(started_after);
+                self.record_position(channel, *position, origin)?;
+                self.record_closure(
+                    channel,
+                    member,
+                    at_seq,
+                    *generation,
+                    Ending::RemovedByOwner,
+                    origin,
+                )?;
+                self.record_generation(channel, *generation, commitment, origin)?;
+                applied.needs_rebuild = self.has_applied_after(channel, member, at_seq)?;
+                applied.changes.push(Change::Channels);
+            }
+            PrivateOp::Rotate {
+                generation,
+                commitment,
+                position,
+            } => {
+                self.record_position(channel, *position, origin)?;
+                self.record_generation(channel, *generation, commitment, origin)?;
+            }
+            PrivateOp::HandOver { to, position } => {
+                self.record_position(channel, *position, origin)?;
+                self.set_owner_from(channel, position + 1, to, origin)?;
+                applied.changes.push(Change::Channels);
+            }
+            PrivateOp::OwnerDelete { id, position } => {
+                self.record_position(channel, *position, origin)?;
+                applied.extend(self.apply_content(verified, Op::Delete { id: id.clone() })?);
+            }
+            PrivateOp::Leave => {
+                self.record_closure(
+                    channel,
+                    author,
+                    verified.seq,
+                    body.generation + 1,
+                    Ending::Left,
+                    origin,
+                )?;
+                applied.needs_rebuild = self.has_applied_after(channel, author, verified.seq)?;
+                applied.changes.push(Change::Channels);
+            }
+            PrivateOp::Content(op) => applied.extend(self.apply_content(verified, op.clone())?),
+        }
+        Ok(applied)
+    }
+
+    /// Applies content from a sealed op as if its author had written it plainly.
+    fn apply_content(&self, verified: &VerifiedOp, op: Op) -> Result<Applied> {
+        let content = VerifiedOp {
+            author: verified.author,
+            seq: verified.seq,
+            body: OpBody {
+                lamport: verified.body.lamport,
+                timestamp_ms: verified.body.timestamp_ms,
+                op,
+            },
+        };
+        Ok(match self.apply(&content)? {
+            Some(change) => Applied {
+                changes: vec![change],
+                readable: vec![content],
+                needs_rebuild: false,
+            },
+            None => Applied::default(),
+        })
     }
 }
 

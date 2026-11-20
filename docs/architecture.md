@@ -89,7 +89,7 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 | `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `presence` (heartbeats and status) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
-| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `rebuild` (undoing a removed member's late ops), `private` (private channel state), `sealing`, `queries` |
+| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `rebuild` (undoing ops that turned out not to count), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
 | `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |
 | `private/` | private channels and DMs: `ids`, `ops` (what's inside sealed ops and grants), `crypto` (sealed content, key wraps, commitments), `sealing` (each member's key for receiving channel keys), `apply` (grants and waiting sealed ops), `rules` (which private ops count), `actions` (create, add, remove, leave, hand over, DMs), `reads` |
 | `crypto.rs` | sign-then-encrypt ops |

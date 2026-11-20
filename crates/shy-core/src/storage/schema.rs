@@ -120,6 +120,28 @@ CREATE TABLE private_applied (
     channel TEXT NOT NULL, author BLOB NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (author, seq));
 CREATE INDEX private_applied_by_channel ON private_applied (channel, author, seq);
 ",
+    // Owner ops form one numbered log per channel; closures say whether they
+    // were a leave. Nothing used the earlier tables yet.
+    "
+DROP TABLE private_owners;
+CREATE TABLE private_owners (
+    channel TEXT NOT NULL, from_position INTEGER NOT NULL, owner BLOB NOT NULL,
+    origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (channel, from_position));
+CREATE TABLE private_positions (
+    channel TEXT NOT NULL, position INTEGER NOT NULL,
+    origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (channel, position));
+DROP TABLE private_closures;
+CREATE TABLE private_closures (
+    channel TEXT NOT NULL, member BLOB NOT NULL, at_seq INTEGER NOT NULL, before_generation INTEGER NOT NULL,
+    is_leave INTEGER NOT NULL, origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL,
+    PRIMARY KEY (origin_author, origin_seq));
+CREATE INDEX private_closures_by_member ON private_closures (channel, member);
+DELETE FROM private_channels; DELETE FROM private_generations; DELETE FROM private_keys;
+DELETE FROM private_adds; DELETE FROM dm_members; DELETE FROM sealed_pending; DELETE FROM private_applied;
+",
+    // Where a message sits in its author's log: their earliest message with
+    // an id wins. Older rows have none and stay as they are.
+    "ALTER TABLE messages ADD COLUMN seq INTEGER;",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

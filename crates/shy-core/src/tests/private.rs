@@ -239,7 +239,12 @@ async fn removing_someone_from_the_workspace_takes_them_out_of_private_channels(
 
     let store = &bob.state().store;
     assert_eq!(store.latest_generation(&channel).unwrap(), 2);
-    assert_eq!(store.current_private_members(&channel).unwrap(), [bob.me()]);
+    assert_eq!(
+        store
+            .private_members(&channel, crate::storage::Ending::Left)
+            .unwrap(),
+        [bob.me()]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

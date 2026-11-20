@@ -214,7 +214,8 @@ impl Forger<'_> {
             author: &self.author.me(),
             seq: self.next_seq,
         };
-        let payload = private::crypto::seal(&key.key, slot, &postcard::to_stdvec(&body).unwrap()).unwrap();
+        let payload =
+            private::crypto::seal(key.labeled(), slot, &postcard::to_stdvec(&body).unwrap()).unwrap();
         self.seal(Op::Sealed { payload })
     }
 }

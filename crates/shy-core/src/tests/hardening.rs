@@ -392,10 +392,10 @@ async fn malformed_sealing_keys_from_others_are_skipped() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ordinary_ops_cannot_reach_private_ids() {
-    use crate::private::ids::{new_private_channel_id, new_private_message_id};
+    use crate::private::ids::{new_private_message_id, private_channel_id};
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");
-    let private = new_private_channel_id(&bob.me());
+    let private = private_channel_id(&bob.me(), &[0; 32], "secret", &[]).unwrap();
     let message = new_private_message_id(&private, &bob.me());
     let mut forger = Forger::new(&bob);
     for op in [
