@@ -8,6 +8,7 @@ import { Button, IconButton, Spinner, springs } from "../../ui";
 import { WriteGate } from "../private/WriteGate";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
+import type { InsertMention } from "./useSuggestions";
 
 const NEAR_END_PX = 80;
 
@@ -31,6 +32,8 @@ export function ThreadPanel({
   );
   const first = thread?.[0];
   const [editing, setEditing] = useState<Message | null>(null);
+  const mentionTarget = useRef<InsertMention | null>(null);
+  const mention = useCallback((name: string, memberId: string) => mentionTarget.current?.(name, memberId), []);
   const replies = thread?.slice(1) ?? [];
   const scroller = useRef<HTMLDivElement>(null);
   // Follows new replies while you're at the end; a reply to show from a link holds the view instead.
@@ -112,6 +115,7 @@ export function ThreadPanel({
             isHighlighted={editing?.id === first.id}
             onOpenThread={null}
             onEdit={() => setEditing(first)}
+            onMention={mention}
           />
         )}
         {replies.length > 0 && (
@@ -130,6 +134,7 @@ export function ThreadPanel({
             isHighlighted={reply.id === focus || editing?.id === reply.id}
             onOpenThread={null}
             onEdit={() => setEditing(reply)}
+            onMention={mention}
           />
         ))}
       </div>
@@ -144,6 +149,7 @@ export function ThreadPanel({
           editing={editing}
           onEditDone={() => setEditing(null)}
           onEditLast={() => setEditing(thread?.findLast((message) => message.can_edit) ?? null)}
+          mentionTarget={mentionTarget}
         />
       </WriteGate>
     </motion.aside>

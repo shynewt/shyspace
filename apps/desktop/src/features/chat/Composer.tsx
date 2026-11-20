@@ -1,13 +1,13 @@
 import { ArrowUp, Pencil, Smile, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
 import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { Button, cx, EmojiPicker, IconButton, Kbd, Popover, springs } from "../../ui";
 import { useDraft } from "./useDraft";
-import { useSuggestions } from "./useSuggestions";
+import { type InsertMention, useSuggestions } from "./useSuggestions";
 
 const MAX_HEIGHT_PX = 200;
 
@@ -19,6 +19,7 @@ export function Composer({
   editing = null,
   onEditDone,
   onEditLast,
+  mentionTarget,
 }: {
   channelId: string;
   /** Names the field for screen readers and is its placeholder. */
@@ -31,6 +32,8 @@ export function Composer({
   onEditDone?: () => void;
   /** Up in an empty composer: edit your last message. */
   onEditLast?: () => void;
+  /** Filled with this box's way to insert a mention, for things shown around it. */
+  mentionTarget?: RefObject<InsertMention | null>;
 }) {
   const [text, setText] = useState("");
   const [isFocused, setFocused] = useState(false);
@@ -38,6 +41,14 @@ export function Composer({
   useFocusOnMount(input);
   const picker = useSuggestions(input, (next) => updateText(next));
   const [isEmojiOpen, setEmojiOpen] = useState(false);
+  const { insertMention } = picker;
+  useEffect(() => {
+    if (!mentionTarget) return;
+    mentionTarget.current = insertMention;
+    return () => {
+      if (mentionTarget.current === insertMention) mentionTarget.current = null;
+    };
+  }, [mentionTarget, insertMention]);
   const sentLength = characterCount(picker.toSend(text).trim());
   const isTooLong = sentLength > MAX_MESSAGE_CHARS;
   const canSend = sentLength > 0 && !isTooLong;

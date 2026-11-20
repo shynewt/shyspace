@@ -15,6 +15,7 @@ import { WriteGate } from "../private/WriteGate";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 import { ThreadPanel } from "./ThreadPanel";
+import type { InsertMention } from "./useSuggestions";
 
 const PAGE_SIZE = 100;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -90,6 +91,8 @@ export function ChannelView({
   );
   const hasOlder = (messages?.length ?? 0) >= windowSize;
   const openThread = thread ?? null;
+  const mentionTarget = useRef<InsertMention | null>(null);
+  const mention = useCallback((name: string, memberId: string) => mentionTarget.current?.(name, memberId), []);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   // A linked message to show: in the channel (loading older history until
@@ -268,6 +271,7 @@ export function ChannelView({
                     }
                     onOpenThread={() => navigate({ kind: "channel", id: channelId, thread: row.message.id })}
                     onEdit={() => setEditing(row.message)}
+                    onMention={mention}
                   />
                 </motion.div>
               ),
@@ -286,6 +290,7 @@ export function ChannelView({
             editing={editing}
             onEditDone={() => setEditing(null)}
             onEditLast={() => setEditing(messages?.findLast((message) => message.can_edit) ?? null)}
+            mentionTarget={mentionTarget}
           />
         </WriteGate>
       </div>

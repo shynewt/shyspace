@@ -15,6 +15,9 @@ import { describeStatus, shownStatus } from "../members/StatusEmoji";
 
 const MAX_SUGGESTIONS = 6;
 
+/** Puts a mention of this member where the message box's cursor is. */
+export type InsertMention = (name: string, memberId: string) => void;
+
 type Person = { kind: "person"; name: string; member: Member | null; detail: string };
 type EmojiSuggestion = { kind: "emoji"; emoji: CatalogEmoji };
 type Suggestion = Person | EmojiSuggestion;
@@ -102,6 +105,18 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     element.setSelectionRange(before.length, before.length);
   };
 
+  const insertMention: InsertMention = (name, memberId) => {
+    const element = input.current;
+    if (!element) return;
+    const before = element.value.slice(0, element.selectionStart);
+    const head = `${before}${before === "" || /\s$/.test(before) ? "" : " "}@${name} `;
+    picked.current.set(name, memberId);
+    setText(head + element.value.slice(element.selectionEnd));
+    setQuery(null);
+    element.focus();
+    requestAnimationFrame(() => element.setSelectionRange(head.length, head.length));
+  };
+
   /** Handles the keys the list owns; returns whether it used the key. */
   const onKeyDown = (event: React.KeyboardEvent): boolean => {
     if (!isOpen) return false;
@@ -173,7 +188,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     "aria-activedescendant": isOpen ? `${listId}-${selected}` : undefined,
   };
 
-  return { list, inputProps, onTextChange, onKeyDown, toSend, adopt, forgetPicked };
+  return { list, inputProps, onTextChange, onKeyDown, toSend, adopt, forgetPicked, insertMention };
 }
 
 function PersonRow({ person }: { person: Person }) {

@@ -16,6 +16,11 @@ export function isMentionLink(href: string): boolean {
   return MEMBER_LINK.test(href) || EVERYONE_LINK.test(href);
 }
 
+/** The member a `shy://member/<id>` link mentions; null for @channel, @here and other links. */
+export function mentionedMemberId(href: string): string | null {
+  return href.match(MEMBER_LINK)?.[1] ?? null;
+}
+
 /** Whether a mention link reaches `memberId`: theirs, or @channel / @here. */
 export function linkMentions(href: string, memberId: string): boolean {
   return EVERYONE_LINK.test(href) || href.match(MEMBER_LINK)?.[1] === memberId;

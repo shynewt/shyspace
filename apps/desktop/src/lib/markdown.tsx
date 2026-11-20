@@ -6,7 +6,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { ConfirmDialog, cx, IconButton, Tooltip } from "../ui";
 import { PAGE_LINK_PREFIX } from "./api";
-import { isMentionLink, linkMentions } from "./mentions";
+import { isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
 import { reportError } from "./toast";
 
 /** The id part of `shy://page/<id>` and `shy://message/<id>` links. */
@@ -43,6 +43,7 @@ export function ChatMarkdown({
   pageTitle,
   onOpenPage,
   onOpenMessage,
+  renderMemberMention,
 }: {
   text: string;
   /** Mentions of this member stand out. */
@@ -50,6 +51,8 @@ export function ChatMarkdown({
   pageTitle: (id: string) => string | undefined;
   onOpenPage: (id: string) => void;
   onOpenMessage: (id: string) => void;
+  /** Draws a mention of a member, like a button opening their card; plain text without it. */
+  renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
 }) {
   const withTitles = text
     .replace(PAGE_LINK_LINE, (line: string, id: string) => (pageTitle(id) === undefined ? line : ""))
@@ -70,7 +73,10 @@ export function ChatMarkdown({
         );
       }
       if (isMentionLink(href)) {
-        return <span className={linkMentions(href, myId) ? "mention mention-me" : "mention"}>{children}</span>;
+        const className = linkMentions(href, myId) ? "mention mention-me" : "mention";
+        const memberId = mentionedMemberId(href);
+        if (memberId && renderMemberMention) return renderMemberMention(memberId, children, className);
+        return <span className={className}>{children}</span>;
       }
       const page = href.match(PAGE_LINK)?.[1];
       if (page) {

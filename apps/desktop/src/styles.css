@@ -223,6 +223,12 @@
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+.prose-chat button.mention {
+  cursor: pointer;
+  font: inherit;
+  line-height: inherit;
+}
+
 .prose-chat .mention-me {
   color: var(--text);
   background: color-mix(in srgb, var(--warning) 28%, transparent);

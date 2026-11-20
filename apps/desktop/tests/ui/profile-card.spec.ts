@@ -1,0 +1,138 @@
+import { expect, type Page, test } from "@playwright/test";
+
+function channelLog(page: Page) {
+  return page.getByRole("log", { name: "Messages in #general" });
+}
+
+function card(page: Page, name: string) {
+  return page.getByRole("dialog", { name: `${name}'s profile` });
+}
+
+function nameButton(page: Page, name: string) {
+  return channelLog(page).getByRole("button", { name, exact: true });
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    window.fake.setPresence(grace, "online");
+    window.fake.setMemberStatus(grace, { emoji: "🎧", text: "Focusing", until_ms: null, alerts: "mentions" });
+    window.fake.receiveMessage(grace, "general", "Morning all");
+  });
+  await expect(channelLog(page).getByText("Morning all")).toBeVisible();
+});
+
+test("the keyboard opens a card, uses it and closes it", async ({ page }) => {
+  await nameButton(page, "Grace").focus();
+  await page.keyboard.press("Enter");
+  const grace = card(page, "Grace");
+  await expect(grace).toBeVisible();
+  await expect(grace).toContainText("Online");
+  await expect(grace).toContainText("🎧 Focusing");
+  await expect(grace).toContainText("Mentions only");
+  await expect(grace.getByRole("button", { name: "Mention" })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(grace).toHaveCount(0);
+  await expect(nameButton(page, "Grace")).toBeFocused();
+
+  await page.keyboard.press("Space");
+  await expect(grace.getByRole("button", { name: "Mention" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(grace).toHaveCount(0);
+  const composer = page.getByLabel("Message #general");
+  await expect(composer).toBeFocused();
+  await expect(composer).toHaveValue("@Grace ");
+  await page.keyboard.type("are you free?");
+  await page.keyboard.press("Enter");
+  await expect(channelLog(page).locator(".mention").filter({ hasText: "@Grace" })).toBeVisible();
+});
+
+test("clicking an avatar opens the card, and clicking outside closes it", async ({ page }) => {
+  await channelLog(page).getByRole("button", { name: "Show Grace's profile" }).click();
+  await expect(card(page, "Grace")).toBeVisible();
+
+  await page.getByRole("log", { name: "Messages in #general" }).click({ position: { x: 600, y: 300 } });
+  await expect(card(page, "Grace")).toHaveCount(0);
+});
+
+test("a pause on a name opens the card, and moving onto it keeps it open", async ({ page }) => {
+  const name = nameButton(page, "Grace");
+  await name.hover();
+  const grace = card(page, "Grace");
+  await expect(grace).toBeVisible();
+  await expect(page.getByLabel("Message #general")).toBeFocused();
+
+  const box = await grace.boundingBox();
+  if (!box) throw new Error("no box for the card");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
+  await page.waitForTimeout(700);
+  await expect(grace).toBeVisible();
+
+  await page.mouse.move(box.x + box.width + 200, box.y + box.height + 200, { steps: 4 });
+  await expect(grace).toHaveCount(0);
+  await expect(page.getByLabel("Message #general")).toBeFocused();
+});
+
+test("passing quickly over a name opens nothing", async ({ page }) => {
+  const box = await nameButton(page, "Grace").boundingBox();
+  if (!box) throw new Error("no box for the name");
+  await page.mouse.move(box.x + 2, box.y + box.height / 2);
+  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 4 });
+  await page.mouse.move(box.x + box.width / 2, box.y + 200, { steps: 4 });
+  await page.waitForTimeout(1000);
+
+  await expect(card(page, "Grace")).toHaveCount(0);
+});
+
+test("an agent's card says it's an agent and shows no presence or status", async ({ page }) => {
+  await page.evaluate(() => {
+    const agent = window.fake.addMember("Claude", { kind: "bot" });
+    window.fake.setPresence(agent, "online");
+    window.fake.setMemberStatus(agent, { emoji: "🤖", text: "Working", until_ms: null, alerts: "all" });
+    window.fake.receiveMessage(agent, "general", "Summary ready");
+  });
+  await nameButton(page, "Claude").click();
+
+  const claude = card(page, "Claude");
+  await expect(claude).toContainText("Agent");
+  await expect(claude).not.toContainText("Online");
+  await expect(claude).not.toContainText("Working");
+});
+
+test("a mention in a message opens the card on click, never on hover", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.memberNamed("Grace");
+    window.fake.receiveMessage(grace, "general", `Ask [@Grace](shy://member/${grace}) about it`);
+  });
+  const mention = channelLog(page).getByRole("button", { name: "@Grace" });
+  await mention.hover();
+  await page.waitForTimeout(1000);
+  await expect(card(page, "Grace")).toHaveCount(0);
+
+  await mention.click();
+  await expect(card(page, "Grace")).toBeVisible();
+});
+
+test("view in members opens the member list in settings", async ({ page }) => {
+  await nameButton(page, "Grace").click();
+  await card(page, "Grace").getByRole("button", { name: "View in members" }).click();
+
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings.getByRole("list", { name: "Members" })).toContainText("Grace");
+});
+
+test("your own card shows you as offline while you appear offline", async ({ page }) => {
+  await page.getByRole("button", { name: /^Ada\b/ }).click();
+  await page.getByRole("menuitem", { name: "Appear offline" }).click();
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("Quietly here");
+  await composer.press("Enter");
+
+  await nameButton(page, "Ada").click();
+  const ada = card(page, "Ada");
+  await expect(ada).toContainText("Not reachable right now");
+  await expect(ada.getByRole("button", { name: "Mention" })).toHaveCount(0);
+});
