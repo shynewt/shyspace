@@ -87,6 +87,10 @@ CREATE TABLE member_status (
 ",
     // 0 = all, 1 = nothing (the old busy flag), 2 = mentions.
     "ALTER TABLE member_status RENAME COLUMN is_busy TO alerts;",
+    "
+CREATE TABLE sealing_secrets (public BLOB PRIMARY KEY, secret BLOB NOT NULL, created_ms INTEGER NOT NULL);
+CREATE TABLE sealing_keys (member BLOB PRIMARY KEY, public BLOB NOT NULL, lamport INTEGER NOT NULL);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

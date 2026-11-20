@@ -369,6 +369,27 @@ async fn a_damaged_page_update_cannot_stop_a_device_following_a_removal() {
     assert!(!texts_in(&carol, &general).contains(&"SENT-AFTER-REMOVAL".to_string()));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn malformed_sealing_keys_from_others_are_skipped() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let announced = admin.state().store.sealing_key_of(&bob.me()).unwrap();
+    let general = channel_id(&admin, "general");
+    let mut forger = Forger::new(&bob);
+    for public in [vec![], vec![7; 31], vec![7; 33]] {
+        admin.receive(forger.seal(Op::SealingKey { public })).unwrap();
+    }
+    admin
+        .receive(forger.seal(Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: "still heard".into(),
+            reply_to: None,
+        }))
+        .unwrap();
+    assert_eq!(admin.state().store.sealing_key_of(&bob.me()).unwrap(), announced);
+    assert!(texts_in(&admin, &general).contains(&"still heard".to_string()));
+}
+
 fn texts_in(member: &Workspace, channel: &str) -> Vec<String> {
     member
         .messages(channel, None, 50)

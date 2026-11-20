@@ -28,6 +28,7 @@ const SHARED_VIEW_TABLES: &[&str] = &[
     "channel_names",
     "deleted",
     "member_status",
+    "sealing_keys",
 ];
 
 /// A page's updates gathered during a replay, written once at the end.

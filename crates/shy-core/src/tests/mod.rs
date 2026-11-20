@@ -8,6 +8,7 @@ mod later;
 mod mentions;
 mod notifications;
 mod presence;
+mod private;
 mod reading;
 mod recovery;
 mod search;

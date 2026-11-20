@@ -13,6 +13,7 @@ use crate::{
         is_valid_status, rule_violation,
     },
     pages,
+    private::crypto::is_valid_sealing_public_key,
     views::Change,
 };
 
@@ -170,6 +171,13 @@ impl Store {
                     params![author, emoji, text, until_ms, *alerts as u8, lamport],
                 )?;
                 Change::Members
+            }
+            Op::SealingKey { public } => {
+                if !is_valid_sealing_public_key(public) {
+                    return Err(rule_violation("malformed sealing key"));
+                }
+                self.put_sealing_key(&verified.author, public, lamport)?;
+                return Ok(None);
             }
         }))
     }

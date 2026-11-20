@@ -80,7 +80,11 @@ impl Store {
             | Op::PageRename { id, .. } => id,
             Op::Reaction { message, .. } => message,
             Op::DocUpdate { page, .. } => page,
-            Op::Profile { .. } | Op::StorageSettings { .. } | Op::Delete { .. } | Op::Status { .. } => {
+            Op::Profile { .. }
+            | Op::StorageSettings { .. }
+            | Op::Delete { .. }
+            | Op::Status { .. }
+            | Op::SealingKey { .. } => {
                 return Ok(false);
             }
         };

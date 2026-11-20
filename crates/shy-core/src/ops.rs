@@ -103,6 +103,11 @@ pub enum Op {
         until_ms: Option<i64>,
         alerts: StatusAlerts,
     },
+    /// The author's public key for receiving private channel keys. The latest
+    /// one wins; their device keeps every secret it announced.
+    SealingKey {
+        public: Vec<u8>,
+    },
 }
 
 /// An op that is validly signed but breaks a rule (someone else's id, an

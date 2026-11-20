@@ -331,6 +331,7 @@ impl Workspace {
                 heartbeat_now: Notify::new(),
             }),
         };
+        workspace.announce_sealing_key()?;
         if let Some(net) = &workspace.inner.net {
             net.set_members(&workspace.current_members()?);
             workspace.spawn_background(incoming);

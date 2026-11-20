@@ -11,6 +11,7 @@ mod reading;
 mod rebuild;
 mod revisions;
 mod schema;
+mod sealing;
 mod sections;
 mod snapshot;
 mod threads;

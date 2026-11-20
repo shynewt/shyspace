@@ -91,6 +91,7 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
 | `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `rebuild` (undoing a removed member's late ops), `queries` |
 | `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |
+| `private/` | private channels and DMs: `crypto` (sealed content, key wraps), `sealing` (each member's key for receiving channel keys) |
 | `crypto.rs` | sign-then-encrypt ops |
 | `ops.rs` | op types, owned ids, timestamps |
 | `pages.rs` | Yjs page helpers |
