@@ -117,7 +117,8 @@ function AttentionRow({ item }: { item: InboxItem }) {
 }
 
 function DraftRow({ draft }: { draft: Draft }) {
-  const { channels, navigate } = useWorkspace();
+  const { channels, navigate, pages } = useWorkspace();
+  const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const channelName = channels.find((channel) => channel.id === draft.channel)?.name ?? "";
   const isThread = draft.target !== draft.channel;
   return (
@@ -138,7 +139,9 @@ function DraftRow({ draft }: { draft: Draft }) {
           <span className="block text-[12.5px] text-muted">
             {isThread ? "Reply in a thread in" : "In"} <b className="font-semibold text-ink">#{channelName}</b>
           </span>
-          <span className="mt-0.5 block truncate text-[13.5px]">{draft.text}</span>
+          <span className="mt-0.5 block truncate text-[13.5px]">
+            {plainPreview(draft.text, (id) => titles.get(id))}
+          </span>
         </span>
       </button>
     </motion.li>

@@ -6,10 +6,16 @@ import { PAGE_LINK_PREFIX } from "./api";
 import { isMentionLink, linkMentions } from "./mentions";
 import { reportError } from "./toast";
 
-const BARE_PAGE_LINK = /(?<!\]\()shy:\/\/page\/([0-9a-f]+)/g;
-const PAGE_LINK = /^shy:\/\/page\/([0-9a-f]+)$/;
-const MESSAGE_LINK = /^shy:\/\/message\/([0-9a-f]+)$/;
-const BARE_MESSAGE_LINK = /(?<!\]\()shy:\/\/message\/([0-9a-f]+)/g;
+/** The id part of `shy://page/<id>` and `shy://message/<id>` links. */
+const PAGE_ID = "[0-9a-f]+";
+const MESSAGE_ID = "[0-9a-f]+";
+
+const PAGE_LINK = new RegExp(`^shy://page/(${PAGE_ID})$`);
+const MESSAGE_LINK = new RegExp(`^shy://message/(${MESSAGE_ID})$`);
+const ANY_PAGE_LINK = new RegExp(`shy://page/(${PAGE_ID})`, "g");
+const ANY_MESSAGE_LINK = new RegExp(`shy://message/(${MESSAGE_ID})`, "g");
+const BARE_PAGE_LINK = new RegExp(`(?<!\\]\\()shy://page/(${PAGE_ID})`, "g");
+const BARE_MESSAGE_LINK = new RegExp(`(?<!\\]\\()shy://message/(${MESSAGE_ID})`, "g");
 const SAFE_EXTERNAL = /^(https?:|mailto:)/i;
 
 /**
@@ -81,19 +87,38 @@ export function ChatMarkdown({
 }
 
 export function pageIdsIn(text: string): string[] {
-  return [...new Set([...text.matchAll(/shy:\/\/page\/([0-9a-f]+)/g)].map((match) => match[1]))];
-}
-
-/** One-line text for quotes and previews: page links shown by title, message links in words, mentions as @name. */
-export function plainPreview(text: string, pageTitle: (id: string) => string | undefined): string {
-  return text
-    .replace(/\[(@[^\]]*)\]\(shy:\/\/(?:member|mention)\/[0-9a-z]+\)/g, "$1")
-    .replace(/shy:\/\/page\/([0-9a-f]+)/g, (_, id: string) => pageTitle(id) ?? "Untitled page")
-    .replace(/\[([^\]]*)\]\(shy:\/\/message\/[0-9a-f]+\)/g, "$1")
-    .replace(/shy:\/\/message\/[0-9a-f]+/g, "a linked message")
-    .replace(/\s+/g, " ");
+  return [...new Set([...text.matchAll(ANY_PAGE_LINK)].map((match) => match[1]))];
 }
 
 export function messageIdsIn(text: string): string[] {
-  return [...new Set([...text.matchAll(/shy:\/\/message\/([0-9a-f]+)/g)].map((match) => match[1]))];
+  return [...new Set([...text.matchAll(ANY_MESSAGE_LINK)].map((match) => match[1]))];
+}
+
+/**
+ * One line of plain words for quotes, previews and search results: markdown
+ * marks dropped, links as their text, page links by title, lines joined with
+ * " · ". Copes with text cut off inside a link, as search snippets can be.
+ */
+export function plainPreview(text: string, pageTitle: (id: string) => string | undefined): string {
+  return text
+    .replace(/!?\[([^\]]*)\]\([^)\s]*\)/g, "$1")
+    .replace(/\]\([^)\s]*\)/g, "")
+    .replace(/\[([^\]]*)\]\([^)\s]*?(…?)$/, "$1$2")
+    .replace(/\[([^\][]*)$/, "$1")
+    .replace(ANY_PAGE_LINK, (_, id: string) => pageTitle(id) ?? "Untitled page")
+    .replace(ANY_MESSAGE_LINK, "a linked message")
+    .split("\n")
+    .map(plainLine)
+    .filter(Boolean)
+    .join(" · ")
+    .replace(/\s+/g, " ");
+}
+
+function plainLine(line: string): string {
+  return line
+    .replace(/^\s*(?:#{1,6}\s+|>\s?|```.*$)/, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "")
+    .replace(/\*\*|__|~~|`/g, "")
+    .replace(/(^|\W)[*_](\S(?:.*?\S)?)[*_](?=\W|$)/g, "$1$2")
+    .trim();
 }

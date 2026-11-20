@@ -12,6 +12,7 @@ import {
 import { motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SearchHit } from "../../lib/api";
+import { plainPreview } from "../../lib/markdown";
 import { shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
@@ -64,6 +65,8 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
   }, [query]);
 
   const items = useMemo<Item[]>(() => {
+    const titles = new Map(pages.map((page) => [page.id, page.title || "Untitled"]));
+    const snippet = (text: string) => <Snippet text={readableSnippet(text, (id) => titles.get(id))} />;
     const needle = query.trim().toLowerCase();
     const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
     const go = (view: View) => () => navigate(view);
@@ -126,7 +129,7 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
             onChoose: go({ kind: "page", id: hit.id }),
             icon: <FileText size={15} />,
             title: hit.title || "Untitled",
-            detail: <Snippet text={hit.snippet} />,
+            detail: snippet(hit.snippet),
             group: "In pages",
           },
         ];
@@ -138,7 +141,7 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
           onChoose: go({ kind: "channel", id: hit.channel, thread: hit.thread_root ?? undefined, focus: hit.id }),
           icon: <MessageSquare size={15} />,
           title: `#${hit.title}`,
-          detail: <Snippet text={hit.snippet} />,
+          detail: snippet(hit.snippet),
           group: "In messages",
         },
       ];
@@ -243,6 +246,15 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
 
 const MATCH_START = String.fromCharCode(1);
 const MATCH_END = String.fromCharCode(2);
+const MATCH_MARKS = new RegExp(`[${MATCH_START}${MATCH_END}]`, "g");
+/** An app link like `shy://page/<id>`, with or without match marks inside it. */
+const MARKED_APP_LINK = new RegExp(`${MATCH_START}?shy${MATCH_END}?://[^\\s)\\]]*`, "g");
+
+/** The snippet as plain words, keeping the match marks that fall on visible text. */
+function readableSnippet(text: string, pageTitle: (id: string) => string | undefined): string {
+  const withPlainLinks = text.replace(MARKED_APP_LINK, (link) => link.replace(MATCH_MARKS, ""));
+  return plainPreview(withPlainLinks, pageTitle);
+}
 
 /** The core wraps matches in \u0001…\u0002; render them as highlights. */
 function Snippet({ text }: { text: string }) {
