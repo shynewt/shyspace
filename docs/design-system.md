@@ -34,7 +34,7 @@ Keep feedback under about 250 ms. Reduced-motion settings are respected globally
 | `Button` | actions; variants `primary`, `secondary`, `ghost`, `danger`; sizes `sm`, `md`, `lg`; `isLoading` |
 | `IconButton` | icon-only actions; `label` is required and becomes the tooltip and accessible name |
 | `Input`, `TextArea`, `Field` | form controls; `Field` links its label to the control through a render function |
-| `Dialog` | modal surfaces (centered, or `placement="top"` like the search palette) |
+| `Dialog` | modal surfaces (centered, or `placement="top"` like the search palette); never taller than the window, longer content scrolls inside; `hasCloseButton` for dialogs without their own Cancel or Done |
 | `Drawer` | side panels, like Members |
 | `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger; a menu sets destructive actions apart below a line |
 | `Card`, `SectionLabel`, `EmptyState` | grouping and empty screens |

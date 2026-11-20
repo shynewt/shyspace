@@ -25,7 +25,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [tab, setTab] = useState<Tab>("profile");
   const tabs = TABS.filter((candidate) => !candidate.isAdminOnly || session.is_admin);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Settings" width={720}>
+    <Dialog open={open} onOpenChange={onOpenChange} title="Settings" width={720} hasCloseButton>
       <div className="flex min-h-[380px] gap-4 p-5 pt-3">
         <div
           role="tablist"

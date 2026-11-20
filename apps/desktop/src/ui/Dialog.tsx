@@ -1,7 +1,9 @@
+import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Dialog as RadixDialog } from "radix-ui";
 import type { ReactNode } from "react";
 import { cx } from "./cx";
+import { IconButton } from "./IconButton";
 import { fade, pop, springs } from "./motion";
 
 type DialogProps = {
@@ -14,10 +16,15 @@ type DialogProps = {
   /** Where the dialog sits: centered, or near the top like a command palette. */
   placement?: "center" | "top";
   width?: number;
+  /** Shows a close button in the top corner, for dialogs without their own Cancel or Done. */
+  hasCloseButton?: boolean;
   children: ReactNode;
 };
 
-/** A modal surface. Radix handles focus trapping, Escape and outside clicks. */
+/**
+ * A modal surface. Radix handles focus trapping, Escape and outside clicks.
+ * It never grows taller than the window: longer content scrolls inside.
+ */
 export function Dialog({
   open,
   onOpenChange,
@@ -26,6 +33,7 @@ export function Dialog({
   hideTitle = false,
   placement = "center",
   width = 440,
+  hasCloseButton = false,
   children,
 }: DialogProps) {
   return (
@@ -47,7 +55,10 @@ export function Dialog({
                   {...pop}
                   transition={springs.smooth}
                   style={{ width }}
-                  className="pointer-events-auto max-w-full overflow-hidden rounded-2xl border border-line bg-surface shadow-float outline-none"
+                  className={cx(
+                    "pointer-events-auto relative max-w-full overflow-y-auto rounded-2xl border border-line bg-surface shadow-float outline-none",
+                    placement === "top" ? "max-h-[calc(86dvh-1rem)]" : "max-h-[calc(100dvh-2rem)]",
+                  )}
                 >
                   <RadixDialog.Title className={hideTitle ? "sr-only" : "px-5 pt-5 text-[15px] font-semibold"}>
                     {title}
@@ -60,6 +71,13 @@ export function Dialog({
                     <RadixDialog.Description className="sr-only">{title}</RadixDialog.Description>
                   )}
                   {children}
+                  {/* After the content, so opening the dialog focuses the content
+                      rather than this button (whose tooltip would take the first Escape). */}
+                  {hasCloseButton && (
+                    <RadixDialog.Close asChild>
+                      <IconButton label="Close" icon={<X size={16} />} className="absolute top-3.5 right-3.5" />
+                    </RadixDialog.Close>
+                  )}
                 </motion.div>
               </RadixDialog.Content>
             </div>

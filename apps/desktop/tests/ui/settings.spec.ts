@@ -56,3 +56,19 @@ test("the arrow keys move between choices", async ({ page }) => {
   await expect(theme.getByRole("radio", { name: "Light" })).toBeFocused();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
+
+test("settings fit the smallest window and scroll inside it", async ({ page }) => {
+  await page.setViewportSize({ width: 820, height: 560 });
+  const settings = await openSettings(page);
+  await expect(settings).toBeInViewport({ ratio: 1 });
+
+  const lastChoice = settings.getByRole("radio", { name: "Appear offline" });
+  await lastChoice.scrollIntoViewIfNeeded();
+  await expect(lastChoice).toBeInViewport({ ratio: 1 });
+});
+
+test("the close button closes settings", async ({ page }) => {
+  const settings = await openSettings(page);
+  await settings.getByRole("button", { name: "Close" }).click();
+  await expect(settings).toBeHidden();
+});
