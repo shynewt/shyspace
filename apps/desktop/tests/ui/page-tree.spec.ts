@@ -21,9 +21,11 @@ test("a sub-page sits deeper than its parent, and top-level pages line up", asyn
   });
   await expect(pageItem(page, "Test2")).toBeVisible();
 
-  const parent = await iconLeft(pageItem(page, "TEST"));
-  expect(await iconLeft(pageItem(page, "Test2"))).toBeGreaterThanOrEqual(parent + 12);
-  expect(await iconLeft(pageItem(page, "Loose"))).toBe(parent);
+  // Polled: the sidebar animates in, so positions settle after a moment.
+  const offsetFromParent = async (title: string) =>
+    (await iconLeft(pageItem(page, title))) - (await iconLeft(pageItem(page, "TEST")));
+  await expect.poll(() => offsetFromParent("Loose")).toBe(0);
+  expect(await offsetFromParent("Test2")).toBeGreaterThanOrEqual(12);
 });
 
 test("a page's hover actions never cover its name", async ({ page }) => {
