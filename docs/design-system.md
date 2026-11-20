@@ -54,6 +54,7 @@ Pages are markdown in a CodeMirror editor (`features/pages/`). The text people a
 - Lines nobody is editing read as formatted text: marks (`#`, `**`, `_`, backticks, link brackets and addresses, `>`) are hidden, list dashes become bullets, `- [ ]` becomes a checkbox, `---` a divider. Lines touched by your cursor or selection show their markdown, so you edit what is really there. While a mouse button is down nothing changes, so text doesn't jump under the pointer.
 - Page links (`shy://page/<id>`) and mentions are chips, also on the line being edited; the cursor steps over a chip as one unit. Page chips show the page's current title and open it on click.
 - Web links show their address on hover and open with Ctrl/Cmd+click.
+- Menus under the cursor: `/` (at the start of a line or after a space) for blocks, `@` for people, `[[` for pages. They open only when you type the trigger, never for another member's edit; arrows, Enter or Tab and Esc drive them while the editor keeps focus and points at the chosen option with `aria-activedescendant`. Each choice inserts the markdown you could type yourself.
 - Keys write markdown: Ctrl/Cmd+B, I and E wrap the selection in bold, italic or code (again to undo it, or to step out of an empty pair); Ctrl/Cmd+K links the selection, and without one stays the app's search; Ctrl/Cmd+Enter checks off the item or opens the link at the cursor. Undo and redo only touch your own edits.
 
 Rules for changing it:

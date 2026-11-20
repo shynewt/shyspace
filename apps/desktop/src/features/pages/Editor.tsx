@@ -11,8 +11,10 @@ import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { formattingKeymap } from "./editor/commands";
 import { livePreview, setPageTitles } from "./editor/livePreview";
+import { type MenuKey, type Suggestion, suggestions } from "./editor/suggestions";
 import { pageTheme } from "./editor/theme";
 import { PAGE_TEXT } from "./pageText";
+import { SuggestionMenu } from "./SuggestionMenu";
 
 /** Local keystrokes are batched before being sealed and sent. */
 const SEND_DELAY_MS = 120;
@@ -42,6 +44,8 @@ function PageEditor({ pageId }: { pageId: string }) {
   const { pages, navigate } = useWorkspace();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const menuKeys = useRef<(key: MenuKey, view: EditorView) => boolean>(() => false);
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -81,7 +85,8 @@ function PageEditor({ pageId }: { pageId: string }) {
             EditorView.lineWrapping,
             markdown({ base: markdownLanguage, codeLanguages: languages }),
             livePreview({ onOpenPage: (id) => navigateRef.current({ kind: "page", id }) }),
-            placeholder("Start writing… Markdown works, and everyone here edits together."),
+            suggestions({ onKey: (key, editor) => menuKeys.current(key, editor), onChange: setSuggestion }),
+            placeholder("Type / for blocks, @ to mention someone, [[ to link a page"),
             keymap.of([
               ...formattingKeymap,
               ...yUndoManagerKeymap,
@@ -113,5 +118,10 @@ function PageEditor({ pageId }: { pageId: string }) {
     view?.dispatch({ effects: setPageTitles.of(new Map(pages.map((page) => [page.id, page.title]))) });
   }, [view, pages]);
 
-  return <div ref={host} className="selectable min-h-[50vh]" />;
+  return (
+    <div className="relative">
+      <div ref={host} className="selectable min-h-[50vh]" />
+      <SuggestionMenu view={view} suggestion={suggestion} pageId={pageId} keys={menuKeys} />
+    </div>
+  );
 }
