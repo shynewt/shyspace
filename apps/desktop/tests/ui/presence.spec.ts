@@ -26,7 +26,9 @@ test.beforeEach(async ({ page }) => {
 
 test("your status shows to everyone and can be cleared", async ({ page }) => {
   const dialog = await openStatusDialog(page);
-  await dialog.getByLabel("Emoji").fill("🎧");
+  await dialog.getByRole("button", { name: "Choose an emoji" }).click();
+  await page.getByLabel("Search emoji").fill("headphone");
+  await page.getByRole("gridcell", { name: "headphone" }).click();
   await dialog.getByLabel("Status", { exact: true }).fill("Deep work");
   await dialog.getByRole("radio", { name: "None", exact: true }).click();
   await dialog.getByRole("button", { name: "Set status" }).click();

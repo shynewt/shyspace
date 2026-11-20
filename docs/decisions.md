@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Emoji data ships with the app (2026-11)
+The emoji picker is frimousse, on Emojibase data. By default it downloads that data from a CDN, which would tell a third party when someone opens a picker in a private app. And the app's content policy lets the page connect only to the core, so it can't fetch the data even from itself. So `ui/emojiData.ts` imports `emojibase-data`'s English files as a lazily loaded module and hands them to the picker. A UI test fails if the picker makes any request outside the app, or doesn't work under the app's connect rules. Because the data is ours, frimousse doesn't check which emoji the system font can draw; we offer Emoji 15.1 and older. Updating emoji means updating the package.
+
 ## No link previews (2026-11)
 The app never fetches a link to show a preview. Fetching would tell the linked site who is reading what, outside the encryption, and previews are a known way to leak data out of AI agents' context (Slack's MCP server did). Links stay plain.
 

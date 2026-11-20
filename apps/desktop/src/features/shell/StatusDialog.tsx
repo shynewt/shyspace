@@ -1,10 +1,11 @@
+import { Smile } from "lucide-react";
 import { useRef, useState } from "react";
 import { api, type MemberStatus, type NotifyLevel } from "../../lib/api";
 import { formatTime } from "../../lib/people";
 import { showToast } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useFormAction } from "../../lib/useFormAction";
-import { Button, cx, Dialog, Field, FormError, Input, SegmentedControl } from "../../ui";
+import { Button, cx, Dialog, EmojiPicker, Field, FormError, Input, Popover, SegmentedControl } from "../../ui";
 
 /** "unchanged" keeps the current status's end time, offered only when it has one. */
 type ClearAfter = "unchanged" | "never" | "hour" | "four_hours" | "today";
@@ -79,18 +80,11 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
   return (
     <form onSubmit={save.run} className="flex flex-col gap-4 p-5 pt-4">
       <div className="flex gap-2">
-        <div className="w-20 shrink-0">
-          <Field label="Emoji">
-            {(id) => (
-              <Input
-                id={id}
-                value={emoji}
-                onChange={(event) => setEmoji(event.target.value)}
-                placeholder="None"
-                className="text-center"
-              />
-            )}
-          </Field>
+        <div className="flex shrink-0 flex-col gap-1.5">
+          <span aria-hidden className="text-[12px] font-medium text-muted">
+            Emoji
+          </span>
+          <EmojiChoice emoji={emoji} onChange={setEmoji} />
         </div>
         <div className="flex-1">
           <Field label="Status">
@@ -164,5 +158,39 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
         </Button>
       </div>
     </form>
+  );
+}
+
+function EmojiChoice({ emoji, onChange }: { emoji: string; onChange: (emoji: string) => void }) {
+  const [isOpen, setOpen] = useState(false);
+  const choose = (next: string) => {
+    onChange(next);
+    setOpen(false);
+  };
+  return (
+    <Popover
+      open={isOpen}
+      onOpenChange={setOpen}
+      side="bottom"
+      align="start"
+      trigger={
+        <button
+          type="button"
+          aria-label={emoji ? `Choose an emoji (now ${emoji})` : "Choose an emoji"}
+          className="grid h-9 w-12 place-items-center rounded-lg border border-line bg-bg text-[18px] transition-colors hover:border-surface-3 data-[state=open]:border-accent"
+        >
+          {emoji || <Smile size={16} className="text-faint" />}
+        </button>
+      }
+    >
+      <EmojiPicker onSelect={choose} />
+      {emoji && (
+        <div className="border-t border-line p-1">
+          <Button variant="ghost" size="sm" onClick={() => choose("")} className="w-full">
+            Remove emoji
+          </Button>
+        </div>
+      )}
+    </Popover>
   );
 }

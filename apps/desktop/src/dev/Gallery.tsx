@@ -9,6 +9,7 @@ import {
   ConfirmDialog,
   CopyField,
   Dialog,
+  EmojiPicker,
   EmptyState,
   Field,
   FormError,
@@ -122,6 +123,9 @@ export default function Gallery() {
           />
           <Popover trigger={<Button>Open popover</Button>}>
             <div className="p-3 text-[13px]">Anchored to its trigger.</div>
+          </Popover>
+          <Popover trigger={<Button>Pick an emoji</Button>} side="bottom" align="start">
+            <EmojiPicker onSelect={(emoji) => showToast(`Picked ${emoji}`)} />
           </Popover>
           <Button onClick={() => showToast("Saved")}>Show toast</Button>
         </Example>

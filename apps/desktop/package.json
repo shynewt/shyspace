@@ -24,6 +24,8 @@
     "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-opener": "^2.7.3",
     "codemirror": "^6.0.2",
+    "emojibase-data": "^18.0.0",
+    "frimousse": "^0.4.0",
     "lucide-react": "^1.76.0",
     "motion": "^14.14.0",
     "radix-ui": "^1.8.1",

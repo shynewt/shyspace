@@ -6,6 +6,7 @@ export { ConfirmDialog } from "./ConfirmDialog";
 export { CopyField } from "./CopyField";
 export { cx } from "./cx";
 export { Dialog } from "./Dialog";
+export { EmojiPicker } from "./EmojiPicker";
 export { EmptyState } from "./EmptyState";
 export { Field } from "./Field";
 export { FormError } from "./FormError";
