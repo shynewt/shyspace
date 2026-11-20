@@ -91,3 +91,24 @@ test("the thread keeps up with new replies while you're at the end", async ({ pa
   await thread.getByLabel("Reply in thread").press("Enter");
   await expect(thread.getByRole("article").filter({ hasText: "Mine too" })).toBeInViewport();
 });
+
+test("a thread opened at a reply still follows new replies", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.memberNamed("Grace");
+    const question = window.fake.receiveMessage(grace, "general", "Which version ships?");
+    window.fake.receiveReply(grace, question, "Version two ships Friday");
+  });
+  await page.keyboard.press("Control+k");
+  await page.getByLabel("Search messages and pages").fill("Friday");
+  await page.getByRole("option", { name: /Version two/ }).click();
+  const thread = page.getByRole("complementary", { name: "Thread" });
+  await expect(thread.getByRole("article").filter({ hasText: "Version two ships Friday" })).toBeVisible();
+
+  await page.evaluate(() => {
+    const root = window.fake.messageWithText("Which version ships?");
+    for (let index = 1; index <= 25; index += 1) {
+      window.fake.receiveReply(window.fake.memberNamed("Grace"), root, `Follow-up ${index}`);
+    }
+  });
+  await expect(thread.getByRole("article").filter({ hasText: "Follow-up 25" })).toBeInViewport();
+});

@@ -55,7 +55,11 @@ export function ThreadPanel({
 
   const isFocusShown = Boolean(focus && thread?.some((message) => message.id === focus));
   useEffect(() => {
-    if (isFocusShown) document.getElementById(`message-${focus}`)?.scrollIntoView({ block: "center" });
+    if (!isFocusShown) return;
+    document.getElementById(`message-${focus}`)?.scrollIntoView({ block: "center" });
+    // A short thread doesn't scroll, so no scroll event would say it's at its end.
+    const element = scroller.current;
+    if (element) isAtEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_END_PX;
   }, [isFocusShown, focus]);
 
   const toggleFollowing = () => {
