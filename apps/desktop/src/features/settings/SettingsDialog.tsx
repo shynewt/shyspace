@@ -1,17 +1,21 @@
-import { Bell, HardDrive, LifeBuoy, Palette, ShieldCheck, UserRound } from "lucide-react";
+import { Bell, Bot, HardDrive, LifeBuoy, Palette, ShieldCheck, UserRound, Users } from "lucide-react";
 import { motion } from "motion/react";
 import { Tabs } from "radix-ui";
 import { Fragment, type ReactNode } from "react";
 import { SETTINGS_SECTIONS, type SettingsGroup, type SettingsSection, type SettingsTarget } from "../../lib/settings";
 import { useWorkspace } from "../../lib/workspace";
 import { cx, Dialog, springs } from "../../ui";
+import { WaitingRequestsBadge } from "../members/JoinRequests";
+import { AgentsSettings } from "./AgentsSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { MembersSettings } from "./MembersSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { PrivacySettings } from "./PrivacySettings";
 import { ProfileSettings } from "./ProfileSettings";
 import { RecoverySettings } from "./RecoverySettings";
 import { StorageSettings } from "./StorageSettings";
 
+/** Members takes its tab from the target, so it's rendered apart from these. */
 const SECTION_VIEWS: Record<SettingsSection, { icon: ReactNode; description: string; content: ReactNode }> = {
   profile: {
     icon: <UserRound size={15} />,
@@ -32,6 +36,16 @@ const SECTION_VIEWS: Record<SettingsSection, { icon: ReactNode; description: str
     icon: <ShieldCheck size={15} />,
     description: "How your conversations are protected.",
     content: <PrivacySettings />,
+  },
+  members: {
+    icon: <Users size={15} />,
+    description: "Everyone who can read this workspace.",
+    content: null,
+  },
+  agents: {
+    icon: <Bot size={15} />,
+    description: "AI helpers in this workspace, and how to add one.",
+    content: <AgentsSettings />,
   },
   storage: {
     icon: <HardDrive size={15} />,
@@ -76,6 +90,7 @@ function SettingsWindow({
   onNavigate: (target: SettingsTarget) => void;
 }) {
   const { session } = useWorkspace();
+  const membersTab = target.membersTab ?? "members";
   const groups: { id: SettingsGroup; title: string }[] = [
     { id: "you", title: "You" },
     { id: "workspace", title: session.workspace_name },
@@ -109,6 +124,7 @@ function SettingsWindow({
                 section={section.id}
                 label={section.label}
                 isActive={section.id === target.section}
+                badge={section.id === "members" && session.is_admin && <WaitingRequestsBadge />}
               />
             ))}
           </Fragment>
@@ -124,14 +140,31 @@ function SettingsWindow({
             <h3 className="text-[15px] font-semibold">{section.label}</h3>
             <p className="mt-0.5 text-[12.5px] text-muted">{SECTION_VIEWS[section.id].description}</p>
           </header>
-          {SECTION_VIEWS[section.id].content}
+          {section.id === "members" ? (
+            <MembersSettings
+              tab={membersTab}
+              onTabChange={(tab) => onNavigate({ section: "members", membersTab: tab })}
+            />
+          ) : (
+            SECTION_VIEWS[section.id].content
+          )}
         </Tabs.Content>
       ))}
     </Tabs.Root>
   );
 }
 
-function SectionTab({ section, label, isActive }: { section: SettingsSection; label: string; isActive: boolean }) {
+function SectionTab({
+  section,
+  label,
+  isActive,
+  badge,
+}: {
+  section: SettingsSection;
+  label: string;
+  isActive: boolean;
+  badge?: ReactNode;
+}) {
   return (
     <Tabs.Trigger
       value={section}
@@ -151,6 +184,7 @@ function SectionTab({ section, label, isActive }: { section: SettingsSection; la
       )}
       <span className={cx("relative", isActive ? "text-accent" : "text-faint")}>{SECTION_VIEWS[section].icon}</span>
       <span className="relative truncate">{label}</span>
+      {badge}
     </Tabs.Trigger>
   );
 }

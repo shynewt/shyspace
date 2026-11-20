@@ -8,7 +8,7 @@ import {
   MessageSquare,
   Search,
   Settings,
-  Users,
+  UserPlus,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -35,39 +35,19 @@ type Item = {
   shortcut?: string[];
 };
 
-export function CommandPalette({
-  open,
-  onOpenChange,
-  onOpenMembers,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onOpenMembers: () => void;
-}) {
+export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange} title="Search" hideTitle placement="top" width={600}>
-        <PaletteBody
-          onClose={() => onOpenChange(false)}
-          onOpenMembers={onOpenMembers}
-          onMarkAllRead={() => setConfirmingMarkAll(true)}
-        />
+        <PaletteBody onClose={() => onOpenChange(false)} onMarkAllRead={() => setConfirmingMarkAll(true)} />
       </Dialog>
       <MarkAllReadDialog open={isConfirmingMarkAll} onOpenChange={setConfirmingMarkAll} />
     </>
   );
 }
 
-function PaletteBody({
-  onClose,
-  onOpenMembers,
-  onMarkAllRead,
-}: {
-  onClose: () => void;
-  onOpenMembers: () => void;
-  onMarkAllRead: () => void;
-}) {
+function PaletteBody({ onClose, onMarkAllRead }: { onClose: () => void; onMarkAllRead: () => void }) {
   const { channels, pages, navigate, session, openSettings } = useWorkspace();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -108,11 +88,15 @@ function PaletteBody({
         icon: <CheckCheck size={15} />,
         onChoose: onMarkAllRead,
       },
-      {
-        title: session.is_admin ? "Members and invites" : "Members",
-        icon: <Users size={15} />,
-        onChoose: onOpenMembers,
-      },
+      ...(session.is_admin
+        ? [
+            {
+              title: "Invite people",
+              icon: <UserPlus size={15} />,
+              onChoose: () => openSettings({ section: "members", membersTab: "invites" }),
+            },
+          ]
+        : []),
       // Settings sections show only while searching, so the empty palette stays short.
       ...(needle
         ? SETTINGS_SECTIONS.map((section) => ({
@@ -174,7 +158,7 @@ function PaletteBody({
       ];
     });
     return [...jumpTo, ...found, ...actions];
-  }, [query, hits, channels, pages, navigate, session.is_admin, onOpenMembers, onMarkAllRead, openSettings]);
+  }, [query, hits, channels, pages, navigate, session.is_admin, onMarkAllRead, openSettings]);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });

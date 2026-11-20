@@ -36,7 +36,6 @@ Keep feedback under about 250 ms. Reduced-motion settings are respected globally
 | `Input`, `TextArea`, `Field` | form controls; `Field` links its label to the control through a render function |
 | `FormError` | why a form's last save failed, under the form; announced to screen readers |
 | `Dialog` | modal surfaces (centered, or `placement="top"` like the search palette); never taller than the window, longer content scrolls inside; `hasCloseButton` for dialogs without their own Cancel or Done |
-| `Drawer` | side panels, like Members |
 | `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger; a menu sets destructive actions apart below a line |
 | `Card`, `SectionLabel`, `EmptyState` | grouping and empty screens |
 | `Avatar`, `Badge`, `Kbd`, `Spinner`, `Logo` | small content pieces |
@@ -45,7 +44,7 @@ Keep feedback under about 250 ms. Reduced-motion settings are respected globally
 | `ConfirmDialog` | asks before something that can't be undone (deletes), showing what it applies to; stays open showing the error if it fails |
 | `Toasts` | transient messages above the message box, from `lib/toast.ts`: `showToast` (a success, or `"info"`), `showUndoToast`, `showReminderToast` (with Open) and `reportError` (announced as an alert) |
 
-Dialogs, drawers, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primitives) primitives for focus handling and keyboard support, styled by us.
+Dialogs, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primitives) primitives for focus handling and keyboard support, styled by us.
 
 ## Rules
 

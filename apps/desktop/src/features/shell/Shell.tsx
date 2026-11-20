@@ -14,7 +14,6 @@ import { Dialog } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { InboxView } from "../inbox/InboxView";
 import { LaterView } from "../later/LaterView";
-import { MembersPanel } from "../members/MembersPanel";
 import { PageView } from "../pages/PageView";
 import { CommandPalette } from "../search/CommandPalette";
 import { SettingsDialog } from "../settings/SettingsDialog";
@@ -29,7 +28,6 @@ export function Shell({ session }: { session: Session }) {
   const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
   const [view, setView] = useState<View | null>(null);
   const [isPaletteOpen, setPaletteOpen] = useState(false);
-  const [isMembersOpen, setMembersOpen] = useState(false);
   const [isShortcutsOpen, setShortcutsOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(null);
 
@@ -112,12 +110,7 @@ export function Shell({ session }: { session: Session }) {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
       >
-        <Sidebar
-          status={status}
-          onOpenSearch={() => setPaletteOpen(true)}
-          onOpenMembers={() => setMembersOpen(true)}
-          onOpenSettings={() => openSettings()}
-        />
+        <Sidebar status={status} onOpenSearch={() => setPaletteOpen(true)} onOpenSettings={() => openSettings()} />
         <main className="relative min-w-0 flex-1 bg-surface">
           <AnimatePresence mode="wait" initial={false}>
             {view && (
@@ -138,8 +131,7 @@ export function Shell({ session }: { session: Session }) {
           </AnimatePresence>
         </main>
       </motion.div>
-      <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} onOpenMembers={() => setMembersOpen(true)} />
-      <MembersPanel open={isMembersOpen} onOpenChange={setMembersOpen} />
+      <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} />
       <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setShortcutsOpen} />
       <SettingsDialog target={settingsTarget} onNavigate={setSettingsTarget} onClose={() => setSettingsTarget(null)} />
       <RemovedNotice isRemoved={status?.removed ?? false} />

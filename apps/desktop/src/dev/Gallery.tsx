@@ -9,7 +9,6 @@ import {
   ConfirmDialog,
   CopyField,
   Dialog,
-  Drawer,
   EmptyState,
   Field,
   FormError,
@@ -29,7 +28,6 @@ import {
 /** Every design-system component in one place. Open the app with #gallery in development. */
 export default function Gallery() {
   const [isDialogOpen, setDialogOpen] = useState(false);
-  const [isDrawerOpen, setDrawerOpen] = useState(false);
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [segment, setSegment] = useState<"one" | "two" | "three">("one");
   return (
@@ -106,7 +104,6 @@ export default function Gallery() {
 
         <Example title="Floating surfaces">
           <Button onClick={() => setDialogOpen(true)}>Open dialog</Button>
-          <Button onClick={() => setDrawerOpen(true)}>Open drawer</Button>
           <Button onClick={() => setConfirmOpen(true)}>Confirm a delete</Button>
           <Menu
             trigger={<Button>Open menu</Button>}
@@ -190,9 +187,6 @@ export default function Gallery() {
         confirmLabel="Delete"
         onConfirm={async () => showToast("Deleted")}
       />
-      <Drawer open={isDrawerOpen} onOpenChange={setDrawerOpen} title="A drawer">
-        <p className="p-2 text-[13px] text-muted">Panels that slide in from the side.</p>
-      </Drawer>
     </div>
   );
 }

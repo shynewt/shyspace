@@ -1,29 +1,27 @@
-import { Bookmark, Inbox as InboxIcon, Plus, Search, Settings, Users } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { Bookmark, Inbox as InboxIcon, Plus, Search, Settings } from "lucide-react";
 import { type ReactNode, useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { IconButton, Kbd, Logo, SectionLabel, springs } from "../../ui";
+import { IconButton, Kbd, Logo, SectionLabel } from "../../ui";
 import { ChannelSections } from "./ChannelSections";
 import { NavItem } from "./NavItem";
 import { PageTree } from "./PageTree";
 import { SyncIndicator } from "./SyncIndicator";
+import { WorkspaceMenu } from "./WorkspaceMenu";
 
 export function Sidebar({
   status,
   onOpenSearch,
-  onOpenMembers,
   onOpenSettings,
 }: {
   status: SyncStatus | undefined;
   onOpenSearch: () => void;
-  onOpenMembers: () => void;
   onOpenSettings: () => void;
 }) {
-  const { session, pages, navigate } = useWorkspace();
+  const { pages, navigate } = useWorkspace();
 
   const createPage = async (parent: string | null) => {
     try {
@@ -38,7 +36,7 @@ export function Sidebar({
       <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
         <Logo size={26} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-semibold tracking-tight">{session.workspace_name}</div>
+          <WorkspaceMenu />
           <SyncIndicator status={status} />
         </div>
       </div>
@@ -65,16 +63,7 @@ export function Sidebar({
         </Section>
       </nav>
 
-      <div className="flex items-center gap-1 border-t border-line p-2">
-        <button
-          type="button"
-          onClick={onOpenMembers}
-          className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13px] text-muted transition hover:bg-surface-2 hover:text-ink"
-        >
-          <Users size={15} />
-          <span className="flex-1 text-left">Members{session.is_admin ? " & invites" : ""}</span>
-          {session.is_admin && <PendingRequestsBadge />}
-        </button>
+      <div className="flex items-center justify-end gap-1 border-t border-line p-2">
         <IconButton
           label={`Settings (${shortcutKeys("settings").join(" ")})`}
           icon={<Settings size={15} />}
@@ -82,30 +71,6 @@ export function Sidebar({
         />
       </div>
     </aside>
-  );
-}
-
-/** How many join requests wait for the admin's decision. */
-function PendingRequestsBadge() {
-  const loadInvites = useCallback(() => api.invites(), []);
-  const invites = useLive(loadInvites, (change) => change.kind === "invites" || change.kind === "members");
-  const waiting = invites?.filter((invite) => invite.state === "requested").length ?? 0;
-  return (
-    <AnimatePresence>
-      {waiting > 0 && (
-        <motion.span
-          key={waiting}
-          initial={{ scale: 0.4, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.4, opacity: 0 }}
-          transition={springs.pop}
-          aria-label={`${waiting} join ${waiting === 1 ? "request" : "requests"} waiting`}
-          className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white tabular-nums"
-        >
-          {waiting}
-        </motion.span>
-      )}
-    </AnimatePresence>
   );
 }
 

@@ -1,8 +1,10 @@
 import { expect, type Page, test } from "@playwright/test";
 
 async function openMembers(page: Page) {
-  await page.getByRole("button", { name: /Members & invites/ }).click();
-  return page.getByRole("dialog");
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Members" }).first().click();
+  return settings.getByRole("list", { name: "Members" });
 }
 
 test.beforeEach(async ({ page }) => {

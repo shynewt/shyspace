@@ -24,15 +24,22 @@ export function Setting({
   );
 }
 
-/** What a member who isn't the admin sees instead of the admin's controls. */
-export function ManagedByAdmin({ children }: { children?: ReactNode }) {
+/** The workspace admin's name, once the members have loaded. */
+export function useAdminName(): string | undefined {
   const loadMembers = useCallback(() => api.members(), []);
   const members = useLive(loadMembers, (change) => change.kind === "members");
-  if (!members) return null;
+  if (!members) return undefined;
   const admin = members.find((member) => member.is_admin && member.active);
+  return admin ? displayName(admin.name, admin.id) : "the workspace admin";
+}
+
+/** What a member who isn't the admin sees instead of the admin's controls. */
+export function ManagedByAdmin({ children }: { children?: ReactNode }) {
+  const adminName = useAdminName();
+  if (!adminName) return null;
   return (
     <div className="flex flex-col gap-1 text-[13px]">
-      <p>{admin ? `Managed by ${displayName(admin.name, admin.id)}.` : "Managed by the workspace admin."}</p>
+      <p>Managed by {adminName}.</p>
       {children && <p className="text-[12px] leading-relaxed text-muted">{children}</p>}
     </div>
   );

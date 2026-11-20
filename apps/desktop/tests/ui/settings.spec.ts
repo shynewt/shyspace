@@ -82,6 +82,8 @@ test("settings group your sections and the workspace's", async ({ page }) => {
     "Appearance",
     "Notifications",
     "Privacy & security",
+    "Members",
+    "Agents",
     "Storage",
     "Recovery",
   ]);
