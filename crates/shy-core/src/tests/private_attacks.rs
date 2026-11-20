@@ -655,3 +655,46 @@ async fn keys_that_contradict_the_owners_announcement_are_not_kept() {
     }
     assert_eq!(dave.state().store.channel_keys(Some(&channel)).unwrap().len(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nobody_can_plant_a_key_in_someone_s_notes_before_they_open_them() {
+    let (_root, _bucket, admin, bob, _carol, _dave) = four_members().await;
+    let notes = crate::private::ids::dm_id(&bob.inner.config.workspace_id, &[bob.me()]);
+    // The admin wraps a key for Bob's notes to Bob, hoping he'll use it.
+    let planted = new_channel_key();
+    let granting = Granting {
+        workspace_id: &admin.inner.config.workspace_id,
+        granter: &admin.me(),
+    };
+    let bobs_sealing_key = admin.state().store.sealing_key_of(&bob.me()).unwrap().unwrap();
+    let grant = GrantBody {
+        channel: notes.clone(),
+        generation: 0,
+        key: planted,
+        dm_members: vec![bob.me()],
+    };
+    let mut forger = Forger::new(&admin);
+    bob.receive(forger.seal(Op::KeyGrant {
+        wraps: vec![wrap_key(granting, &bobs_sealing_key, &postcard::to_stdvec(&grant).unwrap()).unwrap()],
+    }))
+    .unwrap();
+    bob.receive(forger.seal_private(
+        &StoredKey {
+            channel: notes.clone(),
+            generation: 0,
+            key: planted,
+        },
+        PrivateOp::Content(message(&admin, &notes, "planted")),
+    ))
+    .unwrap();
+
+    assert_eq!(bob.open_notes().unwrap(), notes);
+    bob.send_message(&notes, "my secret", None).unwrap();
+
+    let keys = bob.state().store.channel_keys(Some(&notes)).unwrap();
+    assert!(
+        keys.iter().all(|key| key.key != planted),
+        "Bob's notes never use the planted key"
+    );
+    assert_eq!(texts(&bob, &notes), ["my secret"]);
+}

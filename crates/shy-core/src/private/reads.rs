@@ -38,13 +38,16 @@ impl Workspace {
                 channel.can_delete = store.current_owner(&channel.id)? == Some(me);
             }
             Some(PrivateKind::Dm) => {
-                channel.kind = ChannelKind::Dm;
                 channel.dm_members = store
                     .dm_members(&channel.id)?
                     .iter()
                     .filter(|member| **member != me)
                     .map(|member| hex::encode(member.as_bytes()))
                     .collect();
+                channel.kind = match channel.dm_members.is_empty() {
+                    true => ChannelKind::Notes,
+                    false => ChannelKind::Dm,
+                };
                 channel.can_delete = false;
             }
         }

@@ -6,6 +6,7 @@ mod inbox;
 mod invites;
 mod later;
 mod mentions;
+mod notes;
 mod notifications;
 mod presence;
 mod private;

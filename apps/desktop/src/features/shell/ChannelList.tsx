@@ -30,9 +30,9 @@ export function listedChannels(
   view: View | null,
   isUnreadOnly: boolean,
 ): Channel[] {
-  // DMs have their own section.
+  // DMs and notes have their own place.
   const inSection = channelIds.flatMap((id) =>
-    channels.filter((channel) => channel.id === id && channel.kind !== "dm"),
+    channels.filter((channel) => channel.id === id && (channel.kind === "public" || channel.kind === "private")),
   );
   if (!isUnreadOnly) return inSection;
   // The open channel stays listed, so filtering never hides where you are.

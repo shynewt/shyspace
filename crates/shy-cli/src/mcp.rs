@@ -172,6 +172,7 @@ impl ShyTools {
         Ok(match channel.kind {
             ChannelKind::Public => format!("#{}", channel.name),
             ChannelKind::Private => format!("#{} (private)", channel.name),
+            ChannelKind::Notes => "Notes to yourself".to_owned(),
             ChannelKind::Dm => {
                 let members = self.workspace.members()?;
                 let names: Vec<&str> = channel

@@ -245,6 +245,11 @@ async fn open_dm(state: State<'_, AppState>, members: Vec<String>) -> CommandRes
 }
 
 #[tauri::command]
+async fn open_notes(state: State<'_, AppState>) -> CommandResult<String> {
+    current(&state).await?.open_notes().map_err(failed)
+}
+
+#[tauri::command]
 async fn private_members(state: State<'_, AppState>, channel: String) -> CommandResult<PrivateMembers> {
     current(&state).await?.private_members(&channel).map_err(failed)
 }
@@ -736,6 +741,7 @@ pub fn run() {
             create_channel,
             create_private_channel,
             open_dm,
+            open_notes,
             private_members,
             add_to_private_channel,
             remove_from_private_channel,

@@ -8,7 +8,7 @@ import { argument, ownedId, randomHex, requireString } from "./helpers";
 /** Returned by `answer` for commands that aren't about private channels. */
 export const NOT_PRIVATE = Symbol("not a private channel command");
 
-type Kind = "private" | "dm";
+type Kind = "private" | "dm" | "notes";
 type StoredPrivate = { kind: Kind; members: string[]; owner: string | null };
 export type PrivateView = Pick<Channel, "kind" | "dm_members" | "is_member" | "can_delete">;
 
@@ -39,6 +39,8 @@ export class FakePrivate {
         return this.create(requireString(args, "name"), requireStringList(args, "members"));
       case "open_dm":
         return this.openDm(requireStringList(args, "members"));
+      case "open_notes":
+        return this.openNotes();
       case "private_members":
         return this.membersOf(requireString(args, "channel"));
       case "add_to_private_channel":
@@ -107,6 +109,17 @@ export class FakePrivate {
     }
     const id = `dm:${randomHex(16)}`;
     this.channels.set(id, { kind: "dm", members: everyone, owner: null });
+    this.context.listChannel(id, "");
+    return id;
+  }
+
+  private openNotes(): string {
+    const me = this.context.me();
+    for (const [id, found] of this.channels) {
+      if (found.kind === "notes") return id;
+    }
+    const id = `dm:${randomHex(16)}`;
+    this.channels.set(id, { kind: "notes", members: [me], owner: null });
     this.context.listChannel(id, "");
     return id;
   }

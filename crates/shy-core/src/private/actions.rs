@@ -190,6 +190,18 @@ impl Workspace {
         Ok(channel)
     }
 
+    /// Your notes to yourself: a DM whose only member is you, made the first
+    /// time. Its key is granted to you alone, so only you can read or write it.
+    pub fn open_notes(&self) -> Result<EntityId> {
+        let me = self.me();
+        let channel = dm_id(&self.inner.config.workspace_id, &[me]);
+        if !self.state().store.channel_keys(Some(&channel))?.is_empty() {
+            return Ok(channel);
+        }
+        self.grant(&channel, &[(0, new_channel_key())], &[me], &[me])?;
+        Ok(channel)
+    }
+
     /// Takes over channels whose removed owner we succeed, passes on those
     /// we own but left, and on channels we own keeps out who left or was
     /// removed from the workspace: the owner removes them, which makes a key

@@ -413,7 +413,7 @@ fn is_valid_dm_grant(grant: &GrantBody, verified: &VerifiedOp, context: ApplyCon
     unique.dedup();
     grant.generation == 0
         && unique.len() == grant.dm_members.len()
-        && (2..=MAX_DM_MEMBERS).contains(&unique.len())
+        && (1..=MAX_DM_MEMBERS).contains(&unique.len())
         && unique.contains(&verified.author)
         && unique.contains(&context.me)
         && dm_id(context.workspace_id, &unique) == grant.channel

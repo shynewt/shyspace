@@ -80,6 +80,8 @@ pub enum ChannelKind {
     /// Only its members can read it.
     Private,
     Dm,
+    /// Notes to yourself: a DM whose only member is you.
+    Notes,
 }
 
 /// Who is in a private channel, and who owns it.

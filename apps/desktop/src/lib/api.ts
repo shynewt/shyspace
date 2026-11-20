@@ -4,7 +4,7 @@ import { reportError } from "./toast";
 
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
 export type NotifyLevel = "all" | "mentions" | "nothing";
-export type ChannelKind = "public" | "private" | "dm";
+export type ChannelKind = "public" | "private" | "dm" | "notes";
 /** Who is in a private channel (member ids, earliest added first), and who owns it. */
 export type PrivateMembers = { members: string[]; owner: string | null; is_owner: boolean };
 export type Channel = {
@@ -181,6 +181,8 @@ export const api = {
     invoke<string>("create_private_channel", { name, members }),
   /** The DM with exactly these members and you; opening it again finds the same one. */
   openDm: (members: string[]) => invoke<string>("open_dm", { members }),
+  /** Your notes to yourself, made the first time. */
+  openNotes: () => invoke<string>("open_notes"),
   privateMembers: (channel: string) => invoke<PrivateMembers>("private_members", { channel }),
   addToPrivateChannel: (channel: string, member: string) => invoke<void>("add_to_private_channel", { channel, member }),
   removeFromPrivateChannel: (channel: string, member: string) =>
