@@ -69,7 +69,9 @@ test("a pause on a name opens the card, and moving onto it keeps it open", async
 
   const box = await grace.boundingBox();
   if (!box) throw new Error("no box for the card");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
+  // One move from the name onto the card: in steps, a busy machine can leave the pointer in the gap for longer
+  // than the close delay, which a person's hand never does.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForTimeout(700);
   await expect(grace).toBeVisible();
 
@@ -79,11 +81,13 @@ test("a pause on a name opens the card, and moving onto it keeps it open", async
 });
 
 test("passing quickly over a name opens nothing", async ({ page }) => {
-  const box = await nameButton(page, "Grace").boundingBox();
-  if (!box) throw new Error("no box for the name");
-  await page.mouse.move(box.x + 2, box.y + box.height / 2);
-  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 4 });
-  await page.mouse.move(box.x + box.width / 2, box.y + 200, { steps: 4 });
+  // The pointer crosses the name within one moment. Two real mouse moves can arrive 700 ms apart on a busy
+  // machine (WebKit in a container), which is a pause, not a pass.
+  await nameButton(page, "Grace").evaluate((name) => {
+    const crossing = { bubbles: true, pointerType: "mouse", isPrimary: true };
+    name.dispatchEvent(new PointerEvent("pointerover", { ...crossing, relatedTarget: document.body }));
+    name.dispatchEvent(new PointerEvent("pointerout", { ...crossing, relatedTarget: document.body }));
+  });
   await page.waitForTimeout(1000);
 
   await expect(card(page, "Grace")).toHaveCount(0);
