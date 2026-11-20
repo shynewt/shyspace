@@ -17,7 +17,7 @@ use rmcp::{
 use serde::Deserialize;
 use shy_core::{
     Edit, Workspace,
-    views::{Change, Message, PresenceState},
+    views::{Change, Message, NotifyLevel, PresenceState},
 };
 
 type ToolResult = Result<String, String>;
@@ -221,8 +221,12 @@ impl ShyTools {
                     .status
                     .as_ref()
                     .map(|status| {
-                        let busy = if status.is_busy { ", busy" } else { "" };
-                        format!(" — {} {}{busy}", status.emoji, status.text)
+                        let alerts = match status.alerts {
+                            NotifyLevel::All => "",
+                            NotifyLevel::Mentions => ", alerts for mentions only",
+                            NotifyLevel::Nothing => ", no alerts",
+                        };
+                        format!(" — {} {}{alerts}", status.emoji, status.text)
                     })
                     .unwrap_or_default();
                 format!("{}{bot} [{presence}]{status}: {}", member.name, member.id)

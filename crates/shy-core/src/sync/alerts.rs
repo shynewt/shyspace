@@ -27,13 +27,11 @@ impl Workspace {
         if verified.author == self.me() || now_ms()? - verified.body.timestamp_ms > ALERT_WINDOW_MS {
             return Ok(None);
         }
-        // Busy: your status asks for quiet. (The state is already locked here.)
+        // Your status can quiet things further, never louder than the channel.
         let my_status = state.store.member_status(self.me().as_bytes(), now_ms()?)?;
-        if my_status.is_some_and(|status| status.is_busy) {
-            return Ok(None);
-        }
+        let status_level = my_status.map_or(NotifyLevel::All, |status| status.alerts);
         let my_id = self.my_id();
-        let is_wanted = match state.store.notify_level(channel)? {
+        let is_wanted = match state.store.notify_level(channel)?.stricter(status_level) {
             NotifyLevel::All => true,
             NotifyLevel::Mentions => mentions(text, &my_id) || self.follows_thread_of(state, id)?,
             NotifyLevel::Nothing => false,

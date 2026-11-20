@@ -87,21 +87,59 @@ async fn old_messages_caught_up_later_do_not_alert() {
     assert!(alerted_texts(&mut changes).is_empty());
 }
 
+fn status_alerting(alerts: NotifyLevel) -> crate::views::StatusUpdate<'static> {
+    crate::views::StatusUpdate {
+        emoji: "🎧",
+        text: "Focus",
+        until_ms: None,
+        alerts,
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn being_busy_silences_alerts() {
+async fn a_status_can_silence_alerts() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");
-    admin
-        .set_status(crate::views::StatusUpdate {
-            emoji: "🎧",
-            text: "Focus",
-            until_ms: None,
-            is_busy: true,
-        })
-        .unwrap();
+    admin.set_status(status_alerting(NotifyLevel::Nothing)).unwrap();
     let mut changes = admin.subscribe();
     bob.send_message(&general, "anyone?", None).unwrap();
+    let mention = crate::mentions::member_link("Ada", &admin.my_id());
+    bob.send_message(&general, &format!("{mention} urgent"), None)
+        .unwrap();
     sync_all(&[&admin, &bob]).await;
 
     assert!(alerted_texts(&mut changes).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_status_can_let_only_mentions_through() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    admin.set_status(status_alerting(NotifyLevel::Mentions)).unwrap();
+    let mut changes = admin.subscribe();
+    bob.send_message(&general, "anyone?", None).unwrap();
+    let mention = crate::mentions::member_link("Ada", &admin.my_id());
+    bob.send_message(&general, &format!("{mention} urgent"), None)
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    assert_eq!(alerted_texts(&mut changes), vec!["@Ada urgent"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_stricter_of_channel_and_status_wins() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    admin.set_notify_level(&general, NotifyLevel::Nothing).unwrap();
+    admin.set_status(status_alerting(NotifyLevel::All)).unwrap();
+    let mut changes = admin.subscribe();
+    let mention = crate::mentions::member_link("Ada", &admin.my_id());
+    bob.send_message(&general, &format!("{mention} hello"), None)
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    assert!(
+        alerted_texts(&mut changes).is_empty(),
+        "a muted channel stays muted"
+    );
 }

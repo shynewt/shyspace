@@ -20,7 +20,7 @@ import type {
 } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
 import { FakeDrafts } from "./drafts";
-import { argument, type Kind, ownedId, randomHex, requireString } from "./helpers";
+import { argument, type Kind, ownedId, randomHex, requireNotifyLevel, requireString } from "./helpers";
 import { FakeInvites } from "./invites";
 import { FakeLater } from "./later";
 import { search } from "./search";
@@ -185,7 +185,7 @@ export class FakeBackend {
           emoji: requireString(args, "emoji"),
           text: requireString(args, "text"),
           until_ms: (argument(args, "untilMs") as number | null) ?? null,
-          is_busy: argument(args, "busy") === true,
+          alerts: requireNotifyLevel(args, "alerts"),
         };
         return this.notify({ kind: "members" });
       }

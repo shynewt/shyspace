@@ -85,6 +85,8 @@ CREATE TABLE member_status (
     member BLOB PRIMARY KEY, emoji TEXT NOT NULL, text TEXT NOT NULL, until_ms INTEGER,
     is_busy INTEGER NOT NULL, lamport INTEGER NOT NULL);
 ",
+    // 0 = all, 1 = nothing (the old busy flag), 2 = mentions.
+    "ALTER TABLE member_status RENAME COLUMN is_busy TO alerts;",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

@@ -143,17 +143,17 @@ impl Store {
                 emoji,
                 text,
                 until_ms,
-                is_busy,
+                alerts,
             } => {
                 if !is_valid_status(emoji, text) {
                     return Err(rule_violation("invalid status"));
                 }
                 self.db.execute(
-                    "INSERT INTO member_status (member, emoji, text, until_ms, is_busy, lamport)
+                    "INSERT INTO member_status (member, emoji, text, until_ms, alerts, lamport)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                     ON CONFLICT (member) DO UPDATE SET emoji = ?2, text = ?3, until_ms = ?4, is_busy = ?5, lamport = ?6
+                     ON CONFLICT (member) DO UPDATE SET emoji = ?2, text = ?3, until_ms = ?4, alerts = ?5, lamport = ?6
                      WHERE lamport < ?6",
-                    params![author, emoji, text, until_ms, is_busy, lamport],
+                    params![author, emoji, text, until_ms, *alerts as u8, lamport],
                 )?;
                 Change::Members
             }

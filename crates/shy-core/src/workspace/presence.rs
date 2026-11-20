@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Workspace;
 use crate::{
-    ops::{Op, is_valid_status, now_ms},
+    ops::{Op, StatusAlerts, is_valid_status, now_ms},
     views::{PresenceState, StatusUpdate},
 };
 
@@ -103,7 +103,7 @@ impl Workspace {
             emoji: emoji.to_owned(),
             text: text.to_owned(),
             until_ms: status.until_ms,
-            is_busy: status.is_busy,
+            alerts: status.alerts.into(),
         })
     }
 
@@ -112,7 +112,7 @@ impl Workspace {
             emoji: String::new(),
             text: String::new(),
             until_ms: None,
-            is_busy: false,
+            alerts: StatusAlerts::All,
         })
     }
 

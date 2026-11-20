@@ -1,4 +1,5 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
+import type { NotifyLevel } from "../../../src/lib/api";
 
 export type Kind = { kind: "person" | "bot" };
 
@@ -21,4 +22,13 @@ export function requireString(args: InvokeArgs | undefined, name: string): strin
   const value = argument(args, name);
   if (typeof value !== "string") throw new Error(`fake backend: missing string argument "${name}"`);
   return value;
+}
+
+const NOTIFY_LEVELS: readonly NotifyLevel[] = ["all", "mentions", "nothing"];
+
+export function requireNotifyLevel(args: InvokeArgs | undefined, name: string): NotifyLevel {
+  const value = requireString(args, name);
+  const level = NOTIFY_LEVELS.find((candidate) => candidate === value);
+  if (!level) throw new Error(`fake backend: "${value}" is not a notification level`);
+  return level;
 }

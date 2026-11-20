@@ -18,7 +18,7 @@ async fn a_status_reaches_everyone_and_expires() {
         emoji: "🎧",
         text: "Deep work",
         until_ms: Some(in_an_hour),
-        is_busy: true,
+        alerts: crate::views::NotifyLevel::Mentions,
     })
     .unwrap();
     sync_all(&[&admin, &bob]).await;
@@ -26,15 +26,15 @@ async fn a_status_reaches_everyone_and_expires() {
     let members = admin.members().unwrap();
     let status = member(&members, &bob.my_id()).status.clone().unwrap();
     assert_eq!(
-        (status.emoji.as_str(), status.text.as_str(), status.is_busy),
-        ("🎧", "Deep work", true)
+        (status.emoji.as_str(), status.text.as_str(), status.alerts),
+        ("🎧", "Deep work", crate::views::NotifyLevel::Mentions)
     );
 
     bob.set_status(StatusUpdate {
         emoji: "🌴",
         text: "Gone",
         until_ms: Some(now_ms().unwrap() - 1),
-        is_busy: false,
+        alerts: crate::views::NotifyLevel::All,
     })
     .unwrap();
     sync_all(&[&admin, &bob]).await;

@@ -1,7 +1,7 @@
 import { Bell, HardDrive, Palette, ShieldCheck, UserRound } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
-import { api } from "../../lib/api";
+import { api, type NotifyLevel } from "../../lib/api";
 import { type Theme, usePreferences } from "../../lib/preferences";
 import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
@@ -131,16 +131,16 @@ function StatusSettings() {
   const [emoji, setEmoji] = useState("");
   const [text, setText] = useState("");
   const [clearAfter, setClearAfter] = useState<ClearAfter>("never");
-  const [isBusy, setBusy] = useState(false);
+  const [alerts, setAlerts] = useState<NotifyLevel>("all");
   useEffect(() => {
     setEmoji(current?.emoji ?? "");
     setText(current?.text ?? "");
-    setBusy(current?.is_busy ?? false);
-  }, [current?.emoji, current?.text, current?.is_busy]);
+    setAlerts(current?.alerts ?? "all");
+  }, [current?.emoji, current?.text, current?.alerts]);
   const save = (event: FormEvent) => {
     event.preventDefault();
     api
-      .setStatus(emoji, text, clearTime(clearAfter, new Date()), isBusy)
+      .setStatus(emoji, text, clearTime(clearAfter, new Date()), alerts)
       .then(() => showToast("Status set."), reportError);
   };
   return (
@@ -185,20 +185,24 @@ function StatusSettings() {
           />
         )}
       </Field>
-      <Field label="Notifications while set">
+      <Field
+        label="Notifications while set"
+        hint="Mentions only also lets through replies in threads you follow. A channel you muted stays muted."
+      >
         {() => (
-          <SegmentedControl<"available" | "busy">
+          <SegmentedControl<NotifyLevel>
             options={[
-              { value: "available", label: "As usual" },
-              { value: "busy", label: "Busy: none" },
+              { value: "all", label: "As usual" },
+              { value: "mentions", label: "Mentions only" },
+              { value: "nothing", label: "None" },
             ]}
-            value={isBusy ? "busy" : "available"}
-            onChange={(choice) => setBusy(choice === "busy")}
+            value={alerts}
+            onChange={setAlerts}
           />
         )}
       </Field>
       <div className="flex gap-2">
-        <Button type="submit" variant="primary" disabled={!emoji.trim() && !text.trim() && !isBusy}>
+        <Button type="submit" variant="primary" disabled={!emoji.trim() && !text.trim() && alerts === "all"}>
           Set status
         </Button>
         {current && (

@@ -667,7 +667,7 @@ async fn statuses_from_others_are_bounded() {
             emoji: "x",
             text: &"y".repeat(500),
             until_ms: None,
-            is_busy: false
+            alerts: crate::views::NotifyLevel::All
         })
         .is_err()
     );
@@ -681,7 +681,7 @@ async fn statuses_from_others_are_bounded() {
             emoji: "x".into(),
             text: "y".repeat(5_000),
             until_ms: None,
-            is_busy: false,
+            alerts: crate::ops::StatusAlerts::All,
         },
     };
     admin
@@ -746,7 +746,7 @@ async fn statuses_cannot_hide_or_reorder_text() {
             emoji: "",
             text: sneaky,
             until_ms: None,
-            is_busy: false,
+            alerts: crate::views::NotifyLevel::All,
         };
         assert!(bob.set_status(status).is_err(), "{sneaky:?} must be refused");
     }
@@ -754,7 +754,7 @@ async fn statuses_cannot_hide_or_reorder_text() {
         emoji: "👩\u{200D}💻",
         text: "Coding",
         until_ms: None,
-        is_busy: false,
+        alerts: crate::views::NotifyLevel::All,
     };
     bob.set_status(joined_emoji)
         .expect("emoji built with joiners are fine");
@@ -768,7 +768,7 @@ async fn statuses_cannot_hide_or_reorder_text() {
             emoji: String::new(),
             text: "\u{202E}evil".into(),
             until_ms: None,
-            is_busy: false,
+            alerts: crate::ops::StatusAlerts::All,
         },
     };
     admin

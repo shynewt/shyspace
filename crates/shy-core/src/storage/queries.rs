@@ -288,23 +288,25 @@ impl Store {
 
     /// A member's status, if set and not expired at `now_ms`.
     pub fn member_status(&self, member: &[u8], now_ms: i64) -> Result<Option<crate::views::MemberStatus>> {
-        let row: Option<(String, String, Option<i64>, bool)> = self
+        let row: Option<(String, String, Option<i64>, u8)> = self
             .db
             .query_row(
-                "SELECT emoji, text, until_ms, is_busy FROM member_status WHERE member = ?",
+                "SELECT emoji, text, until_ms, alerts FROM member_status WHERE member = ?",
                 [member],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
-        Ok(row.and_then(|(emoji, text, until_ms, is_busy)| {
-            let is_set = !emoji.is_empty() || !text.is_empty() || is_busy;
-            let is_current = until_ms.is_none_or(|until| until > now_ms);
-            (is_set && is_current).then_some(crate::views::MemberStatus {
-                emoji,
-                text,
-                until_ms,
-                is_busy,
-            })
+        let Some((emoji, text, until_ms, alerts)) = row else {
+            return Ok(None);
+        };
+        let alerts = crate::views::NotifyLevel::from(crate::ops::StatusAlerts::try_from(alerts)?);
+        let is_set = !emoji.is_empty() || !text.is_empty() || alerts != crate::views::NotifyLevel::All;
+        let is_current = until_ms.is_none_or(|until| until > now_ms);
+        Ok((is_set && is_current).then_some(crate::views::MemberStatus {
+            emoji,
+            text,
+            until_ms,
+            alerts,
         }))
     }
 }

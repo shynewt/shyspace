@@ -103,7 +103,11 @@ function MemberRow({ member, isMe, canRemove }: { member: Member; isMe: boolean;
           {member.status ? (
             <span>
               {member.status.emoji} {member.status.text}
-              {member.status.is_busy && <span className="ml-1 text-warning">· Busy</span>}
+              {member.status.alerts !== "all" && (
+                <span className="ml-1 text-warning">
+                  · {member.status.alerts === "nothing" ? "Busy" : "Mentions only"}
+                </span>
+              )}
             </span>
           ) : (
             <span className="text-faint">{PRESENCE_LABELS[member.presence]}</span>

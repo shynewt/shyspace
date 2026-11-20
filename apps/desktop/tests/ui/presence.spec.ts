@@ -15,7 +15,7 @@ test("your status shows to everyone and can be cleared", async ({ page }) => {
   const settings = page.getByRole("dialog", { name: "Settings" });
   await settings.getByLabel("Emoji").fill("🎧");
   await settings.getByLabel("Status", { exact: true }).fill("Deep work");
-  await settings.getByRole("tab", { name: "Busy: none" }).click();
+  await settings.getByRole("tab", { name: "None", exact: true }).click();
   await settings.getByRole("button", { name: "Set status" }).click();
   await expect(page.getByText("Status set.")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -32,6 +32,18 @@ test("your status shows to everyone and can be cleared", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeHidden();
   await expect((await openMembers(page)).getByText("Deep work")).toHaveCount(0);
+});
+
+test("a status can let only mentions through", async ({ page }) => {
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByLabel("Status", { exact: true }).fill("Heads down");
+  await settings.getByRole("tab", { name: "Mentions only" }).click();
+  await settings.getByRole("button", { name: "Set status" }).click();
+  await expect(page.getByText("Status set.")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await expect((await openMembers(page)).getByText("· Mentions only")).toBeVisible();
 });
 
 test("others show as online, away or not reachable", async ({ page }) => {

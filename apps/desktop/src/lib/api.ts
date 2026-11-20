@@ -71,7 +71,7 @@ export type Page = {
   is_saved: boolean;
 };
 export type PresenceState = "online" | "away" | "unreachable";
-export type MemberStatus = { emoji: string; text: string; until_ms: number | null; is_busy: boolean };
+export type MemberStatus = { emoji: string; text: string; until_ms: number | null; alerts: NotifyLevel };
 export type Member = {
   id: string;
   name: string;
@@ -196,8 +196,8 @@ export const api = {
     invoke<void>("apply_doc_update", { page, update: Array.from(update) }),
   members: () => invoke<Member[]>("members"),
   setProfile: (name: string) => invoke<void>("set_profile", { name }),
-  setStatus: (emoji: string, text: string, untilMs: number | null, busy: boolean) =>
-    invoke<void>("set_status", { emoji, text, untilMs, busy }),
+  setStatus: (emoji: string, text: string, untilMs: number | null, alerts: NotifyLevel) =>
+    invoke<void>("set_status", { emoji, text, untilMs, alerts }),
   clearStatus: () => invoke<void>("clear_status"),
   setAway: (away: boolean) => invoke<void>("set_away", { away }),
   appearOffline: () => invoke<boolean>("appear_offline"),

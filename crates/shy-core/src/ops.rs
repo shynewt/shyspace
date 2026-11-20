@@ -1,5 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::views::NotifyLevel;
 use anyhow::{Context, Result};
 use iroh::PublicKey;
 
@@ -94,13 +95,13 @@ pub enum Op {
     Delete {
         id: EntityId,
     },
-    /// The author's own status: emoji and text, until a time, and whether
-    /// they're busy (no alerts). Empty emoji and text clear it.
+    /// The author's own status: emoji and text, until a time, and which
+    /// alerts they want meanwhile. Empty emoji and text clear it.
     Status {
         emoji: String,
         text: String,
         until_ms: Option<i64>,
-        is_busy: bool,
+        alerts: StatusAlerts,
     },
 }
 
@@ -163,7 +164,51 @@ pub struct VerifiedOp {
 
 const MAX_CHANNEL_NAME_CHARS: usize = 80;
 const MAX_STATUS_TEXT_CHARS: usize = 100;
+
 const MAX_STATUS_EMOJI_CHARS: usize = 16;
+
+/// Which alerts a status lets through. The variant order is part of the
+/// format: earlier builds stored a busy flag here, and `false`/`true` read as
+/// `All`/`Nothing`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StatusAlerts {
+    All = 0,
+    Nothing = 1,
+    Mentions = 2,
+}
+
+impl From<NotifyLevel> for StatusAlerts {
+    fn from(level: NotifyLevel) -> Self {
+        match level {
+            NotifyLevel::All => StatusAlerts::All,
+            NotifyLevel::Mentions => StatusAlerts::Mentions,
+            NotifyLevel::Nothing => StatusAlerts::Nothing,
+        }
+    }
+}
+
+impl TryFrom<u8> for StatusAlerts {
+    type Error = anyhow::Error;
+
+    fn try_from(stored: u8) -> anyhow::Result<Self> {
+        match stored {
+            0 => Ok(StatusAlerts::All),
+            1 => Ok(StatusAlerts::Nothing),
+            2 => Ok(StatusAlerts::Mentions),
+            other => anyhow::bail!("unknown status alert level {other}"),
+        }
+    }
+}
+
+impl From<StatusAlerts> for NotifyLevel {
+    fn from(alerts: StatusAlerts) -> Self {
+        match alerts {
+            StatusAlerts::All => NotifyLevel::All,
+            StatusAlerts::Mentions => NotifyLevel::Mentions,
+            StatusAlerts::Nothing => NotifyLevel::Nothing,
+        }
+    }
+}
 
 /// A status shows next to the author's name everywhere: bounded, on one
 /// line, and free of characters that hide or reorder text. Emoji keep their
@@ -229,4 +274,19 @@ fn is_invisible_format_char(c: char) -> bool {
             | '\u{FEFF}'
             | '\u{FFF9}'..='\u{FFFB}'
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn statuses_saved_as_busy_or_not_still_read_the_same() {
+        // Earlier builds stored a busy flag where the alert level now is.
+        for (was_busy, alerts) in [(false, StatusAlerts::All), (true, StatusAlerts::Nothing)] {
+            let old = postcard::to_stdvec(&("🎧", "Focus", None::<i64>, was_busy)).unwrap();
+            let new = postcard::to_stdvec(&("🎧", "Focus", None::<i64>, alerts)).unwrap();
+            assert_eq!(old, new);
+        }
+    }
 }

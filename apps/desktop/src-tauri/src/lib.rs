@@ -442,7 +442,7 @@ async fn set_status(
     emoji: String,
     text: String,
     until_ms: Option<i64>,
-    busy: bool,
+    alerts: NotifyLevel,
 ) -> CommandResult<()> {
     current(&state)
         .await?
@@ -450,7 +450,7 @@ async fn set_status(
             emoji: &emoji,
             text: &text,
             until_ms,
-            is_busy: busy,
+            alerts,
         })
         .map_err(failed)
 }

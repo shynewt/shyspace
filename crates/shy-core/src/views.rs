@@ -77,6 +77,16 @@ pub enum NotifyLevel {
 }
 
 impl NotifyLevel {
+    /// The level that lets fewer alerts through.
+    pub fn stricter(self, other: NotifyLevel) -> NotifyLevel {
+        let rank = |level: NotifyLevel| match level {
+            NotifyLevel::All => 0,
+            NotifyLevel::Mentions => 1,
+            NotifyLevel::Nothing => 2,
+        };
+        if rank(other) > rank(self) { other } else { self }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             NotifyLevel::All => "all",
@@ -180,7 +190,8 @@ pub struct MemberStatus {
     pub emoji: String,
     pub text: String,
     pub until_ms: Option<i64>,
-    pub is_busy: bool,
+    /// Which alerts they want while it's set.
+    pub alerts: NotifyLevel,
 }
 
 /// A status to set for yourself.
@@ -188,7 +199,8 @@ pub struct StatusUpdate<'a> {
     pub emoji: &'a str,
     pub text: &'a str,
     pub until_ms: Option<i64>,
-    pub is_busy: bool,
+    /// Which alerts they want while it's set.
+    pub alerts: NotifyLevel,
 }
 
 /// Whether a member's device is reachable right now. "Unreachable" rather than
