@@ -139,6 +139,10 @@
 .prose-chat p {
   margin: 0;
 }
+/* "(edited)" follows the last line of text. */
+.prose-chat p:has(+ .edited-mark) {
+  display: inline;
+}
 .prose-chat p + p,
 .prose-chat ul,
 .prose-chat ol,

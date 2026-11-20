@@ -75,7 +75,7 @@ export const MessageItem = memo(function MessageItem({
       <div className="w-9 shrink-0">
         {isContinuation ? (
           <span className="relative flex justify-end pt-[3px]">
-            <span className="text-[10.5px] text-faint opacity-0 group-hover:opacity-100">
+            <span className="text-[10.5px] whitespace-nowrap text-faint opacity-0 group-hover:opacity-100">
               {formatTime(message.created_ms)}
             </span>
             {message.saved && !message.saved.is_done && (
@@ -113,7 +113,7 @@ export const MessageItem = memo(function MessageItem({
             pageTitle={(id) => titles.get(id)}
             onOpenPage={(id) => navigate({ kind: "page", id })}
           />
-          {message.is_edited && <span className="text-[11px] text-faint">(edited)</span>}
+          {message.is_edited && <span className="edited-mark ml-1 text-[11px] text-faint">(edited)</span>}
         </div>
 
         {linkedPages.map((id) => (

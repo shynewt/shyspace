@@ -76,3 +76,33 @@ test("the channel says when agents can read it", async ({ page }) => {
   await page.evaluate(() => window.fake.addMember("Claude", { kind: "bot" }));
   await expect(page.getByText("1 agent can read this")).toBeVisible();
 });
+
+async function send(page: import("@playwright/test").Page, ...texts: string[]) {
+  const composer = page.getByLabel("Message #general");
+  for (const text of texts) {
+    await composer.fill(text);
+    await composer.press("Enter");
+    await expect(page.getByRole("article").filter({ hasText: text })).toBeVisible();
+  }
+}
+
+test("a follow-up message stays one line tall", async ({ page }) => {
+  await send(page, "First thought", "Second thought");
+
+  const followUp = await page.getByRole("article").filter({ hasText: "Second thought" }).boundingBox();
+  expect(followUp?.height).toBeLessThanOrEqual(28);
+});
+
+test("the edited mark sits on the message's last line", async ({ page }) => {
+  await send(page, "Lunch at noon");
+  const composer = page.getByLabel("Message #general");
+  await composer.press("ArrowUp");
+  await composer.fill("Lunch at one");
+  await composer.press("Enter");
+
+  const message = page.getByRole("article").filter({ hasText: "Lunch at one" });
+  const text = await message.getByText("Lunch at one").boundingBox();
+  const mark = await message.getByText("(edited)").boundingBox();
+  if (!text || !mark) throw new Error("message not laid out");
+  expect(mark.y).toBeLessThan(text.y + text.height);
+});
