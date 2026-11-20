@@ -105,3 +105,26 @@ test("a link whose text shows another address asks before opening", async ({ pag
   await page.getByRole("button", { name: "Open link" }).click();
   await expect.poll(() => openedLinks(page)).toEqual(["https://evil.example/login"]);
 });
+
+for (const [label, text] of [
+  ["a name and password in the address", "[paypal.com](https://paypal.com:x@evil.example/login)"],
+  ["a trailing period", "[paypal.com.](https://evil.example/login)"],
+  ["a look-alike letter", "[p\u0430ypal.com](https://evil.example/login)"],
+  ["an address inside a sentence", "[Log in at paypal.com](https://evil.example/login)"],
+]) {
+  test(`a misleading link with ${label} still asks first`, async ({ page }) => {
+    await recordOpenedLinks(page);
+    await send(page, "general", `Here: ${text}`);
+    await page.getByRole("article").filter({ hasText: "Here:" }).getByRole("link").click();
+
+    await expect(page.getByRole("dialog", { name: "Open this link?" })).toBeVisible();
+    expect(await openedLinks(page)).toEqual([]);
+  });
+}
+
+test("an honest link opens straight away", async ({ page }) => {
+  await recordOpenedLinks(page);
+  await send(page, "general", "Docs at [example.com](https://www.example.com/guide)");
+  await page.getByRole("link", { name: "example.com" }).click();
+  await expect.poll(() => openedLinks(page)).toEqual(["https://www.example.com/guide"]);
+});

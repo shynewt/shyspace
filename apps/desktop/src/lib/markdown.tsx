@@ -108,19 +108,33 @@ function textOf(node: MarkdownNode | MarkdownNode["children"][number]): string {
   return "";
 }
 
-const WEB_ADDRESS = /^(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#]\S*)?$/i;
-const LINK_HOST = /^[a-z][a-z0-9+.-]*:\/\/([^/?#:\s]+)/i;
+/** One word that reads as a web address, in any script: "paypal.com", "https://bank.example/login". */
+const ADDRESS_WORD = /^(?:https?:\/\/)?(?:[\p{L}\p{N}-]+\.)+\p{L}{2,}(?:[:/?#]\S*)?$/iu;
+const WORD_EDGE_PUNCTUATION = /^[("'«“]+|[.,;:!?)"'»”]+$/gu;
 
-function withoutWww(host: string): string {
-  return host.toLowerCase().replace(/^www\./, "");
+/** A URL's host as the system opens it: look-alike letters in punycode, no "www.", and null if it isn't a URL. */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    // Not an address at all; callers treat an unknown host as one to ask about.
+    return null;
+  }
 }
 
-/** Link text that reads as a web address, but not the one the link opens: a common phishing trick. */
+/** The hosts of the addresses written in a link's text, like "Log in at paypal.com." */
+function shownHosts(text: string): (string | null)[] {
+  return text
+    .split(/\s+/)
+    .map((word) => word.replace(WORD_EDGE_PUNCTUATION, ""))
+    .filter((word) => ADDRESS_WORD.test(word))
+    .map((word) => hostOf(/^https?:\/\//i.test(word) ? word : `http://${word}`));
+}
+
+/** Link text that shows a web address other than the one the link opens: a common phishing trick. */
 function isMisleading(text: string, href: string): boolean {
-  const shown = text.trim().match(WEB_ADDRESS)?.[1];
-  if (!shown) return false;
-  const opened = href.match(LINK_HOST)?.[1];
-  return !opened || withoutWww(shown) !== withoutWww(opened);
+  const opened = hostOf(href);
+  return shownHosts(text).some((shown) => shown === null || shown !== opened);
 }
 
 /** A web or mail link: shows where it goes on hover, and asks first when its text shows somewhere else. */
