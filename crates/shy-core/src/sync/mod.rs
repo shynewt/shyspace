@@ -3,6 +3,7 @@
 //! ops arriving live over gossip.
 
 mod alerts;
+mod peers;
 mod receive;
 mod replicate;
 
@@ -95,7 +96,14 @@ impl Workspace {
         let syncer = self.clone();
         tokio::spawn(async move {
             syncer.announce_self().await;
+            let mut last_announced = tokio::time::Instant::now();
             loop {
+                // Staying announced keeps others dialing us while we're online.
+                if last_announced.elapsed() >= Duration::from_millis(peers::ANNOUNCE_EVERY_MS.unsigned_abs())
+                {
+                    syncer.announce_self().await;
+                    last_announced = tokio::time::Instant::now();
+                }
                 syncer.sync().await;
                 if syncer.status().removed {
                     break;

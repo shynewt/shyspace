@@ -410,14 +410,29 @@ impl Bucket {
             .await
     }
 
-    pub async fn peers(&self) -> Result<Vec<PublicKey>> {
-        let paths = self.list("peers", None).await?;
-        Ok(paths
-            .iter()
-            .filter_map(|path| path.filename())
-            .filter_map(parse_member_path)
-            .collect())
+    /// Who announced themselves for gossip, and when they last did.
+    pub async fn peers(&self) -> Result<Vec<PeerAnnouncement>> {
+        let mut stream = self.store.list(Some(&Path::from("peers")));
+        let mut announcements = Vec::new();
+        while let Some(meta) = stream.next().await {
+            let meta = meta?;
+            if let Some(peer) = meta.location.filename().and_then(parse_member_path) {
+                announcements.push(PeerAnnouncement {
+                    peer,
+                    announced_ms: meta.last_modified.timestamp_millis(),
+                });
+            }
+        }
+        Ok(announcements)
     }
+}
+
+/// A member's gossip address hint, rewritten each time they start and every
+/// few hours while they stay online.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerAnnouncement {
+    pub peer: PublicKey,
+    pub announced_ms: i64,
 }
 
 /// What an invitee does through presigned links, done directly in tests
