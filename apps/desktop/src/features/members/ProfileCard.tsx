@@ -32,6 +32,8 @@ type CardControl = {
 
 const CardContext = createContext<CardControl | null>(null);
 
+export const CARD_SURFACE = "z-50 w-[280px] rounded-xl border border-line bg-surface p-4 shadow-float outline-none";
+
 /**
  * A member's profile card: who they are, their status and presence, and
  * quick actions. Wraps the names and avatars that open it
@@ -154,13 +156,7 @@ export function ProfileCard({
             onPointerEnter={() => clearTimeout(timers.current.close)}
             onPointerLeave={() => openedBy.current === "hover" && control.hoverProps.onPointerLeave()}
           >
-            <motion.div
-              ref={card}
-              tabIndex={-1}
-              {...pop}
-              transition={springs.snappy}
-              className="z-50 w-[280px] rounded-xl border border-line bg-surface p-4 shadow-float outline-none"
-            >
+            <motion.div ref={card} tabIndex={-1} {...pop} transition={springs.snappy} className={CARD_SURFACE}>
               <CardBody
                 member={member}
                 onMention={
@@ -238,7 +234,7 @@ export function ProfileCardAvatar({ children }: { children: ReactNode }) {
   );
 }
 
-function CardBody({
+export function CardBody({
   member,
   onMention,
   onMessage,
@@ -319,7 +315,7 @@ function CardBody({
  * press, the card itself after a click. A click must show no focus ring,
  * and WebKit can count a button focused by script as :focus-visible.
  */
-function focusInside(card: HTMLElement | null, openedBy: "pointer" | "keyboard") {
+export function focusInside(card: HTMLElement | null, openedBy: "pointer" | "keyboard") {
   if (openedBy === "keyboard") card?.querySelector<HTMLElement>("button")?.focus();
   else card?.focus();
 }

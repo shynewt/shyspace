@@ -110,7 +110,7 @@ export const LOCAL_SHORTCUTS: { keys: string[]; description: string }[] = [
   { keys: [MOD_LABEL, "I"], description: "Italic text in a page" },
   { keys: [MOD_LABEL, "E"], description: "Code in a page" },
   { keys: [MOD_LABEL, "K"], description: "Link the selected text in a page" },
-  { keys: [MOD_LABEL, "Enter"], description: "Check off an item, or open a link, in a page" },
+  { keys: [MOD_LABEL, "Enter"], description: "Check off an item, open a link, or show who a mention is, in a page" },
 ];
 
 export function shortcutKeys(id: ShortcutId): string[] {

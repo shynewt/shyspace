@@ -1,4 +1,4 @@
-/** Opening a page's links: web and mail links in their apps, page links in shyspace. */
+/** Opening a page's links: web and mail links in their apps, page links in shyspace, mentions as profile cards. */
 import { Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -9,6 +9,22 @@ import { externalUrl, type LinkTarget } from "./links";
 export const pageOpener = Facet.define<(pageId: string) => void, ((pageId: string) => void) | undefined>({
   combine: (openers) => openers[0],
 });
+
+/** Something a floating card can be placed against: a chip, or the cursor's spot. */
+export type CardAnchor = { getBoundingClientRect: () => DOMRect };
+
+/** How the editor shows a mentioned member's card; given by the screen that hosts it. */
+export type MemberOpener = (memberId: string, anchor: CardAnchor, openedBy: "pointer" | "keyboard") => void;
+
+export const memberOpener = Facet.define<MemberOpener, MemberOpener | undefined>({
+  combine: (openers) => openers[0],
+});
+
+export function openMember(view: EditorView, memberId: string, anchor: CardAnchor, openedBy: "pointer" | "keyboard") {
+  const open = view.state.facet(memberOpener);
+  if (!open) throw new Error("the page editor was set up without a way to show members");
+  open(memberId, anchor, openedBy);
+}
 
 export function openLink(view: EditorView, link: LinkTarget): void {
   if (link.pageId) {

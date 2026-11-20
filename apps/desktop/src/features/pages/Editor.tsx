@@ -7,14 +7,19 @@ import { useEffect, useRef, useState } from "react";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import { api, onChange } from "../../lib/api";
+import { useMembers } from "../../lib/members";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
+import { ProfileCardAt } from "../members/ProfileCardAt";
 import { formattingKeymap } from "./editor/commands";
-import { livePreview, setPageTitles } from "./editor/livePreview";
+import { livePreview, setKnownMembers, setPageTitles } from "./editor/livePreview";
+import type { CardAnchor } from "./editor/openLinks";
 import { type MenuKey, type Suggestion, suggestions } from "./editor/suggestions";
 import { pageTheme } from "./editor/theme";
 import { PAGE_TEXT } from "./pageText";
 import { SuggestionMenu } from "./SuggestionMenu";
+
+type OpenMemberCard = { memberId: string; anchor: CardAnchor; openedBy: "pointer" | "keyboard" };
 
 /** Local keystrokes are batched before being sealed and sent. */
 const SEND_DELAY_MS = 120;
@@ -48,6 +53,8 @@ function PageEditor({ pageId, onSaveFailed }: { pageId: string; onSaveFailed: ()
   const onSaveFailedRef = useRef(onSaveFailed);
   onSaveFailedRef.current = onSaveFailed;
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const members = useMembers();
+  const [memberCard, setMemberCard] = useState<OpenMemberCard | null>(null);
   const menuKeys = useRef<(key: MenuKey, view: EditorView) => boolean>(() => false);
 
   useEffect(() => {
@@ -103,7 +110,10 @@ function PageEditor({ pageId, onSaveFailed }: { pageId: string; onSaveFailed: ()
             drawSelection(),
             EditorView.lineWrapping,
             markdown({ base: markdownLanguage, codeLanguages: languages }),
-            livePreview({ onOpenPage: (id) => navigateRef.current({ kind: "page", id }) }),
+            livePreview({
+              onOpenPage: (id) => navigateRef.current({ kind: "page", id }),
+              onOpenMember: (memberId, anchor, openedBy) => setMemberCard({ memberId, anchor, openedBy }),
+            }),
             suggestions({ onKey: (key, editor) => menuKeys.current(key, editor), onChange: setSuggestion }),
             placeholder("Type / for blocks, @ to mention someone, [[ to link a page"),
             keymap.of([
@@ -136,10 +146,24 @@ function PageEditor({ pageId, onSaveFailed }: { pageId: string; onSaveFailed: ()
     view?.dispatch({ effects: setPageTitles.of(new Map(pages.map((page) => [page.id, page.title]))) });
   }, [view, pages]);
 
+  useEffect(() => {
+    if (members) view?.dispatch({ effects: setKnownMembers.of(new Set(members.map((member) => member.id))) });
+  }, [view, members]);
+
   return (
     <div className="relative">
       <div ref={host} className="selectable min-h-[50vh]" />
       <SuggestionMenu view={view} suggestion={suggestion} pageId={pageId} keys={menuKeys} />
+      {memberCard && (
+        <ProfileCardAt
+          {...memberCard}
+          onDismiss={() => {
+            setMemberCard(null);
+            view?.focus();
+          }}
+          onLeave={() => setMemberCard(null)}
+        />
+      )}
     </div>
   );
 }

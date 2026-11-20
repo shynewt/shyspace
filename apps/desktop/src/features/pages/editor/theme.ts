@@ -112,6 +112,7 @@ const editorTheme = EditorView.theme({
   ".cm-md-page svg": { display: "inline", verticalAlign: "-0.12em", marginRight: "0.25em" },
   ".cm-md-page:hover": { backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent)" },
   ".cm-md-page-missing": { cursor: "default", color: "var(--text-muted)", backgroundColor: "var(--surface-2)" },
+  ".cm-md-mention[role=button]": { cursor: "pointer" },
   ".cm-md-mention": {
     color: "var(--accent-text)",
     backgroundColor: "color-mix(in srgb, var(--accent) 10%, transparent)",

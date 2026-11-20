@@ -1,7 +1,7 @@
 /** Finding the links in a page: web and mail links, and links to other pages. */
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
-import { isMentionLink } from "../../../lib/mentions";
+import { isMentionLink, mentionedMemberId } from "../../../lib/mentions";
 
 type SyntaxNode = ReturnType<typeof syntaxTree>["topNode"];
 
@@ -24,7 +24,20 @@ export function externalUrl(url: string): string | null {
   return null;
 }
 
-/** The link at `position`, if any. Mentions aren't links: they open nothing. */
+/** The member mentioned by the mention chip at `position` (either side of it), if any. */
+export function mentionAt(state: EditorState, position: number): string | null {
+  const tree = syntaxTree(state);
+  for (const side of [1, -1] as const) {
+    for (let node: SyntaxNode | null = tree.resolveInner(position, side); node; node = node.parent) {
+      if (node.name !== "Link") continue;
+      const url = node.getChild("URL");
+      return url ? mentionedMemberId(state.sliceDoc(url.from, url.to)) : null;
+    }
+  }
+  return null;
+}
+
+/** The link at `position`, if any. Mentions aren't links: their chips open a profile card instead. */
 export function linkAt(state: EditorState, position: number): LinkTarget | null {
   const tree = syntaxTree(state);
   for (const side of [1, -1] as const) {

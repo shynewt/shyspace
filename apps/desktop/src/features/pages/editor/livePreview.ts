@@ -17,7 +17,7 @@ import {
 import { MOD_LABEL } from "../../../lib/shortcuts";
 import { externalUrl, linkAt } from "./links";
 import { previewItems } from "./markdownPreview";
-import { openLink, openPage, pageOpener } from "./openLinks";
+import { type MemberOpener, memberOpener, openLink, openMember, openPage, pageOpener } from "./openLinks";
 import { toggleTaskAt } from "./tasks";
 
 /** The workspace's page titles, for drawing page links by their current title. */
@@ -32,10 +32,30 @@ const pageTitles = StateField.define<ReadonlyMap<string, string>>({
   },
 });
 
-export function livePreview({ onOpenPage }: { onOpenPage: (pageId: string) => void }) {
+/** The ids of the workspace's members, so only mentions of someone known open a card. */
+export const setKnownMembers = StateEffect.define<ReadonlySet<string>>();
+
+export const knownMembers = StateField.define<ReadonlySet<string>>({
+  create: () => new Set(),
+  update: (known, transaction) => {
+    let next = known;
+    for (const effect of transaction.effects) if (effect.is(setKnownMembers)) next = effect.value;
+    return next;
+  },
+});
+
+export function livePreview({
+  onOpenPage,
+  onOpenMember,
+}: {
+  onOpenPage: (pageId: string) => void;
+  onOpenMember: MemberOpener;
+}) {
   return [
     pageTitles,
+    knownMembers,
     pageOpener.of(onOpenPage),
+    memberOpener.of(onOpenMember),
     previewPlugin,
     EditorView.atomicRanges.of((view) => view.plugin(previewPlugin)?.chips ?? Decoration.none),
     linkTooltip,
@@ -77,7 +97,8 @@ const previewPlugin = ViewPlugin.fromClass(
         update.viewportChanged ||
         isRevealChanged ||
         syntaxTree(update.startState) !== syntaxTree(update.state) ||
-        update.startState.field(pageTitles) !== update.state.field(pageTitles)
+        update.startState.field(pageTitles) !== update.state.field(pageTitles) ||
+        update.startState.field(knownMembers) !== update.state.field(knownMembers)
       ) {
         this.build();
       }
@@ -89,6 +110,7 @@ const previewPlugin = ViewPlugin.fromClass(
 
     private build() {
       const titles = this.view.state.field(pageTitles);
+      const known = this.view.state.field(knownMembers);
       const decorations: Range<Decoration>[] = [];
       const chips: Range<Decoration>[] = [];
       for (const item of previewItems(
@@ -125,7 +147,8 @@ const previewPlugin = ViewPlugin.fromClass(
             break;
           }
           case "mention": {
-            const chip = Decoration.replace({ widget: new MentionWidget(item.label) });
+            const memberId = item.memberId !== null && known.has(item.memberId) ? item.memberId : null;
+            const chip = Decoration.replace({ widget: new MentionWidget(item.label, memberId) });
             decorations.push(chip.range(item.from, item.to));
             chips.push(chip.range(item.from, item.to));
             break;
@@ -256,18 +279,32 @@ class PageChipWidget extends WidgetType {
 }
 
 class MentionWidget extends WidgetType {
-  constructor(readonly label: string) {
+  /** `memberId` is null for @channel, @here and people who aren't members: those open nothing. */
+  constructor(
+    readonly label: string,
+    readonly memberId: string | null,
+  ) {
     super();
   }
 
   eq(other: MentionWidget) {
-    return other.label === this.label;
+    return other.label === this.label && other.memberId === this.memberId;
   }
 
-  toDOM() {
+  toDOM(view: EditorView) {
     const mention = document.createElement("span");
     mention.className = "cm-md-mention";
     mention.textContent = this.label;
+    const { memberId } = this;
+    if (!memberId) return mention;
+    mention.setAttribute("role", "button");
+    mention.setAttribute("aria-label", `${this.label.replace(/^@/, "")}, open profile`);
+    // The cursor stays where it was: the card opens on top of the page, which doesn't change.
+    mention.addEventListener("mousedown", (event) => event.preventDefault());
+    mention.addEventListener("click", (event) => {
+      event.preventDefault();
+      openMember(view, memberId, mention, "pointer");
+    });
     return mention;
   }
 }

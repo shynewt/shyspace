@@ -91,6 +91,13 @@ test("page links and mentions become chips, even on revealed lines", () => {
   expect(rendered(text, [1])).toBe("<page ab12> <page cd34> @Ada");
 });
 
+test("a mention chip knows who it names; @channel names no one", () => {
+  const mentions = itemsOf("[@Ada](shy://member/ff00) and [@channel](shy://mention/channel)").filter(
+    (item) => item.kind === "mention",
+  );
+  expect(mentions.map((item) => (item.kind === "mention" ? item.memberId : undefined))).toEqual(["ff00", null]);
+});
+
 test("a page link inside code stays text", () => {
   expect(rendered("`shy://page/ab12`")).toBe("shy://page/ab12");
 });

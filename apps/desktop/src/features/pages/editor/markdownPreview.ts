@@ -6,7 +6,7 @@
  */
 import type { syntaxTree } from "@codemirror/language";
 import type { Text } from "@codemirror/state";
-import { isMentionLink } from "../../../lib/mentions";
+import { isMentionLink, mentionedMemberId } from "../../../lib/mentions";
 import { BARE_PAGE_LINK, pageIdOf } from "./links";
 
 export type SyntaxTree = ReturnType<typeof syntaxTree>;
@@ -22,7 +22,8 @@ export type PreviewItem =
   | { kind: "checkbox"; from: number; to: number; isChecked: boolean; label: string }
   | { kind: "divider"; from: number; to: number }
   | { kind: "page"; from: number; to: number; pageId: string }
-  | { kind: "mention"; from: number; to: number; label: string };
+  /** `memberId` is null for @channel and @here. */
+  | { kind: "mention"; from: number; to: number; label: string; memberId: string | null };
 
 /** Where a bare `shy://page/…` link is plain text, not a link to draw as a chip. */
 const NOT_PAGE_CHIP = new Set([
@@ -197,7 +198,8 @@ class PreviewBuilder {
       return false;
     }
     if (isMentionLink(href) && isOneLine) {
-      this.add({ kind: "mention", from: link.from, to: link.to, label: this.doc.sliceString(labelFrom, labelTo) });
+      const label = this.doc.sliceString(labelFrom, labelTo);
+      this.add({ kind: "mention", from: link.from, to: link.to, label, memberId: mentionedMemberId(href) });
       return false;
     }
     this.add({ kind: "style", from: labelFrom, to: labelTo, className: "cm-md-link" });
