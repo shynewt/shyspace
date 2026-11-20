@@ -20,12 +20,19 @@ export function currentStatus(status: MemberStatus | null, nowMs: number): Membe
 export function useMembersWithCurrentStatus(members: Member[] | undefined): Member[] | undefined {
   const [nowMs, setNowMs] = useState(Date.now);
   useEffect(() => {
+    const now = Date.now();
     const ends = (members ?? []).flatMap((member) => {
       const until = member.status?.until_ms;
       return until !== undefined && until !== null && until > nowMs ? [until] : [];
     });
     if (ends.length === 0) return;
-    const timer = setTimeout(() => setNowMs(Date.now()), Math.min(Math.min(...ends) - nowMs, MAX_TIMER_MS));
+    const nextEnd = Math.min(...ends);
+    // `nowMs` is when the clock last ticked, which may be long ago: measure from now.
+    if (nextEnd <= now) {
+      setNowMs(now);
+      return;
+    }
+    const timer = setTimeout(() => setNowMs(Date.now()), Math.min(nextEnd - now, MAX_TIMER_MS));
     return () => clearTimeout(timer);
   }, [members, nowMs]);
   return useMemo(

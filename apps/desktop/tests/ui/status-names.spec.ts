@@ -66,6 +66,18 @@ test("a status disappears when it ends, without reloading", async ({ page }) => 
   await expect(emoji).toHaveCount(0);
 });
 
+test("a status ends on time even hours after the app started", async ({ page }) => {
+  await page.clock.install();
+  await page.reload();
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.clock.fastForward("03:00:00");
+  await graceSays(page, "Coffee", { ...HOLIDAY, until_ms: (await page.evaluate(() => Date.now())) + 1500 });
+  const emoji = channelLog(page).getByLabel(/^Status: 🌴/);
+  await expect(emoji).toBeVisible();
+
+  await expect(emoji).toHaveCount(0);
+});
+
 test("an agent shows no status beside its name", async ({ page }) => {
   await page.evaluate((status) => {
     const agent = window.fake.addMember("Claude", { kind: "bot" });
