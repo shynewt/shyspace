@@ -3,11 +3,11 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo, useState } from "react";
 import { api, type Channel, type Draft, type InboxItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
-import { displayName, formatWhen } from "../../lib/people";
+import { displayName } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Button, EmptyState, SectionLabel, springs } from "../../ui";
+import { Avatar, Button, CountBadge, EmptyState, ListRow, RelativeTime, SectionLabel, springs } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
 import { MarkAllReadDialog } from "./MarkAllReadDialog";
 
@@ -101,24 +101,22 @@ function AttentionRow({ item }: { item: InboxItem }) {
       exit={{ opacity: 0, height: 0 }}
       transition={springs.smooth}
     >
-      <button
-        type="button"
+      <ListRow
         onClick={() =>
           navigate({ kind: "channel", id: message.channel, thread: item.thread_root ?? undefined, focus: message.id })
         }
-        className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
-      >
-        <Avatar id={message.author} name={name} isBot={message.author_is_bot} size={32} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-sm text-muted">
+        leading={<Avatar id={message.author} name={name} isBot={message.author_is_bot} size={32} />}
+        meta={
+          <>
             {item.reason === "mention" ? <AtSign size={12} /> : <MessageSquareReply size={12} />}
             <b className="font-semibold text-ink">{name}</b> {where}{" "}
             <ChannelName channelId={message.channel} className="min-w-0" />
-            <span className="ml-auto shrink-0 text-faint">{formatWhen(message.created_ms, new Date())}</span>
-          </span>
-          <span className="mt-0.5 block truncate text-base">{plainPreview(message.text, (id) => titles.get(id))}</span>
-        </span>
-      </button>
+            <RelativeTime ms={message.created_ms} className="ml-auto shrink-0 text-faint" />
+          </>
+        }
+      >
+        {plainPreview(message.text, (id) => titles.get(id))}
+      </ListRow>
     </motion.li>
   );
 }
@@ -135,20 +133,18 @@ function DraftRow({ draft }: { draft: Draft }) {
       exit={{ opacity: 0, height: 0 }}
       transition={springs.smooth}
     >
-      <button
-        type="button"
+      <ListRow
         onClick={() => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined })}
-        className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
-      >
-        <Pencil size={15} className="mt-0.5 shrink-0 text-decorative" />
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm text-muted">
+        leading={<Pencil size={15} className="mt-0.5 text-decorative" />}
+        meta={
+          <span>
             {isThread ? "Reply in a thread in" : "In"}{" "}
             <ChannelName channelId={draft.channel} className="font-semibold text-ink" />
           </span>
-          <span className="mt-0.5 block truncate text-base">{plainPreview(draft.text, (id) => titles.get(id))}</span>
-        </span>
-      </button>
+        }
+      >
+        {plainPreview(draft.text, (id) => titles.get(id))}
+      </ListRow>
     </motion.li>
   );
 }
@@ -167,9 +163,7 @@ function UnreadChannelRow({ channel }: { channel: Channel }) {
         className="flex min-w-0 flex-1 items-center gap-2 text-left text-base font-semibold"
       >
         <ChannelName channelId={channel.id} className="min-w-0" />
-        <span className="rounded-full bg-accent px-1.5 text-2xs font-semibold text-on-accent tabular-nums">
-          {channel.unread}
-        </span>
+        <CountBadge>{channel.unread}</CountBadge>
       </button>
       <Button variant="ghost" size="sm" onClick={() => markRead().catch(reportError)}>
         Mark read

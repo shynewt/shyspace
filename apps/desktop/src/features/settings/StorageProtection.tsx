@@ -1,11 +1,10 @@
-import { ChevronRight, RefreshCw, ShieldAlert, ShieldCheck, ShieldQuestion, TriangleAlert } from "lucide-react";
+import { ChevronRight, RefreshCw, ShieldCheck, ShieldQuestion, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { api, type ProtectionCheck } from "../../lib/api";
-import { formatWhen } from "../../lib/people";
 import { useFormAction } from "../../lib/useFormAction";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, cx, FormError, Tooltip } from "../../ui";
+import { Button, FormError, Notice, RelativeTime, Tooltip } from "../../ui";
 import { useAdminName } from "./layout";
 
 /** Whether the bucket keeps deleted and overwritten data, as last checked. */
@@ -96,25 +95,6 @@ function ProtectionNotice({ protection }: { protection: ProtectionCheck }) {
   }
 }
 
-function Notice({ tone, title, children }: { tone: "warning" | "danger"; title: string; children: ReactNode }) {
-  return (
-    <div
-      className={cx(
-        "flex gap-3 rounded-xl border p-3.5",
-        tone === "danger" ? "border-danger/40 bg-danger/8" : "border-warning/40 bg-warning/8",
-      )}
-    >
-      <ShieldAlert size={18} className={cx("mt-px shrink-0", tone === "danger" ? "text-danger" : "text-warning")} />
-      <div className="flex min-w-0 flex-col gap-1.5 text-sm leading-relaxed">
-        <h4 className={cx("text-base font-semibold", tone === "danger" ? "text-danger-text" : "text-warning-text")}>
-          {title}
-        </h4>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function WhoFixesIt() {
   const { session } = useWorkspace();
   const adminName = useAdminName();
@@ -188,7 +168,13 @@ function CheckAgain({ checkedMs }: { checkedMs: number | null }) {
           Check again
         </Button>
         <span className="text-xs text-faint">
-          {checkedMs === null ? "Not checked yet" : `Last checked ${formatWhen(checkedMs, new Date())}`}
+          {checkedMs === null ? (
+            "Not checked yet"
+          ) : (
+            <>
+              Last checked <RelativeTime ms={checkedMs} />
+            </>
+          )}
         </span>
       </div>
       <FormError message={check.error} />

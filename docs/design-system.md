@@ -40,6 +40,10 @@ Keep feedback under about 250 ms. Reduced motion is decided once, globally: `Mot
 | `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger; a menu sets destructive actions apart below a line; `Popover` can hand focus back to a field (`returnFocusTo`) |
 | `Card`, `SectionLabel`, `EmptyState` | grouping and empty screens |
 | `Avatar`, `Badge`, `Kbd`, `Spinner`, `Logo` | small content pieces |
+| `ListRow` | a clickable row in a list (Inbox, Later): `leading` avatar or icon, a small `meta` line, a one-line preview; `trailing` actions sit outside the button; `isHighlighted` keeps the hover background (while its menu is open) |
+| `CountBadge` | a count pill ("3", "@2", "4 new"), `accent` or `danger`; takes motion props so it can pop in when the count changes |
+| `Notice` | a callout inside a screen: `info` (read-only and other things to know), `warning` or `danger` (something to fix), with an optional title |
+| `RelativeTime` | a past moment as short as stays clear ("Yesterday 4:41 PM"), the full date on hover |
 | `SegmentedControl` | picking one of a few options: a radio group (arrow keys move the choice) named by `label`, sized to its options or `width="full"` |
 | `CopyField` | codes and commands with a copy button |
 | `EmojiPicker` | a searchable emoji grid (names and keywords), recently used first, inside a `Popover`; it and its data load on first open, ship with the app and are never fetched from the network |

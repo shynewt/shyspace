@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 import type { ReactNode } from "react";
 import { sameView, useWorkspace, type View } from "../../lib/workspace";
-import { cx, springs } from "../../ui";
+import { CountBadge, cx, springs } from "../../ui";
 
 export const INDENT_PX = 14;
 
@@ -90,19 +90,17 @@ export function NavItem({
           </span>
         )}
         {hasUnread && (
-          <motion.span
+          <CountBadge
             aria-hidden
             key={`${unread}:${mentions}`}
             initial={{ scale: 0.6, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={springs.pop}
-            className={cx(
-              "ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-2xs font-semibold tabular-nums group-hover:opacity-0",
-              mentions > 0 ? "bg-danger text-white" : "bg-accent text-on-accent",
-            )}
+            tone={mentions > 0 ? "danger" : "accent"}
+            className="ml-auto group-hover:opacity-0"
           >
             {mentions > 0 ? `@${mentions}` : unread}
-          </motion.span>
+          </CountBadge>
         )}
       </button>
       {trailing}

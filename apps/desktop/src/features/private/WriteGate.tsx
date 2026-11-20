@@ -3,6 +3,7 @@ import { api, type Channel, type Member } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
+import { Notice } from "../../ui";
 
 /** Why you can't write in `channel` any more, or null if you can. */
 function whyReadOnly(channel: Channel | undefined, members: Member[] | undefined): string | null {
@@ -24,5 +25,9 @@ export function WriteGate({ channelId, children }: { channelId: string; children
     members,
   );
   if (!notice) return children;
-  return <p className="mx-5 mb-4 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm text-muted">{notice}</p>;
+  return (
+    <Notice className="mx-5 mb-4">
+      <p>{notice}</p>
+    </Notice>
+  );
 }

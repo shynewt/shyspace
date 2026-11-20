@@ -8,6 +8,7 @@ import {
   Card,
   ConfirmDialog,
   CopyField,
+  CountBadge,
   Dialog,
   EmojiPicker,
   EmptyState,
@@ -16,9 +17,12 @@ import {
   IconButton,
   Input,
   Kbd,
+  ListRow,
   Logo,
   Menu,
+  Notice,
   Popover,
+  RelativeTime,
   SectionLabel,
   SegmentedControl,
   Spinner,
@@ -138,8 +142,42 @@ export default function Gallery() {
           <Badge tone="warning">warning</Badge>
           <Badge tone="danger">danger</Badge>
           <Badge tone="success">success</Badge>
+          <CountBadge>3</CountBadge>
+          <CountBadge tone="danger">@2</CountBadge>
+          <RelativeTime ms={Date.now() - 86_400_000} className="text-xs text-faint" />
           <Kbd>Ctrl K</Kbd>
           <Spinner />
+        </Example>
+
+        <Example title="List rows">
+          <div className="w-full">
+            <ListRow
+              onClick={() => showToast("Opened")}
+              leading={<Avatar id="a" name="Ada Lovelace" size={32} />}
+              meta={
+                <>
+                  <b className="font-semibold text-ink">Ada Lovelace</b> mentioned you in general
+                  <RelativeTime ms={Date.now() - 3_600_000} className="ml-auto shrink-0 text-faint" />
+                </>
+              }
+            >
+              Could you look at the launch plan?
+            </ListRow>
+          </div>
+        </Example>
+
+        <Example title="Notices">
+          <div className="flex w-full flex-col gap-3">
+            <Notice>
+              <p>You can still read this conversation, but not write in it.</p>
+            </Notice>
+            <Notice tone="warning" title="Partly protected">
+              <p>Warnings say what's wrong and how to fix it.</p>
+            </Notice>
+            <Notice tone="danger" title="Your storage can lose data">
+              <p>Dangers are for problems that put data at risk.</p>
+            </Notice>
+          </div>
         </Example>
 
         <Example title="Cards and copy fields">

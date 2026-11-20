@@ -9,7 +9,7 @@ import { reportError, showUndoToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
 import { savedItemView, useWorkspace } from "../../lib/workspace";
-import { Avatar, cx, EmptyState, IconButton, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
+import { Avatar, cx, EmptyState, IconButton, ListRow, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
 import { ReminderPicker } from "./ReminderPicker";
 import { remindMeItem } from "./remindMeItem";
@@ -132,65 +132,65 @@ function LaterRow({ item }: { item: LaterItem }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: 24, height: 0, transition: { duration: 0.22, ease: "easeIn" } }}
       transition={springs.smooth}
-      className={cx(
-        "group flex items-center gap-3 rounded-xl px-2.5 py-2 hover:bg-surface-2",
-        isMenuOpen && "bg-surface-2",
-      )}
     >
-      {linked ? (
-        <Avatar id={linked.message.author} name={author ?? ""} isBot={linked.message.author_is_bot} size={30} />
-      ) : (
-        <span
-          aria-hidden
-          className="grid size-[30px] shrink-0 place-items-center rounded-[30%] bg-surface-2 text-muted"
-        >
-          <FileText size={15} />
-        </span>
-      )}
-      <button type="button" onClick={openItem} className="min-w-0 flex-1 text-left">
-        <span className="flex items-center gap-1.5 text-sm text-muted">
-          {linked ? (
-            <span className="flex min-w-0 items-center gap-1">
-              <span className="shrink-0">{author} in </span>
-              <ChannelName channelId={linked.message.channel} className="min-w-0" />
-            </span>
+      <ListRow
+        onClick={openItem}
+        isHighlighted={isMenuOpen}
+        leading={
+          linked ? (
+            <Avatar id={linked.message.author} name={author ?? ""} isBot={linked.message.author_is_bot} size={30} />
           ) : (
-            <span>Page</span>
-          )}
-          {item.remind_ms !== null && !item.is_done && (
-            <span
-              className={cx(
-                "flex shrink-0 items-center gap-1 rounded-full px-2 text-2xs",
-                isOverdue ? "bg-danger/15 text-danger-text" : "bg-accent-soft text-accent-text",
-              )}
-            >
-              <AlarmClock size={11} /> {describeReminder(item.remind_ms, new Date())}
+            <span aria-hidden className="grid size-[30px] place-items-center rounded-[30%] bg-surface-2 text-muted">
+              <FileText size={15} />
             </span>
-          )}
-        </span>
-        <span className={cx("mt-0.5 block truncate text-base", item.is_done && "text-faint line-through")}>
-          {preview}
-        </span>
-      </button>
-      <span
-        className={cx(
-          "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 keyboard-focus-within:opacity-100",
-          isMenuOpen && "opacity-100",
-        )}
+          )
+        }
+        meta={
+          <>
+            {linked ? (
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="shrink-0">{author} in </span>
+                <ChannelName channelId={linked.message.channel} className="min-w-0" />
+              </span>
+            ) : (
+              <span>Page</span>
+            )}
+            {item.remind_ms !== null && !item.is_done && (
+              <span
+                className={cx(
+                  "flex shrink-0 items-center gap-1 rounded-full px-2 text-2xs",
+                  isOverdue ? "bg-danger/15 text-danger-text" : "bg-accent-soft text-accent-text",
+                )}
+              >
+                <AlarmClock size={11} /> {describeReminder(item.remind_ms, new Date())}
+              </span>
+            )}
+          </>
+        }
+        trailing={
+          <span
+            className={cx(
+              "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 keyboard-focus-within:opacity-100",
+              isMenuOpen && "opacity-100",
+            )}
+          >
+            <IconButton
+              label={item.is_done ? "Mark as not done" : "Mark as done"}
+              size="sm"
+              icon={item.is_done ? <Undo2 size={14} /> : <Check size={14} />}
+              onClick={() => setDone(!item.is_done)}
+            />
+            <Menu
+              open={isMenuOpen}
+              onOpenChange={setMenuOpen}
+              trigger={<IconButton label="Later actions" size="sm" icon={<Ellipsis size={14} />} />}
+              items={menu}
+            />
+          </span>
+        }
       >
-        <IconButton
-          label={item.is_done ? "Mark as not done" : "Mark as done"}
-          size="sm"
-          icon={item.is_done ? <Undo2 size={14} /> : <Check size={14} />}
-          onClick={() => setDone(!item.is_done)}
-        />
-        <Menu
-          open={isMenuOpen}
-          onOpenChange={setMenuOpen}
-          trigger={<IconButton label="Later actions" size="sm" icon={<Ellipsis size={14} />} />}
-          items={menu}
-        />
-      </span>
+        <span className={cx(item.is_done && "text-faint line-through")}>{preview}</span>
+      </ListRow>
       <ReminderPicker open={isPicking} onOpenChange={setPicking} initialMs={item.remind_ms} onPick={remind} />
     </motion.li>
   );

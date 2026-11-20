@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api, type Invite } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
-import { Button, Card, springs } from "../../ui";
+import { Button, Card, CountBadge, springs } from "../../ui";
 
 /** Join requests waiting for a decision. Only the admin may load them. */
 export function useJoinRequests(): Invite[] | undefined {
@@ -17,17 +17,17 @@ export function JoinRequestsBadge({ count }: { count: number }) {
   return (
     <AnimatePresence>
       {count > 0 && (
-        <motion.span
+        <CountBadge
           key={count}
           initial={{ scale: 0.4, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.4, opacity: 0 }}
           transition={springs.pop}
           aria-label={`${count} join ${count === 1 ? "request" : "requests"} waiting`}
-          className="relative ml-auto grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-accent px-1.5 text-2xs font-semibold text-on-accent tabular-nums"
+          className="relative ml-auto"
         >
           {count}
-        </motion.span>
+        </CountBadge>
       )}
     </AnimatePresence>
   );

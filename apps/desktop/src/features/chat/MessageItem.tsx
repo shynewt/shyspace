@@ -16,7 +16,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink } from "../../lib/api";
 import { ChatMarkdown, messageIdsIn, pageIdsIn, plainPreview } from "../../lib/markdown";
 import { useMember } from "../../lib/members";
-import { displayName, formatFullDate, formatTime, formatWhen } from "../../lib/people";
+import { displayName, formatFullDate, formatTime } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
@@ -24,12 +24,14 @@ import {
   Avatar,
   Badge,
   ConfirmDialog,
+  CountBadge,
   cx,
   EmojiPicker,
   IconButton,
   Menu,
   type MenuItem,
   Popover,
+  RelativeTime,
   springs,
   Tooltip,
 } from "../../ui";
@@ -358,13 +360,11 @@ function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => vo
         {count} {count === 1 ? "reply" : "replies"}
       </span>
       {message.last_reply_ms && (
-        <span className="text-faint">Last reply {formatWhen(message.last_reply_ms, new Date())}</span>
-      )}
-      {message.unread_replies > 0 && (
-        <span className="rounded-full bg-accent px-1.5 text-2xs font-semibold text-on-accent">
-          {message.unread_replies} new
+        <span className="text-faint">
+          Last reply <RelativeTime ms={message.last_reply_ms} />
         </span>
       )}
+      {message.unread_replies > 0 && <CountBadge>{message.unread_replies} new</CountBadge>}
     </button>
   );
 }

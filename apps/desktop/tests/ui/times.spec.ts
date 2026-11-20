@@ -47,3 +47,24 @@ test("message times drop the leading zero and show the full date on hover", asyn
   await expect(page.getByRole("tooltip")).toContainText("Friday, November 20, 2026 at 9:05 AM");
   await expect(message).toHaveAccessibleName("Ada, Friday, November 20, 2026 at 9:05 AM");
 });
+
+test("inbox and reply times show the full date on hover", async ({ page }) => {
+  await page.getByRole("button", { name: "Later", exact: true }).click();
+  await page.getByRole("button", { name: /^Inbox/ }).click();
+  const inboxTime = page
+    .getByRole("region", { name: "Mentions and replies" })
+    .getByText("Yesterday 4:41 PM", { exact: true })
+    .first();
+  await inboxTime.hover();
+  await expect(page.getByRole("tooltip")).toContainText("Thursday, November 19, 2026 at 4:41 PM");
+
+  await page
+    .getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: /^general/ })
+    .click();
+  await page
+    .getByRole("button", { name: /1 reply/ })
+    .getByText("Yesterday 4:41 PM", { exact: true })
+    .hover();
+  await expect(page.getByRole("tooltip")).toContainText("Thursday, November 19, 2026 at 4:41 PM");
+});
