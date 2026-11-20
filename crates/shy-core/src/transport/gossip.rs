@@ -3,9 +3,9 @@
 //! bucket would. Only current members may connect.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{
-        Arc, RwLock,
+        Arc, Mutex, MutexGuard,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -14,9 +14,12 @@ use anyhow::Result;
 use bytes::Bytes;
 use futures_lite::StreamExt;
 use iroh::{
-    Endpoint, PublicKey, SecretKey,
-    endpoint::{Connection, presets},
-    protocol::{AcceptError, ProtocolHandler, Router},
+    Endpoint, EndpointAddr, PublicKey, SecretKey,
+    endpoint::{
+        self, AfterHandshakeOutcome, BeforeConnectOutcome, Connection, EndpointHooks, VarInt,
+        WeakConnectionHandle, presets,
+    },
+    protocol::Router,
 };
 use iroh_gossip::{Event, Gossip, GossipSender, TopicId};
 use serde::{Deserialize, Serialize};
@@ -49,35 +52,81 @@ pub enum Incoming {
     Lagged,
 }
 
-type Allowlist = Arc<RwLock<HashSet<PublicKey>>>;
-
-/// Refuses gossip connections from anyone who isn't a current member, so
-/// outsiders can't watch traffic or flood us with junk to verify.
-#[derive(Debug, Clone)]
-struct MembersOnly {
-    gossip: Gossip,
-    allowed: Allowlist,
+/// Who may be connected, and the connections they have open with us.
+#[derive(Debug, Default)]
+struct Admitted {
+    members: HashSet<PublicKey>,
+    connections: HashMap<PublicKey, Vec<WeakConnectionHandle>>,
 }
 
-impl ProtocolHandler for MembersOnly {
-    async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
-        let is_member = self
-            .allowed
-            .read()
-            .is_ok_and(|allowed| allowed.contains(&connection.remote_id()));
-        if !is_member {
-            return Err(AcceptError::from_err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "not a member of this workspace",
-            )));
-        }
-        self.gossip.accept(connection).await
+impl Admitted {
+    /// Closes the connections of anyone no longer a member and forgets those already closed.
+    fn close_non_members(&mut self) {
+        let members = &self.members;
+        self.connections.retain(|peer, handles| {
+            if members.contains(peer) {
+                handles.retain(|handle| handle.upgrade().is_some());
+                return !handles.is_empty();
+            }
+            for connection in handles.iter().filter_map(WeakConnectionHandle::upgrade) {
+                connection.close(NOT_A_MEMBER, b"not a member of this workspace");
+            }
+            false
+        });
+    }
+}
+
+const NOT_A_MEMBER: VarInt = VarInt::from_u32(403);
+
+/// Only current members may be connected to us, in either direction, so
+/// outsiders and removed members can't watch traffic or flood us with junk to
+/// verify. Installed on the endpoint, so it sees every connection once its
+/// handshake proves who the peer is.
+#[derive(Debug, Clone, Default)]
+struct MembersOnly(Arc<Mutex<Admitted>>);
+
+impl MembersOnly {
+    fn admitted(&self) -> MutexGuard<'_, Admitted> {
+        self.0
+            .lock()
+            .expect("gossip members lock poisoned by an earlier panic")
     }
 
-    async fn shutdown(&self) {
-        if let Err(error) = self.gossip.shutdown().await {
-            warn!("gossip shutdown: {error}");
+    fn is_member(&self, peer: &PublicKey) -> bool {
+        self.admitted().members.contains(peer)
+    }
+
+    fn set_members(&self, members: &[PublicKey]) {
+        let mut admitted = self.admitted();
+        admitted.members = members.iter().copied().collect();
+        admitted.close_non_members();
+    }
+}
+
+impl EndpointHooks for MembersOnly {
+    async fn before_connect<'a>(&'a self, remote: &'a EndpointAddr, _alpn: &'a [u8]) -> BeforeConnectOutcome {
+        if self.is_member(&remote.id) {
+            BeforeConnectOutcome::Accept
+        } else {
+            BeforeConnectOutcome::Reject
         }
+    }
+
+    /// Checks and records under one lock, so a removal either refuses this
+    /// connection or finds it to close.
+    async fn after_handshake<'a>(&'a self, connection: &'a Connection) -> AfterHandshakeOutcome {
+        let peer = connection.remote_id();
+        let mut admitted = self.admitted();
+        if !admitted.members.contains(&peer) {
+            return AfterHandshakeOutcome::Reject {
+                error_code: NOT_A_MEMBER,
+                reason: b"not a member of this workspace".to_vec(),
+            };
+        }
+        let handles = admitted.connections.entry(peer).or_default();
+        handles.retain(|handle| handle.upgrade().is_some());
+        handles.push(connection.weak_handle());
+        AfterHandshakeOutcome::Accept
     }
 }
 
@@ -85,7 +134,7 @@ pub struct Net {
     router: Router,
     sender: GossipSender,
     neighbors: Arc<AtomicUsize>,
-    allowed: Allowlist,
+    members_only: MembersOnly,
 }
 
 impl Net {
@@ -94,27 +143,27 @@ impl Net {
         topic: [u8; 32],
         incoming: mpsc::Sender<Incoming>,
     ) -> Result<Self> {
-        let endpoint = Endpoint::builder(presets::N0).secret_key(identity).bind().await?;
-        Self::start_on(endpoint, topic, incoming).await
+        Self::start_with(
+            Endpoint::builder(presets::N0).secret_key(identity),
+            topic,
+            incoming,
+        )
+        .await
     }
 
-    /// Runs gossip on an endpoint that's already bound. Starts allowing no one
-    /// until `set_members` is called.
-    pub(crate) async fn start_on(
-        endpoint: Endpoint,
+    /// Binds `endpoint` and runs gossip on it. Allows no one until `set_members` is called.
+    pub(crate) async fn start_with(
+        endpoint: endpoint::Builder,
         topic: [u8; 32],
         incoming: mpsc::Sender<Incoming>,
     ) -> Result<Self> {
+        let members_only = MembersOnly::default();
+        let endpoint = endpoint.hooks(members_only.clone()).bind().await?;
         let gossip = Gossip::builder()
             .max_message_size(MAX_MESSAGE_SIZE)
             .spawn(endpoint.clone());
-        let allowed = Allowlist::default();
-        let handler = MembersOnly {
-            gossip: gossip.clone(),
-            allowed: allowed.clone(),
-        };
         let router = Router::builder(endpoint)
-            .accept(iroh_gossip::ALPN, handler)
+            .accept(iroh_gossip::ALPN, gossip.clone())
             .spawn();
         let (sender, mut receiver) = gossip
             .subscribe(TopicId::from_bytes(topic), Vec::new())
@@ -160,7 +209,7 @@ impl Net {
             router,
             sender,
             neighbors,
-            allowed,
+            members_only,
         })
     }
 
@@ -168,27 +217,18 @@ impl Net {
         self.neighbors.load(Ordering::Relaxed)
     }
 
-    /// Replaces who may connect to us and whom we connect to.
+    /// Replaces who may be connected to us, closing the connections of anyone left out.
     pub fn set_members(&self, members: &[PublicKey]) {
-        match self.allowed.write() {
-            Ok(mut allowed) => *allowed = members.iter().copied().collect(),
-            Err(_) => warn!("gossip allowlist lock poisoned; keeping the previous members"),
-        }
+        self.members_only.set_members(members);
     }
 
     /// Connects to the given peers, skipping ourselves and non-members.
     pub async fn join(&self, peers: Vec<PublicKey>) -> Result<()> {
         let own_id = self.router.endpoint().id();
-        let peers: Vec<_> = {
-            let allowed = self
-                .allowed
-                .read()
-                .map_err(|_| anyhow::anyhow!("gossip allowlist lock poisoned"))?;
-            peers
-                .into_iter()
-                .filter(|peer| *peer != own_id && allowed.contains(peer))
-                .collect()
-        };
+        let peers: Vec<_> = peers
+            .into_iter()
+            .filter(|peer| *peer != own_id && self.members_only.is_member(peer))
+            .collect();
         if !peers.is_empty() {
             self.sender.join_peers(peers).await?;
         }
@@ -234,16 +274,12 @@ mod tests {
     use super::*;
 
     async fn local_net(lookup: &MemoryLookup) -> (PublicKey, Net, mpsc::Receiver<Incoming>) {
-        let endpoint = Endpoint::builder(presets::Minimal)
-            .address_lookup(lookup.clone())
-            .bind()
-            .await
-            .unwrap();
-        lookup.add_endpoint_info(endpoint.addr());
-        let id = endpoint.id();
         let (sender, receiver) = mpsc::channel(16);
-        let net = Net::start_on(endpoint, [7; 32], sender).await.unwrap();
-        (id, net, receiver)
+        let builder = Endpoint::builder(presets::Minimal).address_lookup(lookup.clone());
+        let net = Net::start_with(builder, [7; 32], sender).await.unwrap();
+        let endpoint = net.router.endpoint();
+        lookup.add_endpoint_info(endpoint.addr());
+        (endpoint.id(), net, receiver)
     }
 
     async fn next_nonce(receiver: &mut mpsc::Receiver<Incoming>, within: Duration) -> Option<u64> {
@@ -287,5 +323,66 @@ mod tests {
                 .is_none()
         );
         assert_eq!(alice.neighbors(), 1, "only Bob should be connected to Alice");
+    }
+
+    async fn wait_for_neighbors(net: &Net, expected: usize, within: Duration) -> bool {
+        tokio::time::timeout(within, async {
+            while net.neighbors() != expected {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .is_ok()
+    }
+
+    enum Dialer {
+        Alice,
+        Bob,
+    }
+
+    /// Alice removes Bob once they're connected; Carol stays. Carol never knew
+    /// Bob, so anything Bob hears can only come through Alice.
+    async fn removed_member_is_cut_off(dialer: Dialer) {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice, _alice_inbox) = local_net(&lookup).await;
+        let (bob_id, bob, mut bob_inbox) = local_net(&lookup).await;
+        let (carol_id, carol, mut carol_inbox) = local_net(&lookup).await;
+        alice.set_members(&[alice_id, bob_id, carol_id]);
+        bob.set_members(&[alice_id, bob_id]);
+        carol.set_members(&[alice_id, carol_id]);
+        match dialer {
+            Dialer::Alice => alice.join(vec![bob_id]).await.unwrap(),
+            Dialer::Bob => bob.join(vec![alice_id]).await.unwrap(),
+        }
+        carol.join(vec![alice_id]).await.unwrap();
+        assert!(wait_for_neighbors(&alice, 2, Duration::from_secs(10)).await);
+
+        alice.set_members(&[alice_id, carol_id]);
+
+        assert!(
+            wait_for_neighbors(&alice, 1, Duration::from_secs(5)).await,
+            "only the removed member's connection should be closed"
+        );
+        alice.nudge().await.unwrap();
+        assert!(
+            next_nonce(&mut carol_inbox, Duration::from_secs(10))
+                .await
+                .is_some(),
+            "members who stay must keep hearing each other"
+        );
+        assert!(
+            next_nonce(&mut bob_inbox, Duration::from_secs(3)).await.is_none(),
+            "a removed member must not hear live traffic"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_removed_member_who_connected_to_us_is_cut_off() {
+        removed_member_is_cut_off(Dialer::Bob).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_removed_member_we_connected_to_is_cut_off() {
+        removed_member_is_cut_off(Dialer::Alice).await;
     }
 }
