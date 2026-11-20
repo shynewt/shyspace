@@ -1,66 +1,32 @@
-import { Bot, Hash, Lock } from "lucide-react";
-import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { Lock } from "lucide-react";
+import { AnimatePresence } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, type Message, type MessageCursor } from "../../lib/api";
-import { channelReference, channelTitle, composerLabel } from "../../lib/channels";
-import { formatDay } from "../../lib/people";
+import { api, type Message } from "../../lib/api";
+import { channelReference, composerLabel } from "../../lib/channels";
+import { distanceFromBottom, isAboveView, isInView } from "../../lib/messageList";
 import { captureScrollAnchor, restoreScrollAnchor, type ScrollRestore } from "../../lib/scrollAnchor";
-import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useScrollMemory } from "../../lib/useNavigation";
+import { useWindowAttention } from "../../lib/useWindowAttention";
 import { useWorkspace } from "../../lib/workspace";
-import { EmptyState, Spinner, springs, Tooltip } from "../../ui";
 import { ChannelTitle } from "../private/ChannelTitle";
 import { WriteGate } from "../private/WriteGate";
+import { AgentsNote } from "./AgentsNote";
 import { Composer } from "./Composer";
-import { MessageItem } from "./MessageItem";
+import { firstUnreadId, MessageRows, toRows, UNREAD_LINE_ID } from "./channelRows";
 import { ThreadPanel } from "./ThreadPanel";
+import { UnreadPills } from "./UnreadPills";
+import { NEAR_EDGE_PX, useHeldScroll } from "./useHeldScroll";
+import { isAfter, knownReadPosition, useReadPosition } from "./useReadPosition";
 import type { InsertMention } from "./useSuggestions";
 
 const PAGE_SIZE = 100;
-const GROUP_WINDOW_MS = 5 * 60 * 1000;
-const NEAR_EDGE_PX = 80;
 const HIGHLIGHT_MS = 1600;
 /** How much older history to load looking for where you were, before opening as usual. */
 const MAX_PAGES_FOR_ANCHOR = 10;
 
-type Row =
-  | { kind: "day"; key: string; label: string }
-  | { kind: "unread"; key: string }
-  | { kind: "message"; key: string; message: Message; isContinuation: boolean };
-
-function isNearBottom(element: HTMLElement): boolean {
-  return element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
-}
-
-function isAfter(message: Message, cursor: MessageCursor): boolean {
-  return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.author > cursor.author);
-}
-
-/** The first message by someone else after the read position. */
-function firstUnreadId(messages: Message[], lastRead: MessageCursor | null, me: string): string | null {
-  const first = messages.find((message) => message.author !== me && (!lastRead || isAfter(message, lastRead)));
-  return first?.id ?? null;
-}
-
-function toRows(messages: Message[], unreadFrom: string | null): Row[] {
-  const rows: Row[] = [];
-  let previous: Message | undefined;
-  for (const message of messages) {
-    const day = formatDay(message.created_ms);
-    if (!previous || formatDay(previous.created_ms) !== day) rows.push({ kind: "day", key: `day:${day}`, label: day });
-    if (message.id === unreadFrom) rows.push({ kind: "unread", key: "unread" });
-    const isContinuation =
-      !!previous &&
-      previous.author === message.author &&
-      !message.reply_to &&
-      message.created_ms - previous.created_ms < GROUP_WINDOW_MS &&
-      rows[rows.length - 1].kind === "message";
-    rows.push({ kind: "message", key: message.id, message, isContinuation });
-    previous = message;
-  }
-  return rows;
-}
+/** "pending": not decided yet for this visit; "done": hidden for the rest of it. */
+type JumpPill = "pending" | "shown" | "done";
 
 export function ChannelView({
   channelId,
@@ -80,10 +46,7 @@ export function ChannelView({
   const { registerAnchorSource, noteScrolled } = useScrollMemory();
   const channel = channels.find((candidate) => candidate.id === channelId);
   const members = useLive(api.members, (change) => change.kind === "members");
-  // Where you left off, as of opening the channel: the line stays put while
-  // you read, until Escape dismisses it.
-  const [lastReadOnOpen] = useState(() => channel?.last_read ?? null);
-  const [isUnreadLineDismissed, setUnreadLineDismissed] = useState(false);
+  const isLooking = useWindowAttention();
   // Loading older messages grows the window, so new arrivals never leave gaps.
   const [windowSize, setWindowSize] = useState(PAGE_SIZE);
   const loadMessages = useCallback(() => api.messages(channelId, null, windowSize), [channelId, windowSize]);
@@ -117,53 +80,144 @@ export function ChannelView({
     pagesLoadedForAnchor.current = 0;
     setPendingRestore(restore);
   }, [restore]);
-  const unreadFrom = useMemo(
-    () => (isUnreadLineDismissed ? null : firstUnreadId(messages ?? [], lastReadOnOpen, session.me)),
-    [messages, lastReadOnOpen, session.me, isUnreadLineDismissed],
-  );
-  const rows = useMemo(() => toRows(messages ?? [], unreadFrom), [messages, unreadFrom]);
-  const hasScrolledToUnread = useRef(false);
+
   const scroller = useRef<HTMLDivElement>(null);
-  const isPinnedToBottom = useRef(true);
-  const heightBeforeLoadingOlder = useRef<number | null>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const [lastReadOnOpen] = useState(() => knownReadPosition(channelId, channel?.last_read ?? null));
+  const read = useReadPosition({
+    key: channelId,
+    list: scroller,
+    messages,
+    initial: lastReadOnOpen,
+    isLooking,
+    save: (messageId) => api.markRead(channelId, messageId),
+  });
+  const { markSeen, markAllRead, readCursor } = read;
+  // The line sits above the first message that was unread when you opened the channel, and stays put while you read.
+  // Null until the first messages load; `above` is null when nothing was unread.
+  const [line, setLine] = useState<{ above: string | null } | null>(null);
+  if (messages && line === null) setLine({ above: firstUnreadId(messages, lastReadOnOpen, session.me) });
+  const [isLineDismissed, setLineDismissed] = useState(false);
+  const unreadFrom = isLineDismissed || !line ? null : line.above;
+  const rows = useMemo(() => toRows(messages ?? [], unreadFrom), [messages, unreadFrom]);
+  const [jumpPill, setJumpPill] = useState<JumpPill>("pending");
+  const [newCount, setNewCount] = useState(0);
+
+  const view = useHeldScroll(scroller, markSeen);
+  const { isFollowing, hold, follow, decideFollowing, noteScroll } = view;
+  const hasScrolledToUnread = useRef(false);
+  const newestShown = useRef<string | undefined>(undefined);
   const hasPositioned = useRef(false);
 
-  // Keeps the view anchored whenever the rows change.
+  // Messages that arrive while you're away from the newest one are counted, and kept in the loaded window
+  // so the message you're reading isn't pushed out of it.
+  const countArrivals = useCallback(
+    (shown: Message[]) => {
+      const previous = newestShown.current;
+      newestShown.current = shown.at(-1)?.id;
+      if (!previous || isFollowing.current) return;
+      const index = shown.findIndex((message) => message.id === previous);
+      if (index < 0) return;
+      const arrivals = shown.slice(index + 1);
+      const fromOthers = arrivals.filter((message) => message.author !== session.me).length;
+      if (fromOthers > 0) setNewCount((count) => count + fromOthers);
+      if (arrivals.length > 0) setWindowSize((size) => size + arrivals.length);
+    },
+    [session.me, isFollowing],
+  );
+
+  /** Decided once per visit, right after the view first settles: a way up if the first unread is above. */
+  const decideJumpPill = useCallback(() => {
+    const element = scroller.current;
+    const unreadLine = document.getElementById(UNREAD_LINE_ID);
+    setJumpPill((current) =>
+      current !== "pending" ? current : element && unreadLine && isAboveView(element, unreadLine) ? "shown" : "done",
+    );
+  }, []);
+
+  // Positions the view whenever the rows change. A message link to show waits for its own effect.
   useLayoutEffect(() => {
     const element = scroller.current;
-    if (!element || rows.length === 0 || isGrowing) return;
+    if (!element || !messages || rows.length === 0 || isGrowing) return;
+    countArrivals(messages);
+    if (pendingFocus) return;
     const wasPositioned = hasPositioned.current;
     hasPositioned.current = true;
-    if (heightBeforeLoadingOlder.current !== null) {
-      element.scrollTop += element.scrollHeight - heightBeforeLoadingOlder.current;
-      heightBeforeLoadingOlder.current = null;
-    } else if (pendingRestore && !pendingFocus) {
+    if (pendingRestore) {
       const { anchor } = pendingRestore;
       if (!anchor) {
         // Back to the newest message; a channel just opened goes on as usual instead (the unread line, or the newest).
         setPendingRestore(null);
         if (!wasPositioned) return;
-        isPinnedToBottom.current = true;
-        element.scrollTop = element.scrollHeight;
+        follow();
       } else if (restoreScrollAnchor(element, anchor)) {
         hasScrolledToUnread.current = true;
-        isPinnedToBottom.current = isNearBottom(element);
         setPendingRestore(null);
+        decideFollowing();
       } else if (hasOlder && pagesLoadedForAnchor.current < MAX_PAGES_FOR_ANCHOR) {
         // Older history loads until the anchor's message is there; a deleted one stops the search eventually.
         pagesLoadedForAnchor.current += 1;
         growWindow();
+        return;
       } else {
         setPendingRestore(null);
+        return;
       }
     } else if (!hasScrolledToUnread.current && unreadFrom) {
       hasScrolledToUnread.current = true;
-      document.getElementById("unread-line")?.scrollIntoView({ block: "start" });
-      isPinnedToBottom.current = isNearBottom(element);
-    } else if (isPinnedToBottom.current) {
-      element.scrollTop = element.scrollHeight;
+      document.getElementById(UNREAD_LINE_ID)?.scrollIntoView({ block: "start" });
+      decideFollowing();
+    } else {
+      // Only opening goes to the line; a line added later (for messages that came while you were away) doesn't move you.
+      hasScrolledToUnread.current = true;
+      hold();
     }
-  }, [rows, unreadFrom, pendingRestore, pendingFocus, hasOlder, isGrowing, growWindow]);
+    if (distanceFromBottom(element) <= 1) {
+      isFollowing.current = true;
+      setNewCount(0);
+    }
+    decideJumpPill();
+  }, [
+    messages,
+    rows,
+    unreadFrom,
+    pendingRestore,
+    pendingFocus,
+    hasOlder,
+    isGrowing,
+    growWindow,
+    countArrivals,
+    hold,
+    follow,
+    decideFollowing,
+    decideJumpPill,
+    isFollowing,
+  ]);
+
+  // Content that changes size on its own (cards loading, code folding, the window resizing) mustn't move the view.
+  useEffect(() => {
+    const element = scroller.current;
+    const inner = content.current;
+    if (!element || !inner) return;
+    const observer = new ResizeObserver(() => {
+      if (hasPositioned.current) hold();
+    });
+    observer.observe(element);
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, [hold]);
+
+  // Messages from others arriving while you can't be looking are unread; the line goes above the first of them,
+  // unless one already marks unread messages.
+  useEffect(() => {
+    if (isLooking || !messages) return;
+    const lineMessage = unreadFrom ? messages.find((message) => message.id === unreadFrom) : undefined;
+    if (lineMessage && (!readCursor || isAfter(lineMessage, readCursor))) return;
+    const firstUnseen = firstUnreadId(messages, readCursor, session.me);
+    if (firstUnseen === null || firstUnseen === unreadFrom) return;
+    setLine({ above: firstUnseen });
+    setLineDismissed(false);
+  }, [messages, isLooking, unreadFrom, readCursor, session.me]);
 
   // Where you are, for coming back here: nothing while at the newest message, which is where a channel opens anyway.
   const pendingAnchorRef = useRef(pendingRestore?.anchor);
@@ -173,50 +227,47 @@ export function ChannelView({
       registerAnchorSource(channelId, () => {
         const element = scroller.current;
         if (pendingAnchorRef.current) return pendingAnchorRef.current;
-        if (!element || isPinnedToBottom.current) return null;
+        if (!element || isFollowing.current) return null;
         return captureScrollAnchor(element);
       }),
-    [channelId, registerAnchorSource],
+    [channelId, registerAnchorSource, isFollowing],
   );
 
-  useEffect(() => {
-    // Escape that closed something else, like a menu or the palette, isn't for the line.
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) setUnreadLineDismissed(true);
-    };
-    window.addEventListener("keydown", dismissOnEscape);
-    return () => window.removeEventListener("keydown", dismissOnEscape);
-  }, []);
+  const jumpToNewest = useCallback(() => {
+    setNewCount(0);
+    follow();
+  }, [follow]);
 
-  // What's on screen while the window has focus counts as read; not while
-  // this view is fading out after you switched away.
-  const latestId = messages?.at(-1)?.id;
-  const isPresent = useIsPresent();
   useEffect(() => {
-    if (!latestId || !isPresent) return;
-    const markRead = () => {
-      if (document.hasFocus()) api.markRead(channelId, latestId).catch(reportError);
+    // Escape that closed something else, like a menu, the palette or a name field, isn't for the channel.
+    const markAllReadOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      markAllRead();
+      setLineDismissed(true);
+      setJumpPill("done");
+      jumpToNewest();
     };
-    markRead();
-    window.addEventListener("focus", markRead);
-    return () => window.removeEventListener("focus", markRead);
-  }, [channelId, latestId, isPresent]);
+    window.addEventListener("keydown", markAllReadOnEscape);
+    return () => window.removeEventListener("keydown", markAllReadOnEscape);
+  }, [markAllRead, jumpToNewest]);
 
   useEffect(() => {
     if (!pendingFocus || !messages || isGrowing) return;
     const target = pendingFocus;
     if (messages.some((message) => message.id === target)) {
       setPendingFocus(null);
+      hasPositioned.current = true;
       hasScrolledToUnread.current = true;
-      isPinnedToBottom.current = false;
       document.getElementById(`message-${target}`)?.scrollIntoView({ block: "center" });
+      decideFollowing();
+      decideJumpPill();
       setHighlighted(target);
     } else if (hasOlder) {
       growWindow();
     } else {
       setPendingFocus(null);
     }
-  }, [messages, hasOlder, isGrowing, pendingFocus, growWindow]);
+  }, [messages, hasOlder, isGrowing, pendingFocus, growWindow, decideFollowing, decideJumpPill]);
 
   useEffect(() => {
     if (!highlighted) return;
@@ -225,11 +276,27 @@ export function ChannelView({
   }, [highlighted]);
 
   const loadOlder = () => {
-    if (!hasOlder || isGrowing || heightBeforeLoadingOlder.current !== null || pendingRestore || !scroller.current) {
-      return;
+    if (hasOlder && !isGrowing && !pendingRestore) growWindow();
+  };
+
+  /** After a pill, keyboard focus goes to the messages rather than being lost with the pill. */
+  const focusMessages = () => scroller.current?.focus({ preventScroll: true });
+
+  const jumpToUnread = () => {
+    setJumpPill("done");
+    document.getElementById(UNREAD_LINE_ID)?.scrollIntoView({ block: "start" });
+    decideFollowing();
+    focusMessages();
+  };
+
+  const onScroll = (element: HTMLElement) => {
+    if (noteScroll()) setNewCount(0);
+    if (jumpPill === "shown") {
+      const unreadLine = document.getElementById(UNREAD_LINE_ID);
+      if (!unreadLine || isInView(element, unreadLine)) setJumpPill("done");
     }
-    heightBeforeLoadingOlder.current = scroller.current.scrollHeight;
-    growWindow();
+    if (element.scrollTop < NEAR_EDGE_PX) loadOlder();
+    noteScrolled();
   };
 
   return (
@@ -243,61 +310,40 @@ export function ChannelView({
           </span>
         </header>
 
-        <div
-          ref={scroller}
-          role="log"
-          aria-label={`Messages in ${channelReference(channel, members)}`}
-          onScroll={(event) => {
-            const element = event.currentTarget;
-            isPinnedToBottom.current = isNearBottom(element);
-            if (element.scrollTop < NEAR_EDGE_PX) loadOlder();
-            noteScrolled();
-          }}
-          className="relative flex-1 overflow-y-auto py-3"
-        >
-          {hasOlder && (
-            <div className="flex justify-center py-2 text-decorative">
-              <Spinner size={14} />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            ref={scroller}
+            role="log"
+            aria-label={`Messages in ${channelReference(channel, members)}`}
+            tabIndex={-1}
+            onScroll={(event) => onScroll(event.currentTarget)}
+            className="relative flex-1 overflow-y-auto py-3 [overflow-anchor:none]"
+          >
+            <div ref={content}>
+              <MessageRows
+                channel={channel}
+                members={members}
+                messages={messages}
+                rows={rows}
+                hasOlder={hasOlder}
+                isHighlighted={(message) =>
+                  openThread === message.id || highlighted === message.id || editing?.id === message.id
+                }
+                onOpenThread={(message) => navigate({ kind: "channel", id: channelId, thread: message.id })}
+                onEdit={setEditing}
+                onMention={mention}
+              />
             </div>
-          )}
-          {messages && messages.length === 0 && (
-            <EmptyState
-              icon={channel && channel.kind !== "public" ? <Lock size={22} /> : <Hash size={22} />}
-              title={`This is the start of ${channel?.kind === "dm" ? "your conversation with " : "#"}${channel ? channelTitle(channel, members) : ""}`}
-            >
-              {!channel || channel.kind === "public"
-                ? "Say hi. Only workspace members can read what you write."
-                : "Only the people in it can read what you write, not even the workspace admin."}
-            </EmptyState>
-          )}
-          <AnimatePresence initial={false}>
-            {rows.map((row) =>
-              row.kind === "day" ? (
-                <DayDivider key={row.key} label={row.label} />
-              ) : row.kind === "unread" ? (
-                <UnreadLine key={row.key} />
-              ) : (
-                <motion.div
-                  key={row.key}
-                  layout="position"
-                  initial={{ opacity: 0, y: 10, scale: 0.99 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  transition={springs.smooth}
-                >
-                  <MessageItem
-                    message={row.message}
-                    isContinuation={row.isContinuation}
-                    isHighlighted={
-                      openThread === row.message.id || highlighted === row.message.id || editing?.id === row.message.id
-                    }
-                    onOpenThread={() => navigate({ kind: "channel", id: channelId, thread: row.message.id })}
-                    onEdit={() => setEditing(row.message)}
-                    onMention={mention}
-                  />
-                </motion.div>
-              ),
-            )}
-          </AnimatePresence>
+          </div>
+          <UnreadPills
+            isJumpToUnreadShown={jumpPill === "shown"}
+            newCount={newCount}
+            onJumpToUnread={jumpToUnread}
+            onJumpToNewest={() => {
+              jumpToNewest();
+              focusMessages();
+            }}
+          />
         </div>
 
         <WriteGate channelId={channelId}>
@@ -305,9 +351,7 @@ export function ChannelView({
             channelId={channelId}
             label={composerLabel(channel, members)}
             threadRoot={null}
-            onSent={() => {
-              isPinnedToBottom.current = true;
-            }}
+            onSent={jumpToNewest}
             editing={editing}
             onEditDone={() => setEditing(null)}
             onEditLast={() => setEditing(messages?.findLast((message) => message.can_edit) ?? null)}
@@ -326,58 +370,6 @@ export function ChannelView({
           />
         )}
       </AnimatePresence>
-    </div>
-  );
-}
-
-/** Agents can read every channel; say so where people write. */
-function AgentsNote() {
-  const loadMembers = useCallback(() => api.members(), []);
-  const members = useLive(loadMembers, (change) => change.kind === "members");
-  const agents = members?.filter((member) => member.active && member.is_bot).length ?? 0;
-  return (
-    <span className="ml-auto">
-      {agents > 0 && (
-        <Tooltip
-          label={
-            <span className="block max-w-[260px] whitespace-normal">
-              AI agents are members and can read this channel. What they read goes to their AI provider.
-            </span>
-          }
-          side="bottom"
-        >
-          <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-[11.5px] text-accent-text">
-            <Bot size={12} /> {agents} {agents === 1 ? "agent" : "agents"} can read this
-          </span>
-        </Tooltip>
-      )}
-    </span>
-  );
-}
-
-function UnreadLine() {
-  return (
-    <motion.div
-      id="unread-line"
-      role="separator"
-      aria-label="New messages"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="my-2 flex items-center gap-3 px-5"
-    >
-      <div className="h-px flex-1 bg-danger/60" />
-      <span className="text-[11px] font-semibold tracking-wide text-danger-text uppercase">New messages</span>
-    </motion.div>
-  );
-}
-
-function DayDivider({ label }: { label: string }) {
-  return (
-    <div className="my-3 flex items-center gap-3 px-5">
-      <div className="h-px flex-1 bg-line" />
-      <span className="text-[11.5px] font-medium text-faint">{label}</span>
-      <div className="h-px flex-1 bg-line" />
     </div>
   );
 }

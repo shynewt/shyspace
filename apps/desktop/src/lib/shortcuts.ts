@@ -100,7 +100,7 @@ export const SHORTCUTS: Shortcut[] = [
 
 /** Shown in the cheat sheet but handled where they apply. */
 export const LOCAL_SHORTCUTS: { keys: string[]; description: string }[] = [
-  { keys: ["Esc"], description: "Hide the new-messages line" },
+  { keys: ["Esc"], description: "Mark the channel read and jump to the newest message" },
   { keys: ["Enter"], description: "Send a message" },
   { keys: ["Shift", "Enter"], description: "New line in a message" },
   { keys: ["@"], description: "Mention someone" },

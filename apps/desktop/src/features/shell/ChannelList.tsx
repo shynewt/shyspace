@@ -221,6 +221,8 @@ function ChannelNameInput({
           onKeyDown={(event) => {
             if (event.key === "Enter") submit();
             if (event.key === "Escape") {
+              // Used here: the channel behind mustn't take it as "mark read".
+              event.preventDefault();
               isSubmitted.current = true;
               onDone();
             }

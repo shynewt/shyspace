@@ -4,10 +4,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { api, type Message } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
+import { useWindowAttention } from "../../lib/useWindowAttention";
 import { Button, IconButton, Spinner, springs } from "../../ui";
 import { WriteGate } from "../private/WriteGate";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
+import { knownReadPosition, useReadPosition } from "./useReadPosition";
 import type { InsertMention } from "./useSuggestions";
 
 const NEAR_END_PX = 80;
@@ -39,23 +41,23 @@ export function ThreadPanel({
   // Follows new replies while you're at the end; a reply to show from a link holds the view instead.
   const isAtEnd = useRef(!focus);
 
+  // Replies are read like channel messages, into the thread's own read position.
+  const isPresent = useIsPresent();
+  const isLooking = useWindowAttention() && isPresent;
+  const { markSeen } = useReadPosition({
+    key: root,
+    list: scroller,
+    messages: thread,
+    initial: knownReadPosition(root, null),
+    isLooking,
+    save: (messageId) => api.markThreadRead(root, messageId),
+  });
+
   useLayoutEffect(() => {
     const element = scroller.current;
     if (element && thread && isAtEnd.current) element.scrollTop = element.scrollHeight;
-  }, [thread]);
-
-  // Replies on screen while the window has focus count as read.
-  const latestId = thread?.at(-1)?.id;
-  const isPresent = useIsPresent();
-  useEffect(() => {
-    if (!latestId || !isPresent) return;
-    const markRead = () => {
-      if (document.hasFocus()) api.markThreadRead(root, latestId).catch(reportError);
-    };
-    markRead();
-    window.addEventListener("focus", markRead);
-    return () => window.removeEventListener("focus", markRead);
-  }, [root, latestId, isPresent]);
+    markSeen();
+  }, [thread, markSeen]);
 
   const isFocusShown = Boolean(focus && thread?.some((message) => message.id === focus));
   useEffect(() => {
@@ -100,8 +102,9 @@ export function ThreadPanel({
         onScroll={(event) => {
           const element = event.currentTarget;
           isAtEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_END_PX;
+          markSeen();
         }}
-        className="flex-1 overflow-y-auto py-3"
+        className="relative flex-1 overflow-y-auto py-3"
       >
         {!thread && (
           <div className="flex justify-center py-4 text-decorative">
