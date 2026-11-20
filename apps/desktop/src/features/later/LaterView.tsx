@@ -10,6 +10,7 @@ import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
 import { savedItemView, useWorkspace } from "../../lib/workspace";
 import { Avatar, cx, EmptyState, IconButton, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
+import { ChannelName } from "../private/ChannelName";
 
 /** Messages and pages you saved for yourself, with their reminders. */
 export function LaterView() {
@@ -79,7 +80,7 @@ export function LaterView() {
 }
 
 function LaterRow({ item }: { item: LaterItem }) {
-  const { channels, pages, navigate } = useWorkspace();
+  const { pages, navigate } = useWorkspace();
   const row = useRef<HTMLLIElement>(null);
   const [isMenuOpen, setMenuOpen] = useState(false);
   const openMenu = useCallback(() => setMenuOpen(true), []);
@@ -91,9 +92,7 @@ function LaterRow({ item }: { item: LaterItem }) {
     if (view) navigate(view);
   };
   const author = linked ? displayName(linked.message.author_name, linked.message.author) : null;
-  const where = linked
-    ? `${author} in #${channels.find((channel) => channel.id === linked.message.channel)?.name ?? ""}`
-    : "Page";
+
   const preview = linked ? plainPreview(linked.message.text, (id) => titles.get(id)) : item.page?.title || "Untitled";
   const isOverdue = item.remind_ms !== null && item.remind_ms <= Date.now() && !item.is_done;
 
@@ -150,7 +149,14 @@ function LaterRow({ item }: { item: LaterItem }) {
       )}
       <button type="button" onClick={openItem} className="min-w-0 flex-1 text-left">
         <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
-          <span className="truncate">{where}</span>
+          {linked ? (
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="shrink-0">{author} in </span>
+              <ChannelName channelId={linked.message.channel} className="min-w-0" />
+            </span>
+          ) : (
+            <span>Page</span>
+          )}
           {item.remind_ms !== null && !item.is_done && (
             <span
               className={cx(

@@ -27,7 +27,7 @@ test("the inbox gathers mentions and thread replies and opens them in place", as
   await inboxLink.click();
   const attention = page.getByRole("region", { name: "Mentions and replies" });
   await expect(attention.getByRole("button")).toHaveCount(2);
-  await expect(attention.getByRole("button").first()).toContainText("mentioned you in #random");
+  await expect(attention.getByRole("button").first()).toContainText("mentioned you in random");
 
   await attention.getByRole("button", { name: /replied in a thread/ }).click();
   const thread = page.getByRole("complementary", { name: "Thread" });
@@ -60,7 +60,7 @@ test("a mention opens at the message", async ({ page }) => {
     for (let index = 1; index <= 30; index += 1) window.fake.receiveMessage(grace, "random", `Later ${index}`);
   });
 
-  await page.getByRole("button", { name: /mentioned you in #random/ }).click();
+  await page.getByRole("button", { name: /mentioned you in random/ }).click();
   await expect(page.getByRole("article").filter({ hasText: "the one you need" })).toBeInViewport();
 });
 

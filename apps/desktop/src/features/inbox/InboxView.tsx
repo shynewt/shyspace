@@ -2,14 +2,13 @@ import { AtSign, CheckCheck, Inbox as InboxIcon, MessageSquareReply, Pencil } fr
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo, useState } from "react";
 import { api, type Channel, type Draft, type InboxItem } from "../../lib/api";
-import { useChannelNames } from "../../lib/channels";
 import { plainPreview } from "../../lib/markdown";
 import { displayName, formatWhen } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Button, EmptyState, SectionLabel, springs } from "../../ui";
-import { ChannelGlyph } from "../private/ChannelGlyph";
+import { ChannelName } from "../private/ChannelName";
 import { MarkAllReadDialog } from "./MarkAllReadDialog";
 
 /** Everything that needs your attention, across channels and threads. */
@@ -90,14 +89,10 @@ export function InboxView() {
 
 function AttentionRow({ item }: { item: InboxItem }) {
   const { navigate, pages } = useWorkspace();
-  const names = useChannelNames();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const { message } = item;
   const name = displayName(message.author_name, message.author);
-  const where =
-    item.reason === "mention"
-      ? `mentioned you in ${names.reference(message.channel)}`
-      : `replied in a thread in ${names.reference(message.channel)}`;
+  const where = item.reason === "mention" ? "mentioned you in" : "replied in a thread in";
   return (
     <motion.li
       layout
@@ -117,7 +112,8 @@ function AttentionRow({ item }: { item: InboxItem }) {
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
             {item.reason === "mention" ? <AtSign size={12} /> : <MessageSquareReply size={12} />}
-            <b className="font-semibold text-ink">{name}</b> {where}
+            <b className="font-semibold text-ink">{name}</b> {where}{" "}
+            <ChannelName channelId={message.channel} className="min-w-0" />
             <span className="ml-auto shrink-0 text-faint">{formatWhen(message.created_ms, new Date())}</span>
           </span>
           <span className="mt-0.5 block truncate text-[13.5px]">
@@ -132,7 +128,6 @@ function AttentionRow({ item }: { item: InboxItem }) {
 function DraftRow({ draft }: { draft: Draft }) {
   const { navigate, pages } = useWorkspace();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
-  const channelName = useChannelNames().reference(draft.channel);
   const isThread = draft.target !== draft.channel;
   return (
     <motion.li
@@ -150,7 +145,8 @@ function DraftRow({ draft }: { draft: Draft }) {
         <Pencil size={15} className="mt-0.5 shrink-0 text-decorative" />
         <span className="min-w-0 flex-1">
           <span className="block text-[12.5px] text-muted">
-            {isThread ? "Reply in a thread in" : "In"} <b className="font-semibold text-ink">{channelName}</b>
+            {isThread ? "Reply in a thread in" : "In"}{" "}
+            <ChannelName channelId={draft.channel} className="font-semibold text-ink" />
           </span>
           <span className="mt-0.5 block truncate text-[13.5px]">
             {plainPreview(draft.text, (id) => titles.get(id))}
@@ -163,7 +159,6 @@ function DraftRow({ draft }: { draft: Draft }) {
 
 function UnreadChannelRow({ channel }: { channel: Channel }) {
   const { navigate } = useWorkspace();
-  const names = useChannelNames();
   const markRead = async () => {
     const [latest] = await api.messages(channel.id, null, 1);
     if (latest) await api.markRead(channel.id, latest.id);
@@ -175,8 +170,7 @@ function UnreadChannelRow({ channel }: { channel: Channel }) {
         onClick={() => navigate({ kind: "channel", id: channel.id })}
         className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13.5px] font-semibold"
       >
-        <ChannelGlyph kind={channel.kind} className="text-decorative" />
-        <span className="truncate">{names.title(channel.id)}</span>
+        <ChannelName channelId={channel.id} className="min-w-0" />
         <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white tabular-nums">
           {channel.unread}
         </span>

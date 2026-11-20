@@ -182,7 +182,7 @@ test("Later keeps a reminder beside its item, in a readable width", async ({ pag
   await later(page).click();
 
   const list = page.getByRole("list", { name: "Saved for later" });
-  const where = await list.getByText("Grace in #general").boundingBox();
+  const where = await list.getByText("Grace in general").boundingBox();
   const reminder = await list.getByText(/(Today|Tomorrow) \d/).boundingBox();
   if (!where || !reminder) throw new Error("Later not laid out");
   expect(reminder.x - (where.x + where.width)).toBeLessThan(24);

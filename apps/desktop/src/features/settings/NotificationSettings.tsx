@@ -6,6 +6,7 @@ import { usePreferences } from "../../lib/preferences";
 import { errorMessage } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, FormError, SegmentedControl } from "../../ui";
+import { ChannelName } from "../private/ChannelName";
 import { Setting } from "./layout";
 
 const DEFAULT_LEVEL: NotifyLevel = "all";
@@ -87,7 +88,7 @@ function ChannelAlerts() {
       <ul aria-label="Channel alerts" className="flex flex-col">
         {sorted.map((channel) => (
           <li key={channel.id} className="flex items-center gap-3 py-1">
-            <span className="min-w-0 flex-1 truncate text-[13px]">{names.reference(channel.id)}</span>
+            <ChannelName channelId={channel.id} className="flex-1 text-[13px]" />
             <SegmentedControl<NotifyLevel>
               label={`Alerts for ${names.reference(channel.id)}`}
               options={LEVELS}
