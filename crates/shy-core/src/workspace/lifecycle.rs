@@ -330,6 +330,7 @@ impl Workspace {
                     appear_offline,
                 }),
                 heartbeat_now: Notify::new(),
+                stopped: tokio::sync::watch::Sender::new(false),
             }),
         };
         if let Some(net) = &workspace.inner.net {

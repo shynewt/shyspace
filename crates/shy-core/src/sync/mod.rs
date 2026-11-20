@@ -41,8 +41,14 @@ pub struct SyncStatus {
 impl Workspace {
     pub(crate) fn spawn_background(&self, mut incoming: mpsc::Receiver<Incoming>) {
         let receiver = self.clone();
+        let mut stopped = self.inner.stopped.subscribe();
         tokio::spawn(async move {
-            while let Some(wire) = incoming.recv().await {
+            loop {
+                let wire = tokio::select! {
+                    wire = incoming.recv() => wire,
+                    _ = stopped.changed() => None,
+                };
+                let Some(wire) = wire else { break };
                 match wire {
                     Incoming::NeighborUp => {
                         receiver.inner.wake.notify_one();
@@ -67,6 +73,7 @@ impl Workspace {
         });
 
         let beater = self.clone();
+        let mut stopped = self.inner.stopped.subscribe();
         tokio::spawn(async move {
             let mut reachable = Vec::new();
             loop {
@@ -76,6 +83,7 @@ impl Workspace {
                 tokio::select! {
                     _ = beater.inner.heartbeat_now.notified() => {}
                     _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => {}
+                    _ = stopped.changed() => break,
                 }
                 if beater.status().removed {
                     break;
@@ -94,6 +102,7 @@ impl Workspace {
         });
 
         let syncer = self.clone();
+        let mut stopped = self.inner.stopped.subscribe();
         tokio::spawn(async move {
             syncer.announce_self().await;
             let mut last_announced = tokio::time::Instant::now();
@@ -111,6 +120,7 @@ impl Workspace {
                 tokio::select! {
                     _ = syncer.inner.wake.notified() => tokio::time::sleep(PUSH_DEBOUNCE).await,
                     _ = tokio::time::sleep(SYNC_INTERVAL) => {}
+                    _ = stopped.changed() => break,
                 }
             }
         });

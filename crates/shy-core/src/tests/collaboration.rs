@@ -229,3 +229,39 @@ async fn shutting_down_uploads_what_was_not_sent_yet() {
         .collect();
     assert!(texts.contains(&"written just before quitting".to_string()));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shut_down_workspace_lets_go_of_everything_and_reopens() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let dir = root.path().join("ada");
+    let admin = crate::Workspace::create_with(
+        &data_dir(&dir),
+        "workspace-id".into(),
+        "Acme",
+        crate::Profile {
+            name: "Ada",
+            is_bot: false,
+        },
+        test_bucket_config(),
+        connector(&bucket),
+        crate::Networking::Online,
+    )
+    .await
+    .unwrap();
+    let inner = std::sync::Arc::downgrade(&admin.inner);
+    admin.shutdown().await.unwrap();
+    drop(admin);
+
+    // The background loops stop and drop their handles soon after.
+    let released = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while inner.upgrade().is_some() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(released.is_ok(), "background tasks still hold the workspace");
+    crate::Workspace::open_with(&data_dir(&dir), connector(&bucket), crate::Networking::Offline)
+        .await
+        .unwrap();
+}

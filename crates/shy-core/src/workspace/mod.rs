@@ -113,6 +113,8 @@ pub(crate) struct Inner {
     pub own_presence: Mutex<presence::OwnPresence>,
     /// Sends a heartbeat now instead of at the next tick.
     pub heartbeat_now: Notify,
+    /// Set by `shutdown`; the background loops end when they see it.
+    pub stopped: tokio::sync::watch::Sender<bool>,
 }
 
 #[derive(Clone)]
@@ -180,9 +182,11 @@ impl Workspace {
         state.mls.members()
     }
 
-    /// Uploads what wasn't sent yet, so a message written just before
-    /// quitting isn't held back until the next start, then closes the network.
+    /// Stops the background work, uploads what wasn't sent yet (so a message
+    /// written just before quitting isn't held back until the next start),
+    /// then closes the network.
     pub async fn shutdown(&self) -> Result<()> {
+        self.inner.stopped.send_replace(true);
         let uploaded = self.push().await;
         if let Some(net) = &self.inner.net {
             net.shutdown().await;
