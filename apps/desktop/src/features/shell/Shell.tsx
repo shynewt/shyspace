@@ -34,7 +34,7 @@ export function Shell({ session }: { session: Session }) {
   const loadedMembers = useLive(api.members, (change) => change.kind === "members");
   const members = useMembersWithCurrentStatus(loadedMembers);
   const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
-  const { entry, navigate, back, forward, replace, scrollMemory } = useNavigation(
+  const { entry, restore, navigate, back, forward, replace, scrollMemory } = useNavigation(
     session.me,
     loadedChannels,
     loadedPages,
@@ -143,12 +143,7 @@ export function Shell({ session }: { session: Session }) {
             >
               {view.kind === "channel" && (
                 <ScrollMemoryContext.Provider value={scrollMemory}>
-                  <ChannelView
-                    channelId={view.id}
-                    thread={view.thread}
-                    focus={view.focus}
-                    anchor={entry?.anchor ?? null}
-                  />
+                  <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} restore={restore} />
                 </ScrollMemoryContext.Provider>
               )}
               {view.kind === "page" && <PageView pageId={view.id} />}

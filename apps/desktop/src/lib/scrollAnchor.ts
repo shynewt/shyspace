@@ -15,10 +15,16 @@ export type ScrollAnchor = {
   offsetPx: number;
 };
 
+/** A request to scroll a list back: to the anchor, or to its newest message when there's none. */
+export type ScrollRestore = { anchor: ScrollAnchor | null };
+
 const MESSAGE_ID_PREFIX = "message-";
 
+/** Messages that are laid out; a hidden one has no position to measure. */
 function messagesIn(list: HTMLElement): HTMLElement[] {
-  return Array.from(list.querySelectorAll<HTMLElement>(`article[id^="${MESSAGE_ID_PREFIX}"]`));
+  return Array.from(list.querySelectorAll<HTMLElement>(`article[id^="${MESSAGE_ID_PREFIX}"]`)).filter(
+    (message) => message.offsetParent !== null,
+  );
 }
 
 /** From the top of the list's content to the element's top. A row being animated can be an offset parent of its own, so this adds up the chain. */

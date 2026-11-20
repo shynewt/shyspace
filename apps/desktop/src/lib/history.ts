@@ -1,7 +1,7 @@
 /**
  * Back and forward through the places you've been, kept in memory. Each
- * entry holds a view (with its open thread) and where to scroll it to. Pure,
- * so the rules are easy to test; `useNavigation` wires it to the app.
+ * entry holds a view (with its open thread) and where to scroll it to.
+ * Only the rules live here, as pure functions.
  */
 import type { ScrollAnchor } from "./scrollAnchor";
 import type { View } from "./workspace";

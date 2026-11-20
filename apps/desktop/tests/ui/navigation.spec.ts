@@ -15,14 +15,25 @@ async function openChannel(page: Page, name: string) {
   await expect(page.getByLabel(`Message #${name}`)).toBeVisible();
 }
 
-/** Grace writes "Message 1" to "Message 60" in #general; you've read them. */
-async function fillGeneral(page: Page) {
-  await page.evaluate((count) => {
+/** Grace writes "Message 1" up to "Message <count>" in #general; you've read them. */
+async function fillGeneral(page: Page, count = MESSAGE_COUNT) {
+  await page.evaluate((total) => {
     const grace = window.fake.addMember("Grace");
-    for (let index = 1; index <= count; index += 1) window.fake.receiveMessage(grace, "general", `Message ${index}`);
+    for (let index = 1; index <= total; index += 1) window.fake.receiveMessage(grace, "general", `Message ${index}`);
     window.fake.handle("mark_all_read", undefined);
-  }, MESSAGE_COUNT);
-  await expect(messages(page, "general").getByText(`Message ${MESSAGE_COUNT}`, { exact: true })).toBeVisible();
+  }, count);
+  await expect(messages(page, "general").getByText(`Message ${count}`, { exact: true })).toBeVisible();
+}
+
+/** Scrolls to the top until the first message has loaded, as a reader going back in time does. */
+async function scrollToFirstMessage(page: Page) {
+  const log = messages(page, "general");
+  await expect(async () => {
+    await log.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await expect(log.getByText("Message 1", { exact: true })).toBeAttached({ timeout: 500 });
+  }).toPass();
 }
 
 async function createChannels(page: Page, names: string[]) {
@@ -96,6 +107,88 @@ test.describe("in a session", () => {
     await openChannel(page, "random");
     await openChannel(page, "general");
     await expectMessageAt(page, "Message 30", 17);
+  });
+
+  test("loading older messages keeps the message at the top where it was", async ({ page }) => {
+    await fillGeneral(page, 150);
+    // Without the browser's own scroll anchoring, as in WebKit.
+    await messages(page, "general").evaluate((log) => {
+      log.style.overflowAnchor = "none";
+    });
+    await scrollToMessage(page, "Message 60");
+    await messages(page, "general").evaluate((log) => {
+      log.scrollTop = 30;
+    });
+    const before = await offsetOf(page, "Message 60");
+
+    await expect(messages(page, "general").getByText("Message 1", { exact: true })).toBeAttached();
+    await expectMessageAt(page, "Message 60", before);
+  });
+
+  test("back returns to a message older than the first hundred", async ({ page }) => {
+    await fillGeneral(page, 150);
+    await createChannels(page, ["random"]);
+    await scrollToFirstMessage(page);
+    await scrollToMessage(page, "Message 10");
+
+    await openChannel(page, "random");
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect(page.getByLabel("Message #general")).toBeVisible();
+    await expectMessageAt(page, "Message 10", 17);
+  });
+
+  test("back to a place whose message was deleted opens the channel at the newest message", async ({ page }) => {
+    await fillGeneral(page);
+    await createChannels(page, ["random"]);
+    await scrollToMessage(page, "Message 20");
+    await openChannel(page, "random");
+    await page.evaluate(() => {
+      for (const text of ["Message 19", "Message 20"]) {
+        window.fake.handle("delete_message", { message: window.fake.messageWithText(text) });
+      }
+    });
+
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect(messages(page, "general").getByText("Message 60", { exact: true })).toBeInViewport();
+  });
+
+  test("a link to a message older than the first hundred loads history until it's there", async ({ page }) => {
+    await fillGeneral(page, 150);
+    await createChannels(page, ["random"]);
+    await openChannel(page, "random");
+    const id = await page.evaluate(() => window.fake.messageWithText("Message 3"));
+    await page.getByLabel("Message #random").fill(`see shy://message/${id}`);
+    await page.getByLabel("Message #random").press("Enter");
+
+    await page.getByRole("button", { name: "a message" }).click();
+    await expect(page.getByLabel("Message #general")).toBeVisible();
+    await expect(messages(page, "general").getByText("Message 3", { exact: true })).toBeInViewport();
+  });
+
+  test("back to a place you left at the newest message returns there", async ({ page }) => {
+    await fillGeneral(page);
+    const thread = page.getByRole("complementary", { name: "Thread" });
+    const last = messages(page, "general").getByRole("article").filter({ hasText: "Message 60" });
+    await last.hover();
+    await last.getByRole("button", { name: "Reply in thread" }).click();
+    await expect(thread).toBeVisible();
+    await scrollToMessage(page, "Message 20");
+
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect(thread).toHaveCount(0);
+    await expect(messages(page, "general").getByText("Message 60", { exact: true })).toBeInViewport();
+  });
+
+  test("a channel with something new opens at the new messages, not where you left it", async ({ page }) => {
+    await fillGeneral(page);
+    await createChannels(page, ["random"]);
+    await scrollToMessage(page, "Message 20");
+    await openChannel(page, "random");
+    await page.evaluate(() => window.fake.receiveMessage(window.fake.memberNamed("Grace"), "general", "Fresh news"));
+
+    await page.getByRole("button", { name: "general, 1 unread" }).click();
+    await expect(page.getByRole("separator", { name: "New messages" })).toBeInViewport();
+    await expect(messages(page, "general").getByText("Fresh news")).toBeInViewport();
   });
 
   test("going somewhere new after going back clears what was ahead", async ({ page }) => {
@@ -208,6 +301,26 @@ test.describe("in a session", () => {
     await expect(page.getByRole("complementary", { name: "Thread" })).toHaveCount(0);
     await expect(page.getByRole("alert")).toHaveCount(0);
   });
+});
+
+test("launching reopens the thread you had open", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.prepareFake = (fake) => {
+      const grace = fake.addMember("Grace");
+      const root = fake.receiveMessage(grace, "general", "Plans for the offsite");
+      fake.receiveReply(grace, root, "Lisbon?");
+    };
+  });
+  await page.goto("?seed=thread");
+  await messages(page, "general")
+    .getByRole("button", { name: /1 reply/ })
+    .click();
+  const thread = page.getByRole("complementary", { name: "Thread" });
+  await expect(thread.getByText("Lisbon?")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView") ?? "")).toContain("thread");
+
+  await page.reload();
+  await expect(thread.getByText("Lisbon?")).toBeVisible();
 });
 
 test("launching reopens the last channel where you left it", async ({ page }) => {

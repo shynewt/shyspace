@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api, type Message, type MessageCursor } from "../../lib/api";
 import { channelReference, channelTitle, composerLabel } from "../../lib/channels";
 import { formatDay } from "../../lib/people";
-import { captureScrollAnchor, restoreScrollAnchor, type ScrollAnchor } from "../../lib/scrollAnchor";
+import { captureScrollAnchor, restoreScrollAnchor, type ScrollRestore } from "../../lib/scrollAnchor";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useScrollMemory } from "../../lib/useNavigation";
@@ -21,6 +21,8 @@ const PAGE_SIZE = 100;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const NEAR_EDGE_PX = 80;
 const HIGHLIGHT_MS = 1600;
+/** How much older history to load looking for where you were, before opening as usual. */
+const MAX_PAGES_FOR_ANCHOR = 10;
 
 type Row =
   | { kind: "day"; key: string; label: string }
@@ -64,15 +66,15 @@ export function ChannelView({
   channelId,
   thread,
   focus,
-  anchor,
+  restore,
 }: {
   channelId: string;
   /** The open thread's first message. */
   thread?: string;
   /** A message to scroll to and highlight. */
   focus?: string;
-  /** Where to scroll back to, from history; each new value is restored once. */
-  anchor: ScrollAnchor | null;
+  /** Where to scroll to, coming back here; each new request is carried out once. */
+  restore: ScrollRestore | null;
 }) {
   const { channels, session, navigate } = useWorkspace();
   const { registerAnchorSource, noteScrolled } = useScrollMemory();
@@ -89,7 +91,14 @@ export function ChannelView({
     loadMessages,
     (change) => (change.kind === "messages" && change.channel === channelId) || change.kind === "members",
   );
-  const hasOlder = (messages?.length ?? 0) >= windowSize;
+  // The messages shown when more history was asked for, until the bigger load replaces them.
+  const [messagesBeforeGrowing, setMessagesBeforeGrowing] = useState<Message[] | null>(null);
+  const isGrowing = messages !== undefined && messages === messagesBeforeGrowing;
+  const hasOlder = isGrowing || (messages?.length ?? 0) >= windowSize;
+  const growWindow = useCallback(() => {
+    setMessagesBeforeGrowing(messages ?? null);
+    setWindowSize((size) => size + PAGE_SIZE);
+  }, [messages]);
   const openThread = thread ?? null;
   const mentionTarget = useRef<InsertMention | null>(null);
   const mention = useCallback((name: string, memberId: string) => mentionTarget.current?.(name, memberId), []);
@@ -101,10 +110,13 @@ export function ChannelView({
   useEffect(() => {
     if (focus && !thread) setPendingFocus(focus);
   }, [focus, thread]);
-  const [pendingAnchor, setPendingAnchor] = useState(anchor);
+  const [pendingRestore, setPendingRestore] = useState(restore);
+  const pagesLoadedForAnchor = useRef(0);
   useEffect(() => {
-    if (anchor) setPendingAnchor(anchor);
-  }, [anchor]);
+    if (!restore) return;
+    pagesLoadedForAnchor.current = 0;
+    setPendingRestore(restore);
+  }, [restore]);
   const unreadFrom = useMemo(
     () => (isUnreadLineDismissed ? null : firstUnreadId(messages ?? [], lastReadOnOpen, session.me)),
     [messages, lastReadOnOpen, session.me, isUnreadLineDismissed],
@@ -114,28 +126,35 @@ export function ChannelView({
   const scroller = useRef<HTMLDivElement>(null);
   const isPinnedToBottom = useRef(true);
   const heightBeforeLoadingOlder = useRef<number | null>(null);
-  // The messages shown when more history was asked for; the next load replaces them.
-  const messagesBeforeGrowing = useRef<Message[] | undefined>(undefined);
+  const hasPositioned = useRef(false);
 
   // Keeps the view anchored whenever the rows change.
   useLayoutEffect(() => {
     const element = scroller.current;
-    if (!element || rows.length === 0) return;
+    if (!element || rows.length === 0 || isGrowing) return;
+    const wasPositioned = hasPositioned.current;
+    hasPositioned.current = true;
     if (heightBeforeLoadingOlder.current !== null) {
       element.scrollTop += element.scrollHeight - heightBeforeLoadingOlder.current;
       heightBeforeLoadingOlder.current = null;
-    } else if (pendingAnchor && !pendingFocus) {
-      // Older history loads until the anchor's message is there; without it, the channel opens as usual.
-      if (messages === messagesBeforeGrowing.current) return;
-      if (restoreScrollAnchor(element, pendingAnchor)) {
+    } else if (pendingRestore && !pendingFocus) {
+      const { anchor } = pendingRestore;
+      if (!anchor) {
+        // Back to the newest message; a channel just opened goes on as usual instead (the unread line, or the newest).
+        setPendingRestore(null);
+        if (!wasPositioned) return;
+        isPinnedToBottom.current = true;
+        element.scrollTop = element.scrollHeight;
+      } else if (restoreScrollAnchor(element, anchor)) {
         hasScrolledToUnread.current = true;
         isPinnedToBottom.current = isNearBottom(element);
-        setPendingAnchor(null);
-      } else if (hasOlder) {
-        messagesBeforeGrowing.current = messages;
-        setWindowSize((size) => size + PAGE_SIZE);
+        setPendingRestore(null);
+      } else if (hasOlder && pagesLoadedForAnchor.current < MAX_PAGES_FOR_ANCHOR) {
+        // Older history loads until the anchor's message is there; a deleted one stops the search eventually.
+        pagesLoadedForAnchor.current += 1;
+        growWindow();
       } else {
-        setPendingAnchor(null);
+        setPendingRestore(null);
       }
     } else if (!hasScrolledToUnread.current && unreadFrom) {
       hasScrolledToUnread.current = true;
@@ -144,11 +163,11 @@ export function ChannelView({
     } else if (isPinnedToBottom.current) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [rows, unreadFrom, pendingAnchor, pendingFocus, hasOlder, messages]);
+  }, [rows, unreadFrom, pendingRestore, pendingFocus, hasOlder, isGrowing, growWindow]);
 
   // Where you are, for coming back here: nothing while at the newest message, which is where a channel opens anyway.
-  const pendingAnchorRef = useRef(pendingAnchor);
-  pendingAnchorRef.current = pendingAnchor;
+  const pendingAnchorRef = useRef(pendingRestore?.anchor);
+  pendingAnchorRef.current = pendingRestore?.anchor;
   useEffect(
     () =>
       registerAnchorSource(channelId, () => {
@@ -184,7 +203,7 @@ export function ChannelView({
   }, [channelId, latestId, isPresent]);
 
   useEffect(() => {
-    if (!pendingFocus || !messages) return;
+    if (!pendingFocus || !messages || isGrowing) return;
     const target = pendingFocus;
     if (messages.some((message) => message.id === target)) {
       setPendingFocus(null);
@@ -193,11 +212,11 @@ export function ChannelView({
       document.getElementById(`message-${target}`)?.scrollIntoView({ block: "center" });
       setHighlighted(target);
     } else if (hasOlder) {
-      setWindowSize((size) => size + PAGE_SIZE);
+      growWindow();
     } else {
       setPendingFocus(null);
     }
-  }, [messages, hasOlder, pendingFocus]);
+  }, [messages, hasOlder, isGrowing, pendingFocus, growWindow]);
 
   useEffect(() => {
     if (!highlighted) return;
@@ -206,9 +225,11 @@ export function ChannelView({
   }, [highlighted]);
 
   const loadOlder = () => {
-    if (!hasOlder || heightBeforeLoadingOlder.current !== null || pendingAnchor || !scroller.current) return;
+    if (!hasOlder || isGrowing || heightBeforeLoadingOlder.current !== null || pendingRestore || !scroller.current) {
+      return;
+    }
     heightBeforeLoadingOlder.current = scroller.current.scrollHeight;
-    setWindowSize((size) => size + PAGE_SIZE);
+    growWindow();
   };
 
   return (

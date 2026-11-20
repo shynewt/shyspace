@@ -11,7 +11,7 @@ import {
   visit,
 } from "./history";
 import { readLastView, saveLastView } from "./lastView";
-import type { ScrollAnchor } from "./scrollAnchor";
+import type { ScrollAnchor, ScrollRestore } from "./scrollAnchor";
 import { reportError, showToast } from "./toast";
 import type { View } from "./workspace";
 
@@ -41,7 +41,8 @@ const SAVE_AFTER_SCROLL_MS = 500;
  * `channels` and `pages` are undefined until loaded.
  */
 export function useNavigation(me: string, channels: Channel[] | undefined, pages: Page[] | undefined) {
-  const [history, setHistory] = useState<History | null>(null);
+  const [shown, setShown] = useState<{ history: History; restore: ScrollRestore | null } | null>(null);
+  const history = shown?.history ?? null;
   // Read and written synchronously, so quick presses of Back build on each other.
   const historyRef = useRef<History | null>(null);
   const anchorSource = useRef<AnchorSource | null>(null);
@@ -50,10 +51,11 @@ export function useNavigation(me: string, channels: Channel[] | undefined, pages
   const latest = useRef({ channels, pages });
   latest.current = { channels, pages };
 
-  const commit = useCallback((next: History | null) => {
+  /** Shows `next`; `restore` says where to scroll its channel, if anywhere. */
+  const commit = useCallback((next: History | null, restore: ScrollRestore | null = null) => {
     threadCheck.current += 1;
     historyRef.current = next;
-    setHistory(next);
+    setShown(next ? { history: next, restore } : null);
   }, []);
 
   /** Where the shown channel is scrolled, if it's the current place's. */
@@ -73,18 +75,19 @@ export function useNavigation(me: string, channels: Channel[] | undefined, pages
   const showChecked = useCallback(
     (next: History) => {
       const { view, anchor } = currentEntry(next);
-      if (view.kind !== "channel" || !view.thread) return commit(next);
+      const restore = { anchor };
+      if (view.kind !== "channel" || !view.thread) return commit(next, restore);
       const root = view.thread;
       historyRef.current = next;
       const check = ++threadCheck.current;
       const showChannelOnly = () => {
         const shown = historyRef.current ?? next;
-        commit(replaceCurrent(shown, { kind: "channel", id: view.id }, anchor));
+        commit(replaceCurrent(shown, { kind: "channel", id: view.id }, anchor), restore);
       };
       api.linkedMessage(root).then(
         (linked) => {
           if (check !== threadCheck.current) return;
-          if (linked && linked.message.channel === view.id) commit(historyRef.current);
+          if (linked && linked.message.channel === view.id) commit(historyRef.current, restore);
           else showChannelOnly();
         },
         (error) => {
@@ -116,8 +119,9 @@ export function useNavigation(me: string, channels: Channel[] | undefined, pages
     (view: View) => {
       const current = historyRef.current;
       if (!current) return commit(startHistory(view));
-      const anchor = captureCurrent();
-      commit(visit(leaveWithAnchor(current, anchor), view, startingAnchor(currentEntry(current).view, view)));
+      const left = leaveWithAnchor(current, captureCurrent());
+      const start = startingAnchor(currentEntry(current).view, view);
+      commit(visit(left, view, start), start ? { anchor: start } : null);
     },
     [commit, captureCurrent, startingAnchor],
   );
@@ -195,5 +199,5 @@ export function useNavigation(me: string, channels: Channel[] | undefined, pages
   );
 
   const entry: HistoryEntry | null = history ? currentEntry(history) : null;
-  return { entry, navigate, back, forward, replace, scrollMemory };
+  return { entry, restore: shown?.restore ?? null, navigate, back, forward, replace, scrollMemory };
 }
