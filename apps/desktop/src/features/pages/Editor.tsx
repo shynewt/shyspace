@@ -4,11 +4,12 @@ import { languages } from "@codemirror/language-data";
 import { EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
-import { yCollab } from "y-codemirror.next";
+import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import { api, onChange } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
+import { formattingKeymap } from "./editor/commands";
 import { livePreview, setPageTitles } from "./editor/livePreview";
 import { pageTheme } from "./editor/theme";
 import { PAGE_TEXT } from "./pageText";
@@ -81,7 +82,13 @@ function PageEditor({ pageId }: { pageId: string }) {
             markdown({ base: markdownLanguage, codeLanguages: languages }),
             livePreview({ onOpenPage: (id) => navigateRef.current({ kind: "page", id }) }),
             placeholder("Start writing… Markdown works, and everyone here edits together."),
-            keymap.of([indentWithTab, ...defaultKeymap]),
+            keymap.of([
+              ...formattingKeymap,
+              ...yUndoManagerKeymap,
+              indentWithTab,
+              // Ctrl+/ stays the app's shortcut sheet; HTML comments have no place in a page.
+              ...defaultKeymap.filter((binding) => binding.key !== "Mod-/"),
+            ]),
             // Yjs undo only reverts your own edits, never a teammate's.
             yCollab(text, null, { undoManager }),
             pageTheme,
