@@ -1186,7 +1186,7 @@ async fn names_and_emoji_from_others_are_bounded_and_plain() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ops_naming_huge_ids_are_skipped() {
+async fn ops_naming_huge_ids_are_skipped_and_huge_parents_dropped() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");
     let mut forger = Forger::new(&bob);
@@ -1205,7 +1205,14 @@ async fn ops_naming_huge_ids_are_skipped() {
             active: true,
         }))
         .unwrap();
-    assert!(!texts_in(&admin, &general).contains(&"reply to a giant".to_string()));
+    // Shown as a plain message, as older versions show a reply whose parent is missing.
+    let reply = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.text == "reply to a giant")
+        .unwrap();
+    assert_eq!(reply.reply_to, None);
     assert_eq!(
         admin
             .state()
@@ -1259,4 +1266,44 @@ async fn your_own_name_and_emoji_over_the_limit_are_refused() {
         })
         .unwrap();
     admin.react(&message, "👍🏽", true).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn names_stored_by_an_older_version_are_cleaned_once_on_upgrade() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let dir = root.path().join("ada");
+    let admin = create_admin(&dir, &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    admin
+        .receive(Forger::new(&bob).seal(Op::Profile {
+            name: "Bob\u{202E}nimda".into(),
+            is_bot: false,
+        }))
+        .unwrap();
+    // As an older version stored it: whole, and with no record of the rules.
+    admin.state().store.execute_for_test(
+        "UPDATE profiles SET name = 'Bob' || char(8238) || 'nimda' WHERE name LIKE 'Bobnimda%';
+         DELETE FROM meta WHERE key = 'views_version';",
+    );
+    let name_of_bob = |member: &Workspace| {
+        member
+            .members()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id == bob.my_id())
+            .unwrap()
+            .name
+    };
+    assert!(
+        name_of_bob(&admin).contains('\u{202E}'),
+        "the old state is set up"
+    );
+    drop(admin);
+
+    let reopened = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+    assert_eq!(name_of_bob(&reopened), "Bobnimda");
 }

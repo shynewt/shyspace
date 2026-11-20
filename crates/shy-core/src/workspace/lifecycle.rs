@@ -198,7 +198,7 @@ impl Workspace {
         config.save(&data.path, &local.store)?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
-            name: profile.name.to_owned(),
+            name: super::actions::checked_profile_name(profile.name)?,
             is_bot: profile.is_bot,
         })?;
         workspace.write(Op::ChannelCreate {
@@ -261,7 +261,7 @@ impl Workspace {
         config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
-            name: profile.name.to_owned(),
+            name: super::actions::checked_profile_name(profile.name)?,
             is_bot: profile.is_bot,
         })?;
         Ok(workspace)
@@ -339,6 +339,10 @@ impl Workspace {
                 heartbeat_now: Notify::new(),
             }),
         };
+        workspace
+            .state()
+            .store
+            .rebuild_if_rules_changed(workspace.apply_context())?;
         workspace.announce_sealing_key()?;
         if let Some(net) = &workspace.inner.net {
             net.set_members(&workspace.current_members()?);

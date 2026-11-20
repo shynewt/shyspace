@@ -9,9 +9,9 @@ use super::Store;
 use crate::{
     config,
     ops::{
-        MAX_EMOJI_CHARS, MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS,
-        MAX_PROFILE_NAME_CHARS, Op, VerifiedOp, clean_channel_name, clean_label, cut_to, is_owned_by,
-        is_valid_status, rule_violation,
+        MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, Op, VerifiedOp,
+        clean_channel_name, clean_display_name, clean_emoji, cut_to, is_owned_by, is_valid_status,
+        rule_violation,
     },
     pages,
     private::{crypto::is_valid_sealing_public_key, ids::is_private_id},
@@ -94,13 +94,20 @@ impl Store {
         {
             return Err(rule_violation("op creates an id that belongs to someone else"));
         }
-        if verified
+        // A reply to a far too long id shows as a plain message, as older
+        // versions show it (its parent can't be found); anything else naming
+        // one is forged and goes.
+        let reply_to = match &verified.body.op {
+            Op::Message { reply_to, .. } => reply_to.as_deref(),
+            _ => None,
+        };
+        let has_huge_id = verified
             .body
             .op
             .named_ids()
             .iter()
-            .any(|id| id.len() > MAX_ID_CHARS)
-        {
+            .any(|id| id.len() > MAX_ID_CHARS && Some(*id) != reply_to);
+        if has_huge_id {
             return Err(rule_violation("op names an id far longer than any real one"));
         }
         self.observe_lamport(lamport)?;
@@ -109,7 +116,7 @@ impl Store {
         }
         Ok(Some(match &verified.body.op {
             Op::Profile { name, is_bot } => {
-                let name = clean_label(name, MAX_PROFILE_NAME_CHARS);
+                let name = clean_display_name(name);
                 self.db.execute(
                     "INSERT INTO profiles (member, name, is_bot, lamport) VALUES (?1, ?2, ?3, ?4)
                      ON CONFLICT (member) DO UPDATE SET name = ?2, is_bot = ?3, lamport = ?4 WHERE lamport < ?4",
@@ -135,7 +142,8 @@ impl Store {
                     named_params! {
                         ":id": id, ":channel": channel, ":author": author,
                         ":text": cut_to(text, MAX_MESSAGE_CHARS),
-                        ":reply_to": reply_to, ":lamport": lamport, ":now": now, ":seq": verified.seq,
+                        ":reply_to": reply_to.as_ref().filter(|parent| parent.len() <= MAX_ID_CHARS),
+                        ":lamport": lamport, ":now": now, ":seq": verified.seq,
                     },
                 )?;
                 self.reindex_message(id)?;
@@ -148,7 +156,7 @@ impl Store {
                 emoji,
                 active,
             } => {
-                let emoji = clean_label(emoji, MAX_EMOJI_CHARS);
+                let emoji = clean_emoji(emoji);
                 self.db.execute(
                     "INSERT INTO reactions (message, author, emoji, active, lamport) VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT (message, author, emoji) DO UPDATE SET active = ?4, lamport = ?5 WHERE lamport < ?5",

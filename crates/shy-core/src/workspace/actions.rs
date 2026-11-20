@@ -8,7 +8,8 @@ use crate::{
     crypto,
     ops::{
         EntityId, Envelope, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, MAX_PROFILE_NAME_CHARS,
-        Op, OpBody, VerifiedOp, clean_label, new_owned_id, normalize_channel_name, now_ms,
+        Op, OpBody, VerifiedOp, clean_display_name, clean_emoji, new_owned_id, normalize_channel_name,
+        now_ms,
     },
     pages::{self, Edit},
     private::ids::{new_private_message_id, private_channel_of, private_kind},
@@ -281,7 +282,7 @@ impl Workspace {
 
     pub fn react(&self, message: &str, emoji: &str, active: bool) -> Result<()> {
         ensure!(
-            clean_label(emoji, MAX_EMOJI_CHARS) == emoji,
+            clean_emoji(emoji) == emoji,
             "a reaction is one emoji (up to {MAX_EMOJI_CHARS} characters)"
         );
         self.write(Op::Reaction {
@@ -341,16 +342,21 @@ impl Workspace {
     }
 
     pub fn set_profile(&self, profile: Profile<'_>) -> Result<()> {
-        let name = profile.name.trim();
-        ensure!(
-            clean_label(name, MAX_PROFILE_NAME_CHARS) == name,
-            "a name has up to {MAX_PROFILE_NAME_CHARS} characters, without invisible ones"
-        );
         self.write(Op::Profile {
-            name: name.to_owned(),
+            name: checked_profile_name(profile.name)?,
             is_bot: profile.is_bot,
         })
     }
+}
+
+/// Your own name, refused rather than cut, so what you typed is what others see.
+pub(crate) fn checked_profile_name(name: &str) -> Result<String> {
+    let name = name.trim();
+    ensure!(
+        clean_display_name(name) == name,
+        "a name has up to {MAX_PROFILE_NAME_CHARS} characters, without invisible ones"
+    );
+    Ok(name.to_owned())
 }
 
 fn checked_message_text(text: &str) -> Result<&str> {

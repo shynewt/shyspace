@@ -11,8 +11,9 @@ use tracing::warn;
 
 use super::{ApplyContext, Settling, Store};
 use crate::{
-    ops::{Op, RuleViolation, VerifiedOp},
+    ops::{MAX_ID_CHARS, Op, RuleViolation, VerifiedOp},
     pages::PageMerge,
+    private::ids::is_private_id,
     views::Change,
 };
 
@@ -38,7 +39,29 @@ struct PageReplay {
     updated_ms: i64,
 }
 
+const VIEWS_VERSION_META: &str = "views_version";
+/// Raised when the rules for showing ops change (like the limits on names in
+/// #67), so a store built under older rules rebuilds its views once.
+const VIEWS_VERSION: u8 = 1;
+
 impl Store {
+    /// Rebuilds the views if they were built under older rules. Returns
+    /// whether it did.
+    pub(crate) fn rebuild_if_rules_changed(&self, context: ApplyContext<'_>) -> Result<bool> {
+        let built_under = self
+            .meta(VIEWS_VERSION_META)?
+            .and_then(|bytes| bytes.first().copied())
+            .unwrap_or(0);
+        if built_under >= VIEWS_VERSION {
+            return Ok(false);
+        }
+        self.atomically(|store| {
+            store.rebuild_views(context)?;
+            store.set_meta(VIEWS_VERSION_META, &[VIEWS_VERSION])
+        })?;
+        Ok(true)
+    }
+
     /// Ends a removed member's log at `last_seq`. Ops of theirs after it that
     /// already applied here (sent live just before the removal arrived) are
     /// undone, so this device ends up like those that never saw them.
@@ -155,7 +178,9 @@ impl Store {
         update: &[u8],
         timestamp_ms: i64,
     ) -> Result<()> {
-        if self.is_deleted(page)? {
+        // The rules apply_permitted holds ordinary ops to, for page updates
+        // that skip it here.
+        if is_private_id(page) || page.len() > MAX_ID_CHARS || self.is_deleted(page)? {
             return Ok(());
         }
         let mut replay = pages.remove(page).unwrap_or_default();

@@ -40,6 +40,11 @@ use rusqlite::{Connection, OptionalExtension, Params, params};
 /// A fixed key for databases that only live inside tests.
 #[cfg(test)]
 impl Store {
+    /// Runs raw SQL, to set up states older versions left behind.
+    pub(crate) fn execute_for_test(&self, sql: &str) {
+        self.db.execute_batch(sql).expect("test SQL");
+    }
+
     /// How many rows of `table` have `column` equal to `value`.
     pub(crate) fn count_where(&self, table: &str, column: &str, value: &str) -> i64 {
         self.db

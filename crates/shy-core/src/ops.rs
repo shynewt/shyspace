@@ -238,12 +238,27 @@ pub const MAX_ID_CHARS: usize = 200;
 /// How much of a page goes into the search index.
 pub const MAX_INDEXED_PAGE_CHARS: usize = 200_000;
 
-/// A display name or emoji from someone else, as every device shows it:
-/// without control or invisible characters (which can disguise it), cut short.
-pub fn clean_label(raw: &str, max: usize) -> String {
+/// Emoji keep their joiners (U+200D); everything else invisible goes.
+fn is_visible_in_emoji(c: char) -> bool {
+    (!c.is_control() && !is_invisible_format_char(c)) || c == '\u{200D}'
+}
+
+/// An emoji from someone else, as every device shows it: without control or
+/// invisible characters, cut short.
+pub fn clean_emoji(raw: &str) -> String {
     raw.chars()
-        .filter(|c| (!c.is_control() && !is_invisible_format_char(*c)) || *c == '\u{200D}')
-        .take(max)
+        .filter(|c| is_visible_in_emoji(*c))
+        .take(MAX_EMOJI_CHARS)
+        .collect()
+}
+
+/// A display name from someone else, as every device shows it. Besides what
+/// `clean_emoji` drops, tag characters go: they only matter inside flag
+/// emoji, and in a name they're invisible.
+pub fn clean_display_name(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| is_visible_in_emoji(*c) && !('\u{E0020}'..='\u{E007F}').contains(c))
+        .take(MAX_PROFILE_NAME_CHARS)
         .collect()
 }
 
@@ -355,6 +370,16 @@ fn is_invisible_format_char(c: char) -> bool {
             | '\u{2060}'..='\u{206F}'
             | '\u{FEFF}'
             | '\u{FFF9}'..='\u{FFFB}'
+            // Blank-looking fillers, joiners and separators.
+            | '\u{034F}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{3164}'
+            | '\u{FFA0}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0100}'..='\u{E01EF}'
     )
 }
 
