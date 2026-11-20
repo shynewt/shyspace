@@ -29,18 +29,19 @@ fn mentioned_members(text: &str) -> impl Iterator<Item = &str> {
     })
 }
 
+/// Longest "@Name" a mention can show: names have up to 80 characters of up to
+/// 4 bytes each.
+const MAX_MENTION_NAME_BYTES: usize = 4 * 81;
+/// Longest "(shy://member/<id>)".
+const MAX_MENTION_TARGET_BYTES: usize = 128;
+
 /// `text` with every mention link shown as its `@name`, for previews.
 pub fn with_plain_mentions(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("[@") {
         let after = &rest[start + 1..];
-        let link = after
-            .find("](shy://member/")
-            .or_else(|| after.find("](shy://mention/"))
-            .filter(|end| !after[..*end].contains(']'))
-            .and_then(|end| after[end..].find(')').map(|close| (end, end + close)));
-        match link {
+        match mention_end(after) {
             Some((name_end, close)) => {
                 output.push_str(&rest[..start]);
                 output.push_str(&after[..name_end]);
@@ -56,9 +57,49 @@ pub fn with_plain_mentions(text: &str) -> String {
     output
 }
 
+/// Where the name ends and the link's `)` is, for text after a `[` that
+/// starts a mention. Looks only a short way ahead (names and ids are short),
+/// so text full of `[@` still takes one pass.
+fn mention_end(after: &str) -> Option<(usize, usize)> {
+    let name_end = bounded_find(after, ']', MAX_MENTION_NAME_BYTES)?;
+    let target = &after[name_end + 1..];
+    if !(target.starts_with("(shy://member/") || target.starts_with("(shy://mention/")) {
+        return None;
+    }
+    let close = bounded_find(target, ')', MAX_MENTION_TARGET_BYTES)?;
+    Some((name_end, name_end + 1 + close))
+}
+
+fn bounded_find(text: &str, wanted: char, max_bytes: usize) -> Option<usize> {
+    text.char_indices()
+        .take_while(|(index, _)| *index < max_bytes)
+        .find(|(_, character)| *character == wanted)
+        .map(|(index, _)| index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_full_of_mention_starts_is_handled_in_one_pass() {
+        let adversarial = format!(
+            "{}[@Ada](shy://member/{})",
+            "[@x] ".repeat(200_000),
+            "a".repeat(64)
+        );
+        let started = std::time::Instant::now();
+        let plain = with_plain_mentions(&adversarial);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            plain.ends_with("[@x] @Ada"),
+            "the real mention at the end still becomes plain"
+        );
+    }
 
     #[test]
     fn previews_show_mentions_as_names() {
