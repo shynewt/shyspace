@@ -3,7 +3,27 @@ export function displayName(name: string, id: string) {
 }
 
 export function formatTime(ms: number) {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/** "Friday, November 20, 2026 at 9:05 AM". */
+export function formatFullDate(ms: number) {
+  return new Date(ms).toLocaleString([], { dateStyle: "full", timeStyle: "short" });
+}
+
+/** A past moment, as short as stays clear: "4:41 PM", "Yesterday 4:41 PM", "Mon 4:41 PM", "Nov 3", "Nov 3, 2025". */
+export function formatWhen(ms: number, now: Date) {
+  const date = new Date(ms);
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const sixDaysAgo = new Date(now);
+  sixDaysAgo.setDate(now.getDate() - 6);
+  sixDaysAgo.setHours(0, 0, 0, 0);
+  if (date.toDateString() === now.toDateString()) return formatTime(ms);
+  if (date.toDateString() === yesterday.toDateString()) return `Yesterday ${formatTime(ms)}`;
+  if (date >= sixDaysAgo) return `${date.toLocaleDateString([], { weekday: "short" })} ${formatTime(ms)}`;
+  if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function formatDay(ms: number) {

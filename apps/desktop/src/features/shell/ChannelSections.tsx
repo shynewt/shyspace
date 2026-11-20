@@ -5,8 +5,9 @@ import { api, type SectionSort, type SidebarSection } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useLive } from "../../lib/useLive";
+import { useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs } from "../../ui";
-import { ChannelList } from "./ChannelList";
+import { ChannelList, listedChannels } from "./ChannelList";
 
 const SORTS: { sort: SectionSort; label: string; icon: ReactNode }[] = [
   { sort: "name", label: "A to Z", icon: <ArrowDownAZ size={14} /> },
@@ -92,6 +93,7 @@ function Section({
   builtinActions: ReactNode;
   onAddSection: () => void;
 }) {
+  const { channels, view } = useWorkspace();
   const [isRenaming, setRenaming] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const isOpen = !section.is_collapsed;
@@ -117,6 +119,10 @@ function Section({
       isDestructive: true,
     });
   }
+  // The built-in section holds the filter, so only your own sections hide when nothing in them is listed.
+  const isEmptyWhileFiltered =
+    isUnreadOnly && !section.is_builtin && listedChannels(section.channels, channels, view, true).length === 0;
+  if (isEmptyWhileFiltered) return null;
   return (
     <section aria-label={section.name} className="mt-3">
       {isRenaming ? (
@@ -140,7 +146,7 @@ function Section({
             <span className="truncate">{section.name}</span>
           </button>
           {builtinActions}
-          <span className="opacity-0 group-hover/section:opacity-100 focus-within:opacity-100">
+          <span className="opacity-0 group-hover/section:opacity-100 keyboard-focus-within:opacity-100">
             <Menu
               trigger={
                 <IconButton label={`Actions for the ${section.name} section`} size="sm" icon={<Ellipsis size={13} />} />
@@ -157,7 +163,7 @@ function Section({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex flex-col gap-px overflow-hidden"
+            className="flex flex-col gap-px overflow-clip"
           >
             <ChannelList
               channelIds={section.channels}

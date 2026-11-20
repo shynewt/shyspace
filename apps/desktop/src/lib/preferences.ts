@@ -6,14 +6,22 @@ import { reportError } from "./toast";
  * storage. Reads fall back to the default when storage is unavailable.
  */
 export type Theme = "system" | "light" | "dark";
+/** "system" follows the operating system's reduce-motion setting. */
+export type ReduceMotion = "system" | "on" | "off";
+
+export type RecentEmoji = { emoji: string; label: string };
 
 type Preferences = {
   theme: Theme;
+  reduceMotion: ReduceMotion;
   /** Show message text in desktop notifications (off hides it). */
   alertsShowText: boolean;
+  /** Newest first, at most RECENT_EMOJI_LIMIT. */
+  recentEmoji: RecentEmoji[];
 };
 
-const DEFAULTS: Preferences = { theme: "system", alertsShowText: true };
+const DEFAULTS: Preferences = { theme: "system", reduceMotion: "system", alertsShowText: true, recentEmoji: [] };
+const RECENT_EMOJI_LIMIT = 16;
 const KEY = "shyspace.preferences";
 const listeners = new Set<() => void>();
 
@@ -60,4 +68,36 @@ export function useTheme() {
     if (theme === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+}
+
+const MOTION_CONFIG: Record<ReduceMotion, "user" | "always" | "never"> = {
+  system: "user",
+  on: "always",
+  off: "never",
+};
+
+/** The chosen reduce-motion setting, in the form Motion's `MotionConfig` takes. */
+export function useReducedMotionConfig(): "user" | "always" | "never" {
+  const [{ reduceMotion }] = usePreferences();
+  return MOTION_CONFIG[reduceMotion];
+}
+
+/** The recent emoji list after picking `picked`: it moves to the front, once. */
+export function withRecentEmoji(recent: RecentEmoji[], picked: RecentEmoji): RecentEmoji[] {
+  return [picked, ...recent.filter((entry) => entry.emoji !== picked.emoji)].slice(0, RECENT_EMOJI_LIMIT);
+}
+
+/** Stored recent emoji, skipping anything that isn't one (local storage is only ever a convenience). */
+export function validRecentEmoji(stored: unknown): RecentEmoji[] {
+  if (!Array.isArray(stored)) return [];
+  return stored.flatMap((entry: unknown) =>
+    typeof entry === "object" &&
+    entry !== null &&
+    "emoji" in entry &&
+    "label" in entry &&
+    typeof entry.emoji === "string" &&
+    typeof entry.label === "string"
+      ? [{ emoji: entry.emoji, label: entry.label }]
+      : [],
+  );
 }

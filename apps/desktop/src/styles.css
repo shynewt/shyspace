@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+/* Dark: chosen in settings, or the system's choice unless Light was chosen. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+/* Focus a key put inside this element (see useInputModality), for controls that otherwise show on hover. */
+@custom-variant keyboard-focus-within (:root:not([data-modality="pointer"]) &:has(:focus-visible));
+
 :root {
   color-scheme: light;
   --bg: #f7f6f3;
@@ -8,43 +23,26 @@
   --surface-3: #e7e4dd;
   --border: #e4e1da;
   --text: #22201c;
-  --text-muted: #77736b;
-  --text-faint: #a29e95;
+  --text-muted: #68645d;
+  /* Informational: timestamps, hints, section labels. Meets WCAG AA. */
+  --text-faint: #737069;
+  /* Decoration only (icons beside a label, chevrons): never the only way to read something. */
+  --text-decorative: #a29e95;
   --accent: #6b5cff;
   --accent-strong: #5646f0;
   --accent-soft: #ecebff;
   --accent-text: #4b3dd6;
-  --danger: #d6455d;
+  /* The plain colors are for fills, dots and icons; the -text ones for text. */
+  --danger: #b33a4e;
+  --danger-text: #b33a4e;
   --success: #2f9e6a;
+  --success-text: #247951;
   --warning: #c98a12;
+  --warning-text: #8f620d;
   --shadow: 0 1px 2px rgb(30 25 15 / 0.06), 0 8px 24px rgb(30 25 15 / 0.08);
   --shadow-lg: 0 2px 6px rgb(30 25 15 / 0.08), 0 24px 64px rgb(30 25 15 / 0.18);
-}
 
-/* Dark: chosen in settings, or the system's choice unless Light was chosen. */
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #141412;
-  --surface: #1b1b19;
-  --surface-2: #232320;
-  --surface-3: #2d2d29;
-  --border: #2e2e2a;
-  --text: #ecebe6;
-  --text-muted: #9c9a92;
-  --text-faint: #6c6a63;
-  --accent: #8b7fff;
-  --accent-strong: #9d93ff;
-  --accent-soft: #26234a;
-  --accent-text: #b3abff;
-  --danger: #ef6b80;
-  --success: #4cc48c;
-  --warning: #e3a83a;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
-  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 64px rgb(0 0 0 / 0.55);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  @variant dark {
     color-scheme: dark;
     --bg: #141412;
     --surface: #1b1b19;
@@ -53,14 +51,18 @@
     --border: #2e2e2a;
     --text: #ecebe6;
     --text-muted: #9c9a92;
-    --text-faint: #6c6a63;
-    --accent: #8b7fff;
-    --accent-strong: #9d93ff;
+    --text-faint: #8c8a84;
+    --text-decorative: #6c6a63;
+    --accent: #6f63e4;
+    --accent-strong: #655ada;
     --accent-soft: #26234a;
     --accent-text: #b3abff;
-    --danger: #ef6b80;
+    --danger: #c64b5f;
+    --danger-text: #ef6b80;
     --success: #4cc48c;
+    --success-text: #4cc48c;
     --warning: #e3a83a;
+    --warning-text: #e3a83a;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
     --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 64px rgb(0 0 0 / 0.55);
   }
@@ -75,13 +77,17 @@
   --color-ink: var(--text);
   --color-muted: var(--text-muted);
   --color-faint: var(--text-faint);
+  --color-decorative: var(--text-decorative);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-soft: var(--accent-soft);
   --color-accent-text: var(--accent-text);
   --color-danger: var(--danger);
+  --color-danger-text: var(--danger-text);
   --color-success: var(--success);
+  --color-success-text: var(--success-text);
   --color-warning: var(--warning);
+  --color-warning-text: var(--warning-text);
   --shadow-card: var(--shadow);
   --shadow-float: var(--shadow-lg);
   --font-sans: "Inter", "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -126,6 +132,11 @@
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
+
+  /* After a click, focus a script moves (a menu giving it back to its trigger) gets no ring. */
+  :root[data-modality="pointer"] :focus-visible {
+    outline: none;
+  }
 }
 
 /* Rendered chat markdown */
@@ -135,6 +146,10 @@
 }
 .prose-chat p {
   margin: 0;
+}
+/* "(edited)" follows the last line of text. */
+.prose-chat p:has(+ .edited-mark) {
+  display: inline;
 }
 .prose-chat p + p,
 .prose-chat ul,

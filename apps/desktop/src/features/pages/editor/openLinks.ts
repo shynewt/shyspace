@@ -1,0 +1,30 @@
+/** Opening a page's links: web and mail links in their apps, page links in shyspace. */
+import { Facet } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { reportError } from "../../../lib/toast";
+import { externalUrl, type LinkTarget } from "./links";
+
+/** How the editor opens another page; given by the screen that hosts it. */
+export const pageOpener = Facet.define<(pageId: string) => void, ((pageId: string) => void) | undefined>({
+  combine: (openers) => openers[0],
+});
+
+export function openLink(view: EditorView, link: LinkTarget): void {
+  if (link.pageId) {
+    openPage(view, link.pageId);
+    return;
+  }
+  const url = externalUrl(link.url);
+  if (!url) {
+    reportError(new Error(`only web and email links open from a page, not "${link.url}"`));
+    return;
+  }
+  openUrl(url).catch(reportError);
+}
+
+export function openPage(view: EditorView, pageId: string): void {
+  const open = view.state.facet(pageOpener);
+  if (!open) throw new Error("the page editor was set up without a way to open pages");
+  open(pageId);
+}

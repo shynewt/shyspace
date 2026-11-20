@@ -35,7 +35,7 @@ export function PageCard({ pageId }: { pageId: string }) {
           <span className="truncate">{page.title || "Untitled"}</span>
           <ArrowUpRight
             size={14}
-            className="shrink-0 text-faint transition group-hover/card:translate-x-0.5 group-hover/card:-translate-y-0.5 group-hover/card:text-accent"
+            className="shrink-0 text-decorative transition group-hover/card:translate-x-0.5 group-hover/card:-translate-y-0.5 group-hover/card:text-accent"
           />
         </div>
         <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted">{preview || "Empty page"}</p>

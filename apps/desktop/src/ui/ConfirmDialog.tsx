@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { reportError } from "../lib/toast";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
@@ -14,6 +14,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   onConfirm,
+  children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -21,6 +22,8 @@ export function ConfirmDialog({
   description: string;
   confirmLabel: string;
   onConfirm: () => Promise<void>;
+  /** What the action applies to, shown above the buttons. */
+  children?: ReactNode;
 }) {
   const [isBusy, setBusy] = useState(false);
   const confirm = async () => {
@@ -36,6 +39,7 @@ export function ConfirmDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title={title} description={description} width={400}>
+      {children && <div className="px-5 pt-3">{children}</div>}
       <div className="flex justify-end gap-2 p-5">
         <Button variant="ghost" onClick={() => onOpenChange(false)}>
           Cancel

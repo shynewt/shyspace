@@ -8,22 +8,35 @@ import {
   Link2,
   MessageSquareReply,
   Pencil,
+  Plus,
   SmilePlus,
   Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink } from "../../lib/api";
-import { ChatMarkdown, messageIdsIn, pageIdsIn } from "../../lib/markdown";
-import { displayName, formatTime } from "../../lib/people";
+import { ChatMarkdown, messageIdsIn, pageIdsIn, plainPreview } from "../../lib/markdown";
+import { displayName, formatFullDate, formatTime, formatWhen } from "../../lib/people";
 import { REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
-import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs } from "../../ui";
+import { linkedMessageView, useWorkspace } from "../../lib/workspace";
+import {
+  Avatar,
+  Badge,
+  ConfirmDialog,
+  cx,
+  EmojiPicker,
+  IconButton,
+  Menu,
+  type MenuItem,
+  Popover,
+  springs,
+  Tooltip,
+} from "../../ui";
 import { MessageCard } from "./MessageCard";
 import { PageCard } from "./PageCard";
-import { SavedMarker } from "./SavedMarker";
+import { describeSaved, SavedLabel } from "./SavedLabel";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
 
@@ -44,6 +57,7 @@ export const MessageItem = memo(function MessageItem({
 }) {
   const { pages, navigate, session } = useWorkspace();
   const [isPickerOpen, setPickerOpen] = useState(false);
+  const [isFullPickerShown, setFullPickerShown] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const [isMenuOpen, setMenuOpen] = useState(false);
   const article = useRef<HTMLElement>(null);
@@ -53,36 +67,41 @@ export const MessageItem = memo(function MessageItem({
   const linkedMessages = useMemo(() => messageIdsIn(message.text).filter((id) => id !== message.id), [message]);
   const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
   const name = displayName(message.author_name, message.author);
+  const savedDescription = describeSaved(message.saved);
+
+  const openLinkedMessage = (id: string) =>
+    api.linkedMessage(id).then((linked) => {
+      if (!linked) return showToast("That message was deleted.", "info");
+      navigate(linkedMessageView(linked));
+    }, reportError);
 
   const toggleReaction = (emoji: string) => {
     const isMine = message.reactions.find((reaction) => reaction.emoji === emoji)?.mine ?? false;
     api.react(message.id, emoji, !isMine).catch(reportError);
     setPickerOpen(false);
+    setFullPickerShown(false);
   };
 
   return (
     <article
       ref={article}
       id={`message-${message.id}`}
-      aria-label={`${name} at ${formatTime(message.created_ms)}`}
+      aria-label={`${name}, ${formatFullDate(message.created_ms)}${savedDescription ? `, ${savedDescription}` : ""}`}
       className={cx(
-        "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 focus-within:bg-surface-2/50",
+        "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 keyboard-focus-within:bg-surface-2/50",
         isContinuation ? "py-0.5" : "pt-2 pb-0.5",
         isHighlighted && "bg-accent-soft/70",
         message.mentions_me && !isHighlighted && "bg-warning/8 shadow-[inset_2px_0_0_var(--warning)]",
+        savedDescription && !message.mentions_me && !isHighlighted && "bg-accent-soft/35",
       )}
     >
       <div className="w-9 shrink-0">
         {isContinuation ? (
-          <span className="relative flex justify-end pt-[3px]">
-            <span className="text-[10.5px] text-faint opacity-0 group-hover:opacity-100">
-              {formatTime(message.created_ms)}
-            </span>
-            {message.saved && !message.saved.is_done && (
-              <span className="absolute top-0 right-0 group-hover:opacity-0 focus-within:opacity-100">
-                <SavedMarker saved={message.saved} />
-              </span>
-            )}
+          <span className="flex justify-end pt-[3px]">
+            <MessageTime
+              ms={message.created_ms}
+              className="text-[10.5px] whitespace-nowrap text-faint opacity-0 group-hover:opacity-100"
+            />
           </span>
         ) : (
           <Avatar id={message.author} name={name} isBot={message.author_is_bot} size={36} />
@@ -100,20 +119,19 @@ export const MessageItem = memo(function MessageItem({
           <div className="flex items-baseline gap-2">
             <span className="text-[13.5px] font-semibold">{name}</span>
             {message.author_is_bot && <Badge tone="accent">bot</Badge>}
-            <span className="text-[11.5px] text-faint">{formatTime(message.created_ms)}</span>
-            <span className="self-center">
-              <SavedMarker saved={message.saved} />
-            </span>
+            <MessageTime ms={message.created_ms} className="text-[11.5px] text-faint" />
           </div>
         )}
+        <SavedLabel saved={message.saved} />
         <div className="prose-chat selectable text-[14px]">
           <ChatMarkdown
             text={message.text}
             myId={session.me}
             pageTitle={(id) => titles.get(id)}
             onOpenPage={(id) => navigate({ kind: "page", id })}
+            onOpenMessage={openLinkedMessage}
           />
-          {message.is_edited && <span className="text-[11px] text-faint">(edited)</span>}
+          {message.is_edited && <span className="edited-mark ml-1 text-[11px] text-faint">(edited)</span>}
         </div>
 
         {linkedPages.map((id) => (
@@ -167,30 +185,43 @@ export const MessageItem = memo(function MessageItem({
           "absolute -top-3 right-5 flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5 shadow-card transition",
           isPickerOpen || isMenuOpen
             ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+            : "opacity-0 group-hover:opacity-100 keyboard-focus-within:opacity-100",
         )}
       >
         <Popover
           open={isPickerOpen}
-          onOpenChange={setPickerOpen}
+          onOpenChange={(open) => {
+            setPickerOpen(open);
+            if (!open) setFullPickerShown(false);
+          }}
           trigger={<IconButton label="React" icon={<SmilePlus size={15} />} />}
         >
-          <div className="flex gap-0.5">
-            {QUICK_REACTIONS.map((emoji, index) => (
-              <motion.button
-                key={emoji}
-                type="button"
-                aria-label={`React with ${emoji}`}
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1, transition: { ...springs.pop, delay: index * 0.025 } }}
-                whileHover={{ scale: 1.25 }}
-                onClick={() => toggleReaction(emoji)}
-                className="grid h-8 w-8 place-items-center rounded-md text-[17px] hover:bg-surface-2"
-              >
-                {emoji}
-              </motion.button>
-            ))}
-          </div>
+          {isFullPickerShown ? (
+            <EmojiPicker onSelect={toggleReaction} />
+          ) : (
+            <div className="flex items-center gap-0.5">
+              {QUICK_REACTIONS.map((emoji, index) => (
+                <motion.button
+                  key={emoji}
+                  type="button"
+                  aria-label={`React with ${emoji}`}
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1, transition: { ...springs.pop, delay: index * 0.025 } }}
+                  whileHover={{ scale: 1.25 }}
+                  onClick={() => toggleReaction(emoji)}
+                  className="grid h-8 w-8 place-items-center rounded-md text-[17px] hover:bg-surface-2"
+                >
+                  {emoji}
+                </motion.button>
+              ))}
+              <IconButton
+                label="More emoji…"
+                icon={<Plus size={15} />}
+                onClick={() => setFullPickerShown(true)}
+                className="ml-0.5 h-8 w-8"
+              />
+            </div>
+          )}
         </Popover>
         {onOpenThread && (
           <IconButton label="Reply in thread" icon={<MessageSquareReply size={15} />} onClick={onOpenThread} />
@@ -210,7 +241,13 @@ export const MessageItem = memo(function MessageItem({
         description="It disappears for everyone, along with its reactions. This can't be undone."
         confirmLabel="Delete message"
         onConfirm={() => api.deleteMessage(message.id)}
-      />
+      >
+        {isConfirmingDelete && (
+          <blockquote className="selectable line-clamp-3 border-l-3 border-surface-3 pl-2.5 text-[13px] text-ink">
+            {plainPreview(message.text, (id) => titles.get(id))}
+          </blockquote>
+        )}
+      </ConfirmDialog>
     </article>
   );
 });
@@ -278,6 +315,16 @@ function MessageMenu({
   );
 }
 
+function MessageTime({ ms, className }: { ms: number; className: string }) {
+  return (
+    <Tooltip label={formatFullDate(ms)}>
+      <time dateTime={new Date(ms).toISOString()} className={className}>
+        {formatTime(ms)}
+      </time>
+    </Tooltip>
+  );
+}
+
 function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
   const count = message.reply_count;
   return (
@@ -289,7 +336,9 @@ function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => vo
       <span className="font-medium text-accent-text">
         {count} {count === 1 ? "reply" : "replies"}
       </span>
-      {message.last_reply_ms && <span className="text-faint">Last reply {formatTime(message.last_reply_ms)}</span>}
+      {message.last_reply_ms && (
+        <span className="text-faint">Last reply {formatWhen(message.last_reply_ms, new Date())}</span>
+      )}
       {message.unread_replies > 0 && (
         <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white">
           {message.unread_replies} new

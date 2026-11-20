@@ -51,3 +51,22 @@ test("a section can sort by recent activity", async ({ page }) => {
   await chooseInSubmenu(page, "Sort", "Recent activity");
   await expect(channels.getByRole("button", { name: /^(general|random)/ }).first()).toHaveAccessibleName(/random/);
 });
+
+test("showing unread channels only hides sections with none", async ({ page }) => {
+  await sectionMenu(page, "Channels");
+  await page.getByRole("menuitem", { name: "New section" }).click();
+  await page.getByLabel("Section name").fill("Projects");
+  await page.getByLabel("Section name").press("Enter");
+  await page.getByRole("button", { name: "random", exact: true }).click({ button: "right" });
+  await chooseInSubmenu(page, "Move to", "Projects");
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  const projects = page.getByRole("region", { name: "Projects" });
+  await expect(projects.getByRole("button", { name: "random", exact: true })).toBeVisible();
+
+  await page.getByRole("region", { name: "Channels" }).hover();
+  await page.getByRole("button", { name: "Show unread channels only" }).click();
+  await expect(projects).toHaveCount(0);
+
+  await page.evaluate(() => window.fake.receiveMessage(window.fake.addMember("Grace"), "random", "news"));
+  await expect(projects.getByRole("button", { name: "random, 1 unread" })).toBeVisible();
+});

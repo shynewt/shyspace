@@ -60,3 +60,57 @@ test("a right-click opens the channel's menu with the current level checked", as
   await page.getByRole("menuitem", { name: "Notifications" }).hover();
   await expect(page.getByRole("menuitemradio", { name: "Every message" })).toHaveAttribute("aria-checked", "true");
 });
+
+test("every channel's alerts can be set and reset in Settings", async ({ page }) => {
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Notifications" }).click();
+  await expect(settings.getByRole("tabpanel")).toContainText("Your status can make alerts quieter");
+  const random = settings.getByRole("radiogroup", { name: "Alerts for #random" });
+  const general = settings.getByRole("radiogroup", { name: "Alerts for #general" });
+
+  await random.getByRole("radio", { name: "Muted" }).click();
+  await general.getByRole("radio", { name: "Mentions only" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.fake.handle("channels", undefined)))
+    .toContainEqual(expect.objectContaining({ name: "random", notify: "nothing" }));
+
+  await settings.getByRole("button", { name: "Reset all to every message" }).click();
+  await expect(random.getByRole("radio", { name: "Every message" })).toBeChecked();
+  await expect(general.getByRole("radio", { name: "Every message" })).toBeChecked();
+  await expect(settings.getByRole("button", { name: "Reset all to every message" })).toBeDisabled();
+
+  await settings.getByRole("button", { name: "Undo" }).click();
+  await expect(random.getByRole("radio", { name: "Muted" })).toBeChecked();
+  await expect(general.getByRole("radio", { name: "Mentions only" })).toBeChecked();
+});
+
+test("resetting alerts keeps what worked undoable when one channel fails", async ({ page }) => {
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Notifications" }).click();
+  const random = settings.getByRole("radiogroup", { name: "Alerts for #random" });
+  const general = settings.getByRole("radiogroup", { name: "Alerts for #general" });
+  await random.getByRole("radio", { name: "Muted" }).click();
+  await general.getByRole("radio", { name: "Mentions only" }).click();
+  await expect(general.getByRole("radio", { name: "Mentions only" })).toBeChecked();
+  await page.evaluate(() => {
+    const answer = window.fake.handle.bind(window.fake);
+    const channels = answer("channels", undefined) as { id: string; name: string }[];
+    const randomId = channels.find((channel) => channel.name === "random")?.id;
+    window.fake.handle = (command, args) => {
+      if (command === "set_notify_level" && args && "channel" in args && args.channel === randomId) {
+        throw "the workspace is offline";
+      }
+      return answer(command, args);
+    };
+  });
+
+  await settings.getByRole("button", { name: "Reset all to every message" }).click();
+  await expect(settings.getByRole("alert")).toContainText("the workspace is offline");
+  await expect(general.getByRole("radio", { name: "Every message" })).toBeChecked();
+  await expect(random.getByRole("radio", { name: "Muted" })).toBeChecked();
+
+  await settings.getByRole("button", { name: "Undo" }).click();
+  await expect(general.getByRole("radio", { name: "Mentions only" })).toBeChecked();
+});

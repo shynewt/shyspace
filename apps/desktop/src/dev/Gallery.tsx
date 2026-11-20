@@ -9,9 +9,10 @@ import {
   ConfirmDialog,
   CopyField,
   Dialog,
-  Drawer,
+  EmojiPicker,
   EmptyState,
   Field,
+  FormError,
   IconButton,
   Input,
   Kbd,
@@ -28,7 +29,6 @@ import {
 /** Every design-system component in one place. Open the app with #gallery in development. */
 export default function Gallery() {
   const [isDialogOpen, setDialogOpen] = useState(false);
-  const [isDrawerOpen, setDrawerOpen] = useState(false);
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [segment, setSegment] = useState<"one" | "two" | "three">("one");
   return (
@@ -73,12 +73,24 @@ export default function Gallery() {
               {(id) => <Input id={id} placeholder="Ada Lovelace" />}
             </Field>
             <Field label="Notes">{(id) => <TextArea id={id} rows={2} placeholder="Write something…" />}</Field>
+            <FormError message="The bucket refused these keys: 403 Forbidden" />
           </div>
         </Example>
 
         <Example title="Selection">
+          <SegmentedControl
+            label="Example choice"
+            options={[
+              { value: "one", label: "One" },
+              { value: "two", label: "Two" },
+              { value: "three", label: "Three" },
+            ]}
+            value={segment}
+            onChange={setSegment}
+          />
           <div className="w-full max-w-[420px]">
             <SegmentedControl
+              label="Example full-width choice"
               options={[
                 { value: "one", label: "One" },
                 { value: "two", label: "Two" },
@@ -86,13 +98,13 @@ export default function Gallery() {
               ]}
               value={segment}
               onChange={setSegment}
+              width="full"
             />
           </div>
         </Example>
 
         <Example title="Floating surfaces">
           <Button onClick={() => setDialogOpen(true)}>Open dialog</Button>
-          <Button onClick={() => setDrawerOpen(true)}>Open drawer</Button>
           <Button onClick={() => setConfirmOpen(true)}>Confirm a delete</Button>
           <Menu
             trigger={<Button>Open menu</Button>}
@@ -111,6 +123,9 @@ export default function Gallery() {
           />
           <Popover trigger={<Button>Open popover</Button>}>
             <div className="p-3 text-[13px]">Anchored to its trigger.</div>
+          </Popover>
+          <Popover trigger={<Button>Pick an emoji</Button>} side="bottom" align="start">
+            <EmojiPicker onSelect={(emoji) => showToast(`Picked ${emoji}`)} />
           </Popover>
           <Button onClick={() => showToast("Saved")}>Show toast</Button>
         </Example>
@@ -176,9 +191,6 @@ export default function Gallery() {
         confirmLabel="Delete"
         onConfirm={async () => showToast("Deleted")}
       />
-      <Drawer open={isDrawerOpen} onOpenChange={setDrawerOpen} title="A drawer">
-        <p className="p-2 text-[13px] text-muted">Panels that slide in from the side.</p>
-      </Drawer>
     </div>
   );
 }

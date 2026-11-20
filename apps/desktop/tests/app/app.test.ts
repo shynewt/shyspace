@@ -54,13 +54,15 @@ test("an approved agent's message arrives live in the app", () =>
   withTempDirs(["admin", "agent"], async ([adminDir, agentDir]) => {
     await withApp(adminDir, async (app) => {
       await createWorkspace(app);
-      await app.$("button*=Members & invites").click();
-      await app.$("aria/Who the invite is for").setValue("Robot");
-      await app.$("button=Create").click();
+      await app.$("button*=Acme").click();
+      await app.$("aria/Invite people").click();
+      await app.$("aria/Who is it for?").setValue("Robot");
+      await app.$("button=Create invite").click();
       const inviteCode = await waitForInviteCode(app);
 
       const agent = new CliMember(agentDir);
       const joined = agent.join(inviteCode, "Robot");
+      await app.$("aria/Requests").click();
       await app.$("button=Codes match, let in").waitForClickable(TIMEOUT);
       await app.$("button=Codes match, let in").click();
       await joined;

@@ -1,5 +1,7 @@
 /** Reminder presets, in the user's local time. */
 
+import { formatTime } from "./people";
+
 const MINUTE_MS = 60 * 1000;
 const MORNING_HOUR = 9;
 
@@ -33,11 +35,11 @@ export const REMINDER_CHOICES: ReminderChoice[] = [
   },
 ];
 
-/** "Overdue", "Today 15:00", "Tomorrow 09:00", or "Mon 24 Nov 09:00". */
+/** "Overdue", "Today 3:00 PM", "Tomorrow 9:00 AM", or "Mon, Nov 24 9:00 AM". */
 export function describeReminder(remindMs: number, now: Date): string {
   if (remindMs <= now.getTime()) return "Overdue";
   const at = new Date(remindMs);
-  const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time = formatTime(remindMs);
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
   if (at.toDateString() === now.toDateString()) return `Today ${time}`;

@@ -1,13 +1,13 @@
-import { ArrowUp, Pencil, X } from "lucide-react";
+import { ArrowUp, Pencil, Smile, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
 import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
-import { Button, cx, IconButton, Kbd, springs } from "../../ui";
+import { Button, cx, EmojiPicker, IconButton, Kbd, Popover, springs } from "../../ui";
 import { useDraft } from "./useDraft";
-import { useMentionPicker } from "./useMentionPicker";
+import { useSuggestions } from "./useSuggestions";
 
 const MAX_HEIGHT_PX = 200;
 
@@ -33,9 +33,11 @@ export function Composer({
   onEditLast?: () => void;
 }) {
   const [text, setText] = useState("");
+  const [isFocused, setFocused] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   useFocusOnMount(input);
-  const picker = useMentionPicker(input, (next) => updateText(next));
+  const picker = useSuggestions(input, (next) => updateText(next));
+  const [isEmojiOpen, setEmojiOpen] = useState(false);
   const sentLength = characterCount(picker.toSend(text).trim());
   const isTooLong = sentLength > MAX_MESSAGE_CHARS;
   const canSend = sentLength > 0 && !isTooLong;
@@ -96,8 +98,20 @@ export function Composer({
     }
   };
 
+  /** Puts the emoji where the cursor is, replacing any selection, and leaves the cursor after it. */
+  const insertEmoji = (emoji: string) => {
+    const element = input.current;
+    if (!element) return;
+    const before = element.value.slice(0, element.selectionStart) + emoji;
+    updateText(before + element.value.slice(element.selectionEnd));
+    setEmojiOpen(false);
+    requestAnimationFrame(() => element.setSelectionRange(before.length, before.length));
+  };
+
+  const isHintShown = editing !== null || (isFocused && text === "");
+
   return (
-    <div className="shrink-0 px-5 pt-1 pb-4">
+    <div className="relative shrink-0 px-5 pt-1 pb-7">
       <div className="relative">
         <AnimatePresence>{picker.list}</AnimatePresence>
         <motion.div
@@ -133,6 +147,8 @@ export function Composer({
               rows={1}
               aria-label={label}
               {...picker.inputProps}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               onChange={(event) => {
                 updateText(event.target.value);
                 picker.onTextChange(event.target.value, event.target.selectionStart);
@@ -145,7 +161,7 @@ export function Composer({
                 } else if (event.key === "Escape" && editing) {
                   event.preventDefault();
                   finishEditing();
-                } else if (event.key === "ArrowUp" && !text && !editing && onEditLast) {
+                } else if (event.key === "ArrowUp" && !hasModifier(event) && !text && !editing && onEditLast) {
                   event.preventDefault();
                   onEditLast();
                 }
@@ -153,6 +169,14 @@ export function Composer({
               placeholder={label}
               className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent py-1 text-[14px] leading-6 outline-none placeholder:text-faint"
             />
+            <Popover
+              open={isEmojiOpen}
+              onOpenChange={setEmojiOpen}
+              returnFocusTo={input}
+              trigger={<IconButton label="Insert emoji" icon={<Smile size={16} />} className="mb-0.5" />}
+            >
+              <EmojiPicker onSelect={insertEmoji} />
+            </Popover>
             <Button
               variant="primary"
               aria-label={editing ? "Save" : "Send"}
@@ -164,20 +188,49 @@ export function Composer({
           </div>
         </motion.div>
       </div>
-      <p className="mt-1.5 flex items-center gap-1.5 px-1 text-[11px] text-faint">
+      {/* In the space under the box, so showing it never moves the box. */}
+      <div className="absolute inset-x-6 bottom-1.5 flex h-[18px] items-center gap-3 overflow-hidden text-[11px] text-faint">
         <LengthCount length={sentLength} isTooLong={isTooLong} />
-        {editing ? (
-          <>
-            <Kbd>Enter</Kbd> to save · <Kbd>Esc</Kbd> to cancel
-          </>
-        ) : (
-          <>
-            <Kbd>Enter</Kbd> to send · <Kbd>Shift Enter</Kbd> for a new line · <Kbd>↑</Kbd> to edit your last message
-          </>
-        )}
-      </p>
+        <AnimatePresence initial={false}>
+          {isHintShown && (
+            <motion.p
+              key={editing ? "editing" : "writing"}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              className="flex items-center gap-3"
+            >
+              {editing ? (
+                <>
+                  <KeyHint keys="Enter">save</KeyHint>
+                  <KeyHint keys="Esc">cancel</KeyHint>
+                </>
+              ) : (
+                <>
+                  <KeyHint keys="Enter">send</KeyHint>
+                  <KeyHint keys="Shift Enter">new line</KeyHint>
+                  <KeyHint keys="↑">edit last</KeyHint>
+                </>
+              )}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
+}
+
+function KeyHint({ keys, children }: { keys: string; children: string }) {
+  return (
+    <span className="flex items-center gap-1 whitespace-nowrap">
+      <Kbd>{keys}</Kbd> {children}
+    </span>
+  );
+}
+
+function hasModifier(event: React.KeyboardEvent): boolean {
+  return event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
 }
 
 function LengthCount({ length, isTooLong }: { length: number; isTooLong: boolean }) {
@@ -189,7 +242,10 @@ function LengthCount({ length, isTooLong }: { length: number; isTooLong: boolean
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
           transition={springs.snappy}
-          className={cx("order-last ml-auto tabular-nums", isTooLong ? "font-medium text-danger" : "text-warning")}
+          className={cx(
+            "order-last ml-auto tabular-nums",
+            isTooLong ? "font-medium text-danger-text" : "text-warning-text",
+          )}
         >
           {isTooLong && "Too long to send: "}
           {length.toLocaleString()} / {MAX_MESSAGE_CHARS.toLocaleString()}

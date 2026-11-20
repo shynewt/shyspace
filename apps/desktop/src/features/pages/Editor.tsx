@@ -1,50 +1,24 @@
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { EditorState } from "@codemirror/state";
-import { drawSelection, EditorView, highlightActiveLine, keymap, placeholder } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
+import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
-import { yCollab } from "y-codemirror.next";
+import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import { api, onChange } from "../../lib/api";
 import { reportError } from "../../lib/toast";
+import { useWorkspace } from "../../lib/workspace";
+import { formattingKeymap } from "./editor/commands";
+import { livePreview, setPageTitles } from "./editor/livePreview";
+import { type MenuKey, type Suggestion, suggestions } from "./editor/suggestions";
+import { pageTheme } from "./editor/theme";
 import { PAGE_TEXT } from "./pageText";
+import { SuggestionMenu } from "./SuggestionMenu";
 
 /** Local keystrokes are batched before being sealed and sent. */
 const SEND_DELAY_MS = 120;
 const REMOTE = "remote";
-
-const markdownStyle = HighlightStyle.define([
-  { tag: tags.heading1, fontSize: "1.75em", fontWeight: "700", letterSpacing: "-0.02em" },
-  { tag: tags.heading2, fontSize: "1.4em", fontWeight: "650", letterSpacing: "-0.01em" },
-  { tag: tags.heading3, fontSize: "1.18em", fontWeight: "620" },
-  { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: "600" },
-  { tag: tags.strong, fontWeight: "650" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strikethrough, textDecoration: "line-through", color: "var(--text-muted)" },
-  { tag: tags.link, color: "var(--accent-text)", textDecoration: "underline" },
-  { tag: tags.url, color: "var(--text-faint)" },
-  { tag: tags.monospace, fontFamily: "var(--font-mono)", fontSize: "0.88em", color: "var(--accent-text)" },
-  { tag: tags.quote, color: "var(--text-muted)", fontStyle: "italic" },
-  { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator], color: "var(--text-faint)" },
-  { tag: tags.list, color: "var(--accent)" },
-]);
-
-const theme = EditorView.theme({
-  "&": { fontSize: "15.5px", backgroundColor: "transparent", color: "var(--text)" },
-  "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "var(--font-sans)", lineHeight: "1.7", overflow: "visible" },
-  ".cm-content": { padding: "0 0 40vh", caretColor: "var(--accent)" },
-  ".cm-line": { padding: "0" },
-  ".cm-activeLine": { backgroundColor: "transparent" },
-  ".cm-cursor": { borderLeftColor: "var(--accent)", borderLeftWidth: "2px" },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-    backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent) !important",
-  },
-  ".cm-placeholder": { color: "var(--text-faint)" },
-});
 
 /**
  * Collaborative markdown editor. The Y.Doc mirrors the page held by the core:
@@ -66,6 +40,12 @@ export function Editor({ pageId }: { pageId: string }) {
 
 function PageEditor({ pageId }: { pageId: string }) {
   const host = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<EditorView | null>(null);
+  const { pages, navigate } = useWorkspace();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const menuKeys = useRef<(key: MenuKey, view: EditorView) => boolean>(() => false);
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -90,31 +70,37 @@ function PageEditor({ pageId }: { pageId: string }) {
       if (change.kind === "doc" && change.page === pageId) Y.applyUpdate(doc, Uint8Array.from(change.update), REMOTE);
     });
 
-    let view: EditorView | undefined;
+    let created: EditorView | undefined;
     let disposed = false;
     api.pageState(pageId).then((state) => {
       if (disposed || !host.current) return;
       if (state.length > 0) Y.applyUpdate(doc, state, REMOTE);
       const undoManager = new Y.UndoManager(text);
-      view = new EditorView({
+      created = new EditorView({
         parent: host.current,
         state: EditorState.create({
           doc: text.toString(),
           extensions: [
             drawSelection(),
-            highlightActiveLine(),
             EditorView.lineWrapping,
             markdown({ base: markdownLanguage, codeLanguages: languages }),
-            syntaxHighlighting(markdownStyle),
-            placeholder("Start writing… Markdown works, and everyone here edits together."),
-            keymap.of([indentWithTab, ...defaultKeymap]),
+            livePreview({ onOpenPage: (id) => navigateRef.current({ kind: "page", id }) }),
+            suggestions({ onKey: (key, editor) => menuKeys.current(key, editor), onChange: setSuggestion }),
+            placeholder("Type / for blocks, @ to mention someone, [[ to link a page"),
+            keymap.of([
+              ...formattingKeymap,
+              ...yUndoManagerKeymap,
+              indentWithTab,
+              // Ctrl+/ stays the app's shortcut sheet; HTML comments have no place in a page.
+              ...defaultKeymap.filter((binding) => binding.key !== "Mod-/"),
+            ]),
             // Yjs undo only reverts your own edits, never a teammate's.
             yCollab(text, null, { undoManager }),
-            theme,
+            pageTheme,
           ],
         }),
       });
-      if (text.length === 0) view.focus();
+      setView(created);
     }, reportError);
 
     return () => {
@@ -122,10 +108,19 @@ function PageEditor({ pageId }: { pageId: string }) {
       unsubscribe();
       if (timer) clearTimeout(timer);
       flush();
-      view?.destroy();
+      created?.destroy();
       doc.destroy();
     };
   }, [pageId]);
 
-  return <div ref={host} className="selectable min-h-[50vh]" />;
+  useEffect(() => {
+    view?.dispatch({ effects: setPageTitles.of(new Map(pages.map((page) => [page.id, page.title]))) });
+  }, [view, pages]);
+
+  return (
+    <div className="relative">
+      <div ref={host} className="selectable min-h-[50vh]" />
+      <SuggestionMenu view={view} suggestion={suggestion} pageId={pageId} keys={menuKeys} />
+    </div>
+  );
 }

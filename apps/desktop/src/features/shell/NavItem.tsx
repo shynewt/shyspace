@@ -76,7 +76,7 @@ export function NavItem({
           isMuted && !hasUnread && !isActive && "opacity-60",
         )}
       >
-        <span className={isActive ? "text-accent" : "text-faint"}>{icon}</span>
+        <span className={isActive ? "text-accent" : "text-decorative"}>{icon}</span>
         <span className="truncate">{label}</span>
         {status && (
           <span aria-hidden className="shrink-0 text-faint">

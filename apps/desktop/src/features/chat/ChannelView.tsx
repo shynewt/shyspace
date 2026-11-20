@@ -104,8 +104,9 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
   }, [rows, unreadFrom]);
 
   useEffect(() => {
+    // Escape that closed something else, like a menu or the palette, isn't for the line.
     const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setUnreadLineDismissed(true);
+      if (event.key === "Escape" && !event.defaultPrevented) setUnreadLineDismissed(true);
     };
     window.addEventListener("keydown", dismissOnEscape);
     return () => window.removeEventListener("keydown", dismissOnEscape);
@@ -157,7 +158,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-          <Hash size={17} className="text-faint" />
+          <Hash size={17} className="text-decorative" />
           <h1 className="text-[15px] font-semibold">{channel?.name ?? "…"}</h1>
           <AgentsNote />
           <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
@@ -177,7 +178,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
           className="flex-1 overflow-y-auto py-3"
         >
           {hasOlder && (
-            <div className="flex justify-center py-2 text-faint">
+            <div className="flex justify-center py-2 text-decorative">
               <Spinner size={14} />
             </div>
           )}
@@ -279,7 +280,7 @@ function UnreadLine() {
       className="my-2 flex items-center gap-3 px-5"
     >
       <div className="h-px flex-1 bg-danger/60" />
-      <span className="text-[11px] font-semibold tracking-wide text-danger uppercase">New messages</span>
+      <span className="text-[11px] font-semibold tracking-wide text-danger-text uppercase">New messages</span>
     </motion.div>
   );
 }

@@ -60,7 +60,7 @@ export function Onboarding({ onReady }: { onReady: (session: Session) => void })
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ delay: 0.05 }}
         >
-          <SegmentedControl options={MODES} value={mode} onChange={setMode} />
+          <SegmentedControl label="How to start" options={MODES} value={mode} onChange={setMode} width="full" />
           <div className="px-4 pt-5 pb-4">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
@@ -208,7 +208,7 @@ function BucketTest({
         </Button>
         <AnimatePresence mode="wait" initial={false}>
           {isVerified ? (
-            <motion.span key="ok" {...rise} className="flex items-center gap-1 text-[12.5px] text-success">
+            <motion.span key="ok" {...rise} className="flex items-center gap-1 text-[12.5px] text-success-text">
               <CircleCheck size={14} /> The bucket works
             </motion.span>
           ) : (
@@ -219,7 +219,7 @@ function BucketTest({
         </AnimatePresence>
       </div>
       {check.kind === "failed" && (
-        <p className="selectable flex gap-1.5 text-[12px] leading-relaxed text-danger">
+        <p className="selectable flex gap-1.5 text-[12px] leading-relaxed text-danger-text">
           <CircleAlert size={14} className="mt-0.5 shrink-0" />
           {check.message}
         </p>

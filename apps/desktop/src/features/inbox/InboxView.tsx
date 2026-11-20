@@ -1,78 +1,86 @@
 import { AtSign, CheckCheck, Hash, Inbox as InboxIcon, MessageSquareReply, Pencil } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api, type Channel, type Draft, type InboxItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
-import { displayName, formatTime } from "../../lib/people";
+import { displayName, formatWhen } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Button, EmptyState, SectionLabel, springs } from "../../ui";
+import { MarkAllReadDialog } from "./MarkAllReadDialog";
 
 /** Everything that needs your attention, across channels and threads. */
 export function InboxView() {
   const loadInbox = useCallback(() => api.inbox(), []);
   const inbox = useLive(loadInbox, (change) => change.kind === "messages" || change.kind === "channels");
   const drafts = useLive(api.drafts, (change) => change.kind === "drafts") ?? [];
-  const isEmpty = inbox && inbox.attention.length === 0 && inbox.channels.length === 0 && drafts.length === 0;
+  const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
+  // Like the sidebar: a muted channel needs you only when it mentions you.
+  const unreadChannels =
+    inbox?.channels.filter((channel) => channel.notify !== "nothing" || channel.unread_mentions > 0) ?? [];
+  const isEmpty = inbox && inbox.attention.length === 0 && unreadChannels.length === 0 && drafts.length === 0;
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-        <InboxIcon size={17} className="text-faint" />
+        <InboxIcon size={17} className="text-decorative" />
         <h1 className="text-[15px] font-semibold">Inbox</h1>
         {inbox && !isEmpty && (
           <Button
             variant="ghost"
             size="sm"
             icon={<CheckCheck size={14} />}
-            onClick={() => api.markAllRead().catch(reportError)}
+            onClick={() => setConfirmingMarkAll(true)}
             className="ml-auto"
           >
             Mark all as read
           </Button>
         )}
+        <MarkAllReadDialog open={isConfirmingMarkAll} onOpenChange={setConfirmingMarkAll} />
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        {isEmpty && (
-          <EmptyState icon={<CheckCheck size={22} />} title="You're all caught up">
-            Mentions of you and new replies in threads you follow show up here.
-          </EmptyState>
-        )}
-        {inbox && inbox.attention.length > 0 && (
-          <section aria-label="Mentions and replies" className="mb-6">
-            <SectionLabel>Mentions and replies</SectionLabel>
-            <ul className="flex flex-col gap-1">
-              <AnimatePresence initial={false}>
-                {inbox.attention.map((item) => (
-                  <AttentionRow key={item.message.id} item={item} />
+        <div className="mx-auto max-w-[760px]">
+          {isEmpty && (
+            <EmptyState icon={<CheckCheck size={22} />} title="You're all caught up">
+              Mentions of you and new replies in threads you follow show up here.
+            </EmptyState>
+          )}
+          {inbox && inbox.attention.length > 0 && (
+            <section aria-label="Mentions and replies" className="mb-6">
+              <SectionLabel>Mentions and replies</SectionLabel>
+              <ul className="flex flex-col gap-1">
+                <AnimatePresence initial={false}>
+                  {inbox.attention.map((item) => (
+                    <AttentionRow key={item.message.id} item={item} />
+                  ))}
+                </AnimatePresence>
+              </ul>
+            </section>
+          )}
+          {drafts.length > 0 && (
+            <section aria-label="Drafts" className="mb-6">
+              <SectionLabel>Drafts</SectionLabel>
+              <ul className="flex flex-col gap-1">
+                <AnimatePresence initial={false}>
+                  {drafts.map((draft) => (
+                    <DraftRow key={draft.target} draft={draft} />
+                  ))}
+                </AnimatePresence>
+              </ul>
+            </section>
+          )}
+          {unreadChannels.length > 0 && (
+            <section aria-label="Unread channels">
+              <SectionLabel>Unread channels</SectionLabel>
+              <ul className="flex flex-col gap-1">
+                {unreadChannels.map((channel) => (
+                  <UnreadChannelRow key={channel.id} channel={channel} />
                 ))}
-              </AnimatePresence>
-            </ul>
-          </section>
-        )}
-        {drafts.length > 0 && (
-          <section aria-label="Drafts" className="mb-6">
-            <SectionLabel>Drafts</SectionLabel>
-            <ul className="flex flex-col gap-1">
-              <AnimatePresence initial={false}>
-                {drafts.map((draft) => (
-                  <DraftRow key={draft.target} draft={draft} />
-                ))}
-              </AnimatePresence>
-            </ul>
-          </section>
-        )}
-        {inbox && inbox.channels.length > 0 && (
-          <section aria-label="Unread channels">
-            <SectionLabel>Unread channels</SectionLabel>
-            <ul className="flex flex-col gap-1">
-              {inbox.channels.map((channel) => (
-                <UnreadChannelRow key={channel.id} channel={channel} />
-              ))}
-            </ul>
-          </section>
-        )}
+              </ul>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -97,7 +105,9 @@ function AttentionRow({ item }: { item: InboxItem }) {
     >
       <button
         type="button"
-        onClick={() => navigate({ kind: "channel", id: message.channel, thread: item.thread_root ?? undefined })}
+        onClick={() =>
+          navigate({ kind: "channel", id: message.channel, thread: item.thread_root ?? undefined, focus: message.id })
+        }
         className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
       >
         <Avatar id={message.author} name={name} isBot={message.author_is_bot} size={32} />
@@ -105,7 +115,7 @@ function AttentionRow({ item }: { item: InboxItem }) {
           <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
             {item.reason === "mention" ? <AtSign size={12} /> : <MessageSquareReply size={12} />}
             <b className="font-semibold text-ink">{name}</b> {where}
-            <span className="ml-auto shrink-0 text-faint">{formatTime(message.created_ms)}</span>
+            <span className="ml-auto shrink-0 text-faint">{formatWhen(message.created_ms, new Date())}</span>
           </span>
           <span className="mt-0.5 block truncate text-[13.5px]">
             {plainPreview(message.text, (id) => titles.get(id))}
@@ -117,7 +127,8 @@ function AttentionRow({ item }: { item: InboxItem }) {
 }
 
 function DraftRow({ draft }: { draft: Draft }) {
-  const { channels, navigate } = useWorkspace();
+  const { channels, navigate, pages } = useWorkspace();
+  const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const channelName = channels.find((channel) => channel.id === draft.channel)?.name ?? "";
   const isThread = draft.target !== draft.channel;
   return (
@@ -133,12 +144,14 @@ function DraftRow({ draft }: { draft: Draft }) {
         onClick={() => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined })}
         className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
       >
-        <Pencil size={15} className="mt-0.5 shrink-0 text-faint" />
+        <Pencil size={15} className="mt-0.5 shrink-0 text-decorative" />
         <span className="min-w-0 flex-1">
           <span className="block text-[12.5px] text-muted">
             {isThread ? "Reply in a thread in" : "In"} <b className="font-semibold text-ink">#{channelName}</b>
           </span>
-          <span className="mt-0.5 block truncate text-[13.5px]">{draft.text}</span>
+          <span className="mt-0.5 block truncate text-[13.5px]">
+            {plainPreview(draft.text, (id) => titles.get(id))}
+          </span>
         </span>
       </button>
     </motion.li>
@@ -158,7 +171,7 @@ function UnreadChannelRow({ channel }: { channel: Channel }) {
         onClick={() => navigate({ kind: "channel", id: channel.id })}
         className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13.5px] font-semibold"
       >
-        <Hash size={15} className="text-faint" />
+        <Hash size={15} className="text-decorative" />
         <span className="truncate">{channel.name}</span>
         <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white tabular-nums">
           {channel.unread}

@@ -1,44 +1,23 @@
-import { Bookmark, Inbox as InboxIcon, Plus, Search, Settings, Users } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useCallback } from "react";
+import { Bookmark, Inbox as InboxIcon, Search } from "lucide-react";
+import { useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
-import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
-import { useWorkspace } from "../../lib/workspace";
-import { IconButton, Kbd, Logo, SectionLabel, springs } from "../../ui";
+import { Kbd, Logo } from "../../ui";
 import { ChannelSections } from "./ChannelSections";
+import { MeMenu } from "./MeMenu";
 import { NavItem } from "./NavItem";
-import { PageTree } from "./PageTree";
+import { PagesSection } from "./PagesSection";
 import { SyncIndicator } from "./SyncIndicator";
+import { WorkspaceMenu } from "./WorkspaceMenu";
 
-export function Sidebar({
-  status,
-  onOpenSearch,
-  onOpenMembers,
-  onOpenSettings,
-}: {
-  status: SyncStatus | undefined;
-  onOpenSearch: () => void;
-  onOpenMembers: () => void;
-  onOpenSettings: () => void;
-}) {
-  const { session, pages, navigate } = useWorkspace();
-
-  const createPage = async (parent: string | null) => {
-    try {
-      navigate({ kind: "page", id: await api.createPage("", parent) });
-    } catch (error) {
-      reportError(error);
-    }
-  };
-
+export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefined; onOpenSearch: () => void }) {
   return (
     <aside className="flex w-[264px] shrink-0 flex-col border-r border-line bg-bg">
       <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
         <Logo size={26} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-semibold tracking-tight">{session.workspace_name}</div>
+          <WorkspaceMenu />
           <SyncIndicator status={status} />
         </div>
       </div>
@@ -60,52 +39,13 @@ export function Sidebar({
         <LaterLink />
         <ChannelSections />
 
-        <Section title="Pages" addLabel="New page" onAdd={() => createPage(null)}>
-          <PageTree pages={pages} parent={null} depth={0} onCreateChild={createPage} />
-        </Section>
+        <PagesSection />
       </nav>
 
-      <div className="flex items-center gap-1 border-t border-line p-2">
-        <button
-          type="button"
-          onClick={onOpenMembers}
-          className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13px] text-muted transition hover:bg-surface-2 hover:text-ink"
-        >
-          <Users size={15} />
-          <span className="flex-1 text-left">Members{session.is_admin ? " & invites" : ""}</span>
-          {session.is_admin && <PendingRequestsBadge />}
-        </button>
-        <IconButton
-          label={`Settings (${shortcutKeys("settings").join(" ")})`}
-          icon={<Settings size={15} />}
-          onClick={onOpenSettings}
-        />
+      <div className="border-t border-line p-2">
+        <MeMenu />
       </div>
     </aside>
-  );
-}
-
-/** How many join requests wait for the admin's decision. */
-function PendingRequestsBadge() {
-  const loadInvites = useCallback(() => api.invites(), []);
-  const invites = useLive(loadInvites, (change) => change.kind === "invites" || change.kind === "members");
-  const waiting = invites?.filter((invite) => invite.state === "requested").length ?? 0;
-  return (
-    <AnimatePresence>
-      {waiting > 0 && (
-        <motion.span
-          key={waiting}
-          initial={{ scale: 0.4, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.4, opacity: 0 }}
-          transition={springs.pop}
-          aria-label={`${waiting} join ${waiting === 1 ? "request" : "requests"} waiting`}
-          className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white tabular-nums"
-        >
-          {waiting}
-        </motion.span>
-      )}
-    </AnimatePresence>
   );
 }
 
@@ -131,40 +71,4 @@ function LaterLink() {
   const now = Date.now();
   const due = later?.filter((item) => !item.is_done && item.remind_ms !== null && item.remind_ms <= now).length ?? 0;
   return <NavItem view={{ kind: "later" }} icon={<Bookmark size={15} />} label="Later" unread={due} countNoun="due" />;
-}
-
-function Section({
-  title,
-  addLabel,
-  onAdd,
-  extraAction,
-  children,
-}: {
-  title: string;
-  addLabel: string;
-  onAdd: () => void;
-  extraAction?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="mt-3">
-      <SectionLabel
-        action={
-          <span className="flex items-center">
-            {extraAction}
-            <IconButton
-              label={addLabel}
-              size="sm"
-              icon={<Plus size={14} />}
-              onClick={onAdd}
-              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-            />
-          </span>
-        }
-      >
-        {title}
-      </SectionLabel>
-      <div className="flex flex-col gap-px">{children}</div>
-    </div>
-  );
 }

@@ -1,7 +1,7 @@
 import { Check, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { DropdownMenu } from "radix-ui";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { cx } from "./cx";
 import { pop, springs } from "./motion";
 
@@ -46,8 +46,15 @@ export function Menu({
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} asChild>
           <motion.div {...pop} transition={springs.snappy} className={SURFACE}>
-            {items.map((item) =>
-              "choices" in item ? <Choices key={item.label} item={item} /> : <Action key={item.label} item={item} />,
+            {items.map((item, index) =>
+              "choices" in item ? (
+                <Choices key={item.label} item={item} />
+              ) : (
+                <Fragment key={item.label}>
+                  {isFirstDestructive(items, index) && <DropdownMenu.Separator className="my-1 h-px bg-line" />}
+                  <Action item={item} />
+                </Fragment>
+              ),
             )}
           </motion.div>
         </DropdownMenu.Content>
@@ -56,9 +63,18 @@ export function Menu({
   );
 }
 
+/** Destructive actions sit apart, below a line. */
+function isFirstDestructive(items: MenuItem[], index: number): boolean {
+  const isDestructive = (item: MenuItem) => "isDestructive" in item && item.isDestructive === true;
+  return index > 0 && isDestructive(items[index]) && !isDestructive(items[index - 1]);
+}
+
 function Action({ item }: { item: MenuAction }) {
   return (
-    <DropdownMenu.Item onSelect={item.onSelect} className={cx(ITEM, item.isDestructive ? "text-danger" : "text-ink")}>
+    <DropdownMenu.Item
+      onSelect={item.onSelect}
+      className={cx(ITEM, item.isDestructive ? "text-danger-text" : "text-ink")}
+    >
       {item.icon && <span className="text-muted">{item.icon}</span>}
       {item.label}
     </DropdownMenu.Item>
@@ -72,7 +88,7 @@ function Choices({ item }: { item: MenuChoices }) {
       <DropdownMenu.SubTrigger className={cx(ITEM, "text-ink")}>
         {item.icon && <span className="text-muted">{item.icon}</span>}
         <span className="flex-1">{item.label}</span>
-        <ChevronRight size={14} className="text-faint" />
+        <ChevronRight size={14} className="text-decorative" />
       </DropdownMenu.SubTrigger>
       <DropdownMenu.Portal>
         <DropdownMenu.SubContent sideOffset={6} className={SURFACE}>

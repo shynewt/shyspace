@@ -130,21 +130,36 @@ test("deleting a page keeps its sub-pages at the top level", async ({ page }) =>
   await page.getByRole("button", { name: "New page" }).click();
   await page.getByLabel("Page title").fill("Projects");
   await page.getByLabel("Page title").press("Enter");
-  await page.getByRole("button", { name: "Sub-page", exact: true }).click();
-  // The sub-page has opened once its breadcrumb leads back to the parent.
-  await expect(
-    page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("button", { name: "Projects" }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "More page actions" }).click();
+  await page.getByRole("menuitem", { name: "New sub-page" }).click();
+  // The sub-page has opened once its path leads from the parent to it.
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("listitem")).toHaveText([
+    "Projects",
+    "Untitled",
+  ]);
   await page.getByLabel("Page title").fill("Notes");
   await page.getByLabel("Page title").press("Enter");
   const sidebar = page.getByRole("navigation", { name: "Workspace" });
   await sidebar.getByRole("button", { name: "Projects", exact: true }).click();
   await expect(page.getByLabel("Page title")).toHaveValue("Projects");
 
-  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "More page actions" }).click();
+  await page.getByRole("menuitem", { name: "Delete page" }).click();
   await page.getByRole("button", { name: "Delete page" }).click();
 
   await expect(sidebar.getByRole("button", { name: "Projects", exact: true })).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "Notes", exact: true })).toBeVisible();
   await expect(sidebar.getByRole("button", { name: "Collapse Projects" })).toHaveCount(0);
+});
+
+test("deleting a message asks with the message in view", async ({ page }) => {
+  await openGeneral(page);
+  await page.evaluate(() =>
+    window.fake.receiveMessage(window.fake.addMember("Mallory"), "general", "Buy **cheap** watches"),
+  );
+
+  await messageActions(page, "Buy cheap watches");
+  await expect(page.getByRole("menu").getByRole("separator")).toHaveCount(1);
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await expect(page.getByRole("dialog", { name: "Delete this message?" })).toContainText("Buy cheap watches");
 });

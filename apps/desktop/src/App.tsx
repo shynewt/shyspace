@@ -6,6 +6,7 @@ import { api, type Session } from "./lib/api";
 import { useTheme } from "./lib/preferences";
 import { reportError } from "./lib/toast";
 import { useNoBrowserMenu } from "./lib/useContextMenu";
+import { useInputModality } from "./lib/useInputModality";
 import { Logo, Toasts } from "./ui";
 
 /** The component gallery, only in development builds (open with #gallery). */
@@ -16,6 +17,7 @@ type Phase = { kind: "loading" } | { kind: "onboarding" } | { kind: "ready"; ses
 export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   useNoBrowserMenu();
+  useInputModality();
   useTheme();
 
   useEffect(() => {
