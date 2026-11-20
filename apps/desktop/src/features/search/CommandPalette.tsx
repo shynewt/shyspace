@@ -40,7 +40,15 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange} title="Search" hideTitle placement="top" width={600}>
+      <Dialog
+        open={open}
+        onOpenChange={onOpenChange}
+        title="Search"
+        hideTitle
+        placement="top"
+        width={600}
+        padding="none"
+      >
         <PaletteBody onClose={() => onOpenChange(false)} onMarkAllRead={() => setConfirmingMarkAll(true)} />
       </Dialog>
       <MarkAllReadDialog open={isConfirmingMarkAll} onOpenChange={setConfirmingMarkAll} />

@@ -4,7 +4,7 @@ import { showToast } from "../../lib/toast";
 import { useFormAction } from "../../lib/useFormAction";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, CopyField, Dialog, Field, FormError, Input } from "../../ui";
+import { Button, CopyField, Dialog, DialogActions, Field, FormError, Input } from "../../ui";
 import { ManagedByAdmin } from "./layout";
 import { StorageProtection } from "./StorageProtection";
 
@@ -87,12 +87,12 @@ function BucketForm({ settings }: { settings: Settings }) {
         title="Save your updated recovery kit"
         description="Your recovery kit holds the storage keys, so the old one no longer works. Replace it in your password manager."
       >
-        <div className="flex flex-col gap-3 p-5">
-          {newKit && <CopyField value={newKit} label="Copy recovery kit" />}
-          <Button variant="primary" onClick={() => setNewKit(null)} className="self-end">
+        {newKit && <CopyField value={newKit} label="Copy recovery kit" />}
+        <DialogActions>
+          <Button variant="primary" onClick={() => setNewKit(null)}>
             I saved it
           </Button>
-        </div>
+        </DialogActions>
       </Dialog>
     </>
   );

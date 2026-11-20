@@ -76,6 +76,7 @@ export function SettingsDialog({
       onOpenChange={(open) => !open && onClose()}
       title="Settings"
       width={760}
+      padding="none"
       hasCloseButton
     >
       {target && <SettingsWindow target={target} onNavigate={onNavigate} />}

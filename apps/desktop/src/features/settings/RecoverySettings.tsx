@@ -3,7 +3,7 @@ import { useState } from "react";
 import { api } from "../../lib/api";
 import { useFormAction } from "../../lib/useFormAction";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, CopyField, Dialog, FormError } from "../../ui";
+import { Button, CopyField, Dialog, DialogActions, FormError } from "../../ui";
 import { ManagedByAdmin } from "./layout";
 
 export function RecoverySettings() {
@@ -41,12 +41,12 @@ function RecoveryKit() {
         title="Your recovery kit"
         description="Keep it secret and safe. It restores your admin role and holds the storage credentials. Only use it if this device is gone: two admins at once would conflict."
       >
-        <div className="flex flex-col gap-3 p-5">
-          {kit && <CopyField value={kit} label="Copy recovery kit" />}
-          <Button variant="primary" onClick={() => setKit(null)} className="self-end">
+        {kit && <CopyField value={kit} label="Copy recovery kit" />}
+        <DialogActions>
+          <Button variant="primary" onClick={() => setKit(null)}>
             I saved it
           </Button>
-        </div>
+        </DialogActions>
       </Dialog>
     </div>
   );

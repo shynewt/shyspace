@@ -10,6 +10,7 @@ import {
   CopyField,
   CountBadge,
   Dialog,
+  DialogActions,
   EmojiPicker,
   EmptyState,
   Field,
@@ -212,14 +213,14 @@ export default function Gallery() {
         title="A dialog"
         description="Focus is trapped inside; Escape closes it."
       >
-        <div className="flex justify-end gap-2 p-5">
+        <DialogActions>
           <Button variant="ghost" onClick={() => setDialogOpen(false)}>
             Cancel
           </Button>
           <Button variant="primary" onClick={() => setDialogOpen(false)}>
             Confirm
           </Button>
-        </div>
+        </DialogActions>
       </Dialog>
       <ConfirmDialog
         open={isConfirmOpen}

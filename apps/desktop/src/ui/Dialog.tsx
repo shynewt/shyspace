@@ -18,6 +18,8 @@ type DialogProps = {
   width?: number;
   /** Shows a close button in the top corner, for dialogs without their own Cancel or Done. */
   hasCloseButton?: boolean;
+  /** "none" for content that lays itself out edge to edge, like the search palette. */
+  padding?: "standard" | "none";
   children: ReactNode;
 };
 
@@ -34,6 +36,7 @@ export function Dialog({
   placement = "center",
   width = 440,
   hasCloseButton = false,
+  padding = "standard",
   children,
 }: DialogProps) {
   return (
@@ -70,7 +73,11 @@ export function Dialog({
                   ) : (
                     <RadixDialog.Description className="sr-only">{title}</RadixDialog.Description>
                   )}
-                  {children}
+                  {padding === "standard" ? (
+                    <div className="flex flex-col gap-4 px-5 pt-4 pb-5">{children}</div>
+                  ) : (
+                    children
+                  )}
                   {/* After the content, so opening the dialog focuses the content
                       rather than this button (whose tooltip would take the first Escape). */}
                   {hasCloseButton && (
@@ -86,4 +93,9 @@ export function Dialog({
       </AnimatePresence>
     </RadixDialog.Root>
   );
+}
+
+/** The buttons at the foot of a dialog, the main one last. */
+export function DialogActions({ children }: { children: ReactNode }) {
+  return <div className="flex justify-end gap-2">{children}</div>;
 }

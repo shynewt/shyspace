@@ -2,7 +2,7 @@ import { Lock } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../lib/api";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, Dialog, Field, FormError, Input } from "../../ui";
+import { Button, Dialog, DialogActions, Field, FormError, Input } from "../../ui";
 import { MemberPicker, toggled, useOtherMembers } from "./MemberPicker";
 
 const MAX_DM_OTHERS = 8;
@@ -53,7 +53,7 @@ function NewPrivateChannelForm({ onDone }: { onDone: () => void }) {
   };
   return (
     <form
-      className="flex flex-col gap-4 p-5 pt-4"
+      className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault();
         create();
@@ -77,7 +77,7 @@ function NewPrivateChannelForm({ onDone }: { onDone: () => void }) {
         onToggle={(member) => setChosen(toggled(chosen, member))}
       />
       <FormError message={error} />
-      <div className="flex justify-end gap-2">
+      <DialogActions>
         <Button type="button" variant="ghost" onClick={onDone}>
           Cancel
         </Button>
@@ -90,7 +90,7 @@ function NewPrivateChannelForm({ onDone }: { onDone: () => void }) {
         >
           Create private channel
         </Button>
-      </div>
+      </DialogActions>
     </form>
   );
 }
@@ -130,7 +130,7 @@ function NewDmForm({ onDone }: { onDone: () => void }) {
     }
   };
   return (
-    <div className="flex flex-col gap-4 p-5 pt-4">
+    <div className="flex flex-col gap-4">
       <MemberPicker
         label="People to message"
         members={members}
@@ -139,14 +139,14 @@ function NewDmForm({ onDone }: { onDone: () => void }) {
       />
       {isTooMany && <p className="text-xs text-warning-text">A DM can have up to {MAX_DM_OTHERS} other people.</p>}
       <FormError message={error} />
-      <div className="flex justify-end gap-2">
+      <DialogActions>
         <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button variant="primary" isLoading={isOpening} disabled={chosen.size === 0 || isTooMany} onClick={open}>
           Open DM
         </Button>
-      </div>
+      </DialogActions>
     </div>
   );
 }

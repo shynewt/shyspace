@@ -170,7 +170,7 @@ function RemovedNotice({ isRemoved }: { isRemoved: boolean }) {
       description="You can still read what you already had, but new messages and edits use keys you no longer receive."
       width={380}
     >
-      <div className="flex justify-center px-5 pt-4 pb-5">
+      <div className="flex justify-center">
         <div className="grid h-11 w-11 place-items-center rounded-xl bg-danger/12 text-danger">
           <UserX size={20} />
         </div>

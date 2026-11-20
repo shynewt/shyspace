@@ -51,7 +51,7 @@ function PrivateMembers({ channel, onLeft }: { channel: Channel; onLeft: () => v
   const [pending, setPending] = useState<Pending | null>(null);
   if (!inChannel || !others || !everyone) {
     return (
-      <div className="flex justify-center p-5 py-8 text-decorative">
+      <div className="flex justify-center py-4 text-decorative">
         <Spinner size={16} />
       </div>
     );
@@ -76,7 +76,7 @@ function PrivateMembers({ channel, onLeft }: { channel: Channel; onLeft: () => v
   const nameOf = (member: Member) => displayName(member.name, member.id);
 
   return (
-    <div className="flex flex-col gap-4 p-5 pt-4">
+    <div className="flex flex-col gap-4">
       {addable ? (
         <MemberPicker label="People to add" members={addable} chosen={added} busy={adding} onToggle={add} />
       ) : (

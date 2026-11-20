@@ -5,7 +5,18 @@ import { formatStatusEnd } from "../../lib/people";
 import { showToast } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useFormAction } from "../../lib/useFormAction";
-import { Button, cx, Dialog, EmojiPicker, Field, FormError, Input, Popover, SegmentedControl } from "../../ui";
+import {
+  Button,
+  cx,
+  Dialog,
+  DialogActions,
+  EmojiPicker,
+  Field,
+  FormError,
+  Input,
+  Popover,
+  SegmentedControl,
+} from "../../ui";
 
 /** "unchanged" keeps the current status's end time, offered only while that's still ahead. */
 type ClearAfter = "unchanged" | "never" | "hour" | "four_hours" | "today";
@@ -80,7 +91,7 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
   ];
   const isEmpty = !emoji.trim() && !text.trim() && alerts === "all";
   return (
-    <form onSubmit={save.run} className="flex flex-col gap-4 p-5 pt-4">
+    <form onSubmit={save.run} className="flex flex-col gap-4">
       <div className="flex gap-2">
         <div className="flex shrink-0 flex-col gap-1.5">
           <span aria-hidden className="text-xs font-medium text-muted">
@@ -151,14 +162,14 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
         )}
       </Field>
       <FormError message={save.error} />
-      <div className="flex justify-end gap-2">
+      <DialogActions>
         <Button variant="ghost" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" variant="primary" isLoading={save.isBusy} disabled={isEmpty}>
           Set status
         </Button>
-      </div>
+      </DialogActions>
     </form>
   );
 }
