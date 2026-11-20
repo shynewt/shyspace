@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { failWith } from "./support";
 
 test("a new page can be titled and written in", async ({ page }) => {
   await page.goto("");
@@ -28,6 +29,57 @@ test("an open page reloads when its content is rebuilt", async ({ page }) => {
   await page.evaluate(() => window.fake.rebuildPage("Notes", "what everyone agrees on"));
 
   await expect(page.locator(".cm-content")).toHaveText("what everyone agrees on");
+});
+
+test("a page change that can't be saved says why and goes back to the saved page", async ({ page }) => {
+  await page.goto("");
+  await page.getByRole("button", { name: "New page" }).click();
+  const title = page.getByLabel("Page title");
+  await title.fill("Notes");
+  await title.press("Enter");
+  await page.locator(".cm-content").click();
+  await page.keyboard.type("saved");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Notes"))).toBe("saved");
+
+  const tooLarge = "this change is too large to save (over 4 MB); paste it in smaller parts";
+  await failWith(page, "apply_doc_update", tooLarge);
+  await page.keyboard.type(" never saved");
+
+  await expect(page.getByText(tooLarge)).toBeVisible();
+  await expect(page.locator(".cm-content")).toHaveText("saved");
+});
+
+test("edits typed while a save is still going out wait for it, and are dropped if it fails", async ({ page }) => {
+  await page.goto("");
+  await page.getByRole("button", { name: "New page" }).click();
+  const title = page.getByLabel("Page title");
+  await title.fill("Notes");
+  await title.press("Enter");
+  await page.locator(".cm-content").click();
+  await page.keyboard.type("saved");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Notes"))).toBe("saved");
+  const sends = await page.evaluateHandle(() => {
+    const held = { count: 0, fail: () => {} };
+    const answer = window.fake.handle.bind(window.fake);
+    window.fake.handle = (asked, args) => {
+      if (asked !== "apply_doc_update") return answer(asked, args);
+      held.count += 1;
+      return new Promise((_, reject) => {
+        held.fail = () => reject("this change is too large to save");
+      });
+    };
+    return held;
+  });
+
+  await page.keyboard.type(" big paste");
+  await expect.poll(() => sends.evaluate((held) => held.count)).toBe(1);
+  await page.keyboard.type(" typed meanwhile");
+  await page.waitForTimeout(400);
+  expect(await sends.evaluate((held) => held.count)).toBe(1);
+  await sends.evaluate((held) => held.fail());
+
+  await expect(page.locator(".cm-content")).toHaveText("saved");
+  expect(await sends.evaluate((held) => held.count)).toBe(1);
 });
 
 test("the header shows the page's path, and each part opens", async ({ page }) => {

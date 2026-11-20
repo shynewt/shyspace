@@ -35,15 +35,18 @@ export function Editor({ pageId }: { pageId: string }) {
       }),
     [pageId],
   );
-  return <PageEditor key={resets} pageId={pageId} />;
+  return <PageEditor key={resets} pageId={pageId} onSaveFailed={() => setResets((count) => count + 1)} />;
 }
 
-function PageEditor({ pageId }: { pageId: string }) {
+/** `onSaveFailed` must start a fresh editor from the saved page. */
+function PageEditor({ pageId, onSaveFailed }: { pageId: string; onSaveFailed: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const { pages, navigate } = useWorkspace();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  const onSaveFailedRef = useRef(onSaveFailed);
+  onSaveFailedRef.current = onSaveFailed;
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const menuKeys = useRef<(key: MenuKey, view: EditorView) => boolean>(() => false);
 
@@ -52,12 +55,28 @@ function PageEditor({ pageId }: { pageId: string }) {
     const text = doc.getText(PAGE_TEXT);
     let pending: Uint8Array[] = [];
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Later updates build on earlier ones, so nobody else could apply them
+    // without those: updates go out one at a time, and once one fails this
+    // doc sends nothing more and a fresh editor starts from the saved page.
+    let isSending = false;
+    let hasFailed = false;
     const flush = () => {
       timer = undefined;
-      if (pending.length === 0) return;
+      if (pending.length === 0 || isSending || hasFailed) return;
       const update = Y.mergeUpdates(pending);
       pending = [];
-      api.applyDocUpdate(pageId, update).catch(reportError);
+      isSending = true;
+      api.applyDocUpdate(pageId, update).then(
+        () => {
+          isSending = false;
+          flush();
+        },
+        (error: unknown) => {
+          hasFailed = true;
+          reportError(error);
+          onSaveFailedRef.current();
+        },
+      );
     };
     doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === REMOTE) return;

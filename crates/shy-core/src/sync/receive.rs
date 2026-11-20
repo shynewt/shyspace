@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::{
     crypto::{self, NewerFormat},
-    ops::{Envelope, RuleViolation, VerifiedOp},
+    ops::{Envelope, MAX_PAGE_UPDATE_BYTES, RuleViolation, VerifiedOp},
     storage::{Applied, ApplyContext},
     views::Change,
     workspace::{State, Workspace},
@@ -34,6 +34,12 @@ impl Workspace {
             match verify_or_wait(&state, &envelope)? {
                 Some(verified) if is_ready(&state, &verified)? => {
                     self.apply_with_alert(&state, &envelope, &verified)?
+                }
+                // Not kept while it waits: gap repair reads it again once a
+                // later op of its author's waits behind it.
+                Some(verified) if !envelope.fits_size_limit(&verified.body.op) => {
+                    warn!("not keeping an oversized op that arrived before its turn");
+                    Vec::new()
                 }
                 _ => {
                     park(&state, &envelope)?;
@@ -139,13 +145,22 @@ fn is_ready(state: &State, verified: &VerifiedOp) -> Result<bool> {
 }
 
 /// Applies a verified op. One that breaks a rule is recorded as handled
-/// anyway, so it never blocks the author's later ops.
+/// anyway, so it never blocks the author's later ops; one too large for its
+/// kind is recorded without its content, so it takes no room.
 fn apply_and_record(
     state: &State,
     envelope: &Envelope,
     verified: &VerifiedOp,
     context: ApplyContext<'_>,
 ) -> Result<Applied> {
+    if !envelope.fits_size_limit(&verified.body.op) {
+        warn!(
+            "skipping an op too large for its kind ({} bytes)",
+            envelope.ciphertext.len()
+        );
+        state.store.insert_refused(envelope)?;
+        return Ok(Applied::default());
+    }
     let applied = state.store.atomically(|store| {
         let applied = store.apply_permitted(verified, context)?;
         store.insert_applied(envelope, true)?;
@@ -166,6 +181,10 @@ fn apply_and_record(
 }
 
 fn park(state: &State, envelope: &Envelope) -> Result<()> {
+    ensure!(
+        envelope.ciphertext.len() <= MAX_PAGE_UPDATE_BYTES,
+        "op is larger than any kind may be"
+    );
     ensure!(
         state.store.was_ever_member(&envelope.author)?,
         "op from a non-member"

@@ -41,8 +41,9 @@ struct PageReplay {
 
 const VIEWS_VERSION_META: &str = "views_version";
 /// Raised when the rules for showing ops change (like the limits on names in
-/// #67), so a store built under older rules rebuilds its views once.
-const VIEWS_VERSION: u8 = 1;
+/// #67, then on op sizes), so a store built under older rules rebuilds its
+/// views once.
+const VIEWS_VERSION: u8 = 2;
 
 impl Store {
     /// Rebuilds the views if they were built under older rules. Returns
@@ -122,7 +123,9 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?;
         let mut pages: HashMap<String, PageReplay> = HashMap::new();
         for bytes in stored {
-            let verified = self.open_stored(&bytes)?;
+            let Some(verified) = self.open_stored(&bytes)? else {
+                continue;
+            };
             match &verified.body.op {
                 Op::DocUpdate { page, update } => {
                     self.gather_page_update(&mut pages, page, update, verified.body.timestamp_ms)?;

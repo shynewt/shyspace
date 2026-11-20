@@ -15,6 +15,7 @@ mod reading;
 mod recovery;
 mod search;
 mod sections;
+mod size_attacks;
 mod storage;
 mod support;
 mod threads;

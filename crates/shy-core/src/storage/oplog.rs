@@ -84,15 +84,36 @@ impl Store {
             params![author.as_bytes(), seq],
             |row| row.get(0),
         )?;
-        self.open_stored(&bytes)
+        self.open_stored(&bytes)?
+            .context("that op was refused for its size")
     }
 
-    pub(crate) fn open_stored(&self, bytes: &[u8]) -> Result<VerifiedOp> {
+    /// An op from the log, or `None` for one refused for its size: kept
+    /// without content, or kept whole by an older version.
+    pub(crate) fn open_stored(&self, bytes: &[u8]) -> Result<Option<VerifiedOp>> {
         let envelope: Envelope = postcard::from_bytes(bytes).context("reading a stored op")?;
+        if envelope.ciphertext.is_empty() {
+            return Ok(None);
+        }
         let key = self
             .epoch_key(envelope.epoch)?
             .with_context(|| format!("no key for epoch {} of a stored op", envelope.epoch))?;
-        crypto::open(&envelope, &key).context("opening a stored op")
+        let verified = crypto::open(&envelope, &key).context("opening a stored op")?;
+        Ok(envelope.fits_size_limit(&verified.body.op).then_some(verified))
+    }
+
+    /// Records an op refused for its size as handled, keeping only its
+    /// header. Sealing always adds an authentication tag, so empty content
+    /// can only mean this.
+    pub fn insert_refused(&self, envelope: &Envelope) -> Result<()> {
+        let header_only = Envelope {
+            author: envelope.author,
+            seq: envelope.seq,
+            epoch: envelope.epoch,
+            nonce: envelope.nonce,
+            ciphertext: Vec::new(),
+        };
+        self.insert_applied(&header_only, true)
     }
 
     /// Records an applied envelope and clears any parked copies of it.

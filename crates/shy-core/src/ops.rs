@@ -207,6 +207,24 @@ pub struct Envelope {
     pub ciphertext: Vec<u8>,
 }
 
+/// The most a sealed page update may take: room for a very large paste.
+pub const MAX_PAGE_UPDATE_BYTES: usize = 4 * 1024 * 1024;
+/// The most any other sealed op may take. The longest message, or a key
+/// grant to the most people, needs well under half of it.
+pub const MAX_OP_BYTES: usize = 256 * 1024;
+
+impl Envelope {
+    /// Whether this envelope, holding `op`, is within the size limit for its
+    /// kind. Others refuse bigger ones, so every device keeps the same log.
+    pub fn fits_size_limit(&self, op: &Op) -> bool {
+        let limit = match op {
+            Op::DocUpdate { .. } => MAX_PAGE_UPDATE_BYTES,
+            _ => MAX_OP_BYTES,
+        };
+        self.ciphertext.len() <= limit
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VerifiedOp {
     pub author: PublicKey,

@@ -7,9 +7,9 @@ use super::{Profile, Workspace};
 use crate::{
     crypto,
     ops::{
-        EntityId, Envelope, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, MAX_PROFILE_NAME_CHARS,
-        Op, OpBody, VerifiedOp, clean_display_name, clean_emoji, new_owned_id, normalize_channel_name,
-        now_ms,
+        EntityId, Envelope, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS, MAX_OP_BYTES, MAX_PAGE_TITLE_CHARS,
+        MAX_PAGE_UPDATE_BYTES, MAX_PROFILE_NAME_CHARS, Op, OpBody, VerifiedOp, clean_display_name,
+        clean_emoji, new_owned_id, normalize_channel_name, now_ms,
     },
     pages::{self, Edit},
     private::ids::{new_private_message_id, private_channel_of, private_kind},
@@ -63,6 +63,7 @@ impl Workspace {
                     op,
                 };
                 let envelope = crypto::seal(&self.inner.identity, &key, epoch, seq, &body)?;
+                ensure!(envelope.fits_size_limit(&body.op), too_large(&body.op));
                 let applied = store.apply_any(&VerifiedOp { author, seq, body }, context)?;
                 // Our own private op must count, or nobody else would see it.
                 ensure!(
@@ -376,4 +377,14 @@ fn checked_page_title(title: &str) -> Result<&str> {
         "a page title has at most {MAX_PAGE_TITLE_CHARS} characters"
     );
     Ok(title)
+}
+
+fn too_large(op: &Op) -> String {
+    match op {
+        Op::DocUpdate { .. } => format!(
+            "this change is too large to save (over {} MB); paste it in smaller parts",
+            MAX_PAGE_UPDATE_BYTES / (1024 * 1024)
+        ),
+        _ => format!("this is too large to send (over {} KB)", MAX_OP_BYTES / 1024),
+    }
 }
