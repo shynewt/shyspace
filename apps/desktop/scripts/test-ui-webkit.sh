@@ -9,6 +9,14 @@ set -euo pipefail
 desktop_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 playwright_version="$(cd "$desktop_dir" && node -p 'require("./node_modules/@playwright/test/package.json").version')"
 
+# The image has no pnpm, which the config's dev server command uses. Every
+# command it runs is already installed in node_modules, so a stand-in that
+# runs `pnpm exec <tool>` as `npx <tool>` is enough, and needs no network.
+container_command='mkdir -p /tmp/bin \
+  && printf "#!/bin/sh\n[ \"\$1\" = exec ] && shift\nexec npx \"\$@\"\n" > /tmp/bin/pnpm \
+  && chmod +x /tmp/bin/pnpm \
+  && PATH="/tmp/bin:$PATH" exec npx playwright test "$@"'
+
 # keep-id: files the tests write belong to you, not root. label=disable: lets
 # the container read the repository under SELinux without relabelling it.
 exec podman run --rm --init \
@@ -20,4 +28,4 @@ exec podman run --rm --init \
   --env NPM_CONFIG_UPDATE_NOTIFIER=false \
   --env UI_TEST_BROWSERS=webkit \
   "mcr.microsoft.com/playwright:v$playwright_version-noble" \
-  npx playwright test "$@"
+  bash -c "$container_command" bash "$@"
