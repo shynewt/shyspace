@@ -188,6 +188,10 @@ export class FakeBackend {
     return this.chat.receiveMessage(author, channelName, text);
   }
 
+  receiveMessageIn(author: string, channelId: string, text: string): string {
+    return this.chat.receiveMessageIn(author, channelId, text);
+  }
+
   receiveReply(author: string, root: string, text: string): string {
     return this.chat.receiveReply(author, root, text);
   }

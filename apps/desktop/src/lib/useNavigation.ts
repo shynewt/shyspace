@@ -102,7 +102,12 @@ export function useNavigation(me: string, channels: Channel[] | undefined, pages
 
   const isAvailable = useCallback((view: View) => {
     const { channels: loadedChannels = [], pages: loadedPages = [] } = latest.current;
-    if (view.kind === "channel") return loadedChannels.some((channel) => channel.id === view.id);
+    // A private channel you were removed from stays listed, read-only, but is no longer a place to go back to.
+    if (view.kind === "channel") {
+      return loadedChannels.some(
+        (channel) => channel.id === view.id && (channel.kind !== "private" || channel.is_member),
+      );
+    }
     if (view.kind === "page") return loadedPages.some((page) => page.id === view.id);
     return true;
   }, []);

@@ -148,7 +148,13 @@ export class FakeChat {
   // ---- Acting as other members, for tests --------------------------------
 
   receiveMessage(author: string, channelName: string, text: string): string {
-    const channel = this.channelNamed(channelName);
+    return this.receiveMessageIn(author, this.channelNamed(channelName).id, text);
+  }
+
+  /** Like `receiveMessage`, for channels named by id, like DMs (which have no name). */
+  receiveMessageIn(author: string, channelId: string, text: string): string {
+    const channel = this.channels.find((candidate) => candidate.id === channelId);
+    if (!channel) throw new Error(`fake backend: no channel ${channelId}`);
     const id = this.writeMessage(author, channel.id, text, null);
     const level = this.notifyLevels.get(channel.id) ?? "all";
     if (level === "all" || (level === "mentions" && mentions(text, this.context.me()))) {

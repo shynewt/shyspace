@@ -90,6 +90,23 @@ test("an agent shows no status beside its name", async ({ page }) => {
   await expect(channelLog(page).getByLabel(/^Status:/)).toHaveCount(0);
 });
 
+test("a DM shows the status beside names like a channel", async ({ page }) => {
+  await page.evaluate((status) => {
+    const grace = window.fake.addMember("Grace");
+    window.fake.setMemberStatus(grace, status);
+    const dm = window.fake.handle("open_dm", { members: [grace] });
+    if (typeof dm === "string") window.fake.receiveMessageIn(grace, dm, "Got a minute?");
+  }, HOLIDAY);
+  await page
+    .getByRole("region", { name: "Direct messages" })
+    .getByRole("button", { name: /^Grace, direct message/ })
+    .click();
+
+  const log = page.getByRole("log", { name: "Messages in Grace" });
+  await expect(log.getByText("Got a minute?")).toBeVisible();
+  await expect(log.getByLabel("Status: 🌴 On holiday", { exact: true })).toBeVisible();
+});
+
 test("the thread shows the status beside names too", async ({ page }) => {
   await graceSays(page, "Release notes?", HOLIDAY);
   await channelLog(page).getByRole("article").filter({ hasText: "Release notes?" }).hover();

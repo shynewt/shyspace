@@ -303,6 +303,62 @@ test.describe("in a session", () => {
   });
 });
 
+test("back and forward move between a channel and a DM", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  const dm = await page.evaluate(() => window.fake.handle("open_dm", { members: [window.fake.addMember("Grace")] }));
+  expect(dm).toMatch(/^dm:/);
+  await page
+    .getByRole("region", { name: "Direct messages" })
+    .getByRole("button", { name: /^Grace, direct message/ })
+    .click();
+  await expect(page.getByLabel("Message Grace")).toBeVisible();
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect(page.getByLabel("Message Grace")).toBeVisible();
+});
+
+test("launching reopens a DM", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.prepareFake = (fake) => {
+      const dm = fake.handle("open_dm", { members: [fake.addMember("Grace")] });
+      if (typeof dm === "string") fake.receiveMessageIn(fake.memberNamed("Grace"), dm, "Psst");
+    };
+  });
+  await page.goto("?seed=dm");
+  await page
+    .getByRole("region", { name: "Direct messages" })
+    .getByRole("button", { name: /^Grace, direct message/ })
+    .click();
+  await expect(page.getByLabel("Message Grace")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView") ?? "")).toContain("dm:");
+
+  await page.reload();
+  await expect(page.getByLabel("Message Grace")).toBeVisible();
+  await expect(page.getByText("Psst")).toBeVisible();
+});
+
+test("a private channel you were removed from is skipped in history", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() => {
+    window.fake.receivePrivateChannel(window.fake.addMember("Grace"), "ops");
+    window.fake.handle("create_channel", { name: "random" });
+  });
+  await page
+    .getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: /^ops, private channel/ })
+    .click();
+  await expect(page.getByLabel("Message #ops")).toBeVisible();
+  await openChannel(page, "random");
+  await page.evaluate(() => window.fake.removeMeFromPrivateChannel("ops"));
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+});
+
 test("launching reopens the thread you had open", async ({ page }) => {
   await page.addInitScript(() => {
     window.prepareFake = (fake) => {
