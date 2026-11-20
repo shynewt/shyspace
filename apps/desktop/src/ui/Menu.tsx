@@ -58,7 +58,10 @@ export function Menu({
 
 function Action({ item }: { item: MenuAction }) {
   return (
-    <DropdownMenu.Item onSelect={item.onSelect} className={cx(ITEM, item.isDestructive ? "text-danger" : "text-ink")}>
+    <DropdownMenu.Item
+      onSelect={item.onSelect}
+      className={cx(ITEM, item.isDestructive ? "text-danger-text" : "text-ink")}
+    >
       {item.icon && <span className="text-muted">{item.icon}</span>}
       {item.label}
     </DropdownMenu.Item>
@@ -72,7 +75,7 @@ function Choices({ item }: { item: MenuChoices }) {
       <DropdownMenu.SubTrigger className={cx(ITEM, "text-ink")}>
         {item.icon && <span className="text-muted">{item.icon}</span>}
         <span className="flex-1">{item.label}</span>
-        <ChevronRight size={14} className="text-faint" />
+        <ChevronRight size={14} className="text-decorative" />
       </DropdownMenu.SubTrigger>
       <DropdownMenu.Portal>
         <DropdownMenu.SubContent sideOffset={6} className={SURFACE}>

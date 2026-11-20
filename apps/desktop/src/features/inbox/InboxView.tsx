@@ -19,7 +19,7 @@ export function InboxView() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-        <InboxIcon size={17} className="text-faint" />
+        <InboxIcon size={17} className="text-decorative" />
         <h1 className="text-[15px] font-semibold">Inbox</h1>
         {inbox && !isEmpty && (
           <Button
@@ -133,7 +133,7 @@ function DraftRow({ draft }: { draft: Draft }) {
         onClick={() => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined })}
         className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
       >
-        <Pencil size={15} className="mt-0.5 shrink-0 text-faint" />
+        <Pencil size={15} className="mt-0.5 shrink-0 text-decorative" />
         <span className="min-w-0 flex-1">
           <span className="block text-[12.5px] text-muted">
             {isThread ? "Reply in a thread in" : "In"} <b className="font-semibold text-ink">#{channelName}</b>
@@ -158,7 +158,7 @@ function UnreadChannelRow({ channel }: { channel: Channel }) {
         onClick={() => navigate({ kind: "channel", id: channel.id })}
         className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13.5px] font-semibold"
       >
-        <Hash size={15} className="text-faint" />
+        <Hash size={15} className="text-decorative" />
         <span className="truncate">{channel.name}</span>
         <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white tabular-nums">
           {channel.unread}

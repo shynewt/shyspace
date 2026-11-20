@@ -21,7 +21,7 @@ export function LaterView() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-        <Bookmark size={17} className="text-faint" />
+        <Bookmark size={17} className="text-decorative" />
         <h1 className="text-[15px] font-semibold">Later</h1>
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -48,7 +48,7 @@ export function LaterView() {
               <motion.span
                 animate={{ rotate: isCompletedOpen ? 90 : 0 }}
                 transition={springs.snappy}
-                className="grid text-faint"
+                className="grid text-decorative"
               >
                 <ChevronRight size={14} />
               </motion.span>
@@ -157,7 +157,7 @@ function LaterRow({ item }: { item: LaterItem }) {
             <span
               className={cx(
                 "ml-auto flex shrink-0 items-center gap-1 rounded-full px-2 text-[11px]",
-                isOverdue ? "bg-danger/15 text-danger" : "bg-accent-soft text-accent-text",
+                isOverdue ? "bg-danger/15 text-danger-text" : "bg-accent-soft text-accent-text",
               )}
             >
               <AlarmClock size={11} /> {describeReminder(item.remind_ms, new Date())}

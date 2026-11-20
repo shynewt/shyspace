@@ -159,7 +159,7 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
   return (
     <>
       <div className="flex items-center gap-3 border-b border-line px-4">
-        <Search size={17} className="text-faint" />
+        <Search size={17} className="text-decorative" />
         <input
           value={query}
           aria-label="Search messages and pages"
@@ -218,7 +218,7 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
                   transition={springs.snappy}
                 />
               )}
-              <span className={`relative mt-0.5 ${selected === index ? "text-accent" : "text-faint"}`}>
+              <span className={`relative mt-0.5 ${selected === index ? "text-accent" : "text-decorative"}`}>
                 {item.icon}
               </span>
               <span className="relative min-w-0 flex-1">
@@ -232,7 +232,7 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
                   ))}
                 </span>
               )}
-              {selected === index && <CornerDownLeft size={14} className="relative mt-1 text-faint" />}
+              {selected === index && <CornerDownLeft size={14} className="relative mt-1 text-decorative" />}
             </button>
           </div>
         ))}

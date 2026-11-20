@@ -189,7 +189,10 @@ function LengthCount({ length, isTooLong }: { length: number; isTooLong: boolean
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
           transition={springs.snappy}
-          className={cx("order-last ml-auto tabular-nums", isTooLong ? "font-medium text-danger" : "text-warning")}
+          className={cx(
+            "order-last ml-auto tabular-nums",
+            isTooLong ? "font-medium text-danger-text" : "text-warning-text",
+          )}
         >
           {isTooLong && "Too long to send: "}
           {length.toLocaleString()} / {MAX_MESSAGE_CHARS.toLocaleString()}

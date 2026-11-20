@@ -6,7 +6,11 @@ The desktop UI is built from a small set of shared components in `apps/desktop/s
 
 Calm and warm: soft neutral surfaces, one violet accent, rounded corners, gentle shadows. Light and dark follow the system setting.
 
-- **Tokens** live in `src/styles.css` as CSS variables (`--bg`, `--surface`, `--surface-2/3`, `--border`, `--text`, `--text-muted/faint`, `--accent`, `--accent-soft/strong/text`, `--danger`, `--success`, `--warning`, `--shadow`, `--shadow-lg`). Tailwind exposes them as `bg-surface`, `text-muted`, `border-line`, `shadow-card`, `shadow-float` and so on. Never use raw colors in components; the logo is the one exception.
+- **Tokens** live in `src/styles.css` as CSS variables (`--bg`, `--surface`, `--surface-2/3`, `--border`, `--text`, `--text-muted/faint/decorative`, `--accent`, `--accent-soft/strong/text`, `--danger(-text)`, `--success(-text)`, `--warning(-text)`, `--shadow`, `--shadow-lg`). Tailwind exposes them as `bg-surface`, `text-muted`, `border-line`, `shadow-card`, `shadow-float` and so on. Never use raw colors in components; the logo is the one exception. Each theme's values are written once: dark ones under `@variant dark`, which matches a chosen dark theme, or the system's dark mode unless Light was chosen (`dark:` utilities follow the same rule).
+- **Contrast:** text meets WCAG AA (4.5:1) in both themes; `tests/ui/contrast.spec.ts` checks the token pairs, so add a pair there when you add a token.
+  - `text-muted` for secondary text, `text-faint` for small informational text (timestamps, hints, section labels). Both pass on `bg` and `surface`; only `text-muted` also passes on `surface-2`, so use it for text on `surface-2` fills (like `Kbd`).
+  - `text-decorative` is for decoration only: an icon beside a label, a chevron, a spinner. Never for something someone has to read.
+  - Semantic colors: the plain token (`bg-danger`, a dot, an icon) is for fills and graphics, and white text passes on its fills; the `-text` token (`text-danger-text`) is for text, also on its tints like `bg-danger/15`. The same goes for `accent` and `accent-text`.
 - **Type:** the system UI font, 13–15 px for interface text, larger only for page titles.
 - **Shape:** `rounded-lg` (8 px) for controls, `rounded-xl` (12 px) for cards, `rounded-2xl` (16 px) for dialogs.
 

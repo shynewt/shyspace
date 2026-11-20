@@ -79,7 +79,7 @@ export function ThreadPanel({
       </header>
       <div className="flex-1 overflow-y-auto py-3">
         {!thread && (
-          <div className="flex justify-center py-4 text-faint">
+          <div className="flex justify-center py-4 text-decorative">
             <Spinner size={14} />
           </div>
         )}
