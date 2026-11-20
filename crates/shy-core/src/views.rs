@@ -299,6 +299,11 @@ pub enum Change {
         page: EntityId,
         update: Vec<u8>,
     },
+    /// The page's content was rebuilt from scratch; anything holding a copy
+    /// of it reloads it.
+    PageReset {
+        page: EntityId,
+    },
     Members,
     Invites,
     /// The bucket settings changed; the workspace reconnects.

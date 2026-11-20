@@ -8,6 +8,7 @@ mod later;
 mod oplog;
 mod queries;
 mod reading;
+mod rebuild;
 mod revisions;
 mod schema;
 mod sections;

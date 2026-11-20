@@ -261,6 +261,134 @@ async fn removed_members_cannot_backdate_ops_with_old_keys() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn ops_applied_just_before_a_removal_arrives_are_undone() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let earlier = bob
+        .send_message(&general, "written before removal", None)
+        .unwrap();
+    let page = bob.create_page("Plans", None).unwrap();
+    bob.edit_page(&page, crate::Edit::Append("agreed plan")).unwrap();
+    bob.sync().await;
+    carol.sync().await;
+    carol.set_draft(&general, "unsent thought").unwrap();
+    carol.mark_read(&general, &earlier).unwrap();
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    // Bob gets a last word in live, before Carol hears about the removal:
+    // a new message, a delete of his earlier one, and a page edit.
+    let mut forger = Forger::new(&bob);
+    let last_word = crate::ops::new_owned_id(&bob.me());
+    let late_edit = crate::pages::edit(
+        carol.page_state(&page).unwrap().as_deref(),
+        crate::Edit::Append("SNEAKED-INTO-PAGE"),
+    )
+    .unwrap();
+    for op in [
+        Op::Message {
+            id: last_word.clone(),
+            channel: general.clone(),
+            text: "SENT-AFTER-REMOVAL".into(),
+            reply_to: None,
+        },
+        Op::Delete { id: earlier.clone() },
+        Op::DocUpdate {
+            page: page.clone(),
+            update: late_edit,
+        },
+    ] {
+        carol.receive(forger.seal(op)).unwrap();
+    }
+    carol.react(&last_word, "👍", true).unwrap();
+    let texts = texts_in(&carol, &general);
+    assert!(texts.contains(&"SENT-AFTER-REMOVAL".to_string()));
+    assert!(!texts.contains(&"written before removal".to_string()));
+    assert!(carol.page_text(&page).unwrap().contains("SNEAKED-INTO-PAGE"));
+
+    carol.sync().await;
+    admin.sync().await;
+    for member in [&admin, &carol] {
+        let texts = texts_in(member, &general);
+        assert!(texts.contains(&"written before removal".to_string()));
+        assert!(!texts.contains(&"SENT-AFTER-REMOVAL".to_string()));
+        assert!(member.search("SENT-AFTER-REMOVAL", 10).unwrap().is_empty());
+        assert_eq!(member.page_text(&page).unwrap(), "agreed plan");
+    }
+    assert_eq!(shared_view(&carol, &general), shared_view(&admin, &general));
+    assert_eq!(
+        carol.state().store.last_seq(&bob.me()).unwrap(),
+        admin.state().store.last_seq(&bob.me()).unwrap(),
+        "Carol's copy of Bob's log ends where the removal froze it"
+    );
+    assert_eq!(carol.drafts().unwrap().len(), 1, "drafts are kept");
+    assert!(
+        carol
+            .channels()
+            .unwrap()
+            .iter()
+            .any(|channel| channel.id == general && channel.unread == 0),
+        "read markers are kept"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_damaged_page_update_cannot_stop_a_device_following_a_removal() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let mut forger = Forger::new(&bob);
+    // Planted earlier, so it is part of Bob's log that everyone keeps.
+    let damaged = forger.seal(Op::DocUpdate {
+        page: crate::ops::new_owned_id(&bob.me()),
+        update: b"not a yjs update".to_vec(),
+    });
+    for member in [&admin, &carol] {
+        member.receive(damaged.clone()).unwrap();
+    }
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    carol
+        .receive(forger.seal(Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: "SENT-AFTER-REMOVAL".into(),
+            reply_to: None,
+        }))
+        .unwrap();
+    carol.sync().await;
+
+    assert_eq!(carol.status().error, None);
+    assert_eq!(
+        current_key(&carol).0,
+        current_key(&admin).0,
+        "Carol reached the new epoch"
+    );
+    assert!(!texts_in(&carol, &general).contains(&"SENT-AFTER-REMOVAL".to_string()));
+}
+
+fn texts_in(member: &Workspace, channel: &str) -> Vec<String> {
+    member
+        .messages(channel, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect()
+}
+
+/// What every member should see the same, leaving out personal state.
+fn shared_view(member: &Workspace, channel: &str) -> Vec<(String, String, bool, u64)> {
+    member
+        .messages(channel, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| (message.id, message.text, message.is_edited, message.lamport))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_data_directory_alone_reveals_nothing() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path().join("ada");

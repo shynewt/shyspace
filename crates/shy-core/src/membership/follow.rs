@@ -24,22 +24,34 @@ impl Workspace {
             };
             let verified = commit::verify(&bytes, epoch, &admin)
                 .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
+            // Frozen logs first: if undoing a removed member's late ops fails,
+            // nothing has moved on and the whole commit is retried.
+            let is_rebuilt = {
+                let state = self.state();
+                let mut is_rebuilt = false;
+                for frozen in &verified.frozen {
+                    is_rebuilt |= state
+                        .store
+                        .freeze_author(&frozen.member, frozen.last_seq, &admin)?;
+                }
+                is_rebuilt
+            };
+            if is_rebuilt {
+                self.emit_all_views_changed()?;
+            }
             let outcome = {
                 let mut state = self.state();
                 let outcome = state.mls.process_commit(&verified.commit, &admin)?;
                 state.store.put_commit_record(epoch, &bytes)?;
-                for frozen in &verified.frozen {
-                    state.store.freeze_author(&frozen.member, frozen.last_seq)?;
-                }
                 state.record_epoch()?;
                 outcome
             };
-            self.emit(Change::Members);
             if outcome.removed_self {
                 self.mark_removed();
                 self.emit(Change::Removed);
                 return Ok(());
             }
+            self.emit(Change::Members);
         }
     }
 
@@ -53,6 +65,23 @@ impl Workspace {
             if self.bucket().commit(from_epoch).await?.as_deref() != Some(signed.as_slice()) {
                 self.bucket().put_commit(from_epoch, signed).await?;
             }
+        }
+        Ok(())
+    }
+
+    fn emit_all_views_changed(&self) -> Result<()> {
+        let (channels, pages) = {
+            let state = self.state();
+            (state.store.channels()?, state.store.pages()?)
+        };
+        self.emit(Change::Channels);
+        self.emit(Change::Pages);
+        for channel in channels {
+            self.emit(Change::Messages { channel: channel.id });
+        }
+        // Open editors can't drop what they already merged; they start over.
+        for page in pages {
+            self.emit(Change::PageReset { page: page.id });
         }
         Ok(())
     }

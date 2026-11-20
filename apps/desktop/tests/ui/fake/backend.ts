@@ -124,6 +124,15 @@ export class FakeBackend {
     return this.invites.receiveRequest(name, kind);
   }
 
+  /** Rebuilds a page from scratch with `text`, as the core does after undoing a removed member's edits. */
+  rebuildPage(title: string, text: string): void {
+    const page = this.pages.find((candidate) => candidate.title === title);
+    if (!page) throw new Error(`fake backend: no page titled "${title}"`);
+    page.doc = new Y.Doc();
+    page.doc.getText("content").insert(0, text);
+    this.notify({ kind: "page_reset", page: page.id });
+  }
+
   pageText(title: string): string {
     const page = this.pages.find((candidate) => candidate.title === title);
     if (!page) throw new Error(`fake backend: no page titled "${title}"`);

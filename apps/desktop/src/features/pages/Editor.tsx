@@ -5,7 +5,7 @@ import { languages } from "@codemirror/language-data";
 import { EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, highlightActiveLine, keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { yCollab } from "y-codemirror.next";
 import * as Y from "yjs";
 import { api, onChange } from "../../lib/api";
@@ -52,6 +52,19 @@ const theme = EditorView.theme({
  * events. Applying an update twice is harmless, so no echo tracking is needed.
  */
 export function Editor({ pageId }: { pageId: string }) {
+  // A Yjs doc can't forget what it merged, so a rebuilt page gets a fresh one.
+  const [resets, setResets] = useState(0);
+  useEffect(
+    () =>
+      onChange((change) => {
+        if (change.kind === "page_reset" && change.page === pageId) setResets((count) => count + 1);
+      }),
+    [pageId],
+  );
+  return <PageEditor key={resets} pageId={pageId} />;
+}
+
+function PageEditor({ pageId }: { pageId: string }) {
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

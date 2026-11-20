@@ -94,7 +94,7 @@ impl Store {
     }
 
     /// A removed member's log ends at `last_seq`; anything later is forged.
-    pub fn freeze_author(&self, member: &PublicKey, last_seq: u64) -> Result<()> {
+    pub(super) fn record_frozen_author(&self, member: &PublicKey, last_seq: u64) -> Result<()> {
         self.db.execute(
             "INSERT OR IGNORE INTO frozen_authors (member, last_seq) VALUES (?, ?)",
             params![member.as_bytes(), last_seq],

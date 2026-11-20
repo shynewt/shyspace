@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::{
     crypto::{self, NewerFormat},
-    ops::{Envelope, RuleViolation, VerifiedOp, rule_violation},
+    ops::{Envelope, RuleViolation, VerifiedOp},
     views::Change,
     workspace::{State, Workspace},
 };
@@ -144,10 +144,7 @@ fn apply_and_record(
     admin: &iroh::PublicKey,
 ) -> Result<Option<crate::views::Change>> {
     let applied = state.store.atomically(|store| {
-        if !verified.body.op.is_permitted(&verified.author, admin) {
-            return Err(rule_violation("only the admin may make this change"));
-        }
-        let change = store.apply(verified)?;
+        let change = store.apply_permitted(verified, admin)?;
         store.insert_applied(envelope, true)?;
         Ok(change)
     });

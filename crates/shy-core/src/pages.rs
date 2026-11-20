@@ -29,6 +29,41 @@ pub fn merge(state: Option<&[u8]>, update: &[u8]) -> Result<Vec<u8>> {
     Ok(encode(&doc))
 }
 
+/// Merges many updates to one page in memory, so replaying a page's history
+/// costs the size of each update rather than the whole page every time.
+#[derive(Default)]
+pub struct PageMerge {
+    doc: Doc,
+    accepted: Vec<Vec<u8>>,
+}
+
+impl PageMerge {
+    /// A damaged update fails and leaves the page as it was, as [`merge`] does.
+    pub fn add(&mut self, update: &[u8]) -> Result<()> {
+        let decoded = Update::decode_v1(update)?;
+        let applied = self.doc.transact_mut().apply_update(decoded);
+        if let Err(error) = applied {
+            self.doc = Doc::new();
+            for accepted in &self.accepted {
+                self.doc
+                    .transact_mut()
+                    .apply_update(Update::decode_v1(accepted)?)?;
+            }
+            return Err(error.into());
+        }
+        self.accepted.push(update.to_vec());
+        Ok(())
+    }
+
+    pub fn state(&self) -> Vec<u8> {
+        encode(&self.doc)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.accepted.is_empty()
+    }
+}
+
 pub fn read(state: Option<&[u8]>) -> Result<String> {
     Ok(text(&load(state)?))
 }

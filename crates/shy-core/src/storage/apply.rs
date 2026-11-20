@@ -2,6 +2,7 @@
 //! order ops arrive in, and applying one twice changes nothing.
 
 use anyhow::Result;
+use iroh::PublicKey;
 use rusqlite::{OptionalExtension, named_params, params};
 
 use super::Store;
@@ -20,6 +21,15 @@ use crate::{
 const EARLIER_WINS: &str = "(:lamport < lamport OR (:lamport = lamport AND :author < author))";
 
 impl Store {
+    /// Applies an op if its author may make it in a workspace run by `admin`;
+    /// a rule violation otherwise.
+    pub fn apply_permitted(&self, verified: &VerifiedOp, admin: &PublicKey) -> Result<Option<Change>> {
+        if !verified.body.op.is_permitted(&verified.author, admin) {
+            return Err(rule_violation("only the admin may make this change"));
+        }
+        self.apply(verified)
+    }
+
     /// Returns what changed, or `None` if nothing visible did.
     pub fn apply(&self, verified: &VerifiedOp) -> Result<Option<Change>> {
         let author = verified.author.as_bytes().as_slice();
@@ -174,7 +184,7 @@ impl Store {
         self.reindex_page(id)
     }
 
-    fn reindex_page(&self, id: &str) -> Result<()> {
+    pub(super) fn reindex_page(&self, id: &str) -> Result<()> {
         let (title, state): (String, Option<Vec<u8>>) =
             self.db
                 .query_row("SELECT title, doc FROM pages WHERE id = ?", [id], |row| {

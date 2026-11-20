@@ -40,12 +40,12 @@ impl KeyHistory {
         Ok(Self { epochs, frozen })
     }
 
-    pub fn store_into(self, store: &Store) -> Result<()> {
+    pub fn store_into(self, store: &Store, admin: &PublicKey) -> Result<()> {
         for entry in self.epochs {
             store.put_epoch(entry.epoch, &entry.key, &entry.members)?;
         }
         for frozen in self.frozen {
-            store.freeze_author(&frozen.member, frozen.last_seq)?;
+            store.freeze_author(&frozen.member, frozen.last_seq, admin)?;
         }
         Ok(())
     }

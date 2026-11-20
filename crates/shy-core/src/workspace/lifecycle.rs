@@ -240,7 +240,7 @@ impl Workspace {
             &invite.admin_mls_key,
         )?;
         let grant: Grant = postcard::from_bytes(&mls.open_from_admin(&sealed_grant, &invite.admin)?)?;
-        grant.history.store_into(&local.store)?;
+        grant.history.store_into(&local.store, &invite.admin)?;
         let bucket_lamport = grant.bucket_lamport;
 
         let config = WorkspaceConfig {

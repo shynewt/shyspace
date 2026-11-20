@@ -12,7 +12,10 @@ export function PageCard({ pageId }: { pageId: string }) {
   const { pages, navigate } = useWorkspace();
   const page = pages.find((candidate) => candidate.id === pageId);
   const loadState = useCallback(() => api.pageState(pageId), [pageId]);
-  const state = useLive(loadState, (change) => change.kind === "doc" && change.page === pageId);
+  const state = useLive(
+    loadState,
+    (change) => (change.kind === "doc" || change.kind === "page_reset") && change.page === pageId,
+  );
   const preview = useMemo(() => (state ? pagePreview(state) : ""), [state]);
   if (!page) return null;
   return (
