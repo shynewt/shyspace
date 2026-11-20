@@ -33,6 +33,7 @@ export function Composer({
   onEditLast?: () => void;
 }) {
   const [text, setText] = useState("");
+  const [isFocused, setFocused] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   useFocusOnMount(input);
   const picker = useMentionPicker(input, (next) => updateText(next));
@@ -96,8 +97,10 @@ export function Composer({
     }
   };
 
+  const isHintShown = editing !== null || (isFocused && text === "");
+
   return (
-    <div className="shrink-0 px-5 pt-1 pb-4">
+    <div className="relative shrink-0 px-5 pt-1 pb-7">
       <div className="relative">
         <AnimatePresence>{picker.list}</AnimatePresence>
         <motion.div
@@ -133,6 +136,8 @@ export function Composer({
               rows={1}
               aria-label={label}
               {...picker.inputProps}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               onChange={(event) => {
                 updateText(event.target.value);
                 picker.onTextChange(event.target.value, event.target.selectionStart);
@@ -164,19 +169,44 @@ export function Composer({
           </div>
         </motion.div>
       </div>
-      <p className="mt-1.5 flex items-center gap-1.5 px-1 text-[11px] text-faint">
+      {/* In the space under the box, so showing it never moves the box. */}
+      <div className="absolute inset-x-6 bottom-1.5 flex h-[18px] items-center gap-3 overflow-hidden text-[11px] text-faint">
         <LengthCount length={sentLength} isTooLong={isTooLong} />
-        {editing ? (
-          <>
-            <Kbd>Enter</Kbd> to save · <Kbd>Esc</Kbd> to cancel
-          </>
-        ) : (
-          <>
-            <Kbd>Enter</Kbd> to send · <Kbd>Shift Enter</Kbd> for a new line · <Kbd>↑</Kbd> to edit your last message
-          </>
-        )}
-      </p>
+        <AnimatePresence initial={false}>
+          {isHintShown && (
+            <motion.p
+              key={editing ? "editing" : "writing"}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              className="flex items-center gap-3"
+            >
+              {editing ? (
+                <>
+                  <KeyHint keys="Enter">save</KeyHint>
+                  <KeyHint keys="Esc">cancel</KeyHint>
+                </>
+              ) : (
+                <>
+                  <KeyHint keys="Enter">send</KeyHint>
+                  <KeyHint keys="Shift Enter">new line</KeyHint>
+                  <KeyHint keys="↑">edit last</KeyHint>
+                </>
+              )}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
+  );
+}
+
+function KeyHint({ keys, children }: { keys: string; children: string }) {
+  return (
+    <span className="flex items-center gap-1 whitespace-nowrap">
+      <Kbd>{keys}</Kbd> {children}
+    </span>
   );
 }
 

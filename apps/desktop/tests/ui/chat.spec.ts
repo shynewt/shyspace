@@ -118,3 +118,19 @@ test("a message's toolbar goes away once the pointer moves on, even after using 
   const toolbar = alpha.getByRole("button", { name: "React" }).locator("xpath=..");
   await expect(toolbar).toHaveCSS("opacity", "0");
 });
+
+test("the composer's key hints show only while it's focused and empty", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  const hints = page.getByText("new line");
+  await composer.focus();
+  await expect(hints).toHaveCount(1);
+  const before = await composer.boundingBox();
+
+  await composer.fill("Hello");
+  await expect(hints).toHaveCount(0);
+  expect(await composer.boundingBox()).toEqual(before);
+  await composer.fill("");
+  await expect(hints).toHaveCount(1);
+  await page.getByRole("log", { name: "Messages in #general" }).click();
+  await expect(hints).toHaveCount(0);
+});
