@@ -16,6 +16,7 @@ export function NavItem({
   isMuted = false,
   status,
   onContextMenu,
+  onOpen,
   depth = 0,
   leading,
   trailing,
@@ -37,6 +38,8 @@ export function NavItem({
   status?: { icon: ReactNode; label: string } | null;
   /** A right-click (or the keyboard's menu key) on the item. */
   onContextMenu?: () => void;
+  /** What a click does instead of opening `view`, for a place made on first open. */
+  onOpen?: () => void;
   depth?: number;
   /** Rendered before the item, outside its button (like a fold toggle). */
   leading?: ReactNode;
@@ -64,7 +67,7 @@ export function NavItem({
             ? accessibleName([label, kind, status?.label], hasUnread ? unread : 0, mentions, countNoun)
             : undefined
         }
-        onClick={() => navigate(view)}
+        onClick={onOpen ?? (() => navigate(view))}
         onContextMenu={
           onContextMenu &&
           ((event) => {

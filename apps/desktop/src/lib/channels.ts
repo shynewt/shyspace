@@ -20,8 +20,9 @@ export function channelReference(channel: Channel | undefined, members: readonly
   return channel.kind === "dm" ? channelTitle(channel, members) : `#${channel.name}`;
 }
 
-/** What the composer asks for: "Message #plans" or "Message Ada". */
+/** What the composer asks for: "Message #plans", "Message Ada" or "Write a note". */
 export function composerLabel(channel: Channel | undefined, members: readonly Member[] | undefined): string {
+  if (channel?.kind === "notes") return "Write a note";
   return `Message ${channelReference(channel, members)}`;
 }
 

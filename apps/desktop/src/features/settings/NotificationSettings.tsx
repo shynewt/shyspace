@@ -53,7 +53,10 @@ function ChannelAlerts() {
   const [beforeReset, setBeforeReset] = useState<SavedLevel[] | null>(null);
   // Toasts sit behind the modal Settings window, so failures show here too.
   const [error, setError] = useState<string | null>(null);
-  const sorted = [...channels].sort((left, right) => left.name.localeCompare(right.name));
+  // Your notes never alert you: you wrote them.
+  const sorted = channels
+    .filter((channel) => channel.kind !== "notes")
+    .sort((left, right) => left.name.localeCompare(right.name));
   const changed = sorted.filter((channel) => channel.notify !== DEFAULT_LEVEL);
 
   /** Sets each level, reporting the ones that failed; resolves to those that worked. */

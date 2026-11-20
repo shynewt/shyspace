@@ -1,6 +1,7 @@
 /** The rows of a channel's message list: messages, day dividers and the new-messages line. */
-import { Hash, Lock } from "lucide-react";
+import { Hash, Lock, NotebookPen } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type { ReactNode } from "react";
 import type { Channel, Member, Message, MessageCursor } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
 import { formatDay } from "../../lib/people";
@@ -96,16 +97,7 @@ export function MessageRows({
           <Spinner size={14} />
         </div>
       )}
-      {messages && messages.length === 0 && (
-        <EmptyState
-          icon={channel && channel.kind !== "public" ? <Lock size={22} /> : <Hash size={22} />}
-          title={`This is the start of ${channel?.kind === "dm" ? "your conversation with " : "#"}${channel ? channelTitle(channel, members) : ""}`}
-        >
-          {!channel || channel.kind === "public"
-            ? "Say hi. Only workspace members can read what you write."
-            : "Only the people in it can read what you write, not even the workspace admin."}
-        </EmptyState>
-      )}
+      {messages && messages.length === 0 && <Intro {...introTo(channel, members)} />}
       <AnimatePresence initial={false}>
         {rows.map((row) =>
           row.kind === "day" ? (
@@ -133,4 +125,45 @@ export function MessageRows({
       </AnimatePresence>
     </>
   );
+}
+
+type IntroText = { icon: ReactNode; title: string; text: string };
+
+function Intro({ icon, title, text }: IntroText) {
+  return (
+    <EmptyState icon={icon} title={title}>
+      {text}
+    </EmptyState>
+  );
+}
+
+/** What an empty conversation says about itself, by kind. */
+function introTo(channel: Channel | undefined, members: Member[] | undefined): IntroText {
+  const title = channel ? channelTitle(channel, members) : "";
+  switch (channel?.kind) {
+    case "notes":
+      return {
+        icon: <NotebookPen size={22} />,
+        title: "Your notes",
+        text: "Jot down links, drafts and to-dos. Only you can read them, not even the workspace admin.",
+      };
+    case "dm":
+      return {
+        icon: <Lock size={22} />,
+        title: `This is the start of your conversation with ${title}`,
+        text: "Only the people in it can read what you write, not even the workspace admin.",
+      };
+    case "private":
+      return {
+        icon: <Lock size={22} />,
+        title: `This is the start of #${title}`,
+        text: "Only the people in it can read what you write, not even the workspace admin.",
+      };
+    default:
+      return {
+        icon: <Hash size={22} />,
+        title: `This is the start of #${title}`,
+        text: "Say hi. Only workspace members can read what you write.",
+      };
+  }
 }

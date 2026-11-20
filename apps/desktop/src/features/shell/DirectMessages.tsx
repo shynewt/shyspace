@@ -1,14 +1,15 @@
-import { Plus } from "lucide-react";
+import { NotebookPen, Plus } from "lucide-react";
 import { useState } from "react";
 import { api, type Channel } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
+import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, IconButton } from "../../ui";
 import { NewDmDialog } from "../private/NewPrivateDialogs";
 import { NavItem } from "./NavItem";
 
-/** Your DMs, with a button to start one. */
+/** Your notes, then your DMs, with a button to start one. */
 export function DirectMessages() {
   const { channels } = useWorkspace();
   const members = useLive(api.members, (change) => change.kind === "members");
@@ -29,6 +30,7 @@ export function DirectMessages() {
         />
       </div>
       <div className="flex flex-col gap-px">
+        <NotesItem notes={channels.find((channel) => channel.kind === "notes")} />
         {dms.map((dm) => (
           <DmItem key={dm.id} dm={dm} title={channelTitle(dm, members)} />
         ))}
@@ -44,6 +46,26 @@ export function DirectMessages() {
       </div>
       <NewDmDialog open={isStarting} onOpenChange={setStarting} />
     </section>
+  );
+}
+
+/** Always first: your notes, made the first time you open them. */
+function NotesItem({ notes }: { notes: Channel | undefined }) {
+  const { navigate } = useWorkspace();
+  const openForTheFirstTime = () => {
+    api
+      .openNotes()
+      .then((id) => navigate({ kind: "channel", id }))
+      .catch(reportError);
+  };
+  return (
+    <NavItem
+      view={{ kind: "channel", id: notes?.id ?? "" }}
+      onOpen={notes ? undefined : openForTheFirstTime}
+      icon={<NotebookPen size={15} />}
+      label="Notes"
+      kind="only you can see them"
+    />
   );
 }
 
