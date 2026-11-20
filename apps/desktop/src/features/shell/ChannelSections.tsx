@@ -163,7 +163,7 @@ function Section({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex flex-col gap-px overflow-hidden"
+            className="flex flex-col gap-px overflow-clip"
           >
             <ChannelList
               channelIds={section.channels}
