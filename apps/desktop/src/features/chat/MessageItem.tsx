@@ -8,6 +8,7 @@ import {
   Link2,
   MessageSquareReply,
   Pencil,
+  Plus,
   SmilePlus,
   Trash2,
 } from "lucide-react";
@@ -20,7 +21,19 @@ import { REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
-import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs, Tooltip } from "../../ui";
+import {
+  Avatar,
+  Badge,
+  ConfirmDialog,
+  cx,
+  EmojiPicker,
+  IconButton,
+  Menu,
+  type MenuItem,
+  Popover,
+  springs,
+  Tooltip,
+} from "../../ui";
 import { MessageCard } from "./MessageCard";
 import { PageCard } from "./PageCard";
 import { describeSaved, SavedLabel } from "./SavedLabel";
@@ -44,6 +57,7 @@ export const MessageItem = memo(function MessageItem({
 }) {
   const { pages, navigate, session } = useWorkspace();
   const [isPickerOpen, setPickerOpen] = useState(false);
+  const [isFullPickerShown, setFullPickerShown] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const [isMenuOpen, setMenuOpen] = useState(false);
   const article = useRef<HTMLElement>(null);
@@ -65,6 +79,7 @@ export const MessageItem = memo(function MessageItem({
     const isMine = message.reactions.find((reaction) => reaction.emoji === emoji)?.mine ?? false;
     api.react(message.id, emoji, !isMine).catch(reportError);
     setPickerOpen(false);
+    setFullPickerShown(false);
   };
 
   return (
@@ -175,25 +190,38 @@ export const MessageItem = memo(function MessageItem({
       >
         <Popover
           open={isPickerOpen}
-          onOpenChange={setPickerOpen}
+          onOpenChange={(open) => {
+            setPickerOpen(open);
+            if (!open) setFullPickerShown(false);
+          }}
           trigger={<IconButton label="React" icon={<SmilePlus size={15} />} />}
         >
-          <div className="flex gap-0.5">
-            {QUICK_REACTIONS.map((emoji, index) => (
-              <motion.button
-                key={emoji}
-                type="button"
-                aria-label={`React with ${emoji}`}
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1, transition: { ...springs.pop, delay: index * 0.025 } }}
-                whileHover={{ scale: 1.25 }}
-                onClick={() => toggleReaction(emoji)}
-                className="grid h-8 w-8 place-items-center rounded-md text-[17px] hover:bg-surface-2"
-              >
-                {emoji}
-              </motion.button>
-            ))}
-          </div>
+          {isFullPickerShown ? (
+            <EmojiPicker onSelect={toggleReaction} />
+          ) : (
+            <div className="flex items-center gap-0.5">
+              {QUICK_REACTIONS.map((emoji, index) => (
+                <motion.button
+                  key={emoji}
+                  type="button"
+                  aria-label={`React with ${emoji}`}
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1, transition: { ...springs.pop, delay: index * 0.025 } }}
+                  whileHover={{ scale: 1.25 }}
+                  onClick={() => toggleReaction(emoji)}
+                  className="grid h-8 w-8 place-items-center rounded-md text-[17px] hover:bg-surface-2"
+                >
+                  {emoji}
+                </motion.button>
+              ))}
+              <IconButton
+                label="More emoji…"
+                icon={<Plus size={15} />}
+                onClick={() => setFullPickerShown(true)}
+                className="ml-0.5 h-8 w-8"
+              />
+            </div>
+          )}
         </Popover>
         {onOpenThread && (
           <IconButton label="Reply in thread" icon={<MessageSquareReply size={15} />} onClick={onOpenThread} />

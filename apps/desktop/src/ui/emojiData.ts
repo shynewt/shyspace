@@ -10,21 +10,46 @@ const NEWEST_EMOJI_VERSION = 15.1;
 const SKIN_TONES = ["light", "medium-light", "medium", "medium-dark", "dark"] as const;
 type SkinToneName = (typeof SKIN_TONES)[number];
 
+/** An emoji the app offers: frimousse's shape, plus the shortcodes typed after a colon. */
+export type CatalogEmoji = EmojiData["emojis"][number] & { shortcodes: string[] };
+
+export type EmojiCatalog = Omit<EmojiData, "emojis"> & { emojis: CatalogEmoji[] };
+
+let catalog: Promise<EmojiCatalog> | null = null;
+
 /**
- * Emojibase's English data, shaped for frimousse. It ships inside the app as
- * a lazily loaded module: the app may not connect anywhere but the core, so
- * nothing is fetched (see docs/decisions.md).
+ * Every emoji the app offers, loaded once and shared by the picker and the
+ * colon suggestions. Emojibase's English data ships inside the app as lazily
+ * loaded modules: the app may not connect anywhere but the core, so nothing is
+ * fetched (see docs/decisions.md). This is the one place that builds the
+ * categories, so a later category (like a workspace's own emoji) goes here.
  */
+export function loadEmojiCatalog(): Promise<EmojiCatalog> {
+  catalog ??= buildCatalog();
+  return catalog;
+}
+
+/** The catalog in the shape frimousse takes. */
 export async function loadEmojiData(): Promise<EmojiData> {
-  const [{ default: emojis }, { default: messages }] = await Promise.all([
+  const { emojis, ...rest } = await loadEmojiCatalog();
+  return { ...rest, emojis: emojis.map(({ shortcodes: _shortcodes, ...emoji }) => emoji) };
+}
+
+async function buildCatalog(): Promise<EmojiCatalog> {
+  const [{ default: emojis }, { default: messages }, { default: shortcodes }] = await Promise.all([
     import("emojibase-data/en/data.json"),
     import("emojibase-data/en/messages.json"),
+    import("emojibase-data/en/shortcodes/github.json"),
   ]);
   const countryFlags = messages.subgroups.find((subgroup) => subgroup.key === "country-flag")?.order;
   const toneLabel = (key: SkinToneName) => {
     const tone = messages.skinTones.find((candidate) => candidate.key === key);
     if (!tone) throw new Error(`the emoji data has no ${key} skin tone`);
     return capitalize(tone.message);
+  };
+  const shortcodesOf = (hexcode: string): string[] => {
+    const found = shortcodes[hexcode];
+    return found === undefined ? [] : Array.isArray(found) ? found : [found];
   };
   return {
     locale: "en",
@@ -51,10 +76,45 @@ export async function loadEmojiData(): Promise<EmojiData> {
           countryFlag: (countryFlags !== undefined && emoji.subgroup === countryFlags) || undefined,
           skins: singleToneSkins(emoji.skins),
           aliases: mixedTones.length > 0 ? mixedTones : undefined,
+          shortcodes: shortcodesOf(emoji.hexcode),
         },
       ];
     }),
   };
+}
+
+/**
+ * Emoji matching `query`, best first: recently used ones, then by shortcode,
+ * then by a word of the name, then by keyword (a whole one first).
+ */
+export function searchEmoji(
+  emojis: CatalogEmoji[],
+  query: string,
+  recent: readonly string[],
+  limit: number,
+): CatalogEmoji[] {
+  const wanted = query.toLowerCase();
+  const scored = emojis.flatMap((emoji) => {
+    const score = matchScore(emoji, wanted);
+    if (score === 0) return [];
+    const recency = recent.indexOf(emoji.emoji);
+    return [{ emoji, score: recency === -1 ? score : 100 - recency }];
+  });
+  return scored
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit)
+    .map(({ emoji }) => emoji);
+}
+
+function matchScore(emoji: CatalogEmoji, wanted: string): number {
+  if (emoji.shortcodes.some((shortcode) => shortcode === wanted)) return 5;
+  if (emoji.shortcodes.some((shortcode) => shortcode.startsWith(wanted))) return 4;
+  const words = emoji.label.toLowerCase().split(/[\s:,-]+/);
+  if (words.some((word) => word.startsWith(wanted))) return 3;
+  if (emoji.tags.some((tag) => tag.toLowerCase() === wanted)) return 2.5;
+  if (emoji.tags.some((tag) => tag.toLowerCase().startsWith(wanted))) return 2;
+  if (emoji.label.toLowerCase().includes(wanted)) return 1;
+  return 0;
 }
 
 /** The five single-tone variants by name, or none if the emoji doesn't have all five. */

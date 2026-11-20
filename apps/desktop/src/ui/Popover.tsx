@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { Popover as RadixPopover } from "radix-ui";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { pop, springs } from "./motion";
 
 /** A small floating surface anchored to its trigger, like an emoji picker. */
@@ -11,6 +11,7 @@ export function Popover({
   onOpenChange,
   side = "top",
   align = "end",
+  returnFocusTo,
 }: {
   trigger: ReactNode;
   children: ReactNode;
@@ -18,12 +19,24 @@ export function Popover({
   onOpenChange?: (open: boolean) => void;
   side?: "top" | "bottom" | "left" | "right";
   align?: "start" | "center" | "end";
+  /** Where focus goes when it closes, instead of back to the trigger. */
+  returnFocusTo?: RefObject<HTMLElement | null>;
 }) {
   return (
     <RadixPopover.Root open={open} onOpenChange={onOpenChange}>
       <RadixPopover.Trigger asChild>{trigger}</RadixPopover.Trigger>
       <RadixPopover.Portal>
-        <RadixPopover.Content side={side} align={align} sideOffset={6} asChild>
+        <RadixPopover.Content
+          side={side}
+          align={align}
+          sideOffset={6}
+          asChild
+          onCloseAutoFocus={(event) => {
+            if (!returnFocusTo) return;
+            event.preventDefault();
+            returnFocusTo.current?.focus();
+          }}
+        >
           <motion.div
             {...pop}
             transition={springs.snappy}

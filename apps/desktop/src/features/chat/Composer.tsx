@@ -1,13 +1,13 @@
-import { ArrowUp, Pencil, X } from "lucide-react";
+import { ArrowUp, Pencil, Smile, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
 import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
-import { Button, cx, IconButton, Kbd, springs } from "../../ui";
+import { Button, cx, EmojiPicker, IconButton, Kbd, Popover, springs } from "../../ui";
 import { useDraft } from "./useDraft";
-import { useMentionPicker } from "./useMentionPicker";
+import { useSuggestions } from "./useSuggestions";
 
 const MAX_HEIGHT_PX = 200;
 
@@ -36,7 +36,8 @@ export function Composer({
   const [isFocused, setFocused] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   useFocusOnMount(input);
-  const picker = useMentionPicker(input, (next) => updateText(next));
+  const picker = useSuggestions(input, (next) => updateText(next));
+  const [isEmojiOpen, setEmojiOpen] = useState(false);
   const sentLength = characterCount(picker.toSend(text).trim());
   const isTooLong = sentLength > MAX_MESSAGE_CHARS;
   const canSend = sentLength > 0 && !isTooLong;
@@ -95,6 +96,16 @@ export function Composer({
       setText(draft);
       reportError(error);
     }
+  };
+
+  /** Puts the emoji where the cursor is, replacing any selection, and leaves the cursor after it. */
+  const insertEmoji = (emoji: string) => {
+    const element = input.current;
+    if (!element) return;
+    const before = element.value.slice(0, element.selectionStart) + emoji;
+    updateText(before + element.value.slice(element.selectionEnd));
+    setEmojiOpen(false);
+    requestAnimationFrame(() => element.setSelectionRange(before.length, before.length));
   };
 
   const isHintShown = editing !== null || (isFocused && text === "");
@@ -158,6 +169,14 @@ export function Composer({
               placeholder={label}
               className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent py-1 text-[14px] leading-6 outline-none placeholder:text-faint"
             />
+            <Popover
+              open={isEmojiOpen}
+              onOpenChange={setEmojiOpen}
+              returnFocusTo={input}
+              trigger={<IconButton label="Insert emoji" icon={<Smile size={16} />} className="mb-0.5" />}
+            >
+              <EmojiPicker onSelect={insertEmoji} />
+            </Popover>
             <Button
               variant="primary"
               aria-label={editing ? "Save" : "Send"}
