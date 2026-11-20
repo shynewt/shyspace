@@ -1,4 +1,4 @@
-import { Bookmark, Inbox as InboxIcon, Plus, Search, Settings } from "lucide-react";
+import { Bookmark, Inbox as InboxIcon, Plus, Search } from "lucide-react";
 import { type ReactNode, useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
@@ -7,20 +7,13 @@ import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { IconButton, Kbd, Logo, SectionLabel } from "../../ui";
 import { ChannelSections } from "./ChannelSections";
+import { MeMenu } from "./MeMenu";
 import { NavItem } from "./NavItem";
 import { PageTree } from "./PageTree";
 import { SyncIndicator } from "./SyncIndicator";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 
-export function Sidebar({
-  status,
-  onOpenSearch,
-  onOpenSettings,
-}: {
-  status: SyncStatus | undefined;
-  onOpenSearch: () => void;
-  onOpenSettings: () => void;
-}) {
+export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefined; onOpenSearch: () => void }) {
   const { pages, navigate } = useWorkspace();
 
   const createPage = async (parent: string | null) => {
@@ -63,12 +56,8 @@ export function Sidebar({
         </Section>
       </nav>
 
-      <div className="flex items-center justify-end gap-1 border-t border-line p-2">
-        <IconButton
-          label={`Settings (${shortcutKeys("settings").join(" ")})`}
-          icon={<Settings size={15} />}
-          onClick={onOpenSettings}
-        />
+      <div className="border-t border-line p-2">
+        <MeMenu />
       </div>
     </aside>
   );

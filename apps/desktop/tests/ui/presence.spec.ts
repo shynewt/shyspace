@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { failWith } from "./support";
 
 async function openMembers(page: Page) {
   await page.keyboard.press("Control+,");
@@ -7,20 +8,31 @@ async function openMembers(page: Page) {
   return settings.getByRole("list", { name: "Members" });
 }
 
+/** The button at the foot of the sidebar with your name and status. */
+function meButton(page: Page) {
+  return page.getByRole("button", { name: /^Ada\b/ });
+}
+
+async function openStatusDialog(page: Page) {
+  await meButton(page).click();
+  await page.getByRole("menuitem", { name: /^(Set|Edit) status$/ }).click();
+  return page.getByRole("dialog", { name: "Set a status" });
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("");
   await expect(page.getByLabel("Message #general")).toBeVisible();
 });
 
 test("your status shows to everyone and can be cleared", async ({ page }) => {
-  await page.keyboard.press("Control+,");
-  const settings = page.getByRole("dialog", { name: "Settings" });
-  await settings.getByLabel("Emoji").fill("🎧");
-  await settings.getByLabel("Status", { exact: true }).fill("Deep work");
-  await settings.getByRole("radio", { name: "None", exact: true }).click();
-  await settings.getByRole("button", { name: "Set status" }).click();
+  const dialog = await openStatusDialog(page);
+  await dialog.getByLabel("Emoji").fill("🎧");
+  await dialog.getByLabel("Status", { exact: true }).fill("Deep work");
+  await dialog.getByRole("radio", { name: "None", exact: true }).click();
+  await dialog.getByRole("button", { name: "Set status" }).click();
   await expect(page.getByText("Status set.")).toBeVisible();
-  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(meButton(page)).toContainText("🎧 Deep work");
 
   const members = await openMembers(page);
   await expect(members.getByText("🎧 Deep work")).toBeVisible();
@@ -28,24 +40,64 @@ test("your status shows to everyone and can be cleared", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(members).toBeHidden();
 
-  await page.keyboard.press("Control+,");
-  await page.getByRole("dialog", { name: "Settings" }).getByRole("button", { name: "Clear status" }).click();
+  await meButton(page).click();
+  await page.getByRole("menuitem", { name: "Clear status" }).click();
   await expect(page.getByText("Status cleared.")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Settings" })).toBeHidden();
+  await expect(meButton(page)).not.toContainText("Deep work");
   await expect((await openMembers(page)).getByText("Deep work")).toHaveCount(0);
 });
 
 test("a status can let only mentions through", async ({ page }) => {
-  await page.keyboard.press("Control+,");
-  const settings = page.getByRole("dialog", { name: "Settings" });
-  await settings.getByLabel("Status", { exact: true }).fill("Heads down");
-  await settings.getByRole("radio", { name: "Mentions only" }).click();
-  await settings.getByRole("button", { name: "Set status" }).click();
+  const dialog = await openStatusDialog(page);
+  await dialog.getByLabel("Status", { exact: true }).fill("Heads down");
+  await dialog.getByRole("radio", { name: "Mentions only" }).click();
+  await dialog.getByRole("button", { name: "Set status" }).click();
   await expect(page.getByText("Status set.")).toBeVisible();
-  await page.keyboard.press("Escape");
 
   await expect((await openMembers(page)).getByText("· Mentions only")).toBeVisible();
+});
+
+test("a preset fills in the status to set", async ({ page }) => {
+  const dialog = await openStatusDialog(page);
+  await dialog.getByRole("button", { name: /Focusing/ }).click();
+  await expect(dialog.getByLabel("Status", { exact: true })).toHaveValue("Focusing");
+  await expect(dialog.getByRole("radio", { name: "4 hours" })).toBeChecked();
+  await expect(dialog.getByRole("radio", { name: "Mentions only" })).toBeChecked();
+  await dialog.getByRole("button", { name: "Set status" }).click();
+
+  await expect(meButton(page)).toContainText("Focusing");
+});
+
+test("editing a status keeps when it clears", async ({ page }) => {
+  let dialog = await openStatusDialog(page);
+  await dialog.getByLabel("Status", { exact: true }).fill("Lunch");
+  await dialog.getByRole("radio", { name: "1 hour" }).click();
+  await dialog.getByRole("button", { name: "Set status" }).click();
+  await expect(dialog).toBeHidden();
+  const untilMs = () =>
+    page.evaluate(() => {
+      const me = window.fake.session?.me;
+      const members = window.fake.handle("members", undefined) as { id: string; status: { until_ms: number } }[];
+      return members.find((member) => member.id === me)?.status.until_ms;
+    });
+  const firstUntil = await untilMs();
+
+  dialog = await openStatusDialog(page);
+  await expect(dialog.getByRole("radio", { name: /^Until / })).toBeChecked();
+  await dialog.getByLabel("Status", { exact: true }).fill("Long lunch");
+  await dialog.getByRole("button", { name: "Set status" }).click();
+  await expect(meButton(page)).toContainText("Long lunch");
+  expect(await untilMs()).toBe(firstUntil);
+});
+
+test("a failed status save keeps what you typed and says why", async ({ page }) => {
+  const dialog = await openStatusDialog(page);
+  await failWith(page, "set_status", "the workspace is offline");
+  await dialog.getByLabel("Status", { exact: true }).fill("Deep work");
+  await dialog.getByRole("button", { name: "Set status" }).click();
+
+  await expect(dialog.getByRole("alert")).toHaveText("the workspace is offline");
+  await expect(dialog.getByLabel("Status", { exact: true })).toHaveValue("Deep work");
 });
 
 test("others show as online, away or not reachable", async ({ page }) => {
@@ -61,13 +113,26 @@ test("others show as online, away or not reachable", async ({ page }) => {
 });
 
 test("appearing offline stops telling others you're here", async ({ page }) => {
-  await page.keyboard.press("Control+,");
-  const visibility = page.getByRole("dialog", { name: "Settings" }).getByRole("radio", { name: "Appear offline" });
-  await visibility.click();
-  await expect(visibility).toBeChecked();
-  expect(await page.evaluate(() => window.fake.ownPresenceLog)).toEqual(["offline"]);
-  await page.keyboard.press("Escape");
+  await meButton(page).click();
+  await page.getByRole("menuitem", { name: "Appear offline" }).click();
+  await expect.poll(() => page.evaluate(() => window.fake.ownPresenceLog)).toEqual(["offline"]);
+  await expect(meButton(page)).toContainText("Appearing offline");
 
   const me = (await openMembers(page)).getByRole("listitem").filter({ hasText: "(you)" });
   await expect(me).toContainText("Not reachable right now");
+  await page.keyboard.press("Escape");
+
+  await meButton(page).click();
+  await page.getByRole("menuitem", { name: "Stop appearing offline" }).click();
+  await expect.poll(() => page.evaluate(() => window.fake.ownPresenceLog)).toEqual(["offline", "visible"]);
+  await expect(meButton(page)).toContainText("Online");
+});
+
+test("the me menu opens settings", async ({ page }) => {
+  await meButton(page).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("tab", { name: "Profile" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 });

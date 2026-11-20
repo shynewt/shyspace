@@ -62,10 +62,15 @@ test("settings fit the smallest window and scroll inside it", async ({ page }) =
   await page.setViewportSize({ width: 820, height: 560 });
   const settings = await openSettings(page);
   await expect(settings).toBeInViewport({ ratio: 1 });
+  await page.evaluate(() => {
+    for (let index = 1; index <= 12; index++) window.fake.addMember(`Member ${index}`);
+  });
 
-  const lastChoice = settings.getByRole("radio", { name: "Appear offline" });
-  await lastChoice.scrollIntoViewIfNeeded();
-  await expect(lastChoice).toBeInViewport({ ratio: 1 });
+  await settings.getByRole("tab", { name: "Members" }).first().click();
+  const lastMember = settings.getByRole("listitem").filter({ hasText: "Member 12" });
+  await lastMember.scrollIntoViewIfNeeded();
+  await expect(lastMember).toBeInViewport({ ratio: 1 });
+  await expect(settings).toBeInViewport({ ratio: 1 });
 });
 
 test("the close button closes settings", async ({ page }) => {

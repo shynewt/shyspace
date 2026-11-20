@@ -110,7 +110,7 @@ export function Shell({ session }: { session: Session }) {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
       >
-        <Sidebar status={status} onOpenSearch={() => setPaletteOpen(true)} onOpenSettings={() => openSettings()} />
+        <Sidebar status={status} onOpenSearch={() => setPaletteOpen(true)} />
         <main className="relative min-w-0 flex-1 bg-surface">
           <AnimatePresence mode="wait" initial={false}>
             {view && (
