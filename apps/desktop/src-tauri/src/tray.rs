@@ -76,3 +76,32 @@ pub fn show_main_window(app: &AppHandle) {
         }
     }
 }
+
+/// Shows how many things need you outside the window: in its title, as a
+/// taskbar or dock badge, and next to the tray icon. Where a platform has no
+/// badge or tray, that part is skipped; the title always changes.
+pub fn show_attention(app: &AppHandle, count: u32) -> tauri::Result<()> {
+    let window = app
+        .get_webview_window(MAIN_WINDOW)
+        .ok_or_else(|| tauri::Error::WindowNotFound)?;
+    let title = match count {
+        0 => "shyspace".to_owned(),
+        _ => format!("shyspace ({count})"),
+    };
+    window.set_title(&title)?;
+    let badge = (count > 0).then_some(i64::from(count));
+    if let Err(error) = window.set_badge_count(badge) {
+        tracing::debug!("no taskbar badge on this system: {error}");
+    }
+    if let Some(tray) = app.tray_by_id("shyspace") {
+        let label = (count > 0).then(|| count.to_string());
+        let tooltip = match count {
+            0 => "shyspace".to_owned(),
+            1 => "shyspace: 1 thing needs you".to_owned(),
+            _ => format!("shyspace: {count} things need you"),
+        };
+        tray.set_title(label)?;
+        tray.set_tooltip(Some(tooltip))?;
+    }
+    Ok(())
+}

@@ -37,6 +37,8 @@ type StoredPage = Omit<Page, "can_delete" | "is_saved"> & { doc: Y.Doc };
 export class FakeBackend {
   session: Session | null = null;
   private isHoldingJoins = false;
+  /** What the window title, taskbar and tray last showed as needing you. */
+  attentionCount = 0;
   private pendingJoin: { approve: () => void; cancel: () => void } | null = null;
   private members: Member[] = [];
   private pages: StoredPage[] = [];
@@ -340,6 +342,9 @@ export class FakeBackend {
         return this.requestToJoin(requireString(args, "name"));
       case "cancel_join":
         this.pendingJoin?.cancel();
+        return null;
+      case "set_attention_count":
+        this.attentionCount = argument(args, "count") as number;
         return null;
       case "test_bucket":
         return this.testBucket(argument(args, "bucket") as BucketConfig);

@@ -19,6 +19,7 @@ import { CommandPalette } from "../search/CommandPalette";
 import { SettingsDialog } from "../settings/SettingsDialog";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
+import { useAttentionBadge } from "./useAttentionBadge";
 
 export function Shell({ session }: { session: Session }) {
   // Unread counts change as messages arrive.
@@ -104,6 +105,7 @@ export function Shell({ session }: { session: Session }) {
 
   return (
     <WorkspaceContext.Provider value={context}>
+      <AttentionBadge />
       <motion.div
         className="flex h-full"
         initial={{ opacity: 0, scale: 0.985 }}
@@ -155,4 +157,10 @@ function RemovedNotice({ isRemoved }: { isRemoved: boolean }) {
       </div>
     </Dialog>
   );
+}
+
+/** Keeps the count of what needs you showing outside the window. */
+function AttentionBadge() {
+  useAttentionBadge();
+  return null;
 }

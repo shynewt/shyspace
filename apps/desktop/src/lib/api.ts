@@ -165,6 +165,8 @@ export const api = {
   joinWorkspace: (invite: string, name: string) => invoke<Session>("join_workspace", { invite, name }),
   /** Stops a join still waiting for the admin; `joinWorkspace` then fails. */
   cancelJoin: () => invoke<void>("cancel_join"),
+  /** Shows how many things need you in the window title, the taskbar and the tray. */
+  setAttentionCount: (count: number) => invoke<void>("set_attention_count", { count }),
   restoreWorkspace: (kit: string) => invoke<Session>("restore_workspace", { kit }),
   testBucket: (bucket: BucketConfig) => invoke<void>("test_bucket", { bucket }),
   storageSettings: () => invoke<StorageSettings>("storage_settings"),

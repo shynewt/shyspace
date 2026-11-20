@@ -162,6 +162,12 @@ async fn join_workspace(
     Ok(install(&app, &state, joined.map_err(failed)?).await)
 }
 
+/// How many things need you, shown outside the window.
+#[tauri::command]
+fn set_attention_count(app: AppHandle, count: u32) -> CommandResult<()> {
+    tray::show_attention(&app, count).map_err(|error| error.to_string())
+}
+
 /// Stops waiting for the admin to approve a join request.
 #[tauri::command]
 fn cancel_join(state: State<'_, AppState>) -> CommandResult<()> {
@@ -773,6 +779,7 @@ pub fn run() {
             open_dm,
             open_notes,
             cancel_join,
+            set_attention_count,
             private_members,
             add_to_private_channel,
             remove_from_private_channel,
