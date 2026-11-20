@@ -171,7 +171,7 @@ function UnreadChannelRow({ channel }: { channel: Channel }) {
         className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13.5px] font-semibold"
       >
         <ChannelName channelId={channel.id} className="min-w-0" />
-        <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white tabular-nums">
+        <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-on-accent tabular-nums">
           {channel.unread}
         </span>
       </button>

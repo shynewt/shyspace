@@ -97,8 +97,8 @@ export function NavItem({
             animate={{ scale: 1, opacity: 1 }}
             transition={springs.pop}
             className={cx(
-              "ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-[10.5px] font-semibold text-white tabular-nums group-hover:opacity-0",
-              mentions > 0 ? "bg-danger" : "bg-accent",
+              "ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-[10.5px] font-semibold tabular-nums group-hover:opacity-0",
+              mentions > 0 ? "bg-danger text-white" : "bg-accent text-on-accent",
             )}
           >
             {mentions > 0 ? `@${mentions}` : unread}

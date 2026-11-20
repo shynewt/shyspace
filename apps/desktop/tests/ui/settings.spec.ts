@@ -46,6 +46,57 @@ test("notification text can be hidden", async ({ page }) => {
     .toEqual([{ title: "Grace in #random", body: "New message" }]);
 });
 
+test("the accent colour can be chosen, kept and set back", async ({ page }) => {
+  const settings = await openSettings(page);
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+  const accents = settings.getByRole("radiogroup", { name: "Accent colour" });
+  expect(
+    await accents.getByRole("radio").evaluateAll((radios) => radios.map((radio) => radio.getAttribute("aria-label"))),
+  ).toEqual(["Violet", "Blue", "Indigo", "Teal", "Pink", "Graphite"]);
+  await expect(accents.getByRole("radio", { name: "Violet" })).toBeChecked();
+  const swatchColors = await accents
+    .locator("[data-accent]")
+    .evaluateAll((swatches) => swatches.map((swatch) => getComputedStyle(swatch).backgroundColor));
+  expect(new Set(swatchColors).size, "each swatch shows its own colour").toBe(6);
+  const violet = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent"));
+
+  await accents.getByRole("radio", { name: "Teal" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-accent", "teal");
+  await expect
+    .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent")))
+    .not.toBe(violet);
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-accent", "teal");
+  await openSettings(page);
+  await page.keyboard.press("Control+,");
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+  await settings.getByRole("radiogroup", { name: "Theme" }).getByRole("radio", { checked: true }).focus();
+  await page.keyboard.press("Tab");
+  await expect(accents.getByRole("radio", { name: "Teal" })).toBeFocused();
+  await expect(accents.getByRole("radio", { name: "Teal" })).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("ArrowRight");
+  await expect(accents.getByRole("radio", { name: "Pink" })).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-accent", "pink");
+
+  await accents.getByRole("radio", { name: "Violet" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-accent");
+});
+
+test("text on accent fills follows the accent", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  const settings = await openSettings(page);
+  await settings.getByLabel("Display name").fill("Ada Lovelace");
+  const save = settings.getByRole("button", { name: "Save profile" });
+  await expect(save).toHaveCSS("color", "rgb(255, 255, 255)");
+
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+  await settings.getByRole("radio", { name: "Graphite" }).click();
+  await settings.getByRole("tab", { name: "Profile" }).click();
+  await settings.getByLabel("Display name").fill("Ada Lovelace");
+  await expect(save).toHaveCSS("color", "rgb(27, 27, 25)");
+});
+
 test("the arrow keys move between choices", async ({ page }) => {
   const settings = await openSettings(page);
   await settings.getByRole("tab", { name: "Appearance" }).click();

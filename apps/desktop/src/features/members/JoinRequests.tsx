@@ -24,7 +24,7 @@ export function JoinRequestsBadge({ count }: { count: number }) {
           exit={{ scale: 0.4, opacity: 0 }}
           transition={springs.pop}
           aria-label={`${count} join ${count === 1 ? "request" : "requests"} waiting`}
-          className="relative ml-auto grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white tabular-nums"
+          className="relative ml-auto grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-on-accent tabular-nums"
         >
           {count}
         </motion.span>

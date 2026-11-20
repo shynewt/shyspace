@@ -361,7 +361,7 @@ function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => vo
         <span className="text-faint">Last reply {formatWhen(message.last_reply_ms, new Date())}</span>
       )}
       {message.unread_replies > 0 && (
-        <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white">
+        <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-on-accent">
           {message.unread_replies} new
         </span>
       )}

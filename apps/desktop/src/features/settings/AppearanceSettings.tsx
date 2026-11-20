@@ -1,5 +1,6 @@
 import { type ReduceMotion, type Theme, usePreferences } from "../../lib/preferences";
 import { SegmentedControl } from "../../ui";
+import { AccentSwatches } from "./AccentSwatches";
 import { Setting } from "./layout";
 
 export function AppearanceSettings() {
@@ -17,6 +18,9 @@ export function AppearanceSettings() {
           value={preferences.theme}
           onChange={(theme) => update({ theme })}
         />
+      </Setting>
+      <Setting title="Accent colour" description="Buttons, links, highlights and the focus ring.">
+        <AccentSwatches value={preferences.accent} onChange={(accent) => update({ accent })} />
       </Setting>
       <Setting
         title="Reduce motion"

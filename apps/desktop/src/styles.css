@@ -28,10 +28,6 @@
   --text-faint: #737069;
   /* Decoration only (icons beside a label, chevrons): never the only way to read something. */
   --text-decorative: #a29e95;
-  --accent: #6b5cff;
-  --accent-strong: #5646f0;
-  --accent-soft: #ecebff;
-  --accent-text: #4b3dd6;
   /* The plain colors are for fills, dots and icons; the -text ones for text. */
   --danger: #b33a4e;
   --danger-text: #b33a4e;
@@ -53,10 +49,6 @@
     --text-muted: #9c9a92;
     --text-faint: #8c8a84;
     --text-decorative: #6c6a63;
-    --accent: #6f63e4;
-    --accent-strong: #655ada;
-    --accent-soft: #26234a;
-    --accent-text: #b3abff;
     --danger: #c64b5f;
     --danger-text: #ef6b80;
     --success: #4cc48c;
@@ -65,6 +57,100 @@
     --warning-text: #e3a83a;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
     --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 64px rgb(0 0 0 / 0.55);
+  }
+}
+
+/*
+ * Accent presets, chosen per device (data-accent on <html>). Violet is the
+ * default. Any element with data-accent shows that preset, like a swatch.
+ * Every preset keeps its text readable (WCAG AA) on bg, surface, its soft
+ * tint and its fill.
+ */
+:root,
+[data-accent="violet"] {
+  --accent: #6b5cff;
+  --accent-strong: #5646f0;
+  --accent-soft: #ecebff;
+  --accent-text: #4b3dd6;
+  /* Text and icons on an accent fill. */
+  --on-accent: #ffffff;
+
+  @variant dark {
+    --accent: #6f63e4;
+    --accent-strong: #655ada;
+    --accent-soft: #26234a;
+    --accent-text: #b3abff;
+  }
+}
+
+[data-accent="blue"] {
+  --accent: #2a6fd6;
+  --accent-strong: #215fbf;
+  --accent-soft: #e5eefc;
+  --accent-text: #1c5bb8;
+
+  @variant dark {
+    --accent: #3a74d6;
+    --accent-strong: #3369c8;
+    --accent-soft: #1a2a44;
+    --accent-text: #8ab8ff;
+  }
+}
+
+[data-accent="indigo"] {
+  --accent: #4a5bd4;
+  --accent-strong: #3e4ec2;
+  --accent-soft: #e8eafb;
+  --accent-text: #3546b8;
+
+  @variant dark {
+    --accent: #5869d9;
+    --accent-strong: #4e5fcc;
+    --accent-soft: #1f2448;
+    --accent-text: #a8b3ff;
+  }
+}
+
+[data-accent="teal"] {
+  --accent: #0f7a72;
+  --accent-strong: #0b6a63;
+  --accent-soft: #def2ef;
+  --accent-text: #0a665f;
+
+  @variant dark {
+    --accent: #13827a;
+    --accent-strong: #10746c;
+    --accent-soft: #0f2a27;
+    --accent-text: #62d2c4;
+  }
+}
+
+[data-accent="pink"] {
+  --accent: #cc3d84;
+  --accent-strong: #b83275;
+  --accent-soft: #fce8f2;
+  --accent-text: #ad2c6b;
+
+  @variant dark {
+    --accent: #c24283;
+    --accent-strong: #b33a79;
+    --accent-soft: #3a1a2c;
+    --accent-text: #f59ac6;
+  }
+}
+
+[data-accent="graphite"] {
+  --accent: #55534e;
+  --accent-strong: #45433f;
+  --accent-soft: #ecebe7;
+  --accent-text: #46443f;
+
+  @variant dark {
+    --accent: #d4d2ca;
+    --accent-strong: #c2c0b8;
+    --accent-soft: #2c2c28;
+    --accent-text: #d8d6cf;
+    --on-accent: #1b1b19;
   }
 }
 
@@ -82,6 +168,7 @@
   --color-accent-strong: var(--accent-strong);
   --color-accent-soft: var(--accent-soft);
   --color-accent-text: var(--accent-text);
+  --color-on-accent: var(--on-accent);
   --color-danger: var(--danger);
   --color-danger-text: var(--danger-text);
   --color-success: var(--success);

@@ -6,6 +6,8 @@ import { reportError } from "./toast";
  * storage. Reads fall back to the default when storage is unavailable.
  */
 export type Theme = "system" | "light" | "dark";
+export const ACCENTS = ["violet", "blue", "indigo", "teal", "pink", "graphite"] as const;
+export type Accent = (typeof ACCENTS)[number];
 /** "system" follows the operating system's reduce-motion setting. */
 export type ReduceMotion = "system" | "on" | "off";
 
@@ -13,6 +15,7 @@ export type RecentEmoji = { emoji: string; label: string };
 
 type Preferences = {
   theme: Theme;
+  accent: Accent;
   reduceMotion: ReduceMotion;
   /** Show message text in desktop notifications (off hides it). */
   alertsShowText: boolean;
@@ -20,7 +23,13 @@ type Preferences = {
   recentEmoji: RecentEmoji[];
 };
 
-const DEFAULTS: Preferences = { theme: "system", reduceMotion: "system", alertsShowText: true, recentEmoji: [] };
+const DEFAULTS: Preferences = {
+  theme: "system",
+  accent: "violet",
+  reduceMotion: "system",
+  alertsShowText: true,
+  recentEmoji: [],
+};
 const RECENT_EMOJI_LIMIT = 16;
 const KEY = "shyspace.preferences";
 const listeners = new Set<() => void>();
@@ -68,6 +77,15 @@ export function useTheme() {
     if (theme === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+}
+
+/** Applies the chosen accent colour to the page; Violet is the stylesheet's default. */
+export function useAccent() {
+  const [{ accent }] = usePreferences();
+  useEffect(() => {
+    if (accent === "violet") document.documentElement.removeAttribute("data-accent");
+    else document.documentElement.setAttribute("data-accent", accent);
+  }, [accent]);
 }
 
 const MOTION_CONFIG: Record<ReduceMotion, "user" | "always" | "never"> = {

@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { Shell } from "./features/shell/Shell";
 import { api, type Session } from "./lib/api";
-import { useTheme } from "./lib/preferences";
+import { useAccent, useTheme } from "./lib/preferences";
 import { reportError } from "./lib/toast";
 import { useNoBrowserMenu } from "./lib/useContextMenu";
 import { useInputModality } from "./lib/useInputModality";
@@ -19,6 +19,7 @@ export function App() {
   useNoBrowserMenu();
   useInputModality();
   useTheme();
+  useAccent();
 
   useEffect(() => {
     api.session().then(

@@ -16,7 +16,9 @@ const TEXT_PAIRS: [string, Color][] = [
   ["--text-faint", "--surface"],
   ["--text-faint", "--bg"],
   ["--accent-text", "--surface"],
+  ["--accent-text", "--bg"],
   ["--accent-text", "--accent-soft"],
+  ["--accent-text", { mix: "--accent", percent: 10, over: "--surface" }],
   ["--danger-text", "--surface"],
   ["--danger-text", "--bg"],
   ["--danger-text", { mix: "--danger", percent: 15, over: "--surface" }],
@@ -24,15 +26,18 @@ const TEXT_PAIRS: [string, Color][] = [
   ["--warning-text", { mix: "--warning", percent: 15, over: "--surface" }],
   ["--success-text", "--surface"],
   ["--success-text", { mix: "--success", percent: 12, over: "--surface" }],
-  ["#ffffff", "--accent"],
-  ["#ffffff", "--accent-strong"],
+  ["--on-accent", "--accent"],
+  ["--on-accent", "--accent-strong"],
   ["#ffffff", "--danger"],
 ];
 
 const GRAPHIC_PAIRS: [string, string][] = [
   ["--accent", "--surface"],
   ["--accent", "--bg"],
+  ["--accent", "--accent-soft"],
 ];
+
+const ACCENTS = ["violet", "blue", "indigo", "teal", "pink", "graphite"];
 
 function channels(hex: string): number[] {
   const match = hex.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
@@ -85,7 +90,7 @@ async function tokens(page: Page): Promise<(color: Color) => string> {
   return resolve;
 }
 
-async function expectReadable(page: Page) {
+async function unreadablePairs(page: Page): Promise<string[]> {
   const resolve = await tokens(page);
   const failures: string[] = [];
   for (const [text, background] of TEXT_PAIRS) {
@@ -96,7 +101,11 @@ async function expectReadable(page: Page) {
     const ratio = contrast(resolve(graphic), resolve(background));
     if (ratio < AA_GRAPHIC) failures.push(`${graphic} on ${background}: ${ratio.toFixed(2)}`);
   }
-  expect(failures).toEqual([]);
+  return failures;
+}
+
+async function expectReadable(page: Page) {
+  expect(await unreadablePairs(page)).toEqual([]);
 }
 
 async function openApp(page: Page) {
@@ -104,8 +113,12 @@ async function openApp(page: Page) {
   await page.getByRole("navigation", { name: "Workspace" }).waitFor();
 }
 
+async function rootToken(page: Page, name: string): Promise<string> {
+  return page.evaluate((name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim(), name);
+}
+
 async function background(page: Page): Promise<string> {
-  return page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
+  return rootToken(page, "--bg");
 }
 
 test("text meets WCAG AA in the light theme", async ({ page }) => {
@@ -135,3 +148,19 @@ test("a chosen theme wins over the system's", async ({ page }) => {
   expect(await background(page)).toBe(dark);
   await expectReadable(page);
 });
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`every accent meets WCAG AA in the ${scheme} theme`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await openApp(page);
+    const failures: string[] = [];
+    const accents = new Set<string>();
+    for (const accent of ACCENTS) {
+      await page.evaluate((accent) => document.documentElement.setAttribute("data-accent", accent), accent);
+      accents.add(await rootToken(page, "--accent"));
+      failures.push(...(await unreadablePairs(page)).map((failure) => `${accent}: ${failure}`));
+    }
+    expect(failures).toEqual([]);
+    expect(accents.size, "each accent has its own color").toBe(ACCENTS.length);
+  });
+}
