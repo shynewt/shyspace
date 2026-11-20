@@ -1,10 +1,11 @@
-import { AtSign, Users } from "lucide-react";
+import { AtSign, MessageCircle, Users } from "lucide-react";
 import { motion } from "motion/react";
 import { Popover as RadixPopover } from "radix-ui";
 import { createContext, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { Member } from "../../lib/api";
+import { api, type Member } from "../../lib/api";
 import { useMember } from "../../lib/members";
 import { displayName, formatStatusEnd, presenceLabel } from "../../lib/people";
+import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Badge, Button, pop, springs } from "../../ui";
 import { alertsLabel, shownStatus } from "./StatusEmoji";
@@ -48,7 +49,7 @@ export function ProfileCard({
   children: ReactNode;
 }) {
   const member = useMember(memberId);
-  const { openSettings } = useWorkspace();
+  const { openSettings, navigate } = useWorkspace();
   const [isOpen, setOpen] = useState(false);
   const openedBy = useRef<OpenedBy>("click");
   const isFocusHandedOn = useRef(false);
@@ -162,6 +163,10 @@ export function ProfileCard({
                     onMention(member.name, member.id);
                   })
                 }
+                onMessage={() => {
+                  closeHandingFocusOn();
+                  api.openDm([member.id]).then((id) => navigate({ kind: "channel", id }), reportError);
+                }}
                 onViewInMembers={() => {
                   closeHandingFocusOn();
                   openSettings({ section: "members", membersTab: "members" });
@@ -229,11 +234,14 @@ export function ProfileCardAvatar({ children }: { children: ReactNode }) {
 function CardBody({
   member,
   onMention,
+  onMessage,
   onViewInMembers,
 }: {
   member: Member;
   /** Absent where there's no message box to mention them in. */
   onMention: (() => void) | undefined;
+  /** Opens your DM with them. */
+  onMessage: () => void;
   onViewInMembers: () => void;
 }) {
   const { session } = useWorkspace();
@@ -280,7 +288,12 @@ function CardBody({
           )}
         </div>
       )}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
+        {member.active && !isMe && (
+          <Button size="sm" variant="primary" icon={<MessageCircle size={13} />} onClick={onMessage}>
+            Message
+          </Button>
+        )}
         {canMention && onMention && (
           <Button size="sm" icon={<AtSign size={13} />} onClick={onMention}>
             Mention

@@ -32,13 +32,15 @@ test("the keyboard opens a card, uses it and closes it", async ({ page }) => {
   await expect(grace).toContainText("Online");
   await expect(grace).toContainText("🎧 Focusing");
   await expect(grace).toContainText("Mentions only");
-  await expect(grace.getByRole("button", { name: "Mention" })).toBeFocused();
+  await expect(grace.getByRole("button", { name: "Message" })).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(grace).toHaveCount(0);
   await expect(nameButton(page, "Grace")).toBeFocused();
 
   await page.keyboard.press("Space");
+  await expect(grace.getByRole("button", { name: "Message" })).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(grace.getByRole("button", { name: "Mention" })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(grace).toHaveCount(0);
@@ -135,11 +137,34 @@ test("a card opened by pausing, then clicked, gives focus back to the name on Es
   await name.hover();
   await expect(card(page, "Grace")).toBeVisible();
   await name.click();
-  await expect(card(page, "Grace").getByRole("button", { name: "Mention" })).toBeFocused();
+  await expect(card(page, "Grace").getByRole("button", { name: "Message" })).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(card(page, "Grace")).toHaveCount(0);
   await expect(name).toBeFocused();
+});
+
+test("message opens a DM with them, as a step you can go back from", async ({ page }) => {
+  await nameButton(page, "Grace").click();
+  await card(page, "Grace").getByRole("button", { name: "Message" }).click();
+
+  await expect(page.getByLabel("Message Grace")).toBeVisible();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+});
+
+test("an agent can be messaged too, but not yourself", async ({ page }) => {
+  await page.evaluate(() =>
+    window.fake.receiveMessage(window.fake.addMember("Claude", { kind: "bot" }), "general", "Done"),
+  );
+  await nameButton(page, "Claude").click();
+  await expect(card(page, "Claude").getByRole("button", { name: "Message" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.getByLabel("Message #general").fill("Me here");
+  await page.getByLabel("Message #general").press("Enter");
+  await nameButton(page, "Ada").click();
+  await expect(card(page, "Ada").getByRole("button", { name: "Message" })).toHaveCount(0);
 });
 
 test("view in members opens the member list in settings", async ({ page }) => {
