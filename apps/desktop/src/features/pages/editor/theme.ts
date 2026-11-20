@@ -15,8 +15,8 @@ const highlightStyle = HighlightStyle.define([
   { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator, tags.labelName], color: "var(--text-faint)" },
   // Code inside fenced blocks.
   { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: "var(--accent-text)" },
-  { tag: [tags.string, tags.regexp], color: "var(--success)" },
-  { tag: [tags.number, tags.bool, tags.atom], color: "var(--warning)" },
+  { tag: [tags.string, tags.regexp], color: "var(--success-text)" },
+  { tag: [tags.number, tags.bool, tags.atom], color: "var(--warning-text)" },
   { tag: [tags.comment, tags.lineComment, tags.blockComment], color: "var(--text-muted)", fontStyle: "italic" },
 ]);
 

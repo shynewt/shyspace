@@ -62,7 +62,7 @@ export function PageView({ pageId }: { pageId: string }) {
                 >
                   {ancestor.title || "Untitled"}
                 </button>
-                <ChevronRight size={13} aria-hidden className="shrink-0 text-faint" />
+                <ChevronRight size={13} aria-hidden className="shrink-0 text-decorative" />
               </li>
             ))}
             <li className="flex min-w-0 items-center">

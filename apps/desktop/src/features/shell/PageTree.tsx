@@ -75,7 +75,7 @@ function PageNode({
               aria-expanded={isOpen}
               aria-label={`${isOpen ? "Collapse" : "Expand"} ${title}`}
               onClick={() => setOpen(!isOpen)}
-              className="relative -mr-1 grid h-6 w-5 shrink-0 place-items-center rounded text-faint hover:text-ink"
+              className="relative -mr-1 grid h-6 w-5 shrink-0 place-items-center rounded text-decorative hover:text-ink"
             >
               <motion.span animate={{ rotate: isOpen ? 90 : 0 }} transition={springs.snappy} className="grid">
                 <ChevronRight size={14} />
@@ -92,7 +92,7 @@ function PageNode({
               "flex shrink-0 overflow-hidden",
               isMenuOpen
                 ? "w-auto pl-0.5"
-                : "w-0 group-hover:w-auto group-hover:pl-0.5 focus-within:w-auto focus-within:pl-0.5",
+                : "w-0 opacity-0 group-hover:w-auto group-hover:pl-0.5 group-hover:opacity-100 keyboard-focus-within:w-auto keyboard-focus-within:pl-0.5 keyboard-focus-within:opacity-100",
             )}
           >
             <IconButton

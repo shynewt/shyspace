@@ -52,3 +52,20 @@ test("the Pages section collapses like channel sections", async ({ page }) => {
   await header.click();
   await expect(pageItem(page, "Notes")).toBeVisible();
 });
+
+test("a page's actions hide after mouse use, and show for the keyboard", async ({ page }) => {
+  await page.evaluate(() => window.fake.seedPage("Notes", ""));
+  const addSubpage = sidebar(page).getByRole("button", { name: "New sub-page in Notes" });
+  await pageItem(page, "Notes").hover();
+  await sidebar(page).getByRole("button", { name: "Actions for Notes" }).click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.mouse.click(900, 400);
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  // Folded away to no width: clipped out of view, though still in the page.
+  await expect(addSubpage).not.toBeInViewport();
+
+  await pageItem(page, "Notes").focus();
+  await page.keyboard.press("Tab");
+  await expect(addSubpage).toBeFocused();
+  await expect(addSubpage).toBeInViewport();
+});
