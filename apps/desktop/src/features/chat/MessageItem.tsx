@@ -23,7 +23,7 @@ import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs, Tooltip } from "../../ui";
 import { MessageCard } from "./MessageCard";
 import { PageCard } from "./PageCard";
-import { SavedMarker } from "./SavedMarker";
+import { describeSaved, SavedLabel } from "./SavedLabel";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
 
@@ -53,6 +53,7 @@ export const MessageItem = memo(function MessageItem({
   const linkedMessages = useMemo(() => messageIdsIn(message.text).filter((id) => id !== message.id), [message]);
   const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
   const name = displayName(message.author_name, message.author);
+  const savedDescription = describeSaved(message.saved);
 
   const openLinkedMessage = (id: string) =>
     api.linkedMessage(id).then((linked) => {
@@ -71,26 +72,22 @@ export const MessageItem = memo(function MessageItem({
     <article
       ref={article}
       id={`message-${message.id}`}
-      aria-label={`${name} at ${formatTime(message.created_ms)}`}
+      aria-label={`${name} at ${formatTime(message.created_ms)}${savedDescription ? `, ${savedDescription}` : ""}`}
       className={cx(
         "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 keyboard-focus-within:bg-surface-2/50",
         isContinuation ? "py-0.5" : "pt-2 pb-0.5",
         isHighlighted && "bg-accent-soft/70",
         message.mentions_me && !isHighlighted && "bg-warning/8 shadow-[inset_2px_0_0_var(--warning)]",
+        savedDescription && !message.mentions_me && !isHighlighted && "bg-accent-soft/35",
       )}
     >
       <div className="w-9 shrink-0">
         {isContinuation ? (
-          <span className="relative flex justify-end pt-[3px]">
+          <span className="flex justify-end pt-[3px]">
             <MessageTime
               ms={message.created_ms}
               className="text-[10.5px] whitespace-nowrap text-faint opacity-0 group-hover:opacity-100"
             />
-            {message.saved && !message.saved.is_done && (
-              <span className="absolute top-0 right-0 group-hover:opacity-0 focus-within:opacity-100">
-                <SavedMarker saved={message.saved} />
-              </span>
-            )}
           </span>
         ) : (
           <Avatar id={message.author} name={name} isBot={message.author_is_bot} size={36} />
@@ -109,11 +106,9 @@ export const MessageItem = memo(function MessageItem({
             <span className="text-[13.5px] font-semibold">{name}</span>
             {message.author_is_bot && <Badge tone="accent">bot</Badge>}
             <MessageTime ms={message.created_ms} className="text-[11.5px] text-faint" />
-            <span className="self-center">
-              <SavedMarker saved={message.saved} />
-            </span>
           </div>
         )}
+        <SavedLabel saved={message.saved} />
         <div className="prose-chat selectable text-[14px]">
           <ChatMarkdown
             text={message.text}

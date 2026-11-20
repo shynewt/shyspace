@@ -97,24 +97,46 @@ test("a page can be saved from its header", async ({ page }) => {
   await expect(page.getByRole("list", { name: "Saved for later" })).toContainText("Spec");
 });
 
-test("a saved message shows a mark in chat that leads to Later", async ({ page }) => {
-  const message = page.getByRole("article").filter({ hasText: "Read the spec" });
-  await expect(message.getByRole("button", { name: /Saved for later/ })).toHaveCount(0);
+test("a saved message is labelled above its text, also when grouped, until done", async ({ page }) => {
+  await page.evaluate(() =>
+    window.fake.receiveMessage(window.fake.memberNamed("Grace"), "general", "And the appendix"),
+  );
+  const messages = [
+    { article: page.getByRole("article").filter({ hasText: "Read the spec" }), text: "Read the spec" },
+    { article: page.getByRole("article").filter({ hasText: "And the appendix" }), text: "And the appendix" },
+  ];
+  for (const { article } of messages) {
+    await expect(article.getByRole("button", { name: /Saved for later|Reminder/ })).toHaveCount(0);
+    await article.hover();
+    await article.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: "Save for later" }).click();
+  }
+  for (const { article, text } of messages) {
+    const label = await article.getByRole("button", { name: "Saved for later", exact: true }).boundingBox();
+    const body = await article.getByText(text, { exact: true }).boundingBox();
+    if (!label || !body) throw new Error("message not laid out");
+    expect(label.y + label.height).toBeLessThanOrEqual(body.y + 1);
+    await expect(article).toHaveAccessibleName(/saved for later/i);
+  }
 
-  await messageMenu(page, "Read the spec");
-  await page.getByRole("menuitem", { name: "Save for later" }).click();
-  await expect(message.getByRole("button", { name: "Saved for later. Open Later" })).toBeVisible();
-
-  await messageMenu(page, "Read the spec");
+  const first = messages[0].article;
+  await first.hover();
+  await first.getByRole("button", { name: "More actions" }).click();
   await chooseInSubmenu(page, "Remind me", "In 20 minutes");
-  const reminder = message.getByRole("button", { name: /^Reminder (Today|Tomorrow) .*\. Open Later$/ });
+  const reminder = first.getByRole("button", { name: /^Reminder · (Today|Tomorrow) / });
   await expect(reminder).toBeVisible();
+  await expect(first).toHaveAccessibleName(/reminder · (today|tomorrow)/i);
 
   await reminder.click();
   await expect(page.getByRole("heading", { name: "Later" })).toBeVisible();
-  await page.getByRole("list", { name: "Saved for later" }).getByRole("button", { name: "Mark as done" }).click();
+  await page
+    .getByRole("list", { name: "Saved for later" })
+    .getByRole("listitem")
+    .filter({ hasText: "Read the spec" })
+    .getByRole("button", { name: "Mark as done" })
+    .click();
   await page.getByRole("button", { name: "general", exact: true }).click();
-  await expect(message.getByRole("button", { name: /Open Later/ })).toHaveCount(0);
+  await expect(first.getByRole("button", { name: /Reminder/ })).toHaveCount(0);
 });
 
 test("a saved message that links to another shows the link as words", async ({ page }) => {
