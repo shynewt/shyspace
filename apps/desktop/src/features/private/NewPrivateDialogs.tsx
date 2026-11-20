@@ -53,7 +53,7 @@ function NewPrivateChannelForm({ onDone }: { onDone: () => void }) {
   };
   return (
     <form
-      className="flex flex-col gap-4"
+      className="flex flex-col gap-4 p-5 pt-4"
       onSubmit={(event) => {
         event.preventDefault();
         create();
@@ -130,7 +130,7 @@ function NewDmForm({ onDone }: { onDone: () => void }) {
     }
   };
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 p-5 pt-4">
       <MemberPicker
         label="People to message"
         members={members}
