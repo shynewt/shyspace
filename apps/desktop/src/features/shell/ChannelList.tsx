@@ -1,4 +1,4 @@
-import { AtSign, Bell, BellOff, Ellipsis, FolderInput, Hash, Pencil, Trash2 } from "lucide-react";
+import { Bell, BellMinus, BellOff, Ellipsis, FolderInput, Hash, Pencil, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Channel, type NotifyLevel, type SidebarSection } from "../../lib/api";
@@ -11,14 +11,14 @@ import { NavItem } from "./NavItem";
 
 const NOTIFY_CHOICES: { level: NotifyLevel; label: string; icon: ReactNode }[] = [
   { level: "all", label: "Every message", icon: <Bell size={14} /> },
-  { level: "mentions", label: "Mentions only", icon: <AtSign size={14} /> },
+  { level: "mentions", label: "Mentions only", icon: <BellMinus size={14} /> },
   { level: "nothing", label: "Nothing (muted)", icon: <BellOff size={14} /> },
 ];
 
 /** Shown next to a channel's name when it doesn't alert for every message. */
 const LEVEL_STATUS: Record<NotifyLevel, { icon: ReactNode; label: string } | null> = {
   all: null,
-  mentions: { icon: <AtSign size={12} />, label: "mentions only" },
+  mentions: { icon: <BellMinus size={12} />, label: "mentions only" },
   nothing: { icon: <BellOff size={12} />, label: "muted" },
 };
 const DRAFT_STATUS = { icon: <Pencil size={12} />, label: "draft" };
@@ -142,10 +142,13 @@ function ChannelItem({
         status={hasDraft ? DRAFT_STATUS : LEVEL_STATUS[channel.notify]}
         onContextMenu={() => setMenuOpen(true)}
         trailing={
+          // Takes room only while shown, so a long name ends before it instead of under it.
           <span
             className={cx(
-              "absolute right-1.5 group-hover:opacity-100 focus-within:opacity-100",
-              isMenuOpen ? "opacity-100" : "opacity-0",
+              "relative grid shrink-0 justify-items-start overflow-hidden transition-[width,opacity]",
+              isMenuOpen
+                ? "w-7.5 opacity-100"
+                : "w-0 opacity-0 group-hover:w-7.5 group-hover:opacity-100 keyboard-focus-within:w-7.5 keyboard-focus-within:opacity-100",
             )}
           >
             <Menu

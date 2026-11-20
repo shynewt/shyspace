@@ -6,9 +6,9 @@ type Tone = "live" | "idle" | "error" | "pending";
 
 const DOT: Record<Tone, string> = {
   live: "bg-success",
-  idle: "bg-warning",
+  idle: "bg-faint",
   error: "bg-danger",
-  pending: "bg-faint",
+  pending: "bg-decorative",
 };
 
 function describeStatus(status: SyncStatus | undefined): { tone: Tone; label: string; detail: string } {

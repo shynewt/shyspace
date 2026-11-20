@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { Change } from "../../src/lib/api";
 
 /**
  * Opens a submenu and picks a choice, moving the pointer in steps as a person
@@ -18,6 +19,8 @@ export async function chooseInSubmenu(page: Page, submenu: string, choice: strin
 declare global {
   interface Window {
     openedLinks?: string[];
+    /** Tauri's bridge; `mockIPC` routes it to the fake. */
+    __TAURI_INTERNALS__: { invoke: (command: string, args?: unknown) => Promise<unknown> };
   }
 }
 
@@ -37,4 +40,16 @@ export async function recordOpenedLinks(page: Page) {
 
 export function openedLinks(page: Page): Promise<string[]> {
   return page.evaluate(() => window.openedLinks ?? []);
+}
+
+/** From now on answers `command` with `value`, as the core would in another state, and announces `change`. */
+export async function answerWith(page: Page, command: string, value: unknown, change: Change) {
+  await page.evaluate(
+    ({ command, value, change }) => {
+      const answer = window.fake.handle.bind(window.fake);
+      window.fake.handle = (asked, args) => (asked === command ? structuredClone(value) : answer(asked, args));
+      return window.__TAURI_INTERNALS__.invoke("plugin:event|emit", { event: "change", payload: change });
+    },
+    { command, value, change },
+  );
 }
