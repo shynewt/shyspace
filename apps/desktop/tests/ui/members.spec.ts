@@ -134,8 +134,12 @@ test("agents are listed with what they can read and how to add one", async ({ pa
 
   await expect(settings.getByText(/can read every channel and page/)).toBeVisible();
   await expect(settings.getByRole("list", { name: "Agents" })).toContainText("Robot");
+  await expect(settings.getByRole("button", { name: "Copy commands" })).toHaveCount(0);
   await settings.getByLabel("Agent name").fill("Claude");
   await settings.getByRole("button", { name: "Create agent invite" }).click();
+  await expect(settings.getByText(/shy join --bot --name 'Claude' shy2_/)).toBeVisible();
+
+  await settings.getByLabel("Agent name").fill("Someone else");
   await expect(settings.getByText(/shy join --bot --name 'Claude' shy2_/)).toBeVisible();
 });
 

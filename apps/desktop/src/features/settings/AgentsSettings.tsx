@@ -42,8 +42,11 @@ function AskAdmin() {
 function AddAgent() {
   const { openSettings } = useWorkspace();
   const [name, setName] = useState("Claude");
-  const [code, setCode] = useState<string | null>(null);
-  const create = useFormAction(async () => setCode(await api.createInvite(name.trim())));
+  const [invite, setInvite] = useState<{ code: string; agentName: string } | null>(null);
+  const create = useFormAction(async () => {
+    const agentName = name.trim();
+    setInvite({ code: await api.createInvite(agentName), agentName });
+  });
   return (
     <section aria-labelledby="add-agent" className="flex flex-col gap-3 border-t border-line pt-4">
       <h4 id="add-agent" className="text-[13px] font-semibold">
@@ -60,18 +63,26 @@ function AddAgent() {
         </Button>
       </form>
       <FormError message={create.error} />
-      <p className="text-[12px] leading-relaxed text-muted">
-        Then run these where the agent works, and let it in under{" "}
-        <button
-          type="button"
-          onClick={() => openSettings({ section: "members", membersTab: "requests" })}
-          className="font-medium text-accent-text underline-offset-2 hover:underline"
-        >
-          Members › Requests
-        </button>
-        .
-      </p>
-      <CopyField value={agentCommands(name.trim() || "Claude", code ?? "<invite code>")} label="Copy commands" />
+      {invite ? (
+        <>
+          <p className="text-[12px] leading-relaxed text-muted">
+            Run these where {invite.agentName} works, then let it in under{" "}
+            <button
+              type="button"
+              onClick={() => openSettings({ section: "members", membersTab: "requests" })}
+              className="font-medium text-accent-text underline-offset-2 hover:underline"
+            >
+              Members › Requests
+            </button>
+            .
+          </p>
+          <CopyField value={agentCommands(invite.agentName, invite.code)} label="Copy commands" />
+        </>
+      ) : (
+        <p className="text-[12px] leading-relaxed text-muted">
+          The invite comes with the commands to run where the agent works, like Claude Code with the shy CLI installed.
+        </p>
+      )}
     </section>
   );
 }
