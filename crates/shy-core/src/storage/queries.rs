@@ -52,7 +52,7 @@ pub(super) fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mess
         can_edit: false,
         can_delete: false,
         mentions_me: false,
-        is_saved: false,
+        saved: None,
         reply_count: 0,
         last_reply_ms: None,
         is_following: false,

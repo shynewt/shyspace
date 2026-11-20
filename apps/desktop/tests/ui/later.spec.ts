@@ -96,3 +96,23 @@ test("a page can be saved from its header", async ({ page }) => {
   await later(page).click();
   await expect(page.getByRole("list", { name: "Saved for later" })).toContainText("Spec");
 });
+
+test("a saved message shows a mark in chat that leads to Later", async ({ page }) => {
+  const message = page.getByRole("article").filter({ hasText: "Read the spec" });
+  await expect(message.getByRole("button", { name: /Saved for later/ })).toHaveCount(0);
+
+  await messageMenu(page, "Read the spec");
+  await page.getByRole("menuitem", { name: "Save for later" }).click();
+  await expect(message.getByRole("button", { name: "Saved for later. Open Later" })).toBeVisible();
+
+  await messageMenu(page, "Read the spec");
+  await chooseInSubmenu(page, "Remind me", "In 20 minutes");
+  const reminder = message.getByRole("button", { name: /^Reminder (Today|Tomorrow) .*\. Open Later$/ });
+  await expect(reminder).toBeVisible();
+
+  await reminder.click();
+  await expect(page.getByRole("heading", { name: "Later" })).toBeVisible();
+  await page.getByRole("list", { name: "Saved for later" }).getByRole("button", { name: "Mark as done" }).click();
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await expect(message.getByRole("button", { name: /Open Later/ })).toHaveCount(0);
+});

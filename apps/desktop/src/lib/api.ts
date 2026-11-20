@@ -28,7 +28,7 @@ export type Message = {
   can_edit: boolean;
   can_delete: boolean;
   mentions_me: boolean;
-  is_saved: boolean;
+  saved: SavedMark | null;
   reply_count: number;
   last_reply_ms: number | null;
   is_following: boolean;
@@ -59,6 +59,7 @@ export type LaterItem = {
   page: Page | null;
 };
 export type Draft = { target: string; channel: string; text: string; updated_ms: number };
+export type SavedMark = { remind_ms: number | null; is_done: boolean };
 export type LinkedMessage = { message: Message; thread_root: string | null };
 export type Inbox = { attention: InboxItem[]; channels: Channel[] };
 export type MessageCursor = { lamport: number; author: string };

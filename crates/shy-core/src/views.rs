@@ -131,8 +131,8 @@ pub struct Message {
     pub can_delete: bool,
     /// Whether it mentions this member (directly, or @channel / @here).
     pub mentions_me: bool,
-    /// Whether this member saved it for later.
-    pub is_saved: bool,
+    /// Whether it's in your Later list; personal, never synced.
+    pub saved: Option<SavedMark>,
     /// For a thread's first message: how many replies it has, and when the
     /// latest came.
     pub reply_count: u32,
@@ -183,6 +183,12 @@ pub struct Member {
     pub status: Option<MemberStatus>,
     /// From live heartbeats; never stored or synced through the bucket.
     pub presence: PresenceState,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SavedMark {
+    pub remind_ms: Option<i64>,
+    pub is_done: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

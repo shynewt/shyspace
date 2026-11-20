@@ -98,7 +98,7 @@ impl Workspace {
         let replies = state.store.thread_replies(channel)?;
         for message in &mut messages {
             message.mentions_me = message.author != my_id && mentions(&message.text, &my_id);
-            message.is_saved = state.store.is_saved(&message.id)?;
+            message.saved = state.store.saved_mark(&message.id)?;
             message.can_edit = self.may(&Op::MessageEdit {
                 id: message.id.clone(),
                 text: String::new(),

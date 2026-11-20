@@ -7,6 +7,7 @@ use anyhow::Result;
 use rusqlite::{OptionalExtension, params};
 
 use super::Store;
+use crate::views::SavedMark;
 
 pub struct SavedRow {
     pub item: String,
@@ -79,11 +80,19 @@ impl Store {
         Ok(due)
     }
 
-    pub fn is_saved(&self, item: &str) -> Result<bool> {
+    pub fn saved_mark(&self, item: &str) -> Result<Option<SavedMark>> {
         Ok(self
             .db
-            .query_row("SELECT 1 FROM later WHERE item = ?", [item], |_| Ok(()))
-            .optional()?
-            .is_some())
+            .query_row(
+                "SELECT remind_ms, is_done FROM later WHERE item = ?",
+                [item],
+                |row| {
+                    Ok(SavedMark {
+                        remind_ms: row.get(0)?,
+                        is_done: row.get(1)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 }

@@ -1,4 +1,4 @@
-import type { LaterItem, LinkedMessage, Page } from "../../../src/lib/api";
+import type { LaterItem, LinkedMessage, Page, SavedMark } from "../../../src/lib/api";
 
 type Saved = { saved_ms: number; remind_ms: number | null; is_reminded: boolean; is_done: boolean; order: number };
 
@@ -9,6 +9,11 @@ export class FakeLater {
 
   has(item: string): boolean {
     return this.saved.has(item);
+  }
+
+  mark(item: string): SavedMark | null {
+    const entry = this.saved.get(item);
+    return entry ? { remind_ms: entry.remind_ms, is_done: entry.is_done } : null;
   }
 
   save(item: string, remindMs: number | null): void {

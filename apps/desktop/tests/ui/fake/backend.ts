@@ -41,7 +41,7 @@ export class FakeBackend {
     members: () => this.members,
     tick: () => this.tick(),
     notify: (change) => this.notify(change),
-    isSaved: (item) => this.later.has(item),
+    savedMark: (item) => this.later.mark(item),
   });
   private later = new FakeLater();
   private sections = new FakeSections();

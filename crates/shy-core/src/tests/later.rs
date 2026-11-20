@@ -29,7 +29,7 @@ async fn saved_items_are_listed_with_what_they_point_to() {
             .messages(&general, None, 50)
             .unwrap()
             .iter()
-            .any(|m| m.id == message && m.is_saved)
+            .any(|m| m.id == message && m.saved.is_some())
     );
     assert!(bob.later().unwrap().is_empty(), "saved items stay on the device");
 
@@ -84,5 +84,41 @@ async fn due_reminders_are_handed_out_once() {
         admin.take_due_reminders().unwrap().len(),
         1,
         "a new reminder time fires again"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_carries_its_reminder_and_whether_it_is_done() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let message = bob.send_message(&general, "call back", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let saved_mark = || {
+        admin
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .find(|m| m.id == message)
+            .unwrap()
+            .saved
+    };
+    assert_eq!(saved_mark(), None);
+
+    let at = now_ms().unwrap() + 60_000;
+    admin.save_for_later(&message, Some(at)).unwrap();
+    assert_eq!(
+        saved_mark(),
+        Some(crate::views::SavedMark {
+            remind_ms: Some(at),
+            is_done: false
+        })
+    );
+    admin.mark_later_done(&message, true).unwrap();
+    assert_eq!(
+        saved_mark(),
+        Some(crate::views::SavedMark {
+            remind_ms: Some(at),
+            is_done: true
+        })
     );
 }

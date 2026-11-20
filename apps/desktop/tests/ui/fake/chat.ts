@@ -9,6 +9,7 @@ import type {
   Message,
   MessageCursor,
   NotifyLevel,
+  SavedMark,
 } from "../../../src/lib/api";
 import { mentions } from "../../../src/lib/mentions";
 import { argument, ownedId, requireString } from "./helpers";
@@ -21,7 +22,7 @@ export type ChatContext = {
   members: () => readonly Member[];
   tick: () => number;
   notify: (change: Change) => void;
-  isSaved: (item: string) => boolean;
+  savedMark: (item: string) => SavedMark | null;
 };
 
 /** Returned by `answer` for commands that aren't about chat. */
@@ -36,7 +37,7 @@ type StoredMessage = Omit<
   | "can_edit"
   | "can_delete"
   | "mentions_me"
-  | "is_saved"
+  | "saved"
   | "reply_count"
   | "last_reply_ms"
   | "is_following"
@@ -258,7 +259,7 @@ export class FakeChat {
       can_edit: message.author === this.context.me(),
       can_delete: this.mayDelete(message.id),
       mentions_me: message.author !== this.context.me() && mentions(message.text, this.context.me()),
-      is_saved: this.context.isSaved(message.id),
+      saved: this.context.savedMark(message.id),
       ...this.threadSummary(message),
       reactions: Array.from(counts, ([emoji, entry]) => ({ emoji, ...entry })),
     };

@@ -23,6 +23,7 @@ import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs } from "../../ui";
 import { MessageCard } from "./MessageCard";
 import { PageCard } from "./PageCard";
+import { SavedMarker } from "./SavedMarker";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
 
@@ -73,8 +74,15 @@ export const MessageItem = memo(function MessageItem({
     >
       <div className="w-9 shrink-0">
         {isContinuation ? (
-          <span className="block pt-[3px] text-right text-[10.5px] text-faint opacity-0 group-hover:opacity-100">
-            {formatTime(message.created_ms)}
+          <span className="relative flex justify-end pt-[3px]">
+            <span className="text-[10.5px] text-faint opacity-0 group-hover:opacity-100">
+              {formatTime(message.created_ms)}
+            </span>
+            {message.saved && !message.saved.is_done && (
+              <span className="absolute top-0 right-0 group-hover:opacity-0 focus-within:opacity-100">
+                <SavedMarker saved={message.saved} />
+              </span>
+            )}
           </span>
         ) : (
           <Avatar id={message.author} name={name} isBot={message.author_is_bot} size={36} />
@@ -93,6 +101,9 @@ export const MessageItem = memo(function MessageItem({
             <span className="text-[13.5px] font-semibold">{name}</span>
             {message.author_is_bot && <Badge tone="accent">bot</Badge>}
             <span className="text-[11.5px] text-faint">{formatTime(message.created_ms)}</span>
+            <span className="self-center">
+              <SavedMarker saved={message.saved} />
+            </span>
           </div>
         )}
         <div className="prose-chat selectable text-[14px]">
@@ -232,7 +243,7 @@ function MessageMenu({
     },
   ];
   items.push(
-    message.is_saved
+    message.saved
       ? {
           label: "Remove from Later",
           icon: <BookmarkMinus size={14} />,
