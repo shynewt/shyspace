@@ -17,7 +17,7 @@ use rmcp::{
 use serde::Deserialize;
 use shy_core::{
     Edit, Workspace,
-    views::{Change, Message, NotifyLevel, PresenceState},
+    views::{Change, Channel, ChannelKind, Message, NotifyLevel, PresenceState},
 };
 
 type ToolResult = Result<String, String>;
@@ -38,6 +38,12 @@ pub struct ReadMessages {
     limit: Option<u32>,
     /// Return messages older than this message id, to read further back.
     before: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OpenDm {
+    /// Names or member ids of the people to message (not you), up to 8.
+    members: Vec<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -160,6 +166,38 @@ fn failed(error: anyhow::Error) -> String {
 }
 
 impl ShyTools {
+    /// How a channel reads to an agent: "#general", "#plans (private)", or
+    /// "DM with Ada, Bob".
+    fn channel_label(&self, channel: &Channel) -> Result<String> {
+        Ok(match channel.kind {
+            ChannelKind::Public => format!("#{}", channel.name),
+            ChannelKind::Private => format!("#{} (private)", channel.name),
+            ChannelKind::Dm => {
+                let members = self.workspace.members()?;
+                let names: Vec<&str> = channel
+                    .dm_members
+                    .iter()
+                    .map(|id| {
+                        members
+                            .iter()
+                            .find(|member| member.id == *id)
+                            .map_or(id.as_str(), |member| member.name.as_str())
+                    })
+                    .collect();
+                format!("DM with {}", names.join(", "))
+            }
+        })
+    }
+
+    fn member_id(&self, wanted: &str) -> Result<String> {
+        self.workspace
+            .members()?
+            .into_iter()
+            .find(|member| member.active && (member.id == wanted || member.name == wanted))
+            .map(|member| member.id)
+            .with_context(|| format!("no member {wanted}; call list_members"))
+    }
+
     fn format_by_channel(&self, messages: Vec<Message>) -> Result<String> {
         let channels = self.workspace.channels()?;
         let mut output = String::new();
@@ -170,7 +208,11 @@ impl ShyTools {
                 .cloned()
                 .collect();
             if !in_channel.is_empty() {
-                output.push_str(&format!("#{}:\n{}", channel.name, format_messages(in_channel)));
+                output.push_str(&format!(
+                    "{}:\n{}",
+                    self.channel_label(&channel)?,
+                    format_messages(in_channel)
+                ));
             }
         }
         Ok(output)
@@ -235,14 +277,36 @@ impl ShyTools {
             .join("\n"))
     }
 
-    #[tool(description = "List channels in the workspace.")]
+    #[tool(
+        description = "List the channels you can see: public ones, private channels you were added to, and your DMs. Private channels and DMs are only for the people in them; don't repeat what's there elsewhere."
+    )]
     fn list_channels(&self) -> ToolResult {
         let channels = self.workspace.channels().map_err(failed)?;
-        Ok(channels
+        let mut lines = Vec::new();
+        for channel in &channels {
+            let gone = if channel.is_member {
+                ""
+            } else {
+                " — you're no longer in it"
+            };
+            let label = self.channel_label(channel).map_err(failed)?;
+            lines.push(format!("{label} ({}){gone}", channel.id));
+        }
+        Ok(lines.join("\n"))
+    }
+
+    #[tool(
+        description = "Open (or find) the direct-message conversation with these people, and return its id for read_messages and send_message."
+    )]
+    fn open_dm(&self, Parameters(request): Parameters<OpenDm>) -> ToolResult {
+        let members = request
+            .members
             .iter()
-            .map(|channel| format!("#{} ({})", channel.name, channel.id))
-            .collect::<Vec<_>>()
-            .join("\n"))
+            .map(|wanted| self.member_id(wanted))
+            .collect::<Result<Vec<_>>>()
+            .map_err(failed)?;
+        let id = self.workspace.open_dm(&members).map_err(failed)?;
+        Ok(format!("DM {id}"))
     }
 
     #[tool(

@@ -11,7 +11,8 @@ use shy_core::{
     sync::SyncStatus,
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
-        Page, ProtectionCheck, SearchHit, SectionSort, SidebarSection, StatusUpdate, StorageSettings,
+        Page, PrivateMembers, ProtectionCheck, SearchHit, SectionSort, SidebarSection, StatusUpdate,
+        StorageSettings,
     },
     workspace::StorageUpdate,
 };
@@ -224,6 +225,80 @@ async fn channels(state: State<'_, AppState>) -> CommandResult<Vec<Channel>> {
 #[tauri::command]
 async fn create_channel(state: State<'_, AppState>, name: String) -> CommandResult<String> {
     current(&state).await?.create_channel(&name).map_err(failed)
+}
+
+#[tauri::command]
+async fn create_private_channel(
+    state: State<'_, AppState>,
+    name: String,
+    members: Vec<String>,
+) -> CommandResult<String> {
+    current(&state)
+        .await?
+        .create_private_channel(&name, &members)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn open_dm(state: State<'_, AppState>, members: Vec<String>) -> CommandResult<String> {
+    current(&state).await?.open_dm(&members).map_err(failed)
+}
+
+#[tauri::command]
+async fn private_members(state: State<'_, AppState>, channel: String) -> CommandResult<PrivateMembers> {
+    current(&state).await?.private_members(&channel).map_err(failed)
+}
+
+#[tauri::command]
+async fn add_to_private_channel(
+    state: State<'_, AppState>,
+    channel: String,
+    member: String,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .add_to_private_channel(&channel, &member)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn remove_from_private_channel(
+    state: State<'_, AppState>,
+    channel: String,
+    member: String,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .remove_from_private_channel(&channel, &member)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn hand_over_private_channel(
+    state: State<'_, AppState>,
+    channel: String,
+    member: String,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .hand_over_private_channel(&channel, &member)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn leave_private_channel(state: State<'_, AppState>, channel: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .leave_private_channel(&channel)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn rotate_private_channel_key(state: State<'_, AppState>, channel: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .rotate_private_channel_key(&channel)
+        .map_err(failed)
 }
 
 #[tauri::command]
@@ -659,6 +734,14 @@ pub fn run() {
             recovery_kit,
             channels,
             create_channel,
+            create_private_channel,
+            open_dm,
+            private_members,
+            add_to_private_channel,
+            remove_from_private_channel,
+            hand_over_private_channel,
+            leave_private_channel,
+            rotate_private_channel_key,
             rename_channel,
             mark_read,
             set_status,

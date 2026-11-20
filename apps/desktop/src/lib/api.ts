@@ -5,6 +5,8 @@ import { reportError } from "./toast";
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
 export type NotifyLevel = "all" | "mentions" | "nothing";
 export type ChannelKind = "public" | "private" | "dm";
+/** Who is in a private channel (member ids, earliest added first), and who owns it. */
+export type PrivateMembers = { members: string[]; owner: string | null; is_owner: boolean };
 export type Channel = {
   id: string;
   kind: ChannelKind;
@@ -175,6 +177,18 @@ export const api = {
   recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),
   createChannel: (name: string) => invoke<string>("create_channel", { name }),
+  createPrivateChannel: (name: string, members: string[]) =>
+    invoke<string>("create_private_channel", { name, members }),
+  /** The DM with exactly these members and you; opening it again finds the same one. */
+  openDm: (members: string[]) => invoke<string>("open_dm", { members }),
+  privateMembers: (channel: string) => invoke<PrivateMembers>("private_members", { channel }),
+  addToPrivateChannel: (channel: string, member: string) => invoke<void>("add_to_private_channel", { channel, member }),
+  removeFromPrivateChannel: (channel: string, member: string) =>
+    invoke<void>("remove_from_private_channel", { channel, member }),
+  handOverPrivateChannel: (channel: string, member: string) =>
+    invoke<void>("hand_over_private_channel", { channel, member }),
+  leavePrivateChannel: (channel: string) => invoke<void>("leave_private_channel", { channel }),
+  rotatePrivateChannelKey: (channel: string) => invoke<void>("rotate_private_channel_key", { channel }),
   renameChannel: (channel: string, name: string) => invoke<void>("rename_channel", { channel, name }),
   deleteChannel: (channel: string) => invoke<void>("delete_channel", { channel }),
   markRead: (channel: string, message: string) => invoke<void>("mark_read", { channel, message }),

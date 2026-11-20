@@ -13,6 +13,7 @@ import type {
 } from "../../../src/lib/api";
 import { mentions } from "../../../src/lib/mentions";
 import { argument, ownedId, requireString } from "./helpers";
+import type { PrivateView } from "./private";
 import { followsByDefault, isInChannel, repliesOf, rootOf } from "./threads";
 
 /** What the chat needs from the rest of the fake. */
@@ -23,6 +24,8 @@ export type ChatContext = {
   tick: () => number;
   notify: (change: Change) => void;
   savedMark: (item: string) => SavedMark | null;
+  /** How a private channel or DM shows, or null for a public one. */
+  privateView: (channel: string) => PrivateView | null;
 };
 
 /** Returned by `answer` for commands that aren't about chat. */
@@ -119,6 +122,9 @@ export class FakeChat {
         );
       case "send_message": {
         const channel = requireString(args, "channel");
+        if (this.context.privateView(channel)?.is_member === false) {
+          throw new Error("you aren't a member of this channel");
+        }
         const id = this.writeMessage(
           this.context.me(),
           channel,
@@ -204,10 +210,15 @@ export class FakeChat {
 
   createChannel(name: string): string {
     const id = ownedId(this.context.me());
+    this.listChannel(id, name);
+    return id;
+  }
+
+  /** Lists a channel that was just made, and tells the app. */
+  listChannel(id: string, name: string): void {
     this.channels.push({ id, name });
     this.context.tick();
     this.context.notify({ kind: "channels" });
-    return id;
   }
 
   channelNamed(name: string): StoredChannel {
@@ -357,6 +368,7 @@ export class FakeChat {
       dm_members: [],
       is_member: true,
       can_delete: this.mayDelete(channel.id),
+      ...this.context.privateView(channel.id),
       unread: this.unreadIn(channel.id).filter((message) => isInChannel(this.messages, message)).length,
       unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.context.me())).length,
       last_read: this.readMarkers.get(channel.id) ?? null,

@@ -190,6 +190,26 @@ def main() -> int:
         check("can you review?" in mentioned.get("text", ""), "the agent woke up when mentioned")
         check(agent.tool("wait_for_mentions", timeout_seconds=1) == "no new mentions",
               "each mention reaches the agent once")
+
+        dm = admin.tool("open_dm", members=["Claude"]).split()[-1]
+        admin.tool("send_message", channel=dm, text="PRIVATE-NOTE just for you")
+        deadline = time.monotonic() + DELIVERY_TIMEOUT_SECONDS
+        while dm not in agent.tool("list_channels") and time.monotonic() < deadline:
+            time.sleep(0.5)
+        check(f"DM with Ada ({dm})" in agent.tool("list_channels"), "the agent lists its DM with the admin")
+        dm_text = agent.tool("read_messages", channel=dm)
+        while "PRIVATE-NOTE" not in dm_text and time.monotonic() < deadline:
+            time.sleep(0.5)
+            dm_text = agent.tool("read_messages", channel=dm)
+        check("PRIVATE-NOTE" in dm_text, "a DM reaches the agent, sealed for the two of them")
+        replied: dict[str, str] = {}
+        waiter = threading.Thread(target=lambda: replied.update(
+            text=admin.tool("wait_for_messages", channel=dm, timeout_seconds=DELIVERY_TIMEOUT_SECONDS)))
+        waiter.start()
+        time.sleep(0.5)
+        agent.tool("send_message", channel=dm, text="got it")
+        waiter.join()
+        check("got it" in replied.get("text", ""), "the admin gets the agent's reply in the DM")
     finally:
         if joiner and joiner.poll() is None:
             joiner.kill()

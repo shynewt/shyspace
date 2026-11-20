@@ -25,6 +25,7 @@ import { FakeDrafts } from "./drafts";
 import { argument, type Kind, ownedId, randomHex, requireNotifyLevel, requireString } from "./helpers";
 import { FakeInvites } from "./invites";
 import { FakeLater } from "./later";
+import { FakePrivate, NOT_PRIVATE } from "./private";
 import { search } from "./search";
 import { FakeSections } from "./sections";
 
@@ -44,6 +45,17 @@ export class FakeBackend {
     tick: () => this.tick(),
     notify: (change) => this.notify(change),
     savedMark: (item) => this.later.mark(item),
+    privateView: (channel) => this.private.view(channel),
+  });
+  private private = new FakePrivate({
+    me: () => this.me(),
+    isAdmin: () => Boolean(this.session?.is_admin),
+    members: () => this.members,
+    tick: () => this.tick(),
+    notify: (change) => this.notify(change),
+    savedMark: (item) => this.later.mark(item),
+    privateView: (channel) => this.private.view(channel),
+    listChannel: (id, name) => this.chat.listChannel(id, name),
   });
   private later = new FakeLater();
   private sections = new FakeSections();
@@ -118,6 +130,11 @@ export class FakeBackend {
   /** Desktop notifications the app asked to show. */
   readonly alertsShown: { title: string; body: string }[] = [];
 
+  /** Someone else made a private channel with you in it. */
+  receivePrivateChannel(owner: string, name: string, members: string[]): string {
+    return this.private.receive(owner, name, members);
+  }
+
   receiveMessage(author: string, channelName: string, text: string): string {
     return this.chat.receiveMessage(author, channelName, text);
   }
@@ -157,6 +174,8 @@ export class FakeBackend {
   }
 
   private answer(command: string, args: InvokeArgs | undefined): unknown {
+    const privateAnswer = this.private.answer(command, args);
+    if (privateAnswer !== NOT_PRIVATE) return privateAnswer;
     const chatAnswer = this.chat.answer(command, args);
     if (command === "send_message" && typeof chatAnswer === "string") {
       const target = this.chat.draftTargetOf(chatAnswer);
