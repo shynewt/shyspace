@@ -7,6 +7,8 @@ import { SHORTCUTS } from "../../lib/shortcuts";
 import { showToast } from "../../lib/toast";
 import { useAlerts } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
+import { useMouseBackAndForward } from "../../lib/useMouseBackAndForward";
+import { ScrollMemoryContext, useNavigation } from "../../lib/useNavigation";
 import { usePresence } from "../../lib/usePresence";
 import { useReminders } from "../../lib/useReminders";
 import { sameView, savedItemView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
@@ -23,18 +25,21 @@ import { useAttentionBadge } from "./useAttentionBadge";
 
 export function Shell({ session }: { session: Session }) {
   // Unread counts change as messages arrive.
-  const channels = useLive(api.channels, (change) => change.kind === "channels" || change.kind === "messages") ?? [];
-  const pages = useLive(api.pages, (change) => change.kind === "pages") ?? [];
+  const loadedChannels = useLive(api.channels, (change) => change.kind === "channels" || change.kind === "messages");
+  const loadedPages = useLive(api.pages, (change) => change.kind === "pages");
+  const channels = useMemo(() => loadedChannels ?? [], [loadedChannels]);
+  const pages = useMemo(() => loadedPages ?? [], [loadedPages]);
   const sections = useLive(api.sidebarSections, (change) => change.kind === "channels" || change.kind === "messages");
   const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
-  const [view, setView] = useState<View | null>(null);
+  const { entry, navigate, back, forward, replace, scrollMemory } = useNavigation(
+    session.me,
+    loadedChannels,
+    loadedPages,
+  );
+  const view = entry?.view ?? null;
   const [isPaletteOpen, setPaletteOpen] = useState(false);
   const [isShortcutsOpen, setShortcutsOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(null);
-
-  useEffect(() => {
-    if (!view && channels.length > 0) setView({ kind: "channel", id: channels[0].id });
-  }, [view, channels]);
 
   // Leave a channel or page once it's deleted. Only one that was listed
   // before counts: a brand-new one may not be listed yet.
@@ -42,9 +47,11 @@ export function Shell({ session }: { session: Session }) {
   const previouslyListedIds = useRef(listedIds);
   useEffect(() => {
     const id = view && (view.kind === "channel" || view.kind === "page") ? view.id : null;
-    if (id && previouslyListedIds.current.has(id) && !listedIds.has(id)) setView(null);
+    if (id && previouslyListedIds.current.has(id) && !listedIds.has(id)) {
+      replace(channels.length > 0 ? { kind: "channel", id: channels[0].id } : null);
+    }
     previouslyListedIds.current = listedIds;
-  }, [view, listedIds]);
+  }, [view, listedIds, channels, replace]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -60,14 +67,18 @@ export function Shell({ session }: { session: Session }) {
         candidate.kind === "channel" && (channels.find((channel) => channel.id === candidate.id)?.unread ?? 0) > 0;
       const step = (direction: 1 | -1, isWanted: (candidate: View) => boolean) => {
         for (let index = current + direction; index >= 0 && index < views.length; index += direction) {
-          if (isWanted(views[index])) return setView(views[index]);
+          if (isWanted(views[index])) return navigate(views[index]);
         }
       };
       switch (shortcut.id) {
         case "search":
           return setPaletteOpen((open) => !open);
         case "inbox":
-          return setView({ kind: "inbox" });
+          return navigate({ kind: "inbox" });
+        case "back":
+          return back();
+        case "forward":
+          return forward();
         case "previous":
           return step(-1, () => true);
         case "next":
@@ -84,14 +95,18 @@ export function Shell({ session }: { session: Session }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, channels, pages, sections]);
+  }, [view, channels, pages, sections, navigate, back, forward]);
 
-  const navigate = useCallback((next: View) => setView(next), []);
-  const openSaved = useCallback((item: LaterItem) => {
-    const target = savedItemView(item);
-    if (target) setView(target);
-    else showToast("What you saved no longer exists.", "info");
-  }, []);
+  useMouseBackAndForward(back, forward);
+
+  const openSaved = useCallback(
+    (item: LaterItem) => {
+      const target = savedItemView(item);
+      if (target) navigate(target);
+      else showToast("What you saved no longer exists.", "info");
+    },
+    [navigate],
+  );
 
   useAlerts(view, navigate);
   useReminders(openSaved);
@@ -123,7 +138,16 @@ export function Shell({ session }: { session: Session }) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              {view.kind === "channel" && <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} />}
+              {view.kind === "channel" && (
+                <ScrollMemoryContext.Provider value={scrollMemory}>
+                  <ChannelView
+                    channelId={view.id}
+                    thread={view.thread}
+                    focus={view.focus}
+                    anchor={entry?.anchor ?? null}
+                  />
+                </ScrollMemoryContext.Provider>
+              )}
               {view.kind === "page" && <PageView pageId={view.id} />}
               {view.kind === "inbox" && <InboxView />}
               {view.kind === "later" && <LaterView />}

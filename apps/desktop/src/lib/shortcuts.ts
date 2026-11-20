@@ -9,9 +9,18 @@ export const MOD_LABEL = isMac ? "⌘" : "Ctrl";
 
 const hasMod = (event: KeyboardEvent) => (isMac ? event.metaKey : event.ctrlKey);
 
+/** Option+arrows move by word on a Mac, so back and forward use ⌘[ and ⌘] there, like a browser. */
+const isBracketWithCommand = (event: KeyboardEvent, bracket: "[" | "]") =>
+  event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey && event.key === bracket;
+
+const isAltArrow = (event: KeyboardEvent, arrow: "ArrowLeft" | "ArrowRight") =>
+  event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === arrow;
+
 export type ShortcutId =
   | "search"
   | "inbox"
+  | "back"
+  | "forward"
   | "previous"
   | "next"
   | "previousUnread"
@@ -38,6 +47,18 @@ export const SHORTCUTS: Shortcut[] = [
     keys: [MOD_LABEL, "Shift", "A"],
     description: "Open the inbox",
     matches: (event) => hasMod(event) && event.shiftKey && event.key.toLowerCase() === "a",
+  },
+  {
+    id: "back",
+    keys: isMac ? [MOD_LABEL, "["] : ["Alt", "←"],
+    description: "Back to where you were",
+    matches: (event) => (isMac ? isBracketWithCommand(event, "[") : isAltArrow(event, "ArrowLeft")),
+  },
+  {
+    id: "forward",
+    keys: isMac ? [MOD_LABEL, "]"] : ["Alt", "→"],
+    description: "Forward again",
+    matches: (event) => (isMac ? isBracketWithCommand(event, "]") : isAltArrow(event, "ArrowRight")),
   },
   {
     id: "previous",

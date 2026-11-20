@@ -4,8 +4,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api, type Message, type MessageCursor } from "../../lib/api";
 import { channelReference, channelTitle, composerLabel } from "../../lib/channels";
 import { formatDay } from "../../lib/people";
+import { captureScrollAnchor, restoreScrollAnchor, type ScrollAnchor } from "../../lib/scrollAnchor";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
+import { useScrollMemory } from "../../lib/useNavigation";
 import { useWorkspace } from "../../lib/workspace";
 import { EmptyState, Spinner, springs, Tooltip } from "../../ui";
 import { ChannelTitle } from "../private/ChannelTitle";
@@ -23,6 +25,10 @@ type Row =
   | { kind: "day"; key: string; label: string }
   | { kind: "unread"; key: string }
   | { kind: "message"; key: string; message: Message; isContinuation: boolean };
+
+function isNearBottom(element: HTMLElement): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
+}
 
 function isAfter(message: Message, cursor: MessageCursor): boolean {
   return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.author > cursor.author);
@@ -53,8 +59,22 @@ function toRows(messages: Message[], unreadFrom: string | null): Row[] {
   return rows;
 }
 
-export function ChannelView({ channelId, thread, focus }: { channelId: string; thread?: string; focus?: string }) {
-  const { channels, session } = useWorkspace();
+export function ChannelView({
+  channelId,
+  thread,
+  focus,
+  anchor,
+}: {
+  channelId: string;
+  /** The open thread's first message. */
+  thread?: string;
+  /** A message to scroll to and highlight. */
+  focus?: string;
+  /** Where to scroll back to, from history; each new value is restored once. */
+  anchor: ScrollAnchor | null;
+}) {
+  const { channels, session, navigate } = useWorkspace();
+  const { registerAnchorSource, noteScrolled } = useScrollMemory();
   const channel = channels.find((candidate) => candidate.id === channelId);
   const members = useLive(api.members, (change) => change.kind === "members");
   // Where you left off, as of opening the channel: the line stays put while
@@ -69,10 +89,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
     (change) => (change.kind === "messages" && change.channel === channelId) || change.kind === "members",
   );
   const hasOlder = (messages?.length ?? 0) >= windowSize;
-  const [openThread, setOpenThread] = useState<string | null>(thread ?? null);
-  useEffect(() => {
-    if (thread) setOpenThread(thread);
-  }, [thread]);
+  const openThread = thread ?? null;
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   // A linked message to show: in the channel (loading older history until
@@ -81,6 +98,10 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
   useEffect(() => {
     if (focus && !thread) setPendingFocus(focus);
   }, [focus, thread]);
+  const [pendingAnchor, setPendingAnchor] = useState(anchor);
+  useEffect(() => {
+    if (anchor) setPendingAnchor(anchor);
+  }, [anchor]);
   const unreadFrom = useMemo(
     () => (isUnreadLineDismissed ? null : firstUnreadId(messages ?? [], lastReadOnOpen, session.me)),
     [messages, lastReadOnOpen, session.me, isUnreadLineDismissed],
@@ -90,6 +111,8 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
   const scroller = useRef<HTMLDivElement>(null);
   const isPinnedToBottom = useRef(true);
   const heightBeforeLoadingOlder = useRef<number | null>(null);
+  // The messages shown when more history was asked for; the next load replaces them.
+  const messagesBeforeGrowing = useRef<Message[] | undefined>(undefined);
 
   // Keeps the view anchored whenever the rows change.
   useLayoutEffect(() => {
@@ -98,14 +121,41 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
     if (heightBeforeLoadingOlder.current !== null) {
       element.scrollTop += element.scrollHeight - heightBeforeLoadingOlder.current;
       heightBeforeLoadingOlder.current = null;
+    } else if (pendingAnchor && !pendingFocus) {
+      // Older history loads until the anchor's message is there; without it, the channel opens as usual.
+      if (messages === messagesBeforeGrowing.current) return;
+      if (restoreScrollAnchor(element, pendingAnchor)) {
+        hasScrolledToUnread.current = true;
+        isPinnedToBottom.current = isNearBottom(element);
+        setPendingAnchor(null);
+      } else if (hasOlder) {
+        messagesBeforeGrowing.current = messages;
+        setWindowSize((size) => size + PAGE_SIZE);
+      } else {
+        setPendingAnchor(null);
+      }
     } else if (!hasScrolledToUnread.current && unreadFrom) {
       hasScrolledToUnread.current = true;
       document.getElementById("unread-line")?.scrollIntoView({ block: "start" });
-      isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
+      isPinnedToBottom.current = isNearBottom(element);
     } else if (isPinnedToBottom.current) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [rows, unreadFrom]);
+  }, [rows, unreadFrom, pendingAnchor, pendingFocus, hasOlder, messages]);
+
+  // Where you are, for coming back here: nothing while at the newest message, which is where a channel opens anyway.
+  const pendingAnchorRef = useRef(pendingAnchor);
+  pendingAnchorRef.current = pendingAnchor;
+  useEffect(
+    () =>
+      registerAnchorSource(channelId, () => {
+        const element = scroller.current;
+        if (pendingAnchorRef.current) return pendingAnchorRef.current;
+        if (!element || isPinnedToBottom.current) return null;
+        return captureScrollAnchor(element);
+      }),
+    [channelId, registerAnchorSource],
+  );
 
   useEffect(() => {
     // Escape that closed something else, like a menu or the palette, isn't for the line.
@@ -153,7 +203,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
   }, [highlighted]);
 
   const loadOlder = () => {
-    if (!hasOlder || heightBeforeLoadingOlder.current !== null || !scroller.current) return;
+    if (!hasOlder || heightBeforeLoadingOlder.current !== null || pendingAnchor || !scroller.current) return;
     heightBeforeLoadingOlder.current = scroller.current.scrollHeight;
     setWindowSize((size) => size + PAGE_SIZE);
   };
@@ -175,10 +225,11 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
           aria-label={`Messages in ${channelReference(channel, members)}`}
           onScroll={(event) => {
             const element = event.currentTarget;
-            isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
+            isPinnedToBottom.current = isNearBottom(element);
             if (element.scrollTop < NEAR_EDGE_PX) loadOlder();
+            noteScrolled();
           }}
-          className="flex-1 overflow-y-auto py-3"
+          className="relative flex-1 overflow-y-auto py-3"
         >
           {hasOlder && (
             <div className="flex justify-center py-2 text-decorative">
@@ -215,7 +266,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
                     isHighlighted={
                       openThread === row.message.id || highlighted === row.message.id || editing?.id === row.message.id
                     }
-                    onOpenThread={() => setOpenThread(row.message.id)}
+                    onOpenThread={() => navigate({ kind: "channel", id: channelId, thread: row.message.id })}
                     onEdit={() => setEditing(row.message)}
                   />
                 </motion.div>
@@ -243,9 +294,9 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
           <ThreadPanel
             key={openThread}
             root={openThread}
-            focus={openThread === thread ? focus : undefined}
+            focus={focus}
             channelId={channelId}
-            onClose={() => setOpenThread(null)}
+            onClose={() => navigate({ kind: "channel", id: channelId })}
           />
         )}
       </AnimatePresence>

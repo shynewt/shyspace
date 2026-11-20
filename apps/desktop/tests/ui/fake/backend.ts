@@ -183,6 +183,10 @@ export class FakeBackend {
     return this.chat.receiveReply(author, root, text);
   }
 
+  channelId(name: string): string {
+    return this.chat.channelNamed(name).id;
+  }
+
   messageWithText(text: string): string {
     return this.chat.messageWithText(text);
   }
