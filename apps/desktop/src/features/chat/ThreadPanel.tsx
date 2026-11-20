@@ -1,12 +1,14 @@
 import { Bell, BellOff, X } from "lucide-react";
 import { motion, useIsPresent } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { Button, IconButton, Spinner, springs } from "../../ui";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
+
+const NEAR_END_PX = 80;
 
 /** A thread beside its channel: the first message, its replies, and a reply box. */
 export function ThreadPanel({
@@ -29,6 +31,14 @@ export function ThreadPanel({
   const first = thread?.[0];
   const [editing, setEditing] = useState<Message | null>(null);
   const replies = thread?.slice(1) ?? [];
+  const scroller = useRef<HTMLDivElement>(null);
+  // Follows new replies while you're at the end; a reply to show from a link holds the view instead.
+  const isAtEnd = useRef(!focus);
+
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (element && thread && isAtEnd.current) element.scrollTop = element.scrollHeight;
+  }, [thread]);
 
   // Replies on screen while the window has focus count as read.
   const latestId = thread?.at(-1)?.id;
@@ -77,7 +87,14 @@ export function ThreadPanel({
         )}
         <IconButton label="Close thread" icon={<X size={15} />} onClick={onClose} className={first ? "" : "ml-auto"} />
       </header>
-      <div className="flex-1 overflow-y-auto py-3">
+      <div
+        ref={scroller}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          isAtEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_END_PX;
+        }}
+        className="flex-1 overflow-y-auto py-3"
+      >
         {!thread && (
           <div className="flex justify-center py-4 text-decorative">
             <Spinner size={14} />
@@ -115,6 +132,9 @@ export function ThreadPanel({
         channelId={channelId}
         label="Reply in thread"
         threadRoot={root}
+        onSent={() => {
+          isAtEnd.current = true;
+        }}
         editing={editing}
         onEditDone={() => setEditing(null)}
         onEditLast={() => setEditing(thread?.findLast((message) => message.can_edit) ?? null)}

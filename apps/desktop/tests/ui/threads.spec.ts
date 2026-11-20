@@ -62,3 +62,32 @@ test("you can stop and start following a thread", async ({ page }) => {
   await thread.getByRole("button", { name: "Close thread" }).click();
   await expect(thread).toHaveCount(0);
 });
+
+test("the thread keeps up with new replies while you're at the end", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("Release today?");
+  await composer.press("Enter");
+  await expect(page.getByRole("article").filter({ hasText: "Release today?" })).toBeVisible();
+  await page.evaluate(() => {
+    const root = window.fake.messageWithText("Release today?");
+    for (let index = 1; index <= 25; index += 1) {
+      window.fake.receiveReply(window.fake.memberNamed("Grace"), root, `Reply number ${index}`);
+    }
+  });
+  await openThreadOf(page, "Release today?");
+  const thread = page.getByRole("complementary", { name: "Thread" });
+  await expect(thread.getByRole("article").filter({ hasText: "Reply number 25" })).toBeInViewport();
+
+  await page.evaluate(() =>
+    window.fake.receiveReply(
+      window.fake.memberNamed("Grace"),
+      window.fake.messageWithText("Release today?"),
+      "Fresh one",
+    ),
+  );
+  await expect(thread.getByRole("article").filter({ hasText: "Fresh one" })).toBeInViewport();
+
+  await thread.getByLabel("Reply in thread").fill("Mine too");
+  await thread.getByLabel("Reply in thread").press("Enter");
+  await expect(thread.getByRole("article").filter({ hasText: "Mine too" })).toBeInViewport();
+});
