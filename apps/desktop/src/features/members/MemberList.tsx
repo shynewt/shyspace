@@ -72,7 +72,7 @@ function MemberRow({ member, isMe, actions }: { member: Member; isMe: boolean; a
           <StatusEmoji member={member} />
           {isMe && <span className="shrink-0 text-[12px] font-normal text-muted">(you)</span>}
           {member.is_admin && <Badge>Admin</Badge>}
-          {member.is_bot && <Badge tone="accent">Bot</Badge>}
+          {member.is_bot && <Badge tone="accent">Agent</Badge>}
         </div>
         <MemberStatusLine member={member} />
       </div>

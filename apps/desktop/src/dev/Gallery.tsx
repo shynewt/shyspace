@@ -133,7 +133,7 @@ export default function Gallery() {
         <Example title="Content">
           <Avatar id="a" name="Ada Lovelace" />
           <Avatar id="b" name="Claude" isBot />
-          <Badge tone="accent">bot</Badge>
+          <Badge tone="accent">Agent</Badge>
           <Badge>neutral</Badge>
           <Badge tone="warning">warning</Badge>
           <Badge tone="danger">danger</Badge>

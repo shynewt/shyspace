@@ -86,6 +86,7 @@ test("an agent shows no status beside its name", async ({ page }) => {
   }, HOLIDAY);
   await expect(channelLog(page).getByText("Summary ready")).toBeVisible();
 
+  await expect(channelLog(page).getByText("Agent", { exact: true })).toBeVisible();
   await expect(channelLog(page).getByLabel(/^Status:/)).toHaveCount(0);
 });
 
@@ -129,7 +130,7 @@ test("an agent in the member list has its tag but no presence or status", async 
   await settings.getByRole("tab", { name: "Members" }).first().click();
 
   const row = settings.getByRole("list", { name: "Members" }).getByRole("listitem").filter({ hasText: "Claude" });
-  await expect(row).toContainText("Bot");
+  await expect(row).toContainText("Agent");
   await expect(row).not.toContainText("Online");
   await expect(row).not.toContainText("On holiday");
 });

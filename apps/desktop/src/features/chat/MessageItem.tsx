@@ -131,7 +131,7 @@ export const MessageItem = memo(function MessageItem({
                 {name}
               </ProfileCardTrigger>
               {author && <StatusEmoji member={author} />}
-              {message.author_is_bot && <Badge tone="accent">bot</Badge>}
+              {message.author_is_bot && <Badge tone="accent">Agent</Badge>}
               <MessageTime ms={message.created_ms} className="text-[11.5px] text-faint" />
             </div>
           )}

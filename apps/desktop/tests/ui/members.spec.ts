@@ -102,7 +102,7 @@ test("the member list says who's who and can be searched", async ({ page }) => {
   const rows = settings.getByRole("list", { name: "Members" }).getByRole("listitem");
   await expect(rows.filter({ hasText: "Ada" })).toContainText("Admin");
   await expect(rows.filter({ hasText: "Ada" })).toContainText("(you)");
-  await expect(rows.filter({ hasText: "Claude" })).toContainText("Bot");
+  await expect(rows.filter({ hasText: "Claude" })).toContainText("Agent");
 
   await settings.getByLabel("Search members").fill("gr");
   await expect(rows).toHaveCount(1);
