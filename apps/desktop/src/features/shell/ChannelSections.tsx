@@ -5,8 +5,9 @@ import { api, type SectionSort, type SidebarSection } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useLive } from "../../lib/useLive";
+import { useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs } from "../../ui";
-import { ChannelList } from "./ChannelList";
+import { ChannelList, listedChannels } from "./ChannelList";
 
 const SORTS: { sort: SectionSort; label: string; icon: ReactNode }[] = [
   { sort: "name", label: "A to Z", icon: <ArrowDownAZ size={14} /> },
@@ -92,6 +93,7 @@ function Section({
   builtinActions: ReactNode;
   onAddSection: () => void;
 }) {
+  const { channels, view } = useWorkspace();
   const [isRenaming, setRenaming] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const isOpen = !section.is_collapsed;
@@ -117,6 +119,10 @@ function Section({
       isDestructive: true,
     });
   }
+  // The built-in section holds the filter, so only your own sections hide when nothing in them is listed.
+  const isEmptyWhileFiltered =
+    isUnreadOnly && !section.is_builtin && listedChannels(section.channels, channels, view, true).length === 0;
+  if (isEmptyWhileFiltered) return null;
   return (
     <section aria-label={section.name} className="mt-3">
       {isRenaming ? (

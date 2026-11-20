@@ -5,7 +5,7 @@ import { api, type Channel, type NotifyLevel, type SidebarSection } from "../../
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useLive } from "../../lib/useLive";
-import { useWorkspace } from "../../lib/workspace";
+import { useWorkspace, type View } from "../../lib/workspace";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem } from "../../ui";
 import { NavItem } from "./NavItem";
 
@@ -22,6 +22,19 @@ const LEVEL_STATUS: Record<NotifyLevel, { icon: ReactNode; label: string } | nul
   nothing: { icon: <BellOff size={12} />, label: "muted" },
 };
 const DRAFT_STATUS = { icon: <Pencil size={12} />, label: "draft" };
+
+/** A section's channels as the sidebar lists them: all, or only unread ones plus the open one. */
+export function listedChannels(
+  channelIds: string[],
+  channels: Channel[],
+  view: View | null,
+  isUnreadOnly: boolean,
+): Channel[] {
+  const inSection = channelIds.flatMap((id) => channels.filter((channel) => channel.id === id));
+  if (!isUnreadOnly) return inSection;
+  // The open channel stays listed, so filtering never hides where you are.
+  return inSection.filter((channel) => channel.unread > 0 || (view?.kind === "channel" && view.id === channel.id));
+}
 
 export function ChannelList({
   channelIds,
@@ -42,11 +55,7 @@ export function ChannelList({
   const { channels, view, navigate } = useWorkspace();
   const drafts = useLive(api.drafts, (change) => change.kind === "drafts");
   const hasDraft = (channel: string) => drafts?.some((draft) => draft.target === channel) ?? false;
-  const inSection = channelIds.flatMap((id) => channels.filter((channel) => channel.id === id));
-  // The open channel stays listed, so filtering never hides where you are.
-  const shown = isUnreadOnly
-    ? inSection.filter((channel) => channel.unread > 0 || (view?.kind === "channel" && view.id === channel.id))
-    : inSection;
+  const shown = listedChannels(channelIds, channels, view, isUnreadOnly);
   const create = async (name: string) => navigate({ kind: "channel", id: await api.createChannel(name) });
   return (
     <>
