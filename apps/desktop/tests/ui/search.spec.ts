@@ -43,3 +43,13 @@ test("a reply found by search opens in its thread", async ({ page }) => {
   const thread = page.getByRole("complementary", { name: "Thread" });
   await expect(thread.getByRole("article").filter({ hasText: "Version two ships Friday" })).toBeVisible();
 });
+
+test("marking all as read from the palette asks first", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await page.getByLabel("Search messages and pages").fill("mark all");
+  await page.getByRole("option", { name: /Mark all as read/ }).click();
+
+  await expect(page.getByRole("dialog", { name: "Mark everything as read?" })).toBeVisible();
+});

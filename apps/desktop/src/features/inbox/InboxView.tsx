@@ -1,6 +1,6 @@
 import { AtSign, CheckCheck, Hash, Inbox as InboxIcon, MessageSquareReply, Pencil } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api, type Channel, type Draft, type InboxItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
 import { displayName, formatWhen } from "../../lib/people";
@@ -8,13 +8,18 @@ import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Button, EmptyState, SectionLabel, springs } from "../../ui";
+import { MarkAllReadDialog } from "./MarkAllReadDialog";
 
 /** Everything that needs your attention, across channels and threads. */
 export function InboxView() {
   const loadInbox = useCallback(() => api.inbox(), []);
   const inbox = useLive(loadInbox, (change) => change.kind === "messages" || change.kind === "channels");
   const drafts = useLive(api.drafts, (change) => change.kind === "drafts") ?? [];
-  const isEmpty = inbox && inbox.attention.length === 0 && inbox.channels.length === 0 && drafts.length === 0;
+  const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
+  // Like the sidebar: a muted channel needs you only when it mentions you.
+  const unreadChannels =
+    inbox?.channels.filter((channel) => channel.notify !== "nothing" || channel.unread_mentions > 0) ?? [];
+  const isEmpty = inbox && inbox.attention.length === 0 && unreadChannels.length === 0 && drafts.length === 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -26,12 +31,13 @@ export function InboxView() {
             variant="ghost"
             size="sm"
             icon={<CheckCheck size={14} />}
-            onClick={() => api.markAllRead().catch(reportError)}
+            onClick={() => setConfirmingMarkAll(true)}
             className="ml-auto"
           >
             Mark all as read
           </Button>
         )}
+        <MarkAllReadDialog open={isConfirmingMarkAll} onOpenChange={setConfirmingMarkAll} />
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {isEmpty && (
@@ -63,11 +69,11 @@ export function InboxView() {
             </ul>
           </section>
         )}
-        {inbox && inbox.channels.length > 0 && (
+        {unreadChannels.length > 0 && (
           <section aria-label="Unread channels">
             <SectionLabel>Unread channels</SectionLabel>
             <ul className="flex flex-col gap-1">
-              {inbox.channels.map((channel) => (
+              {unreadChannels.map((channel) => (
                 <UnreadChannelRow key={channel.id} channel={channel} />
               ))}
             </ul>
@@ -97,7 +103,9 @@ function AttentionRow({ item }: { item: InboxItem }) {
     >
       <button
         type="button"
-        onClick={() => navigate({ kind: "channel", id: message.channel, thread: item.thread_root ?? undefined })}
+        onClick={() =>
+          navigate({ kind: "channel", id: message.channel, thread: item.thread_root ?? undefined, focus: message.id })
+        }
         className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
       >
         <Avatar id={message.author} name={name} isBot={message.author_is_bot} size={32} />

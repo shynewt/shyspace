@@ -17,6 +17,7 @@ import { shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
 import { Dialog, Kbd, springs } from "../../ui";
+import { MarkAllReadDialog } from "../inbox/MarkAllReadDialog";
 
 const SEARCH_DELAY_MS = 120;
 const JUMP_LIMIT_WHILE_TYPING = 6;
@@ -41,14 +42,30 @@ export function CommandPalette({
   onOpenChange: (open: boolean) => void;
   onOpenMembers: () => void;
 }) {
+  const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Search" hideTitle placement="top" width={600}>
-      <PaletteBody onClose={() => onOpenChange(false)} onOpenMembers={onOpenMembers} />
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange} title="Search" hideTitle placement="top" width={600}>
+        <PaletteBody
+          onClose={() => onOpenChange(false)}
+          onOpenMembers={onOpenMembers}
+          onMarkAllRead={() => setConfirmingMarkAll(true)}
+        />
+      </Dialog>
+      <MarkAllReadDialog open={isConfirmingMarkAll} onOpenChange={setConfirmingMarkAll} />
+    </>
   );
 }
 
-function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMembers: () => void }) {
+function PaletteBody({
+  onClose,
+  onOpenMembers,
+  onMarkAllRead,
+}: {
+  onClose: () => void;
+  onOpenMembers: () => void;
+  onMarkAllRead: () => void;
+}) {
   const { channels, pages, navigate, session } = useWorkspace();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -87,7 +104,7 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
       {
         title: "Mark all as read",
         icon: <CheckCheck size={15} />,
-        onChoose: () => api.markAllRead().catch(reportError),
+        onChoose: onMarkAllRead,
       },
       {
         title: session.is_admin ? "Members and invites" : "Members",
@@ -147,7 +164,7 @@ function PaletteBody({ onClose, onOpenMembers }: { onClose: () => void; onOpenMe
       ];
     });
     return [...jumpTo, ...found, ...actions];
-  }, [query, hits, channels, pages, navigate, session.is_admin, onOpenMembers]);
+  }, [query, hits, channels, pages, navigate, session.is_admin, onOpenMembers, onMarkAllRead]);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });
