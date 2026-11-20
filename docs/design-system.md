@@ -47,6 +47,21 @@ Keep feedback under about 250 ms. Reduced motion is decided once, globally: `Mot
 
 Dialogs, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primitives) primitives for focus handling and keyboard support, styled by us.
 
+## Editor
+
+Pages are markdown in a CodeMirror editor (`features/pages/`). The text people and agents share is always plain markdown; the editor only changes how it looks (live preview, like Obsidian):
+
+- Lines nobody is editing read as formatted text: marks (`#`, `**`, `_`, backticks, link brackets and addresses, `>`) are hidden, list dashes become bullets, `- [ ]` becomes a checkbox, `---` a divider. Lines touched by your cursor or selection show their markdown, so you edit what is really there. While a mouse button is down nothing changes, so text doesn't jump under the pointer.
+- Page links (`shy://page/<id>`) and mentions are chips, also on the line being edited; the cursor steps over a chip as one unit. Page chips show the page's current title and open it on click.
+- Web links show their address on hover and open with Ctrl/Cmd+click.
+
+Rules for changing it:
+
+- Decorations never change the document. A widget that acts (a checkbox) makes an ordinary edit, computed from the document as it is at that moment, never from a remembered position, so it stays right while others edit.
+- `editor/markdownPreview.ts` decides what to hide or draw and is pure (tested in `tests/ui/markdown-preview.spec.ts`); `editor/livePreview.ts` turns that into decorations. Only the visible part of the page is decorated, so long pages stay fast.
+- Plugins may not hide a line break; keep each hidden range on one line.
+- Styles live in `editor/theme.ts` and use the tokens; color only list markers, never whole list lines.
+
 ## Rules
 
 - Keyboard shortcuts are defined once in `lib/shortcuts.ts` (the shell handles them, the cheat sheet and menus show them). Use a modifier key: the message box usually has focus, so plain letters belong to typing.

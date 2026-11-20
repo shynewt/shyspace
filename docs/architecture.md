@@ -81,7 +81,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 
 ## Pages
 
-A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop editor (CodeMirror + `y-codemirror.next`) and agents (Rust `yrs`) edit the same structure. Agent edits change only the part that differs, so they don't clash with people typing nearby. A page shared in chat (`shy://page/<id>`) shows as a live card.
+A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop editor (CodeMirror + `y-codemirror.next`) and agents (Rust `yrs`) edit the same structure. Agent edits change only the part that differs, so they don't clash with people typing nearby. A page shared in chat (`shy://page/<id>`) shows as a live card. The editor shows the markdown as live preview (`features/pages/editor/`, rules in `design-system.md`); what is stored stays plain markdown.
 
 ## Files in shy-core
 

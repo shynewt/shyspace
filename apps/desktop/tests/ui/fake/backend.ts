@@ -136,17 +136,49 @@ export class FakeBackend {
 
   /** Rebuilds a page from scratch with `text`, as the core does after undoing a removed member's edits. */
   rebuildPage(title: string, text: string): void {
-    const page = this.pages.find((candidate) => candidate.title === title);
-    if (!page) throw new Error(`fake backend: no page titled "${title}"`);
+    const page = this.pageTitled(title);
     page.doc = new Y.Doc();
     page.doc.getText("content").insert(0, text);
     this.notify({ kind: "page_reset", page: page.id });
   }
 
   pageText(title: string): string {
+    return this.pageTitled(title).doc.getText("content").toString();
+  }
+
+  /** Adds a page of yours that already holds `text`; `parentTitle` nests it. */
+  seedPage(title: string, text: string, parentTitle?: string): string {
+    const doc = new Y.Doc();
+    doc.getText("content").insert(0, text);
+    const parent = parentTitle === undefined ? null : this.pageTitled(parentTitle).id;
+    const id = ownedId(this.me());
+    this.pages.push({ id, parent, title, updated_ms: Date.now(), doc });
+    this.tick();
+    this.notify({ kind: "pages" });
+    return id;
+  }
+
+  /**
+   * Another member's edit to a page arriving: made on their own copy, which
+   * may lack your latest keystrokes, then sent as one Yjs update.
+   */
+  receivePageEdit(title: string, edit: { at: number; remove?: number; insert?: string }): void {
+    const page = this.pageTitled(title);
+    const theirs = new Y.Doc();
+    Y.applyUpdate(theirs, Y.encodeStateAsUpdate(page.doc));
+    const before = Y.encodeStateVector(theirs);
+    const text = theirs.getText("content");
+    if (edit.remove) text.delete(edit.at, edit.remove);
+    if (edit.insert) text.insert(edit.at, edit.insert);
+    const update = Y.encodeStateAsUpdate(theirs, before);
+    Y.applyUpdate(page.doc, update);
+    this.notify({ kind: "doc", page: page.id, update: Array.from(update) });
+  }
+
+  private pageTitled(title: string): StoredPage {
     const page = this.pages.find((candidate) => candidate.title === title);
     if (!page) throw new Error(`fake backend: no page titled "${title}"`);
-    return page.doc.getText("content").toString();
+    return page;
   }
 
   // ---- The command surface ----------------------------------------------
