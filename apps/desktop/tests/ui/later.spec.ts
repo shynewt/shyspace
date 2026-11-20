@@ -116,3 +116,23 @@ test("a saved message shows a mark in chat that leads to Later", async ({ page }
   await page.getByRole("button", { name: "general", exact: true }).click();
   await expect(message.getByRole("button", { name: /Open Later/ })).toHaveCount(0);
 });
+
+test("a saved message that links to another shows the link as words", async ({ page }) => {
+  const linking = await page.evaluate(() =>
+    window.fake.receiveMessage(
+      window.fake.addMember("Hopper"),
+      "general",
+      `see shy://message/${window.fake.messageWithText("Read the spec")} first`,
+    ),
+  );
+  expect(linking).toBeTruthy();
+  const article = page.getByRole("article").filter({ hasText: "first" }).first();
+  await article.hover();
+  await article.getByRole("button", { name: "More actions" }).first().click();
+  await page.getByRole("menuitem", { name: "Save for later" }).click();
+
+  await later(page).click();
+  const list = page.getByRole("list", { name: "Saved for later" });
+  await expect(list).toContainText("see a linked message first");
+  await expect(list).not.toContainText("shy://");
+});
