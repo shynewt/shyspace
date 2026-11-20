@@ -2,9 +2,10 @@ import { ArrowUp, Pencil, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
+import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
-import { Button, IconButton, Kbd } from "../../ui";
+import { Button, cx, IconButton, Kbd, springs } from "../../ui";
 import { useDraft } from "./useDraft";
 import { useMentionPicker } from "./useMentionPicker";
 
@@ -33,9 +34,11 @@ export function Composer({
 }) {
   const [text, setText] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
-  const canSend = text.trim().length > 0;
   useFocusOnMount(input);
   const picker = useMentionPicker(input, (next) => updateText(next));
+  const sentLength = characterCount(picker.toSend(text).trim());
+  const isTooLong = sentLength > MAX_MESSAGE_CHARS;
+  const canSend = sentLength > 0 && !isTooLong;
 
   const updateText = useCallback((next: string) => {
     setText(next);
@@ -162,6 +165,7 @@ export function Composer({
         </motion.div>
       </div>
       <p className="mt-1.5 flex items-center gap-1.5 px-1 text-[11px] text-faint">
+        <LengthCount length={sentLength} isTooLong={isTooLong} />
         {editing ? (
           <>
             <Kbd>Enter</Kbd> to save · <Kbd>Esc</Kbd> to cancel
@@ -173,5 +177,24 @@ export function Composer({
         )}
       </p>
     </div>
+  );
+}
+
+function LengthCount({ length, isTooLong }: { length: number; isTooLong: boolean }) {
+  return (
+    <AnimatePresence initial={false}>
+      {length >= SHOW_COUNT_FROM_CHARS && (
+        <motion.span
+          initial={{ opacity: 0, y: 2 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          transition={springs.snappy}
+          className={cx("order-last ml-auto tabular-nums", isTooLong ? "font-medium text-danger" : "text-warning")}
+        >
+          {isTooLong && "Too long to send: "}
+          {length.toLocaleString()} / {MAX_MESSAGE_CHARS.toLocaleString()}
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }

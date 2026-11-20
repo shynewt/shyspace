@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::{
     mentions::{mentions, with_plain_mentions},
-    ops::{Op, VerifiedOp, now_ms},
+    ops::{MAX_MESSAGE_CHARS, Op, VerifiedOp, cut_to, now_ms},
     views::{Change, NotifyLevel},
     workspace::{State, Workspace, follows_by_default},
 };
@@ -27,6 +27,8 @@ impl Workspace {
         if verified.author == self.me() || now_ms()? - verified.body.timestamp_ms > ALERT_WINDOW_MS {
             return Ok(None);
         }
+        // Only what was stored counts, and the scans below stay bounded.
+        let text = cut_to(text, MAX_MESSAGE_CHARS);
         // Your status can quiet things further, never louder than the channel.
         let my_status = state.store.member_status(self.me().as_bytes(), now_ms()?)?;
         let status_level = my_status.map_or(NotifyLevel::All, |status| status.alerts);

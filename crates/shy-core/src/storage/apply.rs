@@ -7,7 +7,10 @@ use rusqlite::{OptionalExtension, named_params, params};
 use super::Store;
 use crate::{
     config,
-    ops::{Op, VerifiedOp, clean_channel_name, is_owned_by, is_valid_status, rule_violation},
+    ops::{
+        MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, Op, VerifiedOp, clean_channel_name, cut_to, is_owned_by,
+        is_valid_status, rule_violation,
+    },
     pages,
     views::Change,
 };
@@ -64,7 +67,8 @@ impl Store {
                     "INSERT INTO messages (id, channel, author, text, reply_to, lamport, created_ms)
                      VALUES (:id, :channel, :author, :text, :reply_to, :lamport, :now)",
                     named_params! {
-                        ":id": id, ":channel": channel, ":author": author, ":text": text,
+                        ":id": id, ":channel": channel, ":author": author,
+                        ":text": cut_to(text, MAX_MESSAGE_CHARS),
                         ":reply_to": reply_to, ":lamport": lamport, ":now": now,
                     },
                 )?;
@@ -161,6 +165,7 @@ impl Store {
     }
 
     fn set_title(&self, id: &str, title: &str, lamport: u64, author: &[u8], now: i64) -> Result<()> {
+        let title = cut_to(title, MAX_PAGE_TITLE_CHARS);
         self.db.execute(
             "UPDATE pages SET title = ?2, title_lamport = ?3, title_author = ?4, updated_ms = MAX(updated_ms, ?5)
              WHERE id = ?1 AND (title_lamport < ?3 OR (title_lamport = ?3 AND title_author < ?4))",

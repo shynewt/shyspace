@@ -2,6 +2,7 @@ import { Bookmark, BookmarkCheck, ChevronRight, FilePlus2, Link2, Trash2 } from 
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
+import { MAX_PAGE_TITLE_CHARS } from "../../lib/limits";
 import { reportError, showToast } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, ConfirmDialog } from "../../ui";
@@ -125,7 +126,7 @@ function TitleInput({ pageId, title }: { pageId: string; title: string }) {
       aria-label="Page title"
       value={draft}
       onFocus={() => setEditing(true)}
-      onChange={(event) => setDraft(event.target.value)}
+      onChange={(event) => setDraft(Array.from(event.target.value).slice(0, MAX_PAGE_TITLE_CHARS).join(""))}
       onBlur={save}
       onKeyDown={(event) => {
         if (event.key !== "Enter") return;

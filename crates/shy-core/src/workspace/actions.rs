@@ -1,12 +1,15 @@
 //! Local changes: each one becomes a signed, encrypted op.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use tracing::warn;
 
 use super::{Profile, Workspace};
 use crate::{
     crypto,
-    ops::{EntityId, Envelope, Op, OpBody, VerifiedOp, new_owned_id, normalize_channel_name, now_ms},
+    ops::{
+        EntityId, Envelope, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, Op, OpBody, VerifiedOp, new_owned_id,
+        normalize_channel_name, now_ms,
+    },
     pages::{self, Edit},
     storage::ItemKind,
     views::{Change, Draft, Message, NotifyLevel},
@@ -93,10 +96,7 @@ impl Workspace {
     }
 
     pub fn send_message(&self, channel: &str, text: &str, reply_to: Option<EntityId>) -> Result<EntityId> {
-        let text = text.trim();
-        if text.is_empty() {
-            bail!("message is empty");
-        }
+        let text = checked_message_text(text)?;
         let id = new_owned_id(&self.me());
         self.write(Op::Message {
             id: id.clone(),
@@ -231,10 +231,7 @@ impl Workspace {
 
     /// Replaces a message's text. Its author only.
     pub fn edit_message(&self, message: &str, text: &str) -> Result<()> {
-        let text = text.trim();
-        if text.is_empty() {
-            bail!("message is empty");
-        }
+        let text = checked_message_text(text)?;
         self.require_item(message, ItemKind::Message)?;
         self.write(Op::MessageEdit {
             id: message.to_owned(),
@@ -259,19 +256,21 @@ impl Workspace {
     }
 
     pub fn create_page(&self, title: &str, parent: Option<EntityId>) -> Result<EntityId> {
+        let title = checked_page_title(title)?;
         let id = new_owned_id(&self.me());
         self.write(Op::PageCreate {
             id: id.clone(),
             parent,
-            title: title.trim().to_owned(),
+            title: title.to_owned(),
         })?;
         Ok(id)
     }
 
     pub fn rename_page(&self, page: &str, title: &str) -> Result<()> {
+        let title = checked_page_title(title)?;
         self.write(Op::PageRename {
             id: page.to_owned(),
-            title: title.trim().to_owned(),
+            title: title.to_owned(),
         })
     }
 
@@ -311,4 +310,23 @@ impl Workspace {
             is_bot: profile.is_bot,
         })
     }
+}
+
+fn checked_message_text(text: &str) -> Result<&str> {
+    let text = text.trim();
+    ensure!(!text.is_empty(), "message is empty");
+    ensure!(
+        text.chars().count() <= MAX_MESSAGE_CHARS,
+        "a message has at most {MAX_MESSAGE_CHARS} characters"
+    );
+    Ok(text)
+}
+
+fn checked_page_title(title: &str) -> Result<&str> {
+    let title = title.trim();
+    ensure!(
+        title.chars().count() <= MAX_PAGE_TITLE_CHARS,
+        "a page title has at most {MAX_PAGE_TITLE_CHARS} characters"
+    );
+    Ok(title)
 }

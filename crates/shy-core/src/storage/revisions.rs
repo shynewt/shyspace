@@ -92,7 +92,11 @@ impl Store {
         let changed = self.db.execute(
             "INSERT INTO message_edits (message, text, lamport) VALUES (?1, ?2, ?3)
              ON CONFLICT (message) DO UPDATE SET text = ?2, lamport = ?3 WHERE lamport < ?3",
-            params![id, text, lamport],
+            params![
+                id,
+                crate::ops::cut_to(text, crate::ops::MAX_MESSAGE_CHARS),
+                lamport
+            ],
         )?;
         if changed == 0 {
             return Ok(None);

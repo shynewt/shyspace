@@ -809,3 +809,164 @@ async fn rapid_presence_flips_are_ignored() {
     assert!(admin.receive_heartbeat(&back).unwrap());
     assert_eq!(member_presence(&admin, &bob.my_id()), PresenceState::Away);
 }
+
+/// Seals ops as Bob's next ones, in order, without them going through his log.
+struct Forger<'a> {
+    bob: &'a Workspace,
+    next_seq: u64,
+}
+
+impl<'a> Forger<'a> {
+    fn new(bob: &'a Workspace) -> Self {
+        let next_seq = bob.state().store.next_seq(&bob.me()).unwrap();
+        Forger { bob, next_seq }
+    }
+
+    fn seal(&mut self, op: Op) -> Envelope {
+        let (epoch, key) = current_key(self.bob);
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        let body = OpBody {
+            lamport: 9_000 + seq,
+            timestamp_ms: now_ms().unwrap(),
+            op,
+        };
+        crypto::seal(&self.bob.inner.identity, &key, epoch, seq, &body).unwrap()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn huge_text_from_others_is_cut_to_the_limit() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let message = crate::ops::new_owned_id(&bob.me());
+    let huge = "é".repeat(100_000);
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal(Op::Message {
+            id: message.clone(),
+            channel: general.clone(),
+            text: huge.clone(),
+            reply_to: None,
+        }))
+        .unwrap();
+    let stored = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.id == message)
+        .unwrap();
+    assert_eq!(stored.text.chars().count(), crate::ops::MAX_MESSAGE_CHARS);
+
+    admin
+        .receive(forger.seal(Op::MessageEdit {
+            id: message.clone(),
+            text: "ü".repeat(100_000),
+        }))
+        .unwrap();
+    let edited = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.id == message)
+        .unwrap();
+    assert!(edited.text.starts_with('ü'), "the edit applied");
+    assert_eq!(edited.text.chars().count(), crate::ops::MAX_MESSAGE_CHARS);
+
+    let page = crate::ops::new_owned_id(&bob.me());
+    admin
+        .receive(forger.seal(Op::PageCreate {
+            id: page.clone(),
+            parent: None,
+            title: huge.clone(),
+        }))
+        .unwrap();
+    let title = || {
+        admin
+            .pages()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == page)
+            .unwrap()
+            .title
+    };
+    assert_eq!(title().chars().count(), crate::ops::MAX_PAGE_TITLE_CHARS);
+    admin
+        .receive(forger.seal(Op::PageRename {
+            id: page.clone(),
+            title: huge,
+        }))
+        .unwrap();
+    assert_eq!(title().chars().count(), crate::ops::MAX_PAGE_TITLE_CHARS);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn your_own_text_over_the_limit_is_refused() {
+    let (_root, _bucket, admin, _bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let at_limit = format!("  {}  ", "a".repeat(crate::ops::MAX_MESSAGE_CHARS));
+    admin
+        .send_message(&general, &at_limit, None)
+        .expect("spaces around it don't count");
+    admin
+        .create_page(&"t".repeat(crate::ops::MAX_PAGE_TITLE_CHARS), None)
+        .expect("a title at the limit is fine");
+    let too_long = "a".repeat(crate::ops::MAX_MESSAGE_CHARS + 1);
+    assert!(admin.send_message(&general, &too_long, None).is_err());
+    let message = admin
+        .send_message(&general, &"a".repeat(crate::ops::MAX_MESSAGE_CHARS), None)
+        .unwrap();
+    assert!(admin.edit_message(&message, &too_long).is_err());
+    assert!(
+        admin
+            .create_page(&"t".repeat(crate::ops::MAX_PAGE_TITLE_CHARS + 1), None)
+            .is_err()
+    );
+    let page = admin.create_page("Spec", None).unwrap();
+    assert!(
+        admin
+            .rename_page(&page, &"t".repeat(crate::ops::MAX_PAGE_TITLE_CHARS + 1))
+            .is_err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mention_hidden_past_the_limit_does_not_alert() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mention = crate::mentions::member_link("Ada", &admin.my_id());
+    let hidden = format!("{}{mention}", "a".repeat(crate::ops::MAX_MESSAGE_CHARS));
+    admin
+        .set_notify_level(&general, crate::views::NotifyLevel::Mentions)
+        .unwrap();
+    let mut changes = admin.subscribe();
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal(Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: hidden,
+            reply_to: None,
+        }))
+        .unwrap();
+    while let Ok(change) = changes.try_recv() {
+        assert!(
+            !matches!(change, crate::views::Change::Alert { .. }),
+            "nobody can see that mention"
+        );
+    }
+
+    admin
+        .receive(forger.seal(Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general,
+            text: format!("{mention} visible"),
+            reply_to: None,
+        }))
+        .unwrap();
+    let mut alerts = 0;
+    while let Ok(change) = changes.try_recv() {
+        alerts += usize::from(matches!(change, crate::views::Change::Alert { .. }));
+    }
+    assert_eq!(alerts, 1, "a mention people can see still alerts");
+}

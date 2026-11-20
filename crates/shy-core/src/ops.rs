@@ -163,6 +163,19 @@ pub struct VerifiedOp {
 }
 
 const MAX_CHANNEL_NAME_CHARS: usize = 80;
+/// Longest message or edit, like Slack's. Longer text from others is cut
+/// rather than refused, so devices that accepted it before this limit and
+/// devices after it don't disagree about whether the message exists.
+pub const MAX_MESSAGE_CHARS: usize = 40_000;
+pub const MAX_PAGE_TITLE_CHARS: usize = 200;
+
+/// `text` cut to at most `max` characters, the same way on every device.
+pub(crate) fn cut_to(text: &str, max: usize) -> &str {
+    match text.char_indices().nth(max) {
+        Some((end, _)) => &text[..end],
+        None => text,
+    }
+}
 const MAX_STATUS_TEXT_CHARS: usize = 100;
 
 const MAX_STATUS_EMOJI_CHARS: usize = 16;
