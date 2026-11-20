@@ -22,6 +22,7 @@ export function SavedLabel({ saved }: { saved: SavedMark | null }) {
     <Tooltip label="Open Later">
       <button
         type="button"
+        aria-label={`${description}. Open Later`}
         onClick={() => navigate({ kind: "later" })}
         className={cx(
           "mb-0.5 flex w-fit items-center gap-1 rounded text-[12px] font-medium hover:underline",

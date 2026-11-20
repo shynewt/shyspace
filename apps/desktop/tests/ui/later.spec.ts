@@ -112,7 +112,7 @@ test("a saved message is labelled above its text, also when grouped, until done"
     await page.getByRole("menuitem", { name: "Save for later" }).click();
   }
   for (const { article, text } of messages) {
-    const label = await article.getByRole("button", { name: "Saved for later", exact: true }).boundingBox();
+    const label = await article.getByRole("button", { name: "Saved for later. Open Later", exact: true }).boundingBox();
     const body = await article.getByText(text, { exact: true }).boundingBox();
     if (!label || !body) throw new Error("message not laid out");
     expect(label.y + label.height).toBeLessThanOrEqual(body.y + 1);
@@ -123,7 +123,7 @@ test("a saved message is labelled above its text, also when grouped, until done"
   await first.hover();
   await first.getByRole("button", { name: "More actions" }).click();
   await chooseInSubmenu(page, "Remind me", "In 20 minutes");
-  const reminder = first.getByRole("button", { name: /^Reminder · (Today|Tomorrow) / });
+  const reminder = first.getByRole("button", { name: /^Reminder · (Today|Tomorrow) .*\. Open Later$/ });
   await expect(reminder).toBeVisible();
   await expect(first).toHaveAccessibleName(/reminder · (today|tomorrow)/i);
 

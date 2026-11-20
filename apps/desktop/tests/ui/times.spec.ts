@@ -45,4 +45,5 @@ test("message times drop the leading zero and show the full date on hover", asyn
   await expect(time).toBeVisible();
   await time.hover();
   await expect(page.getByRole("tooltip")).toContainText("Friday, November 20, 2026 at 9:05 AM");
+  await expect(message).toHaveAccessibleName("Ada, Friday, November 20, 2026 at 9:05 AM");
 });

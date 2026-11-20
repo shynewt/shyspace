@@ -71,7 +71,7 @@ export const MessageItem = memo(function MessageItem({
     <article
       ref={article}
       id={`message-${message.id}`}
-      aria-label={`${name} at ${formatTime(message.created_ms)}${savedDescription ? `, ${savedDescription}` : ""}`}
+      aria-label={`${name}, ${formatFullDate(message.created_ms)}${savedDescription ? `, ${savedDescription}` : ""}`}
       className={cx(
         "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 keyboard-focus-within:bg-surface-2/50",
         isContinuation ? "py-0.5" : "pt-2 pb-0.5",
@@ -214,9 +214,11 @@ export const MessageItem = memo(function MessageItem({
         confirmLabel="Delete message"
         onConfirm={() => api.deleteMessage(message.id)}
       >
-        <blockquote className="selectable line-clamp-3 border-l-3 border-surface-3 pl-2.5 text-[13px] text-ink">
-          {plainPreview(message.text, (id) => titles.get(id))}
-        </blockquote>
+        {isConfirmingDelete && (
+          <blockquote className="selectable line-clamp-3 border-l-3 border-surface-3 pl-2.5 text-[13px] text-ink">
+            {plainPreview(message.text, (id) => titles.get(id))}
+          </blockquote>
+        )}
       </ConfirmDialog>
     </article>
   );
