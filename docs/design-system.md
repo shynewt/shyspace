@@ -39,7 +39,7 @@ Keep feedback under about 250 ms. Reduced-motion settings are respected globally
 | `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger; a menu sets destructive actions apart below a line |
 | `Card`, `SectionLabel`, `EmptyState` | grouping and empty screens |
 | `Avatar`, `Badge`, `Kbd`, `Spinner`, `Logo` | small content pieces |
-| `SegmentedControl` | picking one of a few modes |
+| `SegmentedControl` | picking one of a few options: a radio group (arrow keys move the choice) named by `label`, sized to its options or `width="full"` |
 | `CopyField` | codes and commands with a copy button |
 | `ConfirmDialog` | asks before something that can't be undone (deletes), showing what it applies to; stays open showing the error if it fails |
 | `Toasts` | transient messages above the message box, from `lib/toast.ts`: `showToast` (a success, or `"info"`), `showUndoToast`, `showReminderToast` (with Open) and `reportError` (announced as an alert) |

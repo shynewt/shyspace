@@ -21,7 +21,7 @@ test("you can change the name everyone sees", async ({ page }) => {
 test("the theme can be chosen and kept", async ({ page }) => {
   const settings = await openSettings(page);
   await settings.getByRole("tab", { name: "Appearance" }).click();
-  await settings.getByRole("tab", { name: "Dark" }).click();
+  await settings.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
   await page.reload();
@@ -31,7 +31,7 @@ test("the theme can be chosen and kept", async ({ page }) => {
 test("notification text can be hidden", async ({ page }) => {
   const settings = await openSettings(page);
   await settings.getByRole("tab", { name: "Notifications" }).click();
-  await settings.getByRole("tab", { name: "Hide text" }).click();
+  await settings.getByRole("radio", { name: "Hide text" }).click();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "New channel" }).click();
   await page.getByLabel("Channel name").fill("random");
@@ -43,4 +43,16 @@ test("notification text can be hidden", async ({ page }) => {
   await expect
     .poll(() => page.evaluate(() => window.fake.alertsShown))
     .toEqual([{ title: "Grace in #random", body: "New message" }]);
+});
+
+test("the arrow keys move between choices", async ({ page }) => {
+  const settings = await openSettings(page);
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+  const theme = settings.getByRole("radiogroup", { name: "Theme" });
+  await theme.getByRole("radio", { name: "System" }).focus();
+
+  await page.keyboard.press("ArrowRight");
+  await expect(theme.getByRole("radio", { name: "Light" })).toBeChecked();
+  await expect(theme.getByRole("radio", { name: "Light" })).toBeFocused();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });

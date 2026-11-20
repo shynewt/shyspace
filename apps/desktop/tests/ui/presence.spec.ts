@@ -15,7 +15,7 @@ test("your status shows to everyone and can be cleared", async ({ page }) => {
   const settings = page.getByRole("dialog", { name: "Settings" });
   await settings.getByLabel("Emoji").fill("🎧");
   await settings.getByLabel("Status", { exact: true }).fill("Deep work");
-  await settings.getByRole("tab", { name: "None", exact: true }).click();
+  await settings.getByRole("radio", { name: "None", exact: true }).click();
   await settings.getByRole("button", { name: "Set status" }).click();
   await expect(page.getByText("Status set.")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -38,7 +38,7 @@ test("a status can let only mentions through", async ({ page }) => {
   await page.keyboard.press("Control+,");
   const settings = page.getByRole("dialog", { name: "Settings" });
   await settings.getByLabel("Status", { exact: true }).fill("Heads down");
-  await settings.getByRole("tab", { name: "Mentions only" }).click();
+  await settings.getByRole("radio", { name: "Mentions only" }).click();
   await settings.getByRole("button", { name: "Set status" }).click();
   await expect(page.getByText("Status set.")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -60,9 +60,9 @@ test("others show as online, away or not reachable", async ({ page }) => {
 
 test("appearing offline stops telling others you're here", async ({ page }) => {
   await page.keyboard.press("Control+,");
-  const visibility = page.getByRole("dialog", { name: "Settings" }).getByRole("tab", { name: "Appear offline" });
+  const visibility = page.getByRole("dialog", { name: "Settings" }).getByRole("radio", { name: "Appear offline" });
   await visibility.click();
-  await expect(visibility).toHaveAttribute("aria-selected", "true");
+  await expect(visibility).toBeChecked();
   expect(await page.evaluate(() => window.fake.ownPresenceLog)).toEqual(["offline"]);
   await page.keyboard.press("Escape");
 

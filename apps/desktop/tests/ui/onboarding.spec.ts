@@ -43,7 +43,7 @@ test("changing the settings after a passed test asks for a new test", async ({ p
 });
 
 test("joining with an invite opens the workspace once approved", async ({ page }) => {
-  await page.getByRole("tab", { name: "Join" }).click();
+  await page.getByRole("radio", { name: "Join" }).click();
   await page.getByLabel("Invite code").fill("shy2_example");
   await page.getByLabel("Your name").fill("Grace");
   await page.getByRole("button", { name: /Ask to join/ }).click();

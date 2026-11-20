@@ -174,6 +174,7 @@ function StatusSettings() {
       <Field label="Clear after">
         {() => (
           <SegmentedControl<ClearAfter>
+            label="Clear after"
             options={[
               { value: "never", label: "Never" },
               { value: "hour", label: "1 hour" },
@@ -191,6 +192,7 @@ function StatusSettings() {
       >
         {() => (
           <SegmentedControl<NotifyLevel>
+            label="Notifications while set"
             options={[
               { value: "all", label: "As usual" },
               { value: "mentions", label: "Mentions only" },
@@ -228,6 +230,7 @@ function VisibilitySettings() {
       >
         {() => (
           <SegmentedControl<"auto" | "offline">
+            label="Show me as"
             options={[
               { value: "auto", label: "Online when here" },
               { value: "offline", label: "Appear offline" },
@@ -247,6 +250,7 @@ function AppearanceSettings() {
     <Field label="Theme" hint="System follows your computer's light or dark setting.">
       {() => (
         <SegmentedControl<Theme>
+          label="Theme"
           options={[
             { value: "system", label: "System" },
             { value: "light", label: "Light" },
@@ -270,6 +274,7 @@ function NotificationSettings() {
       >
         {() => (
           <SegmentedControl<"show" | "hide">
+            label="Message text in notifications"
             options={[
               { value: "show", label: "Show text" },
               { value: "hide", label: "Hide text" },

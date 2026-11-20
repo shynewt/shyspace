@@ -77,8 +77,19 @@ export default function Gallery() {
         </Example>
 
         <Example title="Selection">
+          <SegmentedControl
+            label="Example choice"
+            options={[
+              { value: "one", label: "One" },
+              { value: "two", label: "Two" },
+              { value: "three", label: "Three" },
+            ]}
+            value={segment}
+            onChange={setSegment}
+          />
           <div className="w-full max-w-[420px]">
             <SegmentedControl
+              label="Example full-width choice"
               options={[
                 { value: "one", label: "One" },
                 { value: "two", label: "Two" },
@@ -86,6 +97,7 @@ export default function Gallery() {
               ]}
               value={segment}
               onChange={setSegment}
+              width="full"
             />
           </div>
         </Example>
