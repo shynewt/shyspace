@@ -1,6 +1,19 @@
+import { Undo2 } from "lucide-react";
+import { useState } from "react";
+import { api, type Channel, type NotifyLevel } from "../../lib/api";
 import { usePreferences } from "../../lib/preferences";
-import { SegmentedControl } from "../../ui";
+import { reportError } from "../../lib/toast";
+import { useWorkspace } from "../../lib/workspace";
+import { Button, SegmentedControl } from "../../ui";
 import { Setting } from "./layout";
+
+const DEFAULT_LEVEL: NotifyLevel = "all";
+
+const LEVELS: Array<{ value: NotifyLevel; label: string }> = [
+  { value: "all", label: "Every message" },
+  { value: "mentions", label: "Mentions only" },
+  { value: "nothing", label: "Muted" },
+];
 
 export function NotificationSettings() {
   const [preferences, update] = usePreferences();
@@ -20,9 +33,66 @@ export function NotificationSettings() {
           onChange={(choice) => update({ alertsShowText: choice === "show" })}
         />
       </Setting>
-      <p className="text-[12.5px] leading-relaxed text-muted">
-        Choose which messages notify you per channel, from a channel's menu: every message, mentions only, or nothing.
-      </p>
+      <ChannelAlerts />
+      <Setting
+        title="Your status"
+        description="Your status can make alerts quieter for a while, from the menu under your name. While it's set, the quieter of the status and a channel's own setting wins."
+      />
     </>
+  );
+}
+
+type SavedLevel = { channel: Channel; level: NotifyLevel };
+
+function ChannelAlerts() {
+  const { channels } = useWorkspace();
+  // A toast's Undo can't be reached while Settings is open (it's modal), so it's offered here.
+  const [beforeReset, setBeforeReset] = useState<SavedLevel[] | null>(null);
+  const sorted = [...channels].sort((left, right) => left.name.localeCompare(right.name));
+  const changed = sorted.filter((channel) => channel.notify !== DEFAULT_LEVEL);
+  const setLevels = (levels: SavedLevel[]) =>
+    Promise.all(levels.map(({ channel, level }) => api.setNotifyLevel(channel.id, level)));
+  const resetAll = () => {
+    const previous = changed.map((channel) => ({ channel, level: channel.notify }));
+    setLevels(previous.map(({ channel }) => ({ channel, level: DEFAULT_LEVEL }))).then(
+      () => setBeforeReset(previous),
+      reportError,
+    );
+  };
+  const undoReset = (previous: SavedLevel[]) => setLevels(previous).then(() => setBeforeReset(null), reportError);
+  return (
+    <Setting
+      title="Channels"
+      description="Which messages alert you, per channel. A channel's menu in the sidebar changes this too."
+    >
+      <ul aria-label="Channel alerts" className="flex flex-col">
+        {sorted.map((channel) => (
+          <li key={channel.id} className="flex items-center gap-3 py-1">
+            <span className="min-w-0 flex-1 truncate text-[13px]">
+              <span className="text-faint">#</span> {channel.name}
+            </span>
+            <SegmentedControl<NotifyLevel>
+              label={`Alerts for #${channel.name}`}
+              options={LEVELS}
+              value={channel.notify}
+              onChange={(level) => api.setNotifyLevel(channel.id, level).catch(reportError)}
+            />
+          </li>
+        ))}
+      </ul>
+      <div className="flex items-center gap-3">
+        <Button size="sm" disabled={changed.length === 0} onClick={resetAll}>
+          Reset all to every message
+        </Button>
+        {beforeReset && (
+          <p role="status" className="flex items-center gap-1 text-[12.5px] text-muted">
+            {beforeReset.length === 1 ? "1 channel was reset." : `${beforeReset.length} channels were reset.`}
+            <Button variant="ghost" size="sm" icon={<Undo2 size={13} />} onClick={() => undoReset(beforeReset)}>
+              Undo
+            </Button>
+          </p>
+        )}
+      </div>
+    </Setting>
   );
 }

@@ -3,7 +3,7 @@ import { api } from "../../lib/api";
 import { displayName } from "../../lib/people";
 import { useLive } from "../../lib/useLive";
 
-/** One setting: a title and a line of help above its control. */
+/** One setting: a title and a line of help above its control, if it has one. */
 export function Setting({
   title,
   description,
@@ -11,7 +11,7 @@ export function Setting({
 }: {
   title: string;
   description?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-2 border-b border-line py-4 first:pt-0 last:border-b-0">
