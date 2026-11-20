@@ -23,4 +23,4 @@ mod tests;
 pub use keys::KeyStorage;
 pub use pages::Edit;
 pub use transport::bucket::BucketConfig;
-pub use workspace::{DataDir, Networking, Profile, Workspace};
+pub use workspace::{DataDir, JoinCancel, Networking, Profile, Workspace};

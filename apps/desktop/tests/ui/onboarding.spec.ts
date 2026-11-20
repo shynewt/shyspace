@@ -51,3 +51,22 @@ test("joining with an invite opens the workspace once approved", async ({ page }
   await expect(page.getByText("Team")).toBeVisible();
   await expect(page.getByRole("button", { name: "general", exact: true })).toBeVisible();
 });
+
+test("a join request can be cancelled while waiting, keeping what you typed", async ({ page }) => {
+  await page.evaluate(() => window.fake.holdJoins());
+  await page.getByRole("radio", { name: "Join" }).click();
+  await page.getByLabel("Invite code").fill("shy2_first");
+  await page.getByLabel("Your name").fill("Grace");
+  await page.getByRole("button", { name: /Ask to join/ }).click();
+  await expect(page.getByText("Waiting for the admin…")).toBeVisible();
+
+  await page.getByRole("button", { name: "Cancel request" }).click();
+
+  await expect(page.getByLabel("Invite code")).toHaveValue("shy2_first");
+  await expect(page.getByLabel("Your name")).toHaveValue("Grace");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByLabel("Invite code").fill("shy2_second");
+  await page.getByRole("button", { name: /Ask to join/ }).click();
+  await page.evaluate(() => window.fake.approveJoin());
+  await expect(page.getByRole("button", { name: "general", exact: true })).toBeVisible();
+});

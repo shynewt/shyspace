@@ -163,6 +163,8 @@ export const api = {
   createWorkspace: (workspaceName: string, name: string, bucket: BucketConfig) =>
     invoke<Session>("create_workspace", { workspaceName, name, bucket }),
   joinWorkspace: (invite: string, name: string) => invoke<Session>("join_workspace", { invite, name }),
+  /** Stops a join still waiting for the admin; `joinWorkspace` then fails. */
+  cancelJoin: () => invoke<void>("cancel_join"),
   restoreWorkspace: (kit: string) => invoke<Session>("restore_workspace", { kit }),
   testBucket: (bucket: BucketConfig) => invoke<void>("test_bucket", { bucket }),
   storageSettings: () => invoke<StorageSettings>("storage_settings"),

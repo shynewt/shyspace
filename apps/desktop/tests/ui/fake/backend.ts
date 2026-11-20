@@ -36,6 +36,8 @@ type StoredPage = Omit<Page, "can_delete" | "is_saved"> & { doc: Y.Doc };
 
 export class FakeBackend {
   session: Session | null = null;
+  private isHoldingJoins = false;
+  private pendingJoin: { approve: () => void; cancel: () => void } | null = null;
   private members: Member[] = [];
   private pages: StoredPage[] = [];
   private chat = new FakeChat({
@@ -112,6 +114,15 @@ export class FakeBackend {
   private isAppearingOffline = false;
 
   private storageProtection: ProtectionCheck = { state: "unknown", checked_ms: null };
+
+  /** Makes joins wait for `approveJoin`, as a real admin's answer does. */
+  holdJoins(): void {
+    this.isHoldingJoins = true;
+  }
+
+  approveJoin(): void {
+    this.pendingJoin?.approve();
+  }
 
   /** Sets what checking the bucket finds, as a provider's settings would. */
   setStorageProtection(state: StorageProtection): void {
@@ -218,9 +229,10 @@ export class FakeBackend {
 
   // ---- The command surface ----------------------------------------------
 
-  /** Answers a command with a copy, as crossing the real IPC boundary would. */
+  /** Answers a command with a copy, as crossing the real IPC boundary would; a later answer is copied when it comes. */
   handle(command: string, args: InvokeArgs | undefined): unknown {
-    return structuredClone(this.answer(command, args));
+    const answer = this.answer(command, args);
+    return answer instanceof Promise ? answer.then((value) => structuredClone(value)) : structuredClone(answer);
   }
 
   private answer(command: string, args: InvokeArgs | undefined): unknown {
@@ -325,7 +337,10 @@ export class FakeBackend {
           argument(args, "bucket") as BucketConfig,
         );
       case "join_workspace":
-        return this.joinWorkspace(requireString(args, "name"));
+        return this.requestToJoin(requireString(args, "name"));
+      case "cancel_join":
+        this.pendingJoin?.cancel();
+        return null;
       case "test_bucket":
         return this.testBucket(argument(args, "bucket") as BucketConfig);
       case "safety_code":
@@ -403,6 +418,16 @@ export class FakeBackend {
     this.session = { workspace_name: workspaceName, me, is_admin: true };
     this.chat.createChannel("general");
     return this.session;
+  }
+
+  private requestToJoin(name: string): Session | Promise<Session> {
+    if (!this.isHoldingJoins) return this.joinWorkspace(name);
+    return new Promise((resolve, reject) => {
+      this.pendingJoin = {
+        approve: () => resolve(this.joinWorkspace(name)),
+        cancel: () => reject("you cancelled the join request"),
+      };
+    });
   }
 
   private joinWorkspace(name: string): Session {

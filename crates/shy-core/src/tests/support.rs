@@ -7,7 +7,7 @@ use object_store::memory::InMemory;
 use tokio::task::JoinHandle;
 
 use crate::{
-    BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace, crypto,
+    BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace, crypto,
     membership::invite::{Invite, JoinMailbox},
     ops::{Envelope, Op, OpBody, now_ms},
     private::{
@@ -81,6 +81,18 @@ pub fn start_join(
     name: &str,
     is_bot: bool,
 ) -> JoinHandle<Result<Workspace>> {
+    start_cancellable_join(invite, dir, bucket, name, is_bot, JoinCancel::new())
+}
+
+/// Like `start_join`, stopped while it waits by `cancel`.
+pub fn start_cancellable_join(
+    invite: Invite,
+    dir: &Path,
+    bucket: &Bucket,
+    name: &str,
+    is_bot: bool,
+    cancel: JoinCancel,
+) -> JoinHandle<Result<Workspace>> {
     let dir = dir.to_path_buf();
     let bucket = bucket.clone();
     let name = name.to_owned();
@@ -97,6 +109,7 @@ pub fn start_join(
             &mailbox,
             connector(&bucket),
             Networking::Offline,
+            &cancel,
         )
         .await
     })

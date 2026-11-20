@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use super::support::*;
-use crate::views::InviteState;
+use crate::{JoinCancel, views::InviteState};
 
 fn invite_state(admin: &crate::Workspace, token: &str) -> InviteState {
     admin
@@ -177,4 +177,42 @@ async fn the_admin_shows_a_newcomer_by_their_requested_name_right_away() {
         .unwrap();
     assert_eq!(newcomer.name, "Claude");
     assert!(newcomer.is_bot);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_join_can_be_cancelled_while_it_waits_and_tried_again() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let invite = admin
+        .create_test_invite("for Bob", Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let bob_dir = root.path().join("bob");
+    let cancel = JoinCancel::new();
+    let first = start_cancellable_join(invite.clone(), &bob_dir, &bucket, "Bob", false, cancel.clone());
+    wait_for_request(&admin, &token).await;
+
+    cancel.cancel();
+
+    let stopped = tokio::time::timeout(Duration::from_secs(1), first)
+        .await
+        .expect("stops right away, not at the next poll or the invite's expiry")
+        .unwrap();
+    let Err(error) = stopped else {
+        panic!("a cancelled join must not finish")
+    };
+    assert!(error.to_string().contains("cancelled"), "{error:#}");
+    // The admin still has the first request, which this device can still answer.
+    let again = start_join(invite, &bob_dir, &bucket, "Bob", false);
+    admin.approve_invite(&token).await.unwrap();
+    let bob = again.await.unwrap().unwrap();
+    sync_all(&[&admin, &bob]).await;
+    assert!(
+        admin
+            .members()
+            .unwrap()
+            .iter()
+            .any(|member| member.name == "Bob" && member.active)
+    );
 }

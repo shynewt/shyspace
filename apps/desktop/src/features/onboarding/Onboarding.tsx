@@ -267,21 +267,35 @@ function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
   const [invite, setInvite] = useState("");
   const [name, setName] = useState("");
   const [safetyCode, setSafetyCode] = useState<string | null>(null);
+  const [isAsking, setAsking] = useState(false);
+  const isCancelling = useRef(false);
   const firstInput = useRef<HTMLTextAreaElement>(null);
   useFocusOnMount(firstInput);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (isAsking) return;
+    isCancelling.current = false;
+    setAsking(true);
     try {
       setSafetyCode(await api.safetyCode());
       onReady(await api.joinWorkspace(invite, name));
     } catch (error) {
-      reportError(error);
+      // A join you cancelled ends in an error too; it needs no message.
+      if (!isCancelling.current) reportError(error);
       setSafetyCode(null);
+      setAsking(false);
     }
   };
+  const cancel = () => {
+    isCancelling.current = true;
+    api.cancelJoin().catch((error: unknown) => {
+      isCancelling.current = false;
+      reportError(error);
+    });
+  };
 
-  if (safetyCode) return <WaitingForApproval safetyCode={safetyCode} />;
+  if (safetyCode) return <WaitingForApproval safetyCode={safetyCode} onCancel={cancel} />;
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
@@ -310,7 +324,7 @@ function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
         )}
       </Field>
       <SubmitButton
-        isBusy={false}
+        isBusy={isAsking}
         isDisabled={!invite.trim().startsWith("shy2_") || !name.trim()}
         icon={<Ticket size={15} />}
       >
@@ -320,7 +334,7 @@ function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
   );
 }
 
-function WaitingForApproval({ safetyCode }: { safetyCode: string }) {
+function WaitingForApproval({ safetyCode, onCancel }: { safetyCode: string; onCancel: () => void }) {
   return (
     <div className="flex flex-col items-center py-4 text-center">
       <div className="relative grid h-24 w-24 place-items-center">
@@ -348,6 +362,9 @@ function WaitingForApproval({ safetyCode }: { safetyCode: string }) {
         <div className="selectable mt-1 font-mono text-[16px] tracking-wider">{safetyCode}</div>
       </div>
       <p className="mt-3 text-[12px] text-faint">Keep this window open.</p>
+      <Button variant="ghost" onClick={onCancel} className="mt-2">
+        Cancel request
+      </Button>
     </div>
   );
 }

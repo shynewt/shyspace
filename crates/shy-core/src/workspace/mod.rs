@@ -10,7 +10,7 @@ mod reads;
 mod sections;
 mod storage;
 
-pub use lifecycle::DataDir;
+pub use lifecycle::{DataDir, JoinCancel};
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
 pub use presence::Heartbeat;
 pub(crate) use presence::NextBeat;

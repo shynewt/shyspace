@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use iroh::SecretKey;
-use tokio::sync::{Notify, broadcast, mpsc};
+use tokio::sync::{Notify, broadcast, mpsc, watch};
 
 use super::{Inner, Networking, Profile, State, Workspace};
 use crate::{
@@ -37,6 +37,28 @@ pub(crate) const MLS_FILE: &str = "mls.db";
 const SIGNER_META: &str = "mls_signer_public";
 const LOCK_FILE: &str = "shyspace.lock";
 const ANSWER_POLL: Duration = Duration::from_secs(2);
+
+/// Stops a join that is still waiting for the admin's answer. Once the
+/// answer has arrived the join finishes, so nothing is ever left half joined.
+/// The request stays in the admin's list until they decline it or it expires.
+#[derive(Clone)]
+pub struct JoinCancel(Arc<watch::Sender<bool>>);
+
+impl JoinCancel {
+    pub fn new() -> Self {
+        Self(Arc::new(watch::Sender::new(false)))
+    }
+
+    pub fn cancel(&self) {
+        self.0.send_replace(true);
+    }
+}
+
+impl Default for JoinCancel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 const GETTING_STARTED: &str = "# Welcome to shyspace\n\n\
 Everything here is end-to-end encrypted. Your bucket only ever stores ciphertext.\n\n\
@@ -166,9 +188,29 @@ impl Workspace {
         profile: Profile<'_>,
         networking: Networking,
     ) -> Result<Self> {
+        Self::join_cancellable(data, invite_code, profile, networking, &JoinCancel::new()).await
+    }
+
+    /// Like [`Workspace::join`], but `cancel` stops it while it waits.
+    pub async fn join_cancellable(
+        data: &DataDir,
+        invite_code: &str,
+        profile: Profile<'_>,
+        networking: Networking,
+        cancel: &JoinCancel,
+    ) -> Result<Self> {
         let invite = Invite::decode(invite_code)?;
         let mailbox = PresignedMailbox::for_invite(&invite);
-        Self::join_with(data, invite, profile, &mailbox, s3_connector(), networking).await
+        Self::join_with(
+            data,
+            invite,
+            profile,
+            &mailbox,
+            s3_connector(),
+            networking,
+            cancel,
+        )
+        .await
     }
 
     pub(crate) async fn create_with(
@@ -217,6 +259,7 @@ impl Workspace {
         mailbox: &impl JoinMailbox,
         connect: Connector,
         networking: Networking,
+        cancel: &JoinCancel,
     ) -> Result<Self> {
         ensure_not_expired(&invite, now_ms()?)?;
         prepare_empty_dir(&data.path)?;
@@ -233,7 +276,7 @@ impl Workspace {
             is_bot: profile.is_bot,
         };
         mailbox.post_request(postcard::to_stdvec(&request)?).await?;
-        let (welcome, sealed_grant) = wait_for_answer(&invite, mailbox).await?;
+        let (welcome, sealed_grant) = wait_for_answer(&invite, mailbox, cancel).await?;
         mls.join(
             &welcome,
             invite.workspace_id.as_bytes(),
@@ -356,11 +399,21 @@ impl Workspace {
 }
 
 /// Polls for the admin's answer until the invite expires.
-async fn wait_for_answer(invite: &Invite, mailbox: &impl JoinMailbox) -> Result<(Vec<u8>, Vec<u8>)> {
+async fn wait_for_answer(
+    invite: &Invite,
+    mailbox: &impl JoinMailbox,
+    cancel: &JoinCancel,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    let mut cancelled = cancel.0.subscribe();
     loop {
+        // Fetching changes nothing on disk, so a cancel needn't wait for a slow one.
+        let fetched = tokio::select! {
+            fetched = mailbox.fetch_answer() => fetched?,
+            _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => bail!("you cancelled the join request"),
+        };
         // Undecodable bytes are junk from someone with bucket access; the
         // admin re-sends the real answer, so keep polling.
-        if let Some(bytes) = mailbox.fetch_answer().await?
+        if let Some(bytes) = fetched
             && let Ok(answer) = postcard::from_bytes::<Answer>(&bytes)
         {
             match answer {
@@ -375,7 +428,10 @@ async fn wait_for_answer(invite: &Invite, mailbox: &impl JoinMailbox) -> Result<
             now_ms()? < invite.expires_ms,
             "the invite expired before the admin answered"
         );
-        tokio::time::sleep(ANSWER_POLL).await;
+        tokio::select! {
+            () = tokio::time::sleep(ANSWER_POLL) => {}
+            _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => bail!("you cancelled the join request"),
+        }
     }
 }
 

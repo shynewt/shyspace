@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use shy_core::{
-    BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace,
+    BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace,
     sync::SyncStatus,
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
@@ -28,6 +28,8 @@ const EXIT_UPLOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(3)
 struct AppState {
     data: DataDir,
     workspace: Mutex<Option<Workspace>>,
+    /// Stops the join in progress, if one is waiting for the admin.
+    joining: std::sync::Mutex<Option<JoinCancel>>,
 }
 
 #[derive(Serialize)]
@@ -140,10 +142,37 @@ async fn join_workspace(
         name: name.trim(),
         is_bot: false,
     };
-    let workspace = Workspace::join(&state.data, &invite, profile, Networking::Online)
-        .await
-        .map_err(failed)?;
-    Ok(install(&app, &state, workspace).await)
+    let cancel = JoinCancel::new();
+    {
+        let mut joining = state
+            .joining
+            .lock()
+            .map_err(|_| "join state lock poisoned".to_owned())?;
+        if joining.is_some() {
+            return Err("a join request is already waiting for the admin".to_owned());
+        }
+        *joining = Some(cancel.clone());
+    }
+    let joined =
+        Workspace::join_cancellable(&state.data, &invite, profile, Networking::Online, &cancel).await;
+    *state
+        .joining
+        .lock()
+        .map_err(|_| "join state lock poisoned".to_owned())? = None;
+    Ok(install(&app, &state, joined.map_err(failed)?).await)
+}
+
+/// Stops waiting for the admin to approve a join request.
+#[tauri::command]
+fn cancel_join(state: State<'_, AppState>) -> CommandResult<()> {
+    let joining = state
+        .joining
+        .lock()
+        .map_err(|_| "join state lock poisoned".to_owned())?;
+    if let Some(cancel) = joining.as_ref() {
+        cancel.cancel();
+    }
+    Ok(())
 }
 
 /// Shown while waiting to join, for the admin to compare.
@@ -708,6 +737,7 @@ pub fn run() {
             app.manage(AppState {
                 data: DataDir::new(dir, KeyStorage::Keychain),
                 workspace: Mutex::new(None),
+                joining: std::sync::Mutex::new(None),
             });
             let has_tray = tray::try_install(app.handle());
             app.manage(tray::HasTray(has_tray));
@@ -742,6 +772,7 @@ pub fn run() {
             create_private_channel,
             open_dm,
             open_notes,
+            cancel_join,
             private_members,
             add_to_private_channel,
             remove_from_private_channel,
