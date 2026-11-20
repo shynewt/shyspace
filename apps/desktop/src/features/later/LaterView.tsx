@@ -4,13 +4,15 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type LaterItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
 import { displayName } from "../../lib/people";
-import { describeReminder, REMINDER_CHOICES } from "../../lib/reminders";
+import { describeReminder } from "../../lib/reminders";
 import { reportError, showUndoToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
 import { savedItemView, useWorkspace } from "../../lib/workspace";
 import { Avatar, cx, EmptyState, IconButton, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
+import { ReminderPicker } from "./ReminderPicker";
+import { remindMeItem } from "./remindMeItem";
 
 /** Messages and pages you saved for yourself, with their reminders. */
 export function LaterView() {
@@ -101,21 +103,19 @@ function LaterRow({ item }: { item: LaterItem }) {
       .markLaterDone(item.id, isDone)
       .then(() => isDone && showUndoToast("Marked as done.", () => api.markLaterDone(item.id, false)))
       .catch(reportError);
+  const [isPicking, setPicking] = useState(false);
+  const remind = (at: number | null) => api.saveForLater(item.id, at).catch(reportError);
   const remove = () =>
     api
       .removeFromLater(item.id)
       .then(() => showUndoToast("Removed from Later.", () => api.saveForLater(item.id, item.remind_ms)))
       .catch(reportError);
   const menu: MenuItem[] = [
-    {
-      label: "Remind me",
-      icon: <AlarmClock size={14} />,
-      choices: REMINDER_CHOICES.map((choice) => ({
-        label: choice.label,
-        isChosen: false,
-        onSelect: () => api.saveForLater(item.id, choice.at(new Date()).getTime()).catch(reportError),
-      })),
-    },
+    remindMeItem({
+      remindMs: item.is_done ? null : item.remind_ms,
+      onRemind: remind,
+      onCustom: () => setPicking(true),
+    }),
     {
       label: item.is_done ? "Mark as not done" : "Mark as done",
       icon: item.is_done ? <Undo2 size={14} /> : <Check size={14} />,
@@ -191,6 +191,7 @@ function LaterRow({ item }: { item: LaterItem }) {
           items={menu}
         />
       </span>
+      <ReminderPicker open={isPicking} onOpenChange={setPicking} initialMs={item.remind_ms} onPick={remind} />
     </motion.li>
   );
 }

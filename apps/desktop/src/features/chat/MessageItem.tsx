@@ -1,5 +1,4 @@
 import {
-  AlarmClock,
   Bookmark,
   BookmarkMinus,
   Copy,
@@ -18,7 +17,6 @@ import { api, type Message, messageLink } from "../../lib/api";
 import { ChatMarkdown, messageIdsIn, pageIdsIn, plainPreview } from "../../lib/markdown";
 import { useMember } from "../../lib/members";
 import { displayName, formatFullDate, formatTime, formatWhen } from "../../lib/people";
-import { REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
@@ -35,6 +33,8 @@ import {
   springs,
   Tooltip,
 } from "../../ui";
+import { ReminderPicker } from "../later/ReminderPicker";
+import { remindMeItem } from "../later/remindMeItem";
 import { ProfileCard, ProfileCardAvatar, ProfileCardTrigger } from "../members/ProfileCard";
 import { StatusEmoji } from "../members/StatusEmoji";
 import { MessageCard } from "./MessageCard";
@@ -284,6 +284,9 @@ function MessageMenu({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const [isPicking, setPicking] = useState(false);
+  const remindMs = message.saved && !message.saved.is_done ? message.saved.remind_ms : null;
+  const remind = (at: number | null) => api.saveForLater(message.id, at).catch(reportError);
   const copy = (text: string, done: string) =>
     navigator.clipboard.writeText(text).then(() => showToast(done), reportError);
   const items: MenuItem[] = [
@@ -310,27 +313,26 @@ function MessageMenu({
           icon: <Bookmark size={14} />,
           onSelect: () => api.saveForLater(message.id, null).catch(reportError),
         },
-    {
-      label: "Remind me",
-      icon: <AlarmClock size={14} />,
-      choices: REMINDER_CHOICES.map((choice) => ({
-        label: choice.label,
-        isChosen: false,
-        onSelect: () => api.saveForLater(message.id, choice.at(new Date()).getTime()).catch(reportError),
-      })),
-    },
+    remindMeItem({
+      remindMs: remindMs,
+      onRemind: remind,
+      onCustom: () => setPicking(true),
+    }),
   );
   if (message.can_edit) items.push({ label: "Edit", icon: <Pencil size={14} />, onSelect: onEdit });
   if (message.can_delete) {
     items.push({ label: "Delete", icon: <Trash2 size={14} />, onSelect: onDelete, isDestructive: true });
   }
   return (
-    <Menu
-      trigger={<IconButton label="More actions" icon={<Ellipsis size={15} />} />}
-      items={items}
-      open={open}
-      onOpenChange={onOpenChange}
-    />
+    <>
+      <Menu
+        trigger={<IconButton label="More actions" icon={<Ellipsis size={15} />} />}
+        items={items}
+        open={open}
+        onOpenChange={onOpenChange}
+      />
+      <ReminderPicker open={isPicking} onOpenChange={setPicking} initialMs={remindMs} onPick={remind} />
+    </>
   );
 }
 
