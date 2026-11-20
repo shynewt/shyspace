@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo } from "react";
 import { api, type Channel, type Draft, type InboxItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
-import { displayName, formatTime } from "../../lib/people";
+import { displayName, formatWhen } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
@@ -105,7 +105,7 @@ function AttentionRow({ item }: { item: InboxItem }) {
           <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
             {item.reason === "mention" ? <AtSign size={12} /> : <MessageSquareReply size={12} />}
             <b className="font-semibold text-ink">{name}</b> {where}
-            <span className="ml-auto shrink-0 text-faint">{formatTime(message.created_ms)}</span>
+            <span className="ml-auto shrink-0 text-faint">{formatWhen(message.created_ms, new Date())}</span>
           </span>
           <span className="mt-0.5 block truncate text-[13.5px]">
             {plainPreview(message.text, (id) => titles.get(id))}

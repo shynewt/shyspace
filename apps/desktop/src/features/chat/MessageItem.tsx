@@ -15,12 +15,12 @@ import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink } from "../../lib/api";
 import { ChatMarkdown, messageIdsIn, pageIdsIn } from "../../lib/markdown";
-import { displayName, formatTime } from "../../lib/people";
+import { displayName, formatFullDate, formatTime, formatWhen } from "../../lib/people";
 import { REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs } from "../../ui";
+import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs, Tooltip } from "../../ui";
 import { MessageCard } from "./MessageCard";
 import { PageCard } from "./PageCard";
 import { SavedMarker } from "./SavedMarker";
@@ -75,9 +75,10 @@ export const MessageItem = memo(function MessageItem({
       <div className="w-9 shrink-0">
         {isContinuation ? (
           <span className="relative flex justify-end pt-[3px]">
-            <span className="text-[10.5px] whitespace-nowrap text-faint opacity-0 group-hover:opacity-100">
-              {formatTime(message.created_ms)}
-            </span>
+            <MessageTime
+              ms={message.created_ms}
+              className="text-[10.5px] whitespace-nowrap text-faint opacity-0 group-hover:opacity-100"
+            />
             {message.saved && !message.saved.is_done && (
               <span className="absolute top-0 right-0 group-hover:opacity-0 focus-within:opacity-100">
                 <SavedMarker saved={message.saved} />
@@ -100,7 +101,7 @@ export const MessageItem = memo(function MessageItem({
           <div className="flex items-baseline gap-2">
             <span className="text-[13.5px] font-semibold">{name}</span>
             {message.author_is_bot && <Badge tone="accent">bot</Badge>}
-            <span className="text-[11.5px] text-faint">{formatTime(message.created_ms)}</span>
+            <MessageTime ms={message.created_ms} className="text-[11.5px] text-faint" />
             <span className="self-center">
               <SavedMarker saved={message.saved} />
             </span>
@@ -278,6 +279,16 @@ function MessageMenu({
   );
 }
 
+function MessageTime({ ms, className }: { ms: number; className: string }) {
+  return (
+    <Tooltip label={formatFullDate(ms)}>
+      <time dateTime={new Date(ms).toISOString()} className={className}>
+        {formatTime(ms)}
+      </time>
+    </Tooltip>
+  );
+}
+
 function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
   const count = message.reply_count;
   return (
@@ -289,7 +300,9 @@ function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => vo
       <span className="font-medium text-accent-text">
         {count} {count === 1 ? "reply" : "replies"}
       </span>
-      {message.last_reply_ms && <span className="text-faint">Last reply {formatTime(message.last_reply_ms)}</span>}
+      {message.last_reply_ms && (
+        <span className="text-faint">Last reply {formatWhen(message.last_reply_ms, new Date())}</span>
+      )}
       {message.unread_replies > 0 && (
         <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white">
           {message.unread_replies} new
