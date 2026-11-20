@@ -60,3 +60,58 @@ test("the emoji picker works under the app's connect rules", async ({ page }) =>
   await page.getByLabel("Search emoji").fill("rocket");
   await expect(page.getByRole("gridcell", { name: "rocket" })).toBeVisible();
 });
+
+async function openEmojiPicker(page: import("@playwright/test").Page) {
+  await page.getByRole("button", { name: /^Ada\b/ }).click();
+  await page.getByRole("menuitem", { name: /^(Set|Edit) status$/ }).click();
+  await page
+    .getByRole("dialog", { name: "Set a status" })
+    .getByRole("button", { name: /^Choose an emoji/ })
+    .click();
+}
+
+test("search finds emoji by name and by keyword", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await openEmojiPicker(page);
+  const search = page.getByLabel("Search emoji");
+
+  await search.fill("thumbs");
+  await expect(page.getByRole("gridcell", { name: "Thumbs up" })).toBeVisible();
+  await search.fill("party");
+  await expect(page.getByRole("gridcell", { name: "Party popper" })).toBeVisible();
+  await expect(page.getByRole("gridcell", { name: "Partying face" })).toBeVisible();
+  await search.fill("tada");
+  await expect(page.getByRole("gridcell", { name: "Party popper" })).toBeVisible();
+});
+
+test("recently used emoji come first, and stay after a restart", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await openEmojiPicker(page);
+  await page.getByLabel("Search emoji").fill("palm tree");
+  await page.getByRole("gridcell", { name: "Palm tree" }).click();
+  await page.keyboard.press("Escape");
+
+  await page.reload();
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await openEmojiPicker(page);
+  const recent = page.getByRole("list", { name: "Recently used" });
+  await expect(recent.getByRole("button", { name: "Palm tree" })).toBeVisible();
+  await page.getByLabel("Search emoji").fill("rocket");
+  await expect(recent).toBeHidden();
+});
+
+test("the picker and its emoji load only when first opened", async ({ page }) => {
+  const emojiRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/frimousse|EmojiPickerPanel|emojibase-data/.test(request.url())) emojiRequests.push(request.url());
+  });
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  expect(emojiRequests).toEqual([]);
+
+  await openEmojiPicker(page);
+  await expect(page.getByRole("gridcell").first()).toBeVisible();
+  expect(emojiRequests.length).toBeGreaterThan(0);
+});
