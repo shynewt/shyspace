@@ -48,12 +48,15 @@ export function ProfileCard({
   children: ReactNode;
 }) {
   const member = useMember(memberId);
+  const { openSettings } = useWorkspace();
   const [isOpen, setOpen] = useState(false);
   const openedBy = useRef<OpenedBy>("click");
   const isFocusHandedOn = useRef(false);
   const timers = useRef<{ open?: ReturnType<typeof setTimeout>; close?: ReturnType<typeof setTimeout> }>({});
   const card = useRef<HTMLDivElement>(null);
   const extraTarget = useRef<HTMLElement>(null);
+  /** The name or avatar that opened the card, for focus to go back to. */
+  const opener = useRef<HTMLElement | null>(null);
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
 
@@ -65,7 +68,8 @@ export function ProfileCard({
     };
   }, []);
 
-  const control = useMemo((): CardControl => {
+  const control = useMemo((): CardControl | null => {
+    if (!member) return null;
     const clearTimers = () => {
       clearTimeout(timers.current.open);
       clearTimeout(timers.current.close);
@@ -75,14 +79,16 @@ export function ProfileCard({
       timers.current.close = setTimeout(() => setOpen(false), HOVER_CLOSE_MS);
     };
     return {
-      name: member ? displayName(member.name, member.id) : "",
+      name: displayName(member.name, member.id),
       extraTarget,
       hoverProps: {
         onPointerEnter: (event) => {
           if (event.pointerType !== "mouse") return;
           clearTimeout(timers.current.close);
           if (isOpenRef.current) return;
+          const target = event.currentTarget;
           timers.current.open = setTimeout(() => {
+            opener.current = target instanceof HTMLElement ? target : null;
             openedBy.current = "hover";
             setOpen(true);
           }, HOVER_OPEN_MS);
@@ -96,6 +102,7 @@ export function ProfileCard({
         // The card decides; Radix's own toggle would close a card the pointer just opened.
         event.preventDefault();
         clearTimers();
+        opener.current = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
         if (isOpenRef.current && openedBy.current === "click") return setOpen(false);
         const wasHoverOpen = isOpenRef.current;
         openedBy.current = "click";
@@ -105,51 +112,65 @@ export function ProfileCard({
     };
   }, [member]);
 
-  if (!member) return children;
   const close = () => {
     clearTimeout(timers.current.close);
     setOpen(false);
   };
-  const hoverOnly = openedBy.current === "hover";
+  /** Closes the card with focus moved on by the caller, not back to the name. */
+  const closeHandingFocusOn = () => {
+    isFocusHandedOn.current = true;
+    close();
+  };
+  // The same tree with or without the member, so rows don't remount when members load.
   return (
-    <RadixPopover.Root open={isOpen} onOpenChange={(open) => !open && close()}>
+    <RadixPopover.Root open={isOpen && control !== null} onOpenChange={(open) => !open && close()}>
       <CardContext.Provider value={control}>{children}</CardContext.Provider>
-      <RadixPopover.Portal>
-        <RadixPopover.Content
-          side="bottom"
-          align="start"
-          sideOffset={6}
-          collisionPadding={12}
-          aria-label={`${control.name}'s profile`}
-          asChild
-          onOpenAutoFocus={(event) => hoverOnly && event.preventDefault()}
-          onCloseAutoFocus={(event) => {
-            if (hoverOnly || isFocusHandedOn.current) event.preventDefault();
-            isFocusHandedOn.current = false;
-          }}
-          onInteractOutside={(event) => {
-            if (event.target instanceof Node && extraTarget.current?.contains(event.target)) event.preventDefault();
-          }}
-          onPointerEnter={() => clearTimeout(timers.current.close)}
-          onPointerLeave={() => openedBy.current === "hover" && control.hoverProps.onPointerLeave()}
-        >
-          <motion.div
-            ref={card}
-            {...pop}
-            transition={springs.snappy}
-            className="z-50 w-[280px] rounded-xl border border-line bg-surface p-4 shadow-float outline-none"
+      {member && control && (
+        <RadixPopover.Portal>
+          <RadixPopover.Content
+            side="bottom"
+            align="start"
+            sideOffset={6}
+            collisionPadding={12}
+            aria-label={`${control.name}'s profile`}
+            asChild
+            onOpenAutoFocus={(event) => openedBy.current === "hover" && event.preventDefault()}
+            onCloseAutoFocus={(event) => {
+              // Radix skips its own return after a click on the name (that counts as outside), so it's done here.
+              event.preventDefault();
+              if (openedBy.current === "click" && !isFocusHandedOn.current) opener.current?.focus();
+              isFocusHandedOn.current = false;
+            }}
+            onInteractOutside={(event) => {
+              if (event.target instanceof Node && extraTarget.current?.contains(event.target)) event.preventDefault();
+            }}
+            onPointerEnter={() => clearTimeout(timers.current.close)}
+            onPointerLeave={() => openedBy.current === "hover" && control.hoverProps.onPointerLeave()}
           >
-            <CardBody
-              member={member}
-              onMention={onMention}
-              onClose={close}
-              onFocusHandedOn={() => {
-                isFocusHandedOn.current = true;
-              }}
-            />
-          </motion.div>
-        </RadixPopover.Content>
-      </RadixPopover.Portal>
+            <motion.div
+              ref={card}
+              {...pop}
+              transition={springs.snappy}
+              className="z-50 w-[280px] rounded-xl border border-line bg-surface p-4 shadow-float outline-none"
+            >
+              <CardBody
+                member={member}
+                onMention={
+                  onMention &&
+                  (() => {
+                    closeHandingFocusOn();
+                    onMention(member.name, member.id);
+                  })
+                }
+                onViewInMembers={() => {
+                  closeHandingFocusOn();
+                  openSettings({ section: "members", membersTab: "members" });
+                }}
+              />
+            </motion.div>
+          </RadixPopover.Content>
+        </RadixPopover.Portal>
+      )}
     </RadixPopover.Root>
   );
 }
@@ -208,31 +229,19 @@ export function ProfileCardAvatar({ children }: { children: ReactNode }) {
 function CardBody({
   member,
   onMention,
-  onClose,
-  onFocusHandedOn,
+  onViewInMembers,
 }: {
   member: Member;
-  onMention: ((name: string, memberId: string) => void) | undefined;
-  onClose: () => void;
-  onFocusHandedOn: () => void;
+  /** Absent where there's no message box to mention them in. */
+  onMention: (() => void) | undefined;
+  onViewInMembers: () => void;
 }) {
-  const { session, openSettings } = useWorkspace();
+  const { session } = useWorkspace();
   const name = displayName(member.name, member.id);
   const isMe = member.id === session.me;
   const status = shownStatus(member);
   const alerts = status && alertsLabel(status);
-  const canMention = onMention && member.active && !isMe && member.name !== "";
-
-  const mention = () => {
-    onFocusHandedOn();
-    onClose();
-    onMention?.(member.name, member.id);
-  };
-  const viewInMembers = () => {
-    onFocusHandedOn();
-    onClose();
-    openSettings({ section: "members", membersTab: "members" });
-  };
+  const canMention = member.active && !isMe && member.name !== "";
 
   return (
     <div className="flex flex-col gap-3">
@@ -272,12 +281,12 @@ function CardBody({
         </div>
       )}
       <div className="flex gap-2">
-        {canMention && (
-          <Button size="sm" icon={<AtSign size={13} />} onClick={mention}>
+        {canMention && onMention && (
+          <Button size="sm" icon={<AtSign size={13} />} onClick={onMention}>
             Mention
           </Button>
         )}
-        <Button size="sm" variant="ghost" icon={<Users size={13} />} onClick={viewInMembers}>
+        <Button size="sm" variant="ghost" icon={<Users size={13} />} onClick={onViewInMembers}>
           View in members
         </Button>
       </div>

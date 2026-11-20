@@ -116,6 +116,32 @@ test("a mention in a message opens the card on click, never on hover", async ({ 
   await expect(card(page, "Grace")).toBeVisible();
 });
 
+test("a mention of someone unknown opens no card", async ({ page }) => {
+  await page.evaluate(() =>
+    window.fake.receiveMessage(
+      window.fake.memberNamed("Grace"),
+      "general",
+      `Ask [@Bob](shy://member/${"b".repeat(64)})`,
+    ),
+  );
+  await channelLog(page).getByText("@Bob").click();
+  await page.waitForTimeout(300);
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("a card opened by pausing, then clicked, gives focus back to the name on Esc", async ({ page }) => {
+  const name = nameButton(page, "Grace");
+  await name.hover();
+  await expect(card(page, "Grace")).toBeVisible();
+  await name.click();
+  await expect(card(page, "Grace").getByRole("button", { name: "Mention" })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(card(page, "Grace")).toHaveCount(0);
+  await expect(name).toBeFocused();
+});
+
 test("view in members opens the member list in settings", async ({ page }) => {
   await nameButton(page, "Grace").click();
   await card(page, "Grace").getByRole("button", { name: "View in members" }).click();
@@ -135,4 +161,18 @@ test("your own card shows you as offline while you appear offline", async ({ pag
   const ada = card(page, "Ada");
   await expect(ada).toContainText("Not reachable right now");
   await expect(ada.getByRole("button", { name: "Mention" })).toHaveCount(0);
+});
+
+test("the caret is right after a mention from a card at once", async ({ page }) => {
+  await page.getByLabel("Message #general").fill("hi");
+  await nameButton(page, "Grace").click();
+  const mention = card(page, "Grace").getByRole("button", { name: "Mention" });
+  await expect(mention).toBeVisible();
+
+  const result = await mention.evaluate((element: HTMLElement) => {
+    element.click();
+    const box = document.activeElement;
+    return box instanceof HTMLTextAreaElement ? [box.value, box.selectionStart] : null;
+  });
+  expect(result).toEqual(["hi @Grace ", 10]);
 });
