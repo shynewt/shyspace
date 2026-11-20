@@ -30,9 +30,10 @@ impl Workspace {
                 let state = self.state();
                 let mut is_rebuilt = false;
                 for frozen in &verified.frozen {
-                    is_rebuilt |= state
-                        .store
-                        .freeze_author(&frozen.member, frozen.last_seq, &admin)?;
+                    is_rebuilt |=
+                        state
+                            .store
+                            .freeze_author(&frozen.member, frozen.last_seq, self.apply_context())?;
                 }
                 is_rebuilt
             };
@@ -70,18 +71,9 @@ impl Workspace {
     }
 
     fn emit_all_views_changed(&self) -> Result<()> {
-        let (channels, pages) = {
-            let state = self.state();
-            (state.store.channels()?, state.store.pages()?)
-        };
-        self.emit(Change::Channels);
-        self.emit(Change::Pages);
-        for channel in channels {
-            self.emit(Change::Messages { channel: channel.id });
-        }
-        // Open editors can't drop what they already merged; they start over.
-        for page in pages {
-            self.emit(Change::PageReset { page: page.id });
+        let changes = self.state().store.all_view_changes()?;
+        for change in changes {
+            self.emit(change);
         }
         Ok(())
     }

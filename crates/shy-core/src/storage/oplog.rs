@@ -1,12 +1,15 @@
 //! Ops we have applied, ops waiting to be applied, and how far we have read
 //! each author's log in the bucket.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
 use super::Store;
-use crate::ops::Envelope;
+use crate::{
+    crypto,
+    ops::{Envelope, VerifiedOp},
+};
 
 /// How far ahead of our own clock an op's lamport may be. Without a bound, one
 /// op with lamport u64::MAX would pin titles forever and overflow every clock.
@@ -74,6 +77,24 @@ impl Store {
         self.exists("SELECT 1 FROM ops WHERE author = ? LIMIT 1", [author.as_bytes()])
     }
 
+    /// An applied op, opened again from the log.
+    pub(crate) fn stored_op(&self, author: &PublicKey, seq: u64) -> Result<VerifiedOp> {
+        let bytes: Vec<u8> = self.db.query_row(
+            "SELECT envelope FROM ops WHERE author = ? AND seq = ?",
+            params![author.as_bytes(), seq],
+            |row| row.get(0),
+        )?;
+        self.open_stored(&bytes)
+    }
+
+    pub(crate) fn open_stored(&self, bytes: &[u8]) -> Result<VerifiedOp> {
+        let envelope: Envelope = postcard::from_bytes(bytes).context("reading a stored op")?;
+        let key = self
+            .epoch_key(envelope.epoch)?
+            .with_context(|| format!("no key for epoch {} of a stored op", envelope.epoch))?;
+        crypto::open(&envelope, &key).context("opening a stored op")
+    }
+
     /// Records an applied envelope and clears any parked copies of it.
     pub fn insert_applied(&self, envelope: &Envelope, is_pushed: bool) -> Result<()> {
         self.db.execute(
@@ -131,6 +152,14 @@ impl Store {
 
     pub fn pending(&self) -> Result<Vec<Envelope>> {
         self.envelopes("SELECT envelope FROM pending_ops ORDER BY epoch, seq", [])
+    }
+
+    #[cfg(test)]
+    pub(crate) fn envelopes_after(&self, author: &PublicKey, seq: u64) -> Result<Vec<Envelope>> {
+        self.envelopes(
+            "SELECT envelope FROM ops WHERE author = ? AND seq > ? ORDER BY seq",
+            params![author.as_bytes(), seq],
+        )
     }
 
     pub fn unpushed(&self, author: &PublicKey) -> Result<Vec<Envelope>> {

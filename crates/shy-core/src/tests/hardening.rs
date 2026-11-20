@@ -390,6 +390,59 @@ async fn malformed_sealing_keys_from_others_are_skipped() {
     assert!(texts_in(&admin, &general).contains(&"still heard".to_string()));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn ordinary_ops_cannot_reach_private_ids() {
+    use crate::private::ids::{new_private_channel_id, new_private_message_id};
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let private = new_private_channel_id(&bob.me());
+    let message = new_private_message_id(&private, &bob.me());
+    let mut forger = Forger::new(&bob);
+    for op in [
+        Op::ChannelCreate {
+            id: private.clone(),
+            name: "secret".into(),
+        },
+        Op::Message {
+            id: message.clone(),
+            channel: private.clone(),
+            text: "PLAIN-INTO-PRIVATE".into(),
+            reply_to: None,
+        },
+        Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: "PLAIN-REPLY-TO-PRIVATE".into(),
+            reply_to: Some(message.clone()),
+        },
+        Op::Reaction {
+            message: message.clone(),
+            emoji: "👍".into(),
+            active: true,
+        },
+    ] {
+        admin.receive(forger.seal(op)).unwrap();
+    }
+    assert!(admin.messages(&private, None, 50).unwrap().is_empty());
+    assert!(!texts_in(&admin, &general).contains(&"PLAIN-REPLY-TO-PRIVATE".to_string()));
+    assert!(
+        admin
+            .channels()
+            .unwrap()
+            .iter()
+            .all(|channel| channel.id != private)
+    );
+    assert_eq!(
+        admin.state().store.count_where("reactions", "message", &message),
+        0
+    );
+
+    // Not even the admin can delete in a channel they can't see.
+    bob.receive(Forger::new(&admin).seal(Op::Delete { id: private.clone() }))
+        .unwrap();
+    assert!(!bob.state().store.is_deleted(&private).unwrap());
+}
+
 fn texts_in(member: &Workspace, channel: &str) -> Vec<String> {
     member
         .messages(channel, None, 50)
@@ -957,31 +1010,6 @@ async fn rapid_presence_flips_are_ignored() {
     let back = bob.heartbeat(PresenceState::Away).unwrap();
     assert!(admin.receive_heartbeat(&back).unwrap());
     assert_eq!(member_presence(&admin, &bob.my_id()), PresenceState::Away);
-}
-
-/// Seals ops as Bob's next ones, in order, without them going through his log.
-struct Forger<'a> {
-    bob: &'a Workspace,
-    next_seq: u64,
-}
-
-impl<'a> Forger<'a> {
-    fn new(bob: &'a Workspace) -> Self {
-        let next_seq = bob.state().store.next_seq(&bob.me()).unwrap();
-        Forger { bob, next_seq }
-    }
-
-    fn seal(&mut self, op: Op) -> Envelope {
-        let (epoch, key) = current_key(self.bob);
-        let seq = self.next_seq;
-        self.next_seq += 1;
-        let body = OpBody {
-            lamport: 9_000 + seq,
-            timestamp_ms: now_ms().unwrap(),
-            op,
-        };
-        crypto::seal(&self.bob.inner.identity, &key, epoch, seq, &body).unwrap()
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

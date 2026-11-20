@@ -28,7 +28,7 @@ export type ChatContext = {
 /** Returned by `answer` for commands that aren't about chat. */
 export const NOT_CHAT = Symbol("not a chat command");
 
-type StoredChannel = Omit<Channel, "can_delete" | "unread" | "unread_mentions" | "last_read" | "notify">;
+type StoredChannel = Pick<Channel, "id" | "name">;
 type StoredMessage = Omit<
   Message,
   | "author_name"
@@ -353,6 +353,9 @@ export class FakeChat {
   private channelViews(): Channel[] {
     return this.channels.map((channel) => ({
       ...channel,
+      kind: "public" as const,
+      dm_members: [],
+      is_member: true,
       can_delete: this.mayDelete(channel.id),
       unread: this.unreadIn(channel.id).filter((message) => isInChannel(this.messages, message)).length,
       unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.context.me())).length,

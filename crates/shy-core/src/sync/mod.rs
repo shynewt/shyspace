@@ -148,7 +148,9 @@ impl Workspace {
             if let Err(error) = repaired {
                 errors.push(error);
             }
-            for result in [self.pull().await, self.push().await, self.join_peers().await] {
+            let pulled = self.pull().await;
+            let tended = self.tend_private_channels();
+            for result in [pulled, tended, self.push().await, self.join_peers().await] {
                 if let Err(error) = result {
                     errors.push(error);
                 }

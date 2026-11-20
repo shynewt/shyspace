@@ -7,6 +7,7 @@ use tracing::warn;
 use crate::{
     crypto::{self, NewerFormat},
     ops::{Envelope, RuleViolation, VerifiedOp},
+    storage::{Applied, ApplyContext},
     views::Change,
     workspace::{State, Workspace},
 };
@@ -52,13 +53,15 @@ impl Workspace {
         envelope: &Envelope,
         verified: &VerifiedOp,
     ) -> Result<Vec<Change>> {
-        let Some(change) = apply_and_record(state, envelope, verified, &self.inner.config.admin)? else {
-            return Ok(Vec::new());
-        };
-        Ok([Some(change), self.alert_for(state, verified)?]
-            .into_iter()
-            .flatten()
-            .collect())
+        let applied = apply_and_record(state, envelope, verified, self.apply_context())?;
+        let mut changes = applied.changes;
+        for readable in &applied.readable {
+            changes.extend(self.alert_for(state, readable)?);
+        }
+        if applied.needs_rebuild {
+            changes.extend(state.store.all_view_changes()?);
+        }
+        Ok(changes)
     }
 
     /// Retries parked ops, for example after a new epoch key arrived.
@@ -141,19 +144,22 @@ fn apply_and_record(
     state: &State,
     envelope: &Envelope,
     verified: &VerifiedOp,
-    admin: &iroh::PublicKey,
-) -> Result<Option<crate::views::Change>> {
+    context: ApplyContext<'_>,
+) -> Result<Applied> {
     let applied = state.store.atomically(|store| {
-        let change = store.apply_permitted(verified, admin)?;
+        let applied = store.apply_permitted(verified, context)?;
         store.insert_applied(envelope, true)?;
-        Ok(change)
+        if applied.needs_rebuild {
+            store.rebuild_views(context)?;
+        }
+        Ok(applied)
     });
     match applied {
-        Ok(change) => Ok(change),
+        Ok(applied) => Ok(applied),
         Err(error) if error.downcast_ref::<RuleViolation>().is_some() => {
             warn!("skipping an op that breaks a rule: {error:#}");
             state.store.insert_applied(envelope, true)?;
-            Ok(None)
+            Ok(Applied::default())
         }
         Err(error) => Err(error),
     }

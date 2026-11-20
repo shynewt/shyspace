@@ -53,7 +53,14 @@ mod tests {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Channel {
     pub id: EntityId,
+    pub kind: ChannelKind,
+    /// "" for a DM; show its members instead.
     pub name: String,
+    /// A DM's members other than you (member ids).
+    pub dm_members: Vec<String>,
+    /// False once you left or were removed from a private channel; what you
+    /// read before stays.
+    pub is_member: bool,
     /// Whether this member may delete it (its owner or the admin).
     pub can_delete: bool,
     /// Messages by others since this member's read position.
@@ -64,6 +71,24 @@ pub struct Channel {
     pub last_read: Option<MessageCursor>,
     /// Which new messages here alert this member.
     pub notify: NotifyLevel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    Public,
+    /// Only its members can read it.
+    Private,
+    Dm,
+}
+
+/// Who is in a private channel, and who owns it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrivateMembers {
+    /// Member ids, earliest added first.
+    pub members: Vec<String>,
+    pub owner: Option<String>,
+    pub is_owner: bool,
 }
 
 /// A personal, per-channel choice of which new messages alert you.

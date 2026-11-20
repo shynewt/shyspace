@@ -6,7 +6,8 @@ use rusqlite::{OptionalExtension, params};
 
 use super::Store;
 use crate::views::{
-    Channel, Member, Message, MessageCursor, NotifyLevel, Page, PresenceState, Reaction, SearchHit,
+    Channel, ChannelKind, Member, Message, MessageCursor, NotifyLevel, Page, PresenceState, Reaction,
+    SearchHit,
 };
 
 /// Message filters for `Store::search`, with names already resolved.
@@ -78,7 +79,10 @@ impl Store {
         let rows = statement.query_map([], |row| {
             Ok(Channel {
                 id: row.get(0)?,
+                kind: ChannelKind::Public,
                 name: row.get(1)?,
+                dm_members: Vec::new(),
+                is_member: true,
                 can_delete: false,
                 unread: 0,
                 unread_mentions: 0,

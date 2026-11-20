@@ -89,16 +89,16 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 | `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `presence` (heartbeats and status) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
-| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `rebuild` (undoing a removed member's late ops), `queries` |
+| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `rebuild` (undoing a removed member's late ops), `private` (private channel state), `sealing`, `queries` |
 | `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |
-| `private/` | private channels and DMs: `crypto` (sealed content, key wraps), `sealing` (each member's key for receiving channel keys) |
+| `private/` | private channels and DMs: `ids`, `ops` (what's inside sealed ops and grants), `crypto` (sealed content, key wraps, commitments), `sealing` (each member's key for receiving channel keys), `apply` (grants and waiting sealed ops), `rules` (which private ops count), `actions` (create, add, remove, leave, hand over, DMs), `reads` |
 | `crypto.rs` | sign-then-encrypt ops |
 | `ops.rs` | op types, owned ids, timestamps |
 | `pages.rs` | Yjs page helpers |
 | `views.rs` | read models sent to the UI and agents |
 | `keys.rs` | the device key and where it's kept (keychain or file) |
 | `config.rs`, `identity.rs` | workspace settings (including the current bucket settings) and the identity key |
-| `tests/` | multi-member scenarios (`collaboration`) and attacks (`hardening`) |
+| `tests/` | multi-member scenarios (`collaboration`, `private`) and attacks (`hardening`, `private_attacks`) |
 
 ## Database migrations
 

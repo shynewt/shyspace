@@ -31,6 +31,15 @@ const REPLAYABLE_TABLES: &[&str] = &[
     "sidebar_placement",
     "member_status",
     "sealing_keys",
+    "private_channels",
+    "private_owners",
+    "private_generations",
+    "private_keys",
+    "private_adds",
+    "private_closures",
+    "dm_members",
+    "sealed_pending",
+    "private_applied",
 ];
 
 /// Copies the database at `source` to `destination`, both under `key`.

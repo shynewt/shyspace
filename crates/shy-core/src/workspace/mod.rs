@@ -119,6 +119,14 @@ pub struct Workspace {
 
 impl Workspace {
     /// Whether this member may make `op`, by the rule every member enforces.
+    pub(crate) fn apply_context(&self) -> crate::storage::ApplyContext<'_> {
+        crate::storage::ApplyContext {
+            workspace_id: &self.inner.config.workspace_id,
+            admin: self.inner.config.admin,
+            me: self.me(),
+        }
+    }
+
     pub(crate) fn may(&self, op: &crate::ops::Op) -> bool {
         op.is_permitted(&self.me(), &self.inner.config.admin)
     }

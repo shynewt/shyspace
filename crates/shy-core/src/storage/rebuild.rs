@@ -4,16 +4,16 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use iroh::PublicKey;
 use rusqlite::params;
 use tracing::warn;
 
-use super::Store;
+use super::{ApplyContext, Store};
 use crate::{
-    crypto,
-    ops::{Envelope, Op, RuleViolation, VerifiedOp},
+    ops::{Op, RuleViolation, VerifiedOp},
     pages::PageMerge,
+    views::Change,
 };
 
 /// Tables that hold only what ops produce.
@@ -29,6 +29,8 @@ const SHARED_VIEW_TABLES: &[&str] = &[
     "deleted",
     "member_status",
     "sealing_keys",
+    "sealed_pending",
+    "private_applied",
 ];
 
 /// A page's updates gathered during a replay, written once at the end.
@@ -43,7 +45,12 @@ impl Store {
     /// already applied here (sent live just before the removal arrived) are
     /// undone, so this device ends up like those that never saw them.
     /// Returns whether the views were rebuilt.
-    pub fn freeze_author(&self, member: &PublicKey, last_seq: u64, admin: &PublicKey) -> Result<bool> {
+    pub fn freeze_author(
+        &self,
+        member: &PublicKey,
+        last_seq: u64,
+        context: ApplyContext<'_>,
+    ) -> Result<bool> {
         self.atomically(|store| {
             store.record_frozen_author(member, last_seq)?;
             let dropped = store.db.execute(
@@ -53,7 +60,8 @@ impl Store {
             if dropped == 0 {
                 return Ok(false);
             }
-            store.rebuild_views(admin)?;
+            store.delete_private_rows_after(member, last_seq)?;
+            store.rebuild_views(context)?;
             Ok(true)
         })
     }
@@ -61,7 +69,7 @@ impl Store {
     /// Replays every stored op, in the order they were first applied, into
     /// empty views. Ops merge the same way in any order, so this gives what a
     /// device that never saw the dropped ops has. Runs inside a transaction.
-    fn rebuild_views(&self, admin: &PublicKey) -> Result<()> {
+    pub(crate) fn rebuild_views(&self, context: ApplyContext<'_>) -> Result<()> {
         for table in SHARED_VIEW_TABLES {
             self.db.execute(&format!("DELETE FROM {table}"), [])?;
         }
@@ -77,7 +85,7 @@ impl Store {
                 Op::DocUpdate { page, update } => {
                     self.gather_page_update(&mut pages, page, update, verified.body.timestamp_ms)?;
                 }
-                _ => self.replay(&verified, admin)?,
+                _ => self.replay(&verified, context)?,
             }
         }
         for (page, replay) in pages {
@@ -93,28 +101,30 @@ impl Store {
         Ok(())
     }
 
-    fn open_stored(&self, bytes: &[u8]) -> Result<VerifiedOp> {
-        let envelope: Envelope = postcard::from_bytes(bytes).context("reading a stored op")?;
-        let key = self
-            .epoch_key(envelope.epoch)?
-            .with_context(|| format!("no key for epoch {} of a stored op", envelope.epoch))?;
-        crypto::open(&envelope, &key).context("opening a stored op")
+    /// Everything a rebuild may have changed, for anything showing it.
+    pub(crate) fn all_view_changes(&self) -> Result<Vec<Change>> {
+        let mut changes = vec![Change::Channels, Change::Pages, Change::Members];
+        for channel in self.channels()? {
+            changes.push(Change::Messages { channel: channel.id });
+        }
+        // Open editors can't drop what they already merged; they start over.
+        for page in self.pages()? {
+            changes.push(Change::PageReset { page: page.id });
+        }
+        Ok(changes)
     }
 
     /// Applies one op; one that breaks a rule leaves no trace, as when it
     /// first arrived.
-    fn replay(&self, verified: &VerifiedOp, admin: &PublicKey) -> Result<()> {
-        self.db.execute_batch("SAVEPOINT replay_op")?;
-        match self.apply_permitted(verified, admin) {
-            Ok(_) => self.db.execute_batch("RELEASE replay_op")?,
+    fn replay(&self, verified: &VerifiedOp, context: ApplyContext<'_>) -> Result<()> {
+        match self.with_savepoint(|store| store.apply_permitted(verified, context)) {
+            Ok(_) => Ok(()),
             Err(error) if error.downcast_ref::<RuleViolation>().is_some() => {
                 warn!("skipping a stored op that breaks a rule: {error:#}");
-                self.db
-                    .execute_batch("ROLLBACK TO replay_op; RELEASE replay_op")?;
+                Ok(())
             }
-            Err(error) => return Err(error),
+            Err(error) => Err(error),
         }
-        Ok(())
     }
 
     /// Like applying a page update, but merged in memory with the page's other

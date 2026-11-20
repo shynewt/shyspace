@@ -6,7 +6,10 @@ use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 
 use super::commit::FrozenAuthor;
-use crate::{crypto::EpochKey, storage::Store};
+use crate::{
+    crypto::EpochKey,
+    storage::{ApplyContext, Store},
+};
 
 /// One past epoch: its key and who could write in it.
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,12 +43,12 @@ impl KeyHistory {
         Ok(Self { epochs, frozen })
     }
 
-    pub fn store_into(self, store: &Store, admin: &PublicKey) -> Result<()> {
+    pub fn store_into(self, store: &Store, context: ApplyContext<'_>) -> Result<()> {
         for entry in self.epochs {
             store.put_epoch(entry.epoch, &entry.key, &entry.members)?;
         }
         for frozen in self.frozen {
-            store.freeze_author(&frozen.member, frozen.last_seq, admin)?;
+            store.freeze_author(&frozen.member, frozen.last_seq, context)?;
         }
         Ok(())
     }

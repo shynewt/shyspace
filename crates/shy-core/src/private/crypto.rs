@@ -20,10 +20,14 @@ use zeroize::Zeroizing;
 pub const CHANNEL_KEY_LEN: usize = 32;
 pub type ChannelKey = [u8; CHANNEL_KEY_LEN];
 pub type KeyHint = [u8; 8];
+/// A fingerprint of a channel key, which owners publish to the channel so
+/// nobody can hand out a different key under the same generation.
+pub type Commitment = [u8; 32];
 const SEALING_PUBLIC_KEY_LEN: usize = 32;
 
 const CONTENT_KEY_CONTEXT: &str = "shyspace private content v1";
 const HINT_KEY_CONTEXT: &str = "shyspace private hint v1";
+const COMMITMENT_CONTEXT: &str = "shyspace channel key commitment v1";
 const GRANT_INFO_DOMAIN: &str = "shyspace key grant v1";
 const HPKE: HpkeConfig = HpkeConfig(
     HpkeKemType::DhKem25519,
@@ -62,6 +66,10 @@ pub struct SealedPayload {
 
 pub fn new_channel_key() -> ChannelKey {
     rand::random()
+}
+
+pub fn commitment(key: &ChannelKey) -> Commitment {
+    blake3::derive_key(COMMITMENT_CONTEXT, key)
 }
 
 pub fn key_hint(key: &ChannelKey, slot: Slot<'_>) -> Result<KeyHint> {
@@ -153,7 +161,7 @@ impl Granting<'_> {
     }
 }
 
-pub fn wrap(granting: Granting<'_>, recipient_public: &[u8], plaintext: &[u8]) -> Result<Wrap> {
+pub fn wrap_key(granting: Granting<'_>, recipient_public: &[u8], plaintext: &[u8]) -> Result<Wrap> {
     ensure!(
         is_valid_sealing_public_key(recipient_public),
         "malformed sealing key"
@@ -175,7 +183,7 @@ pub fn wrap(granting: Granting<'_>, recipient_public: &[u8], plaintext: &[u8]) -
 
 /// Fails when the wrap is for someone else, or was made by another granter
 /// or in another workspace. Devices try every wrap, so failing is normal.
-pub fn unwrap(granting: Granting<'_>, own: &SealingKeyPair, wrap: &Wrap) -> Result<Zeroizing<Vec<u8>>> {
+pub fn unwrap_key(granting: Granting<'_>, own: &SealingKeyPair, wrap: &Wrap) -> Result<Zeroizing<Vec<u8>>> {
     let ciphertext = HpkeCiphertext {
         kem_output: wrap.kem_output.clone().into(),
         ciphertext: wrap.ciphertext.clone().into(),
@@ -250,24 +258,24 @@ mod tests {
         };
         let bob = new_sealing_key_pair().unwrap();
         let carol = new_sealing_key_pair().unwrap();
-        let wrapped = wrap(granting, &bob.public, b"channel key").unwrap();
+        let wrapped = wrap_key(granting, &bob.public, b"channel key").unwrap();
         assert_eq!(
-            unwrap(granting, &bob, &wrapped).unwrap().as_slice(),
+            unwrap_key(granting, &bob, &wrapped).unwrap().as_slice(),
             b"channel key"
         );
-        assert!(unwrap(granting, &carol, &wrapped).is_err());
+        assert!(unwrap_key(granting, &carol, &wrapped).is_err());
 
         let mallory = SecretKey::generate().public();
         let copied_by_mallory = Granting {
             granter: &mallory,
             ..granting
         };
-        assert!(unwrap(copied_by_mallory, &bob, &wrapped).is_err());
+        assert!(unwrap_key(copied_by_mallory, &bob, &wrapped).is_err());
         let other_workspace = Granting {
             workspace_id: "other",
             ..granting
         };
-        assert!(unwrap(other_workspace, &bob, &wrapped).is_err());
+        assert!(unwrap_key(other_workspace, &bob, &wrapped).is_err());
     }
 
     #[test]
@@ -277,6 +285,6 @@ mod tests {
             workspace_id: "w",
             granter: &granter,
         };
-        assert!(wrap(granting, &[1, 2, 3], b"key").is_err());
+        assert!(wrap_key(granting, &[1, 2, 3], b"key").is_err());
     }
 }

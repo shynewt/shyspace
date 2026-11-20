@@ -6,6 +6,7 @@ mod epochs;
 mod invites;
 mod later;
 mod oplog;
+mod private;
 mod queries;
 mod reading;
 mod rebuild;
@@ -16,7 +17,9 @@ mod sections;
 mod snapshot;
 mod threads;
 
+pub use apply::{Applied, ApplyContext};
 pub use invites::PendingRequest;
+pub use private::{Origin, Owner, StoredKey, WaitingSealed};
 pub use queries::SearchFilters;
 pub use reading::UnreadMessage;
 pub use revisions::ItemKind;
@@ -31,6 +34,20 @@ use iroh::PublicKey;
 use rusqlite::{Connection, OptionalExtension, Params, params};
 
 /// A fixed key for databases that only live inside tests.
+#[cfg(test)]
+impl Store {
+    /// How many rows of `table` have `column` equal to `value`.
+    pub(crate) fn count_where(&self, table: &str, column: &str, value: &str) -> i64 {
+        self.db
+            .query_row(
+                &format!("SELECT count(*) FROM {table} WHERE {column} = ?"),
+                [value],
+                |row| row.get(0),
+            )
+            .expect("counting rows")
+    }
+}
+
 #[cfg(test)]
 pub(crate) const TEST_DB_KEY: &str = "x'0000000000000000000000000000000000000000000000000000000000000000'";
 
@@ -54,6 +71,22 @@ impl Store {
         let value = work(self)?;
         transaction.commit()?;
         Ok(value)
+    }
+
+    /// Runs `work` inside the current transaction so that, if it fails,
+    /// none of its writes remain.
+    pub(crate) fn with_savepoint<T>(&self, work: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
+        self.db.execute_batch("SAVEPOINT work")?;
+        match work(self) {
+            Ok(value) => {
+                self.db.execute_batch("RELEASE work")?;
+                Ok(value)
+            }
+            Err(error) => {
+                self.db.execute_batch("ROLLBACK TO work; RELEASE work")?;
+                Err(error)
+            }
+        }
     }
 
     pub fn meta(&self, key: &str) -> Result<Option<Vec<u8>>> {

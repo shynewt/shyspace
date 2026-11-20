@@ -91,6 +91,35 @@ CREATE TABLE member_status (
 CREATE TABLE sealing_secrets (public BLOB PRIMARY KEY, secret BLOB NOT NULL, created_ms INTEGER NOT NULL);
 CREATE TABLE sealing_keys (member BLOB PRIMARY KEY, public BLOB NOT NULL, lamport INTEGER NOT NULL);
 ",
+    // Private channels. Rows record the op that made them (origin), so a
+    // removed member's late ops can be taken back out.
+    "
+CREATE TABLE private_channels (
+    id TEXT PRIMARY KEY, kind TEXT NOT NULL, origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL);
+CREATE TABLE private_owners (
+    channel TEXT NOT NULL, position INTEGER NOT NULL, owner BLOB NOT NULL,
+    origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (channel, position));
+CREATE TABLE private_generations (
+    channel TEXT NOT NULL, generation INTEGER NOT NULL, commitment BLOB NOT NULL,
+    origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (channel, generation));
+CREATE TABLE private_keys (
+    channel TEXT NOT NULL, generation INTEGER NOT NULL, key BLOB NOT NULL,
+    origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (channel, generation, key));
+CREATE TABLE private_adds (
+    channel TEXT NOT NULL, member BLOB NOT NULL, after_seq INTEGER NOT NULL, from_generation INTEGER NOT NULL,
+    origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (origin_author, origin_seq, member));
+CREATE INDEX private_adds_by_member ON private_adds (channel, member);
+CREATE TABLE private_closures (
+    channel TEXT NOT NULL, member BLOB NOT NULL, at_seq INTEGER NOT NULL, before_generation INTEGER NOT NULL,
+    origin_author BLOB NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (origin_author, origin_seq));
+CREATE INDEX private_closures_by_member ON private_closures (channel, member);
+CREATE TABLE dm_members (channel TEXT NOT NULL, member BLOB NOT NULL, PRIMARY KEY (channel, member));
+CREATE TABLE sealed_pending (
+    author BLOB NOT NULL, seq INTEGER NOT NULL, hint BLOB NOT NULL, channel TEXT, PRIMARY KEY (author, seq));
+CREATE TABLE private_applied (
+    channel TEXT NOT NULL, author BLOB NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (author, seq));
+CREATE INDEX private_applied_by_channel ON private_applied (channel, author, seq);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

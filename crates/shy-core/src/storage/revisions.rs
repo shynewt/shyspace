@@ -48,7 +48,7 @@ impl Store {
         }))
     }
 
-    pub(super) fn is_deleted(&self, id: &str) -> Result<bool> {
+    pub(crate) fn is_deleted(&self, id: &str) -> Result<bool> {
         Ok(self
             .db
             .query_row("SELECT 1 FROM deleted WHERE id = ?", [id], |_| Ok(()))
@@ -84,7 +84,9 @@ impl Store {
             | Op::StorageSettings { .. }
             | Op::Delete { .. }
             | Op::Status { .. }
-            | Op::SealingKey { .. } => {
+            | Op::SealingKey { .. }
+            | Op::KeyGrant { .. }
+            | Op::Sealed { .. } => {
                 return Ok(false);
             }
         };

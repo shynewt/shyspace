@@ -9,6 +9,7 @@ mod mentions;
 mod notifications;
 mod presence;
 mod private;
+mod private_attacks;
 mod reading;
 mod recovery;
 mod search;

@@ -4,9 +4,16 @@ import { reportError } from "./toast";
 
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
 export type NotifyLevel = "all" | "mentions" | "nothing";
+export type ChannelKind = "public" | "private" | "dm";
 export type Channel = {
   id: string;
+  kind: ChannelKind;
+  /** "" for a DM; show its members instead. */
   name: string;
+  /** A DM's members other than you (member ids). */
+  dm_members: string[];
+  /** False once you left or were removed from a private channel. */
+  is_member: boolean;
   can_delete: boolean;
   unread: number;
   unread_mentions: number;

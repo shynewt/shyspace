@@ -21,6 +21,7 @@ use crate::{
     },
     ops::{Op, new_owned_id, new_random_id, now_ms},
     pages::Edit,
+    storage::ApplyContext,
     storage::Store,
     sync::SyncStatus,
     transport::{
@@ -240,7 +241,14 @@ impl Workspace {
             &invite.admin_mls_key,
         )?;
         let grant: Grant = postcard::from_bytes(&mls.open_from_admin(&sealed_grant, &invite.admin)?)?;
-        grant.history.store_into(&local.store, &invite.admin)?;
+        grant.history.store_into(
+            &local.store,
+            ApplyContext {
+                workspace_id: &invite.workspace_id,
+                admin: invite.admin,
+                me: local.identity.public(),
+            },
+        )?;
         let bucket_lamport = grant.bucket_lamport;
 
         let config = WorkspaceConfig {

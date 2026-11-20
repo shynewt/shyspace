@@ -11,7 +11,11 @@ use crate::{
         normalize_channel_name, now_ms,
     },
     pages::{self, Edit},
-    storage::ItemKind,
+    private::{
+        ids::{new_private_message_id, private_channel_of, private_kind},
+        ops::PrivateOp,
+    },
+    storage::{ItemKind, Store},
     views::{Change, Draft, Message, NotifyLevel},
 };
 
@@ -20,8 +24,23 @@ const MAX_MENTION_SCAN: u32 = 500;
 impl Workspace {
     /// Seals, stores and applies a local change, then sends it live. The
     /// bucket upload happens on the next sync pass.
+    /// Content of a private channel or DM is sealed for its members.
     pub(crate) fn write(&self, op: Op) -> Result<()> {
-        let (envelope, change) = {
+        let private_channel = op
+            .named_ids()
+            .into_iter()
+            .find_map(private_channel_of)
+            .map(str::to_owned);
+        match private_channel {
+            Some(channel) => self.write_private(&channel, PrivateOp::Content(op)),
+            None => self.write_with(|_, _| Ok(op)),
+        }
+    }
+
+    /// Like [`Workspace::write`], for an op that needs its own sequence number
+    /// (sealed content is bound to it).
+    pub(crate) fn write_with(&self, make_op: impl FnOnce(&Store, u64) -> Result<Op>) -> Result<()> {
+        let (envelope, changes) = {
             let state = self.state();
             if !state.mls.is_active() {
                 bail!("you are no longer a member of this workspace");
@@ -32,23 +51,36 @@ impl Workspace {
                 .epoch_key(epoch)?
                 .context("missing key for the current epoch")?;
             let author = self.me();
-            if !self.may(&op) {
-                bail!("only its owner or the admin can do that");
-            }
+            let context = self.apply_context();
             state.store.atomically(|store| {
+                let seq = store.next_seq(&author)?;
+                let op = make_op(store, seq)?;
+                if !self.may(&op) {
+                    bail!("only its owner or the admin can do that");
+                }
+                let is_sealed = matches!(op, Op::Sealed { .. });
                 let body = OpBody {
                     lamport: store.next_lamport()?,
                     timestamp_ms: now_ms()?,
                     op,
                 };
-                let seq = store.next_seq(&author)?;
                 let envelope = crypto::seal(&self.inner.identity, &key, epoch, seq, &body)?;
-                let change = store.apply(&VerifiedOp { author, seq, body })?;
+                let applied = store.apply_any(&VerifiedOp { author, seq, body }, context)?;
+                // Our own private op must count, or nobody else would see it.
+                ensure!(
+                    !is_sealed || store.is_private_applied(&author, seq)?,
+                    "that isn't allowed in this channel"
+                );
                 store.insert_applied(&envelope, false)?;
-                Ok((envelope, change))
+                let mut changes = applied.changes;
+                if applied.needs_rebuild {
+                    store.rebuild_views(context)?;
+                    changes.extend(store.all_view_changes()?);
+                }
+                Ok((envelope, changes))
             })?
         };
-        if let Some(change) = change {
+        for change in changes {
             self.emit(change);
         }
         self.send_live(envelope);
@@ -97,7 +129,10 @@ impl Workspace {
 
     pub fn send_message(&self, channel: &str, text: &str, reply_to: Option<EntityId>) -> Result<EntityId> {
         let text = checked_message_text(text)?;
-        let id = new_owned_id(&self.me());
+        let id = match private_kind(channel) {
+            Some(_) => new_private_message_id(channel, &self.me()),
+            None => new_owned_id(&self.me()),
+        };
         self.write(Op::Message {
             id: id.clone(),
             channel: channel.to_owned(),

@@ -9,6 +9,13 @@ use tokio::task::JoinHandle;
 use crate::{
     BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace, crypto,
     membership::invite::{Invite, JoinMailbox},
+    ops::{Envelope, Op, OpBody, now_ms},
+    private::{
+        self,
+        crypto::Slot,
+        ops::{PrivateBody, PrivateOp},
+    },
+    storage::StoredKey,
     transport::bucket::{Bucket, Connector},
     views::InviteState,
 };
@@ -166,4 +173,48 @@ pub fn current_key(workspace: &Workspace) -> (u64, crypto::EpochKey) {
     let state = workspace.state();
     let epoch = state.mls.epoch().unwrap();
     (epoch, state.store.epoch_key(epoch).unwrap().unwrap())
+}
+
+/// Seals ops as a member's next ones, in order, without them going through
+/// their log.
+pub struct Forger<'a> {
+    author: &'a Workspace,
+    pub next_seq: u64,
+}
+
+impl<'a> Forger<'a> {
+    pub fn new(author: &'a Workspace) -> Self {
+        let next_seq = author.state().store.next_seq(&author.me()).unwrap();
+        Forger { author, next_seq }
+    }
+
+    pub fn seal(&mut self, op: Op) -> Envelope {
+        let (epoch, key) = current_key(self.author);
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        let body = OpBody {
+            lamport: 9_000 + seq,
+            timestamp_ms: now_ms().unwrap(),
+            op,
+        };
+        crypto::seal(&self.author.inner.identity, &key, epoch, seq, &body).unwrap()
+    }
+}
+
+impl Forger<'_> {
+    /// Seals `op` into a private channel with `key`, bound to the next slot.
+    pub fn seal_private(&mut self, key: &StoredKey, op: PrivateOp) -> Envelope {
+        let body = PrivateBody {
+            channel: key.channel.clone(),
+            generation: key.generation,
+            op,
+        };
+        let slot = Slot {
+            workspace_id: &self.author.inner.config.workspace_id,
+            author: &self.author.me(),
+            seq: self.next_seq,
+        };
+        let payload = private::crypto::seal(&key.key, slot, &postcard::to_stdvec(&body).unwrap()).unwrap();
+        self.seal(Op::Sealed { payload })
+    }
 }

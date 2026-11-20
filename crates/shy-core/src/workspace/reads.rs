@@ -32,6 +32,7 @@ impl Workspace {
             channel.can_delete = self.may(&Op::Delete {
                 id: channel.id.clone(),
             });
+            self.describe_private(&state.store, channel)?;
         }
         Ok(channels)
     }
@@ -103,9 +104,7 @@ impl Workspace {
                 id: message.id.clone(),
                 text: String::new(),
             });
-            message.can_delete = self.may(&Op::Delete {
-                id: message.id.clone(),
-            });
+            message.can_delete = self.may_delete(&state.store, &message.id)?;
             let thread: Vec<&Reply> = replies.iter().filter(|reply| reply.root == message.id).collect();
             message.reply_count = count(thread.len());
             message.last_reply_ms = thread.iter().map(|reply| reply.created_ms).max();

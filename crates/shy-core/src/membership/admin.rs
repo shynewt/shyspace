@@ -283,7 +283,7 @@ impl Workspace {
             let commit = state.mls.remove_member(&member)?;
             state
                 .store
-                .freeze_author(&frozen.member, frozen.last_seq, &self.me())?;
+                .freeze_author(&frozen.member, frozen.last_seq, self.apply_context())?;
             let signed = self.record_commit(&state, from_epoch, commit, vec![frozen])?;
             state.mls.merge_pending_commit()?;
             state.record_epoch()?;

@@ -28,8 +28,13 @@ pub fn new_owned_id(author: &PublicKey) -> EntityId {
     format!("{}{}", owner_prefix(author), new_random_id())
 }
 
+/// A private message's id names its channel first; the owned part is last.
 pub fn is_owned_by(id: &str, author: &PublicKey) -> bool {
-    id.len() == 2 * OWNER_PREFIX_BYTES + 16 && id.starts_with(&owner_prefix(author))
+    let owned = match crate::private::ids::is_private_id(id) {
+        true => id.rsplit(['/', ':']).next().unwrap_or(id),
+        false => id,
+    };
+    owned.len() == 2 * OWNER_PREFIX_BYTES + 16 && owned.starts_with(&owner_prefix(author))
 }
 
 fn owner_prefix(author: &PublicKey) -> String {
@@ -108,6 +113,14 @@ pub enum Op {
     SealingKey {
         public: Vec<u8>,
     },
+    /// Private channel keys, each wrapped for one recipient.
+    KeyGrant {
+        wraps: Vec<crate::private::crypto::Wrap>,
+    },
+    /// An op in a private channel or DM, readable only by its members.
+    Sealed {
+        payload: crate::private::crypto::SealedPayload,
+    },
 }
 
 /// An op that is validly signed but breaks a rule (someone else's id, an
@@ -130,6 +143,40 @@ pub(crate) fn rule_violation(reason: impl Into<String>) -> anyhow::Error {
 }
 
 impl Op {
+    /// Every id this op creates, changes or points at.
+    pub fn named_ids(&self) -> Vec<&str> {
+        match self {
+            Op::ChannelCreate { id, .. }
+            | Op::PageRename { id, .. }
+            | Op::MessageEdit { id, .. }
+            | Op::ChannelRename { id, .. }
+            | Op::Delete { id } => vec![id],
+            Op::Message {
+                id,
+                channel,
+                reply_to,
+                ..
+            } => [Some(id), Some(channel), reply_to.as_ref()]
+                .into_iter()
+                .flatten()
+                .map(String::as_str)
+                .collect(),
+            Op::Reaction { message, .. } => vec![message],
+            Op::PageCreate { id, parent, .. } => [Some(id), parent.as_ref()]
+                .into_iter()
+                .flatten()
+                .map(String::as_str)
+                .collect(),
+            Op::DocUpdate { page, .. } => vec![page],
+            Op::Profile { .. }
+            | Op::StorageSettings { .. }
+            | Op::Status { .. }
+            | Op::SealingKey { .. }
+            | Op::KeyGrant { .. }
+            | Op::Sealed { .. } => Vec::new(),
+        }
+    }
+
     /// Whether `author` may make this change in a workspace run by `admin`.
     pub fn is_permitted(&self, author: &PublicKey, admin: &PublicKey) -> bool {
         match self {
