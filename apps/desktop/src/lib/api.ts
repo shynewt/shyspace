@@ -220,7 +220,9 @@ export const api = {
   setFollowing: (root: string, following: boolean) => invoke<void>("set_following", { root, following }),
   markThreadRead: (root: string, message: string) => invoke<void>("mark_thread_read", { root, message }),
   setNotifyLevel: (channel: string, level: NotifyLevel) => invoke<void>("set_notify_level", { channel, level }),
-  showAlert: (title: string, body: string) => invoke<void>("show_alert", { title, body }),
+  /** A desktop notification; a click on it opens `message` (sent back as an "alert-opened" event). */
+  showAlert: (title: string, body: string, message: string | null) =>
+    invoke<void>("show_alert", { title, body, message }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>

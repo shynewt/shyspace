@@ -1,6 +1,7 @@
 //! Thin bridge from the UI to shy-core: every command maps to one Workspace
 //! call, and every core change is forwarded to the UI as a "change" event.
 
+mod alerts;
 mod tray;
 
 use std::path::PathBuf;
@@ -17,7 +18,6 @@ use shy_core::{
     workspace::StorageUpdate,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, ipc::Response};
-use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Mutex;
 
 type CommandResult<T> = Result<T, String>;
@@ -416,13 +416,8 @@ async fn set_notify_level(
 
 /// Shows a desktop notification. The UI decides when one is wanted.
 #[tauri::command]
-fn show_alert(app: AppHandle, title: String, body: String) -> CommandResult<()> {
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .map_err(|error| error.to_string())
+fn show_alert(app: AppHandle, title: String, body: String, message: Option<String>) -> CommandResult<()> {
+    alerts::show(&app, title, body, message)
 }
 
 #[tauri::command]
@@ -745,6 +740,7 @@ pub fn run() {
                 workspace: Mutex::new(None),
                 joining: std::sync::Mutex::new(None),
             });
+            alerts::follow_clicks(app.handle())?;
             let has_tray = tray::try_install(app.handle());
             app.manage(tray::HasTray(has_tray));
             Ok(())

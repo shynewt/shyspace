@@ -93,7 +93,7 @@ export function Shell({ session }: { session: Session }) {
     else showToast("What you saved no longer exists.", "info");
   }, []);
 
-  useAlerts(view);
+  useAlerts(view, navigate);
   useReminders(openSaved);
   usePresence();
 

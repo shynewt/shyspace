@@ -142,6 +142,15 @@ export class FakeBackend {
 
   /** Desktop notifications the app asked to show. */
   readonly alertsShown: { title: string; body: string }[] = [];
+  /** The message each alert in `alertsShown` was about, if any. */
+  private readonly alertMessages: (string | null)[] = [];
+
+  /** Clicks the `index`th alert, as the notification server reports a click. */
+  clickAlert(index: number): void {
+    const message = this.alertMessages[index];
+    if (!message) throw new Error(`fake backend: alert ${index} isn't about a message`);
+    void emit("alert-opened", message);
+  }
 
   /** Someone else made a private channel with you (and `others`) in it. */
   receivePrivateChannel(owner: string, name: string, others: string[] = []): string {
@@ -364,6 +373,7 @@ export class FakeBackend {
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
       case "show_alert":
         this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
+        this.alertMessages.push((argument(args, "message") as string | null) ?? null);
         return null;
       case "pages":
         return this.pages.map(({ doc: _doc, ...page }) => ({
