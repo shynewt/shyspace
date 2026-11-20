@@ -25,7 +25,7 @@ All animation uses the presets in `ui/motion.ts`, through Motion:
 | `springs.pop` | small playful pops: reactions, counters, copy confirmations |
 | `rise`, `pop`, `fade` | enter and exit variants for content, floating surfaces, overlays |
 
-Keep feedback under about 250 ms. Reduced-motion settings are respected globally (`MotionConfig reducedMotion="user"` in `main.tsx`); don't override it.
+Keep feedback under about 250 ms. Reduced motion is decided once, globally: `MotionConfig` in `main.tsx` follows the system unless Settings › Appearance › Reduce motion says On or Off. Don't override it in components.
 
 ## Components
 

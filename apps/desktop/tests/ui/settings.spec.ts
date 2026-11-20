@@ -196,3 +196,45 @@ test("members see who manages storage and recovery", async ({ page }) => {
   await expect(settings.getByRole("tabpanel")).toContainText("Managed by Ada.");
   await expect(settings.getByRole("button", { name: "Show recovery kit" })).toHaveCount(0);
 });
+
+/** The cheat sheet's transform in each frame while it opens: "none" throughout when motion is reduced. */
+async function transformsWhileOpeningADialog(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const seen = new Set<string>();
+    const sampled = new Promise<void>((resolve) => {
+      const start = performance.now();
+      const sample = () => {
+        const dialog = document.querySelector('[role="dialog"]');
+        if (dialog) seen.add(getComputedStyle(dialog).transform);
+        if (performance.now() - start < 300) requestAnimationFrame(sample);
+        else resolve();
+      };
+      requestAnimationFrame(sample);
+    });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", ctrlKey: true }));
+    await sampled;
+    return [...seen];
+  });
+}
+
+test("reduce motion can be turned on whatever the system says", async ({ page }) => {
+  const settings = await openSettings(page);
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+  await settings.getByRole("radiogroup", { name: "Reduce motion" }).getByRole("radio", { name: "On" }).click();
+  await page.keyboard.press("Escape");
+  await expect(settings).toBeHidden();
+
+  expect(await transformsWhileOpeningADialog(page)).toEqual(["none"]);
+});
+
+test("reduce motion can be turned off when the system asks for less", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const settings = await openSettings(page);
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+  await settings.getByRole("radiogroup", { name: "Reduce motion" }).getByRole("radio", { name: "Off" }).click();
+  await page.keyboard.press("Escape");
+  await expect(settings).toBeHidden();
+
+  const transforms = await transformsWhileOpeningADialog(page);
+  expect(transforms.some((transform) => transform.startsWith("matrix("))).toBe(true);
+});

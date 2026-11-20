@@ -1,7 +1,8 @@
 import { MotionConfig } from "motion/react";
-import { StrictMode } from "react";
+import { type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { useReducedMotionConfig } from "./lib/preferences";
 import { springs, TooltipProvider } from "./ui";
 import "./styles.css";
 
@@ -10,10 +11,19 @@ if (!root) throw new Error("index.html has no #root element");
 
 createRoot(root).render(
   <StrictMode>
-    <MotionConfig reducedMotion="user" transition={springs.snappy}>
+    <ChosenMotion>
       <TooltipProvider>
         <App />
       </TooltipProvider>
-    </MotionConfig>
+    </ChosenMotion>
   </StrictMode>,
 );
+
+/** Motion everywhere follows the Reduce motion setting (by default, the system's). */
+function ChosenMotion({ children }: { children: ReactNode }) {
+  return (
+    <MotionConfig reducedMotion={useReducedMotionConfig()} transition={springs.snappy}>
+      {children}
+    </MotionConfig>
+  );
+}

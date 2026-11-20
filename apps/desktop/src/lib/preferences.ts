@@ -6,14 +6,17 @@ import { reportError } from "./toast";
  * storage. Reads fall back to the default when storage is unavailable.
  */
 export type Theme = "system" | "light" | "dark";
+/** "system" follows the operating system's reduce-motion setting. */
+export type ReduceMotion = "system" | "on" | "off";
 
 type Preferences = {
   theme: Theme;
+  reduceMotion: ReduceMotion;
   /** Show message text in desktop notifications (off hides it). */
   alertsShowText: boolean;
 };
 
-const DEFAULTS: Preferences = { theme: "system", alertsShowText: true };
+const DEFAULTS: Preferences = { theme: "system", reduceMotion: "system", alertsShowText: true };
 const KEY = "shyspace.preferences";
 const listeners = new Set<() => void>();
 
@@ -60,4 +63,16 @@ export function useTheme() {
     if (theme === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+}
+
+const MOTION_CONFIG: Record<ReduceMotion, "user" | "always" | "never"> = {
+  system: "user",
+  on: "always",
+  off: "never",
+};
+
+/** The chosen reduce-motion setting, in the form Motion's `MotionConfig` takes. */
+export function useReducedMotionConfig(): "user" | "always" | "never" {
+  const [{ reduceMotion }] = usePreferences();
+  return MOTION_CONFIG[reduceMotion];
 }
