@@ -331,12 +331,15 @@ impl Workspace {
                 recovery_lock: tokio::sync::Mutex::new(()),
                 status: Mutex::new(SyncStatus::default()),
                 refetched_gaps: Mutex::new(std::collections::HashSet::new()),
+                last_dialed_ms: Mutex::new(std::collections::HashMap::new()),
                 presence: Mutex::new(Default::default()),
                 own_presence: Mutex::new(super::presence::OwnPresence {
                     is_away: false,
                     appear_offline,
+                    last_sent: None,
                 }),
                 heartbeat_now: Notify::new(),
+                stopped: tokio::sync::watch::Sender::new(false),
             }),
         };
         workspace

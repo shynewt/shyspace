@@ -1,6 +1,7 @@
 //! Status (set by hand, synced) and presence (automatic, live only).
 
 use super::support::*;
+use crate::workspace::NextBeat;
 use crate::{
     ops::now_ms,
     views::{PresenceState, StatusUpdate},
@@ -75,12 +76,9 @@ async fn appearing_offline_is_remembered_before_anything_is_sent() {
     let bucket = memory_bucket();
     let admin = create_admin(&dir, &bucket).await;
     admin.set_away(true);
-    assert_eq!(
-        admin.next_heartbeat().unwrap().unwrap().state,
-        PresenceState::Away
-    );
+    assert_eq!(sent(admin.next_heartbeat().unwrap()).state, PresenceState::Away);
     admin.set_appear_offline(true).unwrap();
-    assert!(admin.next_heartbeat().unwrap().is_none());
+    assert!(matches!(admin.next_heartbeat().unwrap(), NextBeat::Silent));
     drop(admin);
 
     let reopened =
@@ -89,7 +87,7 @@ async fn appearing_offline_is_remembered_before_anything_is_sent() {
             .unwrap();
     assert!(reopened.appear_offline().unwrap());
     assert!(
-        reopened.next_heartbeat().unwrap().is_none(),
+        matches!(reopened.next_heartbeat().unwrap(), NextBeat::Silent),
         "no heartbeat at launch, not even one"
     );
     assert_eq!(
@@ -99,7 +97,31 @@ async fn appearing_offline_is_remembered_before_anything_is_sent() {
 
     reopened.set_appear_offline(false).unwrap();
     assert_eq!(
-        reopened.next_heartbeat().unwrap().unwrap().state,
+        sent(reopened.next_heartbeat().unwrap()).state,
         PresenceState::Online
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn heartbeats_go_out_at_most_every_few_seconds_unless_something_changed() {
+    let (_root, _bucket, admin, _bob) = admin_and_bob().await;
+    sent(admin.next_heartbeat().unwrap());
+    assert!(
+        matches!(admin.next_heartbeat().unwrap(), NextBeat::After(wait) if wait.as_millis() <= 5000),
+        "a peer reconnecting again and again doesn't make us beat each time, only a little later"
+    );
+    admin.set_away(true);
+    let beat = sent(admin.next_heartbeat().unwrap());
+    assert_eq!(
+        beat.state,
+        PresenceState::Away,
+        "a change of our own goes out at once"
+    );
+}
+
+fn sent(beat: NextBeat) -> crate::workspace::Heartbeat {
+    match beat {
+        NextBeat::Now(heartbeat) => heartbeat,
+        NextBeat::After(_) | NextBeat::Silent => panic!("expected a heartbeat to go out now"),
+    }
 }

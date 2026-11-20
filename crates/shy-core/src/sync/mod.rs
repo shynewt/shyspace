@@ -3,6 +3,7 @@
 //! ops arriving live over gossip.
 
 mod alerts;
+mod peers;
 mod receive;
 mod replicate;
 
@@ -17,7 +18,7 @@ use crate::{
     transport::gossip::{Incoming, Wire},
     views::Change,
     views::PresenceState,
-    workspace::Workspace,
+    workspace::{NextBeat, Workspace},
 };
 
 const SYNC_INTERVAL: Duration = Duration::from_secs(8);
@@ -40,8 +41,14 @@ pub struct SyncStatus {
 impl Workspace {
     pub(crate) fn spawn_background(&self, mut incoming: mpsc::Receiver<Incoming>) {
         let receiver = self.clone();
+        let mut stopped = self.inner.stopped.subscribe();
         tokio::spawn(async move {
-            while let Some(wire) = incoming.recv().await {
+            loop {
+                let wire = tokio::select! {
+                    wire = incoming.recv() => wire,
+                    _ = stopped.changed() => None,
+                };
+                let Some(wire) = wire else { break };
                 match wire {
                     Incoming::NeighborUp => {
                         receiver.inner.wake.notify_one();
@@ -66,15 +73,21 @@ impl Workspace {
         });
 
         let beater = self.clone();
+        let mut stopped = self.inner.stopped.subscribe();
         tokio::spawn(async move {
             let mut reachable = Vec::new();
             loop {
-                if let Err(error) = beater.send_heartbeat().await {
-                    warn!("could not send a heartbeat: {error:#}");
-                }
+                let wait = match beater.send_heartbeat().await {
+                    Ok(held_back) => held_back.unwrap_or(HEARTBEAT_INTERVAL),
+                    Err(error) => {
+                        warn!("could not send a heartbeat: {error:#}");
+                        HEARTBEAT_INTERVAL
+                    }
+                };
                 tokio::select! {
                     _ = beater.inner.heartbeat_now.notified() => {}
-                    _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => {}
+                    _ = tokio::time::sleep(wait) => {}
+                    _ = stopped.changed() => break,
                 }
                 if beater.status().removed {
                     break;
@@ -93,9 +106,17 @@ impl Workspace {
         });
 
         let syncer = self.clone();
+        let mut stopped = self.inner.stopped.subscribe();
         tokio::spawn(async move {
             syncer.announce_self().await;
+            let mut last_announced = tokio::time::Instant::now();
             loop {
+                // Staying announced keeps others dialing us while we're online.
+                if last_announced.elapsed() >= Duration::from_millis(peers::ANNOUNCE_EVERY_MS.unsigned_abs())
+                {
+                    syncer.announce_self().await;
+                    last_announced = tokio::time::Instant::now();
+                }
                 syncer.sync().await;
                 if syncer.status().removed {
                     break;
@@ -103,6 +124,7 @@ impl Workspace {
                 tokio::select! {
                     _ = syncer.inner.wake.notified() => tokio::time::sleep(PUSH_DEBOUNCE).await,
                     _ = tokio::time::sleep(SYNC_INTERVAL) => {}
+                    _ = stopped.changed() => break,
                 }
             }
         });
@@ -175,11 +197,16 @@ impl Workspace {
         self.emit(Change::Sync);
     }
 
-    async fn send_heartbeat(&self) -> anyhow::Result<()> {
-        let (Some(net), Some(heartbeat)) = (&self.inner.net, self.next_heartbeat()?) else {
-            return Ok(());
+    /// Returns how soon to try again when the beat was held back.
+    async fn send_heartbeat(&self) -> anyhow::Result<Option<Duration>> {
+        let Some(net) = &self.inner.net else {
+            return Ok(None);
         };
-        net.broadcast_presence(heartbeat).await
+        match self.next_heartbeat()? {
+            NextBeat::Now(heartbeat) => net.broadcast_presence(heartbeat).await.map(|()| None),
+            NextBeat::After(wait) => Ok(Some(wait)),
+            NextBeat::Silent => Ok(None),
+        }
     }
 
     fn reachable_members(&self) -> anyhow::Result<Vec<(iroh::PublicKey, PresenceState)>> {

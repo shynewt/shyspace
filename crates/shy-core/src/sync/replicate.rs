@@ -3,7 +3,8 @@
 use anyhow::Result;
 use tracing::warn;
 
-use crate::workspace::Workspace;
+use super::peers::peers_to_dial;
+use crate::{ops::now_ms, workspace::Workspace};
 
 impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
@@ -60,13 +61,28 @@ impl Workspace {
         Ok(())
     }
 
-    /// Refreshes who may gossip with us, then connects to members online.
+    /// Refreshes who may gossip with us, then connects to members who seem
+    /// to be around (see `peers_to_dial`).
     pub(super) async fn join_peers(&self) -> Result<()> {
         let Some(net) = &self.inner.net else {
             return Ok(());
         };
         net.set_members(&self.current_members()?);
-        net.join(self.bucket().peers().await?).await
+        let announcements = self.bucket().peers().await?;
+        let now = now_ms()?;
+        let to_dial = {
+            let mut last_dialed = self
+                .inner
+                .last_dialed_ms
+                .lock()
+                .expect("dial times lock poisoned by an earlier panic");
+            let to_dial = peers_to_dial(&announcements, &last_dialed, now);
+            for peer in &to_dial {
+                last_dialed.insert(*peer, now);
+            }
+            to_dial
+        };
+        net.join(to_dial).await
     }
 
     pub(super) async fn announce_self(&self) {

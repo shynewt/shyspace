@@ -13,6 +13,7 @@ mod storage;
 pub use lifecycle::DataDir;
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
 pub use presence::Heartbeat;
+pub(crate) use presence::NextBeat;
 pub(crate) use reads::follows_by_default;
 pub use storage::StorageUpdate;
 
@@ -106,11 +107,15 @@ pub(crate) struct Inner {
     /// Gaps (author, missing seq) already fetched again this run, so a gap
     /// the bucket can't fill doesn't make every pass re-read everything.
     pub refetched_gaps: Mutex<std::collections::HashSet<(iroh::PublicKey, u64)>>,
+    /// When we last dialed each peer over gossip, by our clock.
+    pub last_dialed_ms: Mutex<std::collections::HashMap<iroh::PublicKey, i64>>,
     /// Others' presence, from heartbeats; in memory only.
     pub presence: Mutex<presence::PresenceBook>,
     pub own_presence: Mutex<presence::OwnPresence>,
     /// Sends a heartbeat now instead of at the next tick.
     pub heartbeat_now: Notify,
+    /// Set by `shutdown`; the background loops end when they see it.
+    pub stopped: tokio::sync::watch::Sender<bool>,
 }
 
 #[derive(Clone)]
@@ -186,9 +191,11 @@ impl Workspace {
         state.mls.members()
     }
 
-    /// Uploads what wasn't sent yet, so a message written just before
-    /// quitting isn't held back until the next start, then closes the network.
+    /// Stops the background work, uploads what wasn't sent yet (so a message
+    /// written just before quitting isn't held back until the next start),
+    /// then closes the network.
     pub async fn shutdown(&self) -> Result<()> {
+        self.inner.stopped.send_replace(true);
         let uploaded = self.push().await;
         if let Some(net) = &self.inner.net {
             net.shutdown().await;

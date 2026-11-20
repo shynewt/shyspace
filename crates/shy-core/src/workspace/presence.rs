@@ -1,7 +1,7 @@
 //! Presence and status. Presence (online, away) travels only as signed
 //! heartbeats over gossip and is never stored; status is a synced op.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use iroh::{PublicKey, Signature};
@@ -21,6 +21,9 @@ pub(crate) const PRESENCE_TIMEOUT_MS: i64 = 75 * 1000;
 /// Presence changes from one member closer together than this are ignored,
 /// so nobody can make everyone's member list redraw nonstop.
 const MIN_CHANGE_GAP_MS: i64 = 1000;
+/// Peers reconnecting over and over each ask for a heartbeat; one this soon
+/// after the last, saying the same, is skipped.
+const MIN_SEND_GAP_MS: i64 = 5000;
 const SIGNATURE_DOMAIN: &str = "shyspace presence v1";
 const APPEAR_OFFLINE_KEY: &str = "appear_offline";
 
@@ -65,12 +68,23 @@ impl PresenceBook {
     }
 }
 
+/// What the heartbeat loop should do next.
+pub(crate) enum NextBeat {
+    Now(Heartbeat),
+    /// The same beat went out moments ago; send it after this.
+    After(Duration),
+    /// Appearing offline: nothing to send.
+    Silent,
+}
+
 /// What this device says about itself. `appear_offline` is kept in the
 /// database, so it holds from the first moment after a restart.
 #[derive(Default)]
 pub(crate) struct OwnPresence {
     pub is_away: bool,
     pub appear_offline: bool,
+    /// The last heartbeat's state and when it went out.
+    pub last_sent: Option<(PresenceState, i64)>,
 }
 
 fn signed_bytes(
@@ -162,12 +176,26 @@ impl Workspace {
         }
     }
 
-    /// The heartbeat to send now, or none when appearing offline.
-    pub(crate) fn next_heartbeat(&self) -> Result<Option<Heartbeat>> {
-        match self.own_state() {
-            PresenceState::Unreachable => Ok(None),
-            state => self.heartbeat(state).map(Some),
+    /// The heartbeat to send now: none when appearing offline, or a wait when
+    /// the same one went out moments ago.
+    pub(crate) fn next_heartbeat(&self) -> Result<NextBeat> {
+        let state = self.own_state();
+        if state == PresenceState::Unreachable {
+            return Ok(NextBeat::Silent);
         }
+        let now = now_ms()?;
+        {
+            let mut own = self.own();
+            if let Some((sent_state, sent_ms)) = own.last_sent
+                && sent_state == state
+                && now - sent_ms < MIN_SEND_GAP_MS
+            {
+                let wait_ms = MIN_SEND_GAP_MS - (now - sent_ms);
+                return Ok(NextBeat::After(Duration::from_millis(wait_ms.unsigned_abs())));
+            }
+            own.last_sent = Some((state, now));
+        }
+        self.heartbeat_at(state, now).map(NextBeat::Now)
     }
 
     pub fn heartbeat(&self, state: PresenceState) -> Result<Heartbeat> {
