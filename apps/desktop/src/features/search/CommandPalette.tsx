@@ -3,7 +3,6 @@ import {
   CornerDownLeft,
   FilePlus2,
   FileText,
-  Hash,
   Inbox,
   MessageSquare,
   Search,
@@ -13,6 +12,7 @@ import {
 import { motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SearchHit } from "../../lib/api";
+import { useChannelNames } from "../../lib/channels";
 import { plainPreview } from "../../lib/markdown";
 import { SETTINGS_SECTIONS } from "../../lib/settings";
 import { shortcutKeys } from "../../lib/shortcuts";
@@ -20,6 +20,7 @@ import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
 import { Dialog, Kbd, springs } from "../../ui";
 import { MarkAllReadDialog } from "../inbox/MarkAllReadDialog";
+import { ChannelGlyph } from "../private/ChannelGlyph";
 
 const SEARCH_DELAY_MS = 120;
 const JUMP_LIMIT_WHILE_TYPING = 6;
@@ -49,6 +50,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 
 function PaletteBody({ onClose, onMarkAllRead }: { onClose: () => void; onMarkAllRead: () => void }) {
   const { channels, pages, navigate, session, openSettings } = useWorkspace();
+  const names = useChannelNames();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [selected, setSelected] = useState(0);
@@ -110,13 +112,13 @@ function PaletteBody({ onClose, onMarkAllRead }: { onClose: () => void; onMarkAl
       .map((action) => ({ ...action, key: `action:${action.title}`, group: "Actions" }));
     const jumpTo: Item[] = [
       ...channels
-        .filter((channel) => matches(channel.name))
+        .filter((channel) => matches(names.title(channel.id)))
         .map(
           (channel): Item => ({
             key: `channel:${channel.id}`,
             onChoose: go({ kind: "channel", id: channel.id }),
-            icon: <Hash size={15} />,
-            title: channel.name,
+            icon: <ChannelGlyph kind={channel.kind} />,
+            title: names.title(channel.id),
             group: "Jump to",
           }),
         ),
@@ -158,7 +160,7 @@ function PaletteBody({ onClose, onMarkAllRead }: { onClose: () => void; onMarkAl
       ];
     });
     return [...jumpTo, ...found, ...actions];
-  }, [query, hits, channels, pages, navigate, session.is_admin, onMarkAllRead, openSettings]);
+  }, [query, hits, channels, names, pages, navigate, session.is_admin, onMarkAllRead, openSettings]);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });

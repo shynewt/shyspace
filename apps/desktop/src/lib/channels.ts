@@ -1,5 +1,8 @@
-import type { Channel, Member } from "./api";
+import { useMemo } from "react";
+import { api, type Channel, type Member } from "./api";
 import { displayName } from "./people";
+import { useLive } from "./useLive";
+import { useWorkspace } from "./workspace";
 
 /** A channel's name as the app shows it: its own, or for a DM, the other people in it. */
 export function channelTitle(channel: Channel, members: readonly Member[] | undefined): string {
@@ -18,4 +21,23 @@ export function channelReference(channel: Channel | undefined, members: readonly
 /** What the composer asks for: "Message #plans" or "Message Ada". */
 export function composerLabel(channel: Channel | undefined, members: readonly Member[] | undefined): string {
   return `Message ${channelReference(channel, members)}`;
+}
+
+/** Names channels by id, as `channelReference` does, for screens that list several. Stable while nothing changes. */
+export function useChannelNames(): {
+  reference: (channelId: string) => string;
+  title: (channelId: string) => string;
+} {
+  const { channels } = useWorkspace();
+  const members = useLive(api.members, (change) => change.kind === "members");
+  return useMemo(() => {
+    const find = (channelId: string) => channels.find((channel) => channel.id === channelId);
+    return {
+      reference: (channelId: string) => channelReference(find(channelId), members),
+      title: (channelId: string) => {
+        const channel = find(channelId);
+        return channel ? channelTitle(channel, members) : "";
+      },
+    };
+  }, [channels, members]);
 }

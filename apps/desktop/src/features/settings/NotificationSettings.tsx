@@ -1,6 +1,7 @@
 import { Undo2 } from "lucide-react";
 import { useState } from "react";
 import { api, type Channel, type NotifyLevel } from "../../lib/api";
+import { useChannelNames } from "../../lib/channels";
 import { usePreferences } from "../../lib/preferences";
 import { errorMessage } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
@@ -46,6 +47,7 @@ type SavedLevel = { channel: Channel; level: NotifyLevel };
 
 function ChannelAlerts() {
   const { channels } = useWorkspace();
+  const names = useChannelNames();
   // A toast's Undo can't be reached while Settings is open (it's modal), so it's offered here.
   const [beforeReset, setBeforeReset] = useState<SavedLevel[] | null>(null);
   // Toasts sit behind the modal Settings window, so failures show here too.
@@ -57,7 +59,9 @@ function ChannelAlerts() {
   const setLevels = async (levels: SavedLevel[]): Promise<SavedLevel[]> => {
     const results = await Promise.allSettled(levels.map(({ channel, level }) => api.setNotifyLevel(channel.id, level)));
     const failures = results.flatMap((result, index) =>
-      result.status === "rejected" ? [`#${levels[index].channel.name}: ${errorMessage(result.reason)}`] : [],
+      result.status === "rejected"
+        ? [`${names.reference(levels[index].channel.id)}: ${errorMessage(result.reason)}`]
+        : [],
     );
     setError(failures.length > 0 ? `Couldn't change ${failures.join("; ")}` : null);
     return levels.filter((_, index) => results[index].status === "fulfilled");
@@ -83,11 +87,9 @@ function ChannelAlerts() {
       <ul aria-label="Channel alerts" className="flex flex-col">
         {sorted.map((channel) => (
           <li key={channel.id} className="flex items-center gap-3 py-1">
-            <span className="min-w-0 flex-1 truncate text-[13px]">
-              <span className="text-decorative">#</span> {channel.name}
-            </span>
+            <span className="min-w-0 flex-1 truncate text-[13px]">{names.reference(channel.id)}</span>
             <SegmentedControl<NotifyLevel>
-              label={`Alerts for #${channel.name}`}
+              label={`Alerts for ${names.reference(channel.id)}`}
               options={LEVELS}
               value={channel.notify}
               onChange={(level) => setLevels([{ channel, level }])}

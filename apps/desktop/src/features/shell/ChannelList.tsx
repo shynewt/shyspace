@@ -137,8 +137,9 @@ function ChannelItem({
     <>
       <NavItem
         view={{ kind: "channel", id: channel.id }}
-        icon={channel.kind === "private" ? <Lock size={15} aria-label="Private" /> : <Hash size={15} />}
+        icon={channel.kind === "private" ? <Lock size={15} /> : <Hash size={15} />}
         label={channel.name}
+        kind={channel.kind === "private" ? "private channel" : undefined}
         unread={channel.unread}
         mentions={channel.unread_mentions}
         isMuted={channel.notify === "nothing"}

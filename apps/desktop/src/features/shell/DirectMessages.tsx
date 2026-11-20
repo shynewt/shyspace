@@ -54,9 +54,10 @@ function DmItem({ dm, title }: { dm: Channel; title: string }) {
       view={{ kind: "channel", id: dm.id }}
       icon={first ? <Avatar id={first} name={title} size={16} /> : null}
       label={title}
+      kind="direct message"
       unread={dm.unread}
-      // Every message in a DM is for you.
-      mentions={dm.unread}
+      // Every message in a DM is for you, unless you muted it.
+      mentions={dm.notify === "nothing" ? 0 : dm.unread}
       isMuted={dm.notify === "nothing"}
     />
   );

@@ -9,6 +9,7 @@ export function NavItem({
   view,
   icon,
   label,
+  kind,
   unread = 0,
   countNoun = "unread",
   mentions = 0,
@@ -22,6 +23,8 @@ export function NavItem({
   view: View;
   icon: ReactNode;
   label: string;
+  /** What it is, for screen readers, when the icon alone says it ("private channel"). */
+  kind?: string;
   /** Messages you haven't read; shown as a count and bold label. */
   unread?: number;
   /** What the count is, for screen readers ("unread" unless said). */
@@ -57,8 +60,8 @@ export function NavItem({
         type="button"
         aria-current={isActive ? "page" : undefined}
         aria-label={
-          hasUnread || status
-            ? accessibleName(label, status?.label, hasUnread ? unread : 0, mentions, countNoun)
+          hasUnread || status || kind
+            ? accessibleName([label, kind, status?.label], hasUnread ? unread : 0, mentions, countNoun)
             : undefined
         }
         onClick={() => navigate(view)}
@@ -105,15 +108,8 @@ export function NavItem({
 }
 
 /** "random, muted, 2 unread, 1 mentions you": what the badges and icons show. */
-function accessibleName(
-  label: string,
-  status: string | undefined,
-  unread: number,
-  mentions: number,
-  countNoun: string,
-): string {
-  const parts = [label];
-  if (status) parts.push(status);
+function accessibleName(names: (string | undefined)[], unread: number, mentions: number, countNoun: string): string {
+  const parts = names.filter((name): name is string => Boolean(name));
   if (unread > 0) parts.push(`${unread} ${countNoun}`);
   if (unread > 0 && mentions > 0) parts.push(`${mentions} ${mentions === 1 ? "mentions" : "mention"} you`);
   return parts.join(", ");

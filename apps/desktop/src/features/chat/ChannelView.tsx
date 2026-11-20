@@ -9,6 +9,7 @@ import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { EmptyState, Spinner, springs, Tooltip } from "../../ui";
 import { ChannelTitle } from "../private/ChannelTitle";
+import { WriteGate } from "../private/WriteGate";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 import { ThreadPanel } from "./ThreadPanel";
@@ -186,10 +187,10 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
           )}
           {messages && messages.length === 0 && (
             <EmptyState
-              icon={channel?.kind === "public" ? <Hash size={22} /> : <Lock size={22} />}
+              icon={channel && channel.kind !== "public" ? <Lock size={22} /> : <Hash size={22} />}
               title={`This is the start of ${channel?.kind === "dm" ? "your conversation with " : "#"}${channel ? channelTitle(channel, members) : ""}`}
             >
-              {channel?.kind === "public"
+              {!channel || channel.kind === "public"
                 ? "Say hi. Only workspace members can read what you write."
                 : "Only the people in it can read what you write, not even the workspace admin."}
             </EmptyState>
@@ -223,11 +224,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
           </AnimatePresence>
         </div>
 
-        {channel?.is_member === false ? (
-          <p className="mx-5 mb-4 rounded-xl border border-line bg-surface-2 px-4 py-3 text-[13px] text-muted">
-            You're no longer in this channel. You can still read what was said while you were in it.
-          </p>
-        ) : (
+        <WriteGate channelId={channelId}>
           <Composer
             channelId={channelId}
             label={composerLabel(channel, members)}
@@ -239,7 +236,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
             onEditDone={() => setEditing(null)}
             onEditLast={() => setEditing(messages?.findLast((message) => message.can_edit) ?? null)}
           />
-        )}
+        </WriteGate>
       </div>
       <AnimatePresence>
         {openThread && (

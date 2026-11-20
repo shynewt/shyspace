@@ -83,6 +83,14 @@ export class FakePrivate {
     return id;
   }
 
+  /** Someone else's change to a channel you're in, as their ops would bring it. */
+  receiveChange(channel: string, change: { removed?: string; owner?: string }): void {
+    const found = this.require(channel);
+    if (change.removed) found.members = found.members.filter((member) => member !== change.removed);
+    if (change.owner) found.owner = change.owner;
+    this.changed();
+  }
+
   private create(name: string, members: string[]): string {
     const me = this.context.me();
     const id = `p:${ownedId(me)}${randomHex(8)}`;

@@ -135,6 +135,24 @@ export class FakeBackend {
     return this.private.receive(owner, name, others);
   }
 
+  /** The owner of the private channel `name` removed you from it. */
+  removeMeFromPrivateChannel(name: string): void {
+    this.private.receiveChange(this.chat.channelNamed(name).id, { removed: this.me() });
+  }
+
+  /** The owner of the private channel `name` made you its owner. */
+  makeMeOwnerOf(name: string): void {
+    this.private.receiveChange(this.chat.channelNamed(name).id, { owner: this.me() });
+  }
+
+  /** `member` was removed from the workspace. */
+  removeFromWorkspace(member: string): void {
+    const found = this.members.find((candidate) => candidate.id === member);
+    if (!found) throw new Error(`fake backend: no member ${member}`);
+    found.active = false;
+    this.notify({ kind: "members" });
+  }
+
   receiveMessage(author: string, channelName: string, text: string): string {
     return this.chat.receiveMessage(author, channelName, text);
   }

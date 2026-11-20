@@ -70,14 +70,12 @@ function NewPrivateChannelForm({ onDone }: { onDone: () => void }) {
           />
         )}
       </Field>
-      {members && (
-        <MemberPicker
-          label="People to add"
-          members={members}
-          chosen={chosen}
-          onToggle={(member) => setChosen(toggled(chosen, member))}
-        />
-      )}
+      <MemberPicker
+        label="People to add"
+        members={members}
+        chosen={chosen}
+        onToggle={(member) => setChosen(toggled(chosen, member))}
+      />
       <FormError message={error} />
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>
@@ -133,15 +131,14 @@ function NewDmForm({ onDone }: { onDone: () => void }) {
   };
   return (
     <div className="flex flex-col gap-4">
-      {members && (
-        <MemberPicker
-          label="People to message"
-          members={members}
-          chosen={chosen}
-          onToggle={(member) => setChosen(toggled(chosen, member))}
-        />
-      )}
-      <FormError message={isTooMany ? `A DM can have up to ${MAX_DM_OTHERS} other people.` : error} />
+      <MemberPicker
+        label="People to message"
+        members={members}
+        chosen={chosen}
+        onToggle={(member) => setChosen(toggled(chosen, member))}
+      />
+      {isTooMany && <p className="text-[12px] text-warning-text">A DM can have up to {MAX_DM_OTHERS} other people.</p>}
+      <FormError message={error} />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onDone}>
           Cancel

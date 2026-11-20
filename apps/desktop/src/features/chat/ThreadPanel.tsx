@@ -5,6 +5,7 @@ import { api, type Message } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { Button, IconButton, Spinner, springs } from "../../ui";
+import { WriteGate } from "../private/WriteGate";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 
@@ -132,17 +133,19 @@ export function ThreadPanel({
           />
         ))}
       </div>
-      <Composer
-        channelId={channelId}
-        label="Reply in thread"
-        threadRoot={root}
-        onSent={() => {
-          isAtEnd.current = true;
-        }}
-        editing={editing}
-        onEditDone={() => setEditing(null)}
-        onEditLast={() => setEditing(thread?.findLast((message) => message.can_edit) ?? null)}
-      />
+      <WriteGate channelId={channelId}>
+        <Composer
+          channelId={channelId}
+          label="Reply in thread"
+          threadRoot={root}
+          onSent={() => {
+            isAtEnd.current = true;
+          }}
+          editing={editing}
+          onEditDone={() => setEditing(null)}
+          onEditLast={() => setEditing(thread?.findLast((message) => message.can_edit) ?? null)}
+        />
+      </WriteGate>
     </motion.aside>
   );
 }
