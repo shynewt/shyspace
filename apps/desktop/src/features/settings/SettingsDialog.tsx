@@ -131,10 +131,13 @@ function SettingsWindow({
         ))}
       </Tabs.List>
       {SETTINGS_SECTIONS.map((section) => (
+        // Every section stays mounted while Settings is open, so typed text and
+        // a save still running survive looking at another section.
         <Tabs.Content
           key={section.id}
           value={section.id}
-          className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 outline-none"
+          forceMount
+          className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 outline-none data-[state=inactive]:hidden"
         >
           <header className="mb-5">
             <h3 className="text-[15px] font-semibold">{section.label}</h3>

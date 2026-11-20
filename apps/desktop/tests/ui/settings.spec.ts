@@ -238,3 +238,29 @@ test("reduce motion can be turned off when the system asks for less", async ({ p
   const transforms = await transformsWhileOpeningADialog(page);
   expect(transforms.some((transform) => transform.startsWith("matrix("))).toBe(true);
 });
+
+test("typed text waits while you look at another section", async ({ page }) => {
+  const settings = await openSettings(page);
+  await settings.getByLabel("Display name").fill("Ada Lovelace");
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+  await settings.getByRole("tab", { name: "Profile" }).click();
+
+  await expect(settings.getByLabel("Display name")).toHaveValue("Ada Lovelace");
+});
+
+test("a storage save that ends on another section still shows the new kit", async ({ page }) => {
+  const settings = await openSettings(page);
+  await settings.getByRole("tab", { name: "Storage" }).click();
+  await page.evaluate(() => {
+    const answer = window.fake.handle.bind(window.fake);
+    window.fake.handle = (command, args) =>
+      command === "update_storage"
+        ? new Promise((resolve) => setTimeout(() => resolve(answer(command, args)), 400))
+        : answer(command, args);
+  });
+  await settings.getByLabel("Secret key").fill("new-secret");
+  await settings.getByRole("button", { name: "Save storage settings" }).click();
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+
+  await expect(page.getByRole("dialog", { name: "Save your updated recovery kit" })).toBeVisible();
+});

@@ -31,7 +31,7 @@ test("a waiting join request shows a badge until it is approved", async ({ page 
   await expect(settings.getByRole("tab", { name: "Members 1 join request waiting" })).toBeVisible();
   await expect(membersTabs(page).getByRole("tab", { name: /Requests/ })).toHaveAttribute("aria-selected", "true");
   await expect(settings.getByText("1234 5678 9012 3456 7890")).toBeVisible();
-  await expect(settings.getByText(/end-to-end encryption ends there/)).toBeVisible();
+  await expect(settings.getByText(/end-to-end encryption ends there/).filter({ visible: true })).toBeVisible();
   await settings.getByRole("button", { name: "Codes match, let in" }).click();
 
   await expect(settings.getByText("Claude wants to join")).toHaveCount(0);
