@@ -84,7 +84,7 @@ function ChannelAlerts() {
         {sorted.map((channel) => (
           <li key={channel.id} className="flex items-center gap-3 py-1">
             <span className="min-w-0 flex-1 truncate text-[13px]">
-              <span className="text-faint">#</span> {channel.name}
+              <span className="text-decorative">#</span> {channel.name}
             </span>
             <SegmentedControl<NotifyLevel>
               label={`Alerts for #${channel.name}`}

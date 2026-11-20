@@ -264,3 +264,23 @@ test("a storage save that ends on another section still shows the new kit", asyn
 
   await expect(page.getByRole("dialog", { name: "Save your updated recovery kit" })).toBeVisible();
 });
+
+test("opening settings with the mouse leaves no focus ring on its sections", async ({ page }) => {
+  await page.goto("");
+  await page.getByLabel("Message #general").click();
+  await page.getByRole("button", { name: /^Ada\b/ }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  const profile = page.getByRole("dialog", { name: "Settings" }).getByRole("tab", { name: "Profile" });
+
+  await expect(profile).toBeFocused();
+  await expect(profile).toHaveCSS("outline-style", "none");
+  await expect(profile).toHaveCSS("box-shadow", "none");
+});
+
+test("moving between sections with the keyboard shows where focus is", async ({ page }) => {
+  const settings = await openSettings(page);
+  await page.keyboard.press("ArrowDown");
+
+  await expect(settings.getByRole("tab", { name: "Appearance" })).toBeFocused();
+  await expect(settings.getByRole("tab", { name: "Appearance" })).toHaveCSS("outline-style", "solid");
+});

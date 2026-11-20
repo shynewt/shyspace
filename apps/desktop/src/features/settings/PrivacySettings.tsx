@@ -16,8 +16,8 @@ export function PrivacySettings() {
         </div>
       </div>
       <details className="group rounded-xl border border-line px-4 py-3">
-        <summary className="flex cursor-default list-none items-center gap-1.5 text-[13px] font-medium outline-none [&::-webkit-details-marker]:hidden">
-          <ChevronRight size={14} className="text-faint transition-transform group-open:rotate-90" />
+        <summary className="flex cursor-default list-none items-center gap-1.5 rounded-md text-[13px] font-medium [&::-webkit-details-marker]:hidden">
+          <ChevronRight size={14} className="text-decorative transition-transform group-open:rotate-90" />
           How it works
         </summary>
         <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-9 text-[12.5px] leading-relaxed text-muted">

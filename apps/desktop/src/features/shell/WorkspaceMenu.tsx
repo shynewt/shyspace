@@ -47,7 +47,7 @@ function WorkspaceMenuButton({ items, waitingRequests }: { items: MenuItem[]; wa
           className="-mx-1.5 flex w-[calc(100%+0.75rem)] min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-surface-2 data-[state=open]:bg-surface-2"
         >
           <span className="truncate text-[14px] font-semibold tracking-tight">{session.workspace_name}</span>
-          <ChevronDown size={14} className="shrink-0 text-faint" />
+          <ChevronDown size={14} className="shrink-0 text-decorative" />
           <JoinRequestsBadge count={waitingRequests} />
         </button>
       }

@@ -137,7 +137,7 @@ function SettingsWindow({
           key={section.id}
           value={section.id}
           forceMount
-          className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 outline-none data-[state=inactive]:hidden"
+          className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 -outline-offset-2 data-[state=inactive]:hidden"
         >
           <header className="mb-5">
             <h3 className="text-[15px] font-semibold">{section.label}</h3>
@@ -172,7 +172,7 @@ function SectionTab({
     <Tabs.Trigger
       value={section}
       className={cx(
-        "relative flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset",
+        "relative flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] -outline-offset-2 transition-colors",
         isActive ? "font-medium text-ink" : "text-muted hover:bg-surface-2 hover:text-ink",
       )}
     >
@@ -185,7 +185,9 @@ function SectionTab({
           <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent" />
         </motion.span>
       )}
-      <span className={cx("relative", isActive ? "text-accent" : "text-faint")}>{SECTION_VIEWS[section].icon}</span>
+      <span className={cx("relative", isActive ? "text-accent" : "text-decorative")}>
+        {SECTION_VIEWS[section].icon}
+      </span>
       <span className="relative truncate">{label}</span>
       {badge}
     </Tabs.Trigger>

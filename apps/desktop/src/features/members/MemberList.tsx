@@ -23,7 +23,7 @@ export function SearchableMemberList({ label, members, actions }: ListProps) {
   return (
     <div className="flex flex-col gap-2">
       <div className="relative">
-        <Search size={14} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
+        <Search size={14} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-decorative" />
         <Input
           type="search"
           value={query}
@@ -94,7 +94,9 @@ function MemberStatusLine({ member }: { member: Member }) {
     <span>
       {member.status.emoji} {member.status.text}
       {member.status.alerts !== "all" && (
-        <span className="ml-1 text-warning">· {member.status.alerts === "nothing" ? "Busy" : "Mentions only"}</span>
+        <span className="ml-1 text-warning-text">
+          · {member.status.alerts === "nothing" ? "Busy" : "Mentions only"}
+        </span>
       )}
     </span>
   );

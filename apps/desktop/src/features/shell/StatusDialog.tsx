@@ -187,7 +187,7 @@ function EmojiChoice({ emoji, onChange }: { emoji: string; onChange: (emoji: str
           aria-label={emoji ? `Choose an emoji (now ${emoji})` : "Choose an emoji"}
           className="grid h-9 w-12 place-items-center rounded-lg border border-line bg-bg text-[18px] transition-colors hover:border-surface-3 data-[state=open]:border-accent"
         >
-          {emoji || <Smile size={16} className="text-faint" />}
+          {emoji || <Smile size={16} className="text-decorative" />}
         </button>
       }
     >

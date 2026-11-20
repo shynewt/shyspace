@@ -35,14 +35,14 @@ export function MembersSettings({ tab, onTabChange }: { tab: MembersTab; onTabCh
           Requests <WaitingRequestsBadge />
         </TabTrigger>
       </Tabs.List>
-      <Tabs.Content value="members" className="outline-none">
+      <Tabs.Content value="members">
         <MemberDirectory />
       </Tabs.Content>
-      <Tabs.Content value="invites" className="flex flex-col gap-5 outline-none">
+      <Tabs.Content value="invites" className="flex flex-col gap-5">
         <CreateInvite />
         <OpenInvites />
       </Tabs.Content>
-      <Tabs.Content value="requests" className="outline-none">
+      <Tabs.Content value="requests">
         <JoinRequestList />
       </Tabs.Content>
     </Tabs.Root>
@@ -54,7 +54,7 @@ function TabTrigger({ value, isActive, children }: { value: MembersTab; isActive
     <Tabs.Trigger
       value={value}
       className={cx(
-        "-mb-px flex h-9 items-center gap-1.5 border-b-2 text-[13px] outline-none transition-colors focus-visible:rounded-t-md focus-visible:ring-2 focus-visible:ring-accent",
+        "-mb-px flex h-9 items-center gap-1.5 rounded-t-md border-b-2 text-[13px] -outline-offset-2 transition-colors",
         isActive ? "border-accent font-medium text-ink" : "border-transparent text-muted hover:text-ink",
       )}
     >
