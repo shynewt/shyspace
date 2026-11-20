@@ -92,7 +92,7 @@ test("a page can be saved from its header", async ({ page }) => {
   await page.getByLabel("Page title").press("Enter");
   await page.getByRole("button", { name: "Save for later" }).click();
 
-  await expect(page.getByRole("button", { name: "Saved", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Saved for later" })).toHaveAttribute("aria-pressed", "true");
   await later(page).click();
   await expect(page.getByRole("list", { name: "Saved for later" })).toContainText("Spec");
 });
