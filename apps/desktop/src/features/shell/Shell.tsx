@@ -2,6 +2,7 @@ import { UserX } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LaterItem, type Session } from "../../lib/api";
+import { useMembersWithCurrentStatus } from "../../lib/members";
 import type { SettingsTarget } from "../../lib/settings";
 import { SHORTCUTS } from "../../lib/shortcuts";
 import { showToast } from "../../lib/toast";
@@ -30,6 +31,8 @@ export function Shell({ session }: { session: Session }) {
   const channels = useMemo(() => loadedChannels ?? [], [loadedChannels]);
   const pages = useMemo(() => loadedPages ?? [], [loadedPages]);
   const sections = useLive(api.sidebarSections, (change) => change.kind === "channels" || change.kind === "messages");
+  const loadedMembers = useLive(api.members, (change) => change.kind === "members");
+  const members = useMembersWithCurrentStatus(loadedMembers);
   const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
   const { entry, navigate, back, forward, replace, scrollMemory } = useNavigation(
     session.me,
@@ -114,8 +117,8 @@ export function Shell({ session }: { session: Session }) {
 
   const openSettings = useCallback((target: SettingsTarget = { section: "profile" }) => setSettingsTarget(target), []);
   const context = useMemo(
-    () => ({ session, channels, pages, view, navigate, openSettings }),
-    [session, channels, pages, view, navigate, openSettings],
+    () => ({ session, channels, pages, members, view, navigate, openSettings }),
+    [session, channels, pages, members, view, navigate, openSettings],
   );
 
   return (

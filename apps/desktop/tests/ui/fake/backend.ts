@@ -13,6 +13,7 @@ import type {
   Change,
   LaterItem,
   Member,
+  MemberStatus,
   Page,
   ProtectionCheck,
   SectionSort,
@@ -137,6 +138,14 @@ export class FakeBackend {
     const found = this.members.find((candidate) => candidate.id === member);
     if (!found) throw new Error(`fake backend: no member ${member}`);
     found.presence = presence;
+    this.notify({ kind: "members" });
+  }
+
+  /** Sets another member's status, as their own device would. */
+  setMemberStatus(member: string, status: MemberStatus | null): void {
+    const found = this.members.find((candidate) => candidate.id === member);
+    if (!found) throw new Error(`fake backend: no member ${member}`);
+    found.status = status;
     this.notify({ kind: "members" });
   }
 

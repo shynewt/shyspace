@@ -16,6 +16,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink } from "../../lib/api";
 import { ChatMarkdown, messageIdsIn, pageIdsIn, plainPreview } from "../../lib/markdown";
+import { useMember } from "../../lib/members";
 import { displayName, formatFullDate, formatTime, formatWhen } from "../../lib/people";
 import { REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showToast } from "../../lib/toast";
@@ -34,6 +35,7 @@ import {
   springs,
   Tooltip,
 } from "../../ui";
+import { StatusEmoji } from "../members/StatusEmoji";
 import { MessageCard } from "./MessageCard";
 import { PageCard } from "./PageCard";
 import { describeSaved, SavedLabel } from "./SavedLabel";
@@ -67,6 +69,7 @@ export const MessageItem = memo(function MessageItem({
   const linkedMessages = useMemo(() => messageIdsIn(message.text).filter((id) => id !== message.id), [message]);
   const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
   const name = displayName(message.author_name, message.author);
+  const author = useMember(message.author);
   const savedDescription = describeSaved(message.saved);
 
   const openLinkedMessage = (id: string) =>
@@ -118,6 +121,7 @@ export const MessageItem = memo(function MessageItem({
         {!isContinuation && (
           <div className="flex items-baseline gap-2">
             <span className="text-[13.5px] font-semibold">{name}</span>
+            {author && <StatusEmoji member={author} />}
             {message.author_is_bot && <Badge tone="accent">bot</Badge>}
             <MessageTime ms={message.created_ms} className="text-[11.5px] text-faint" />
           </div>

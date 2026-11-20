@@ -37,7 +37,8 @@ test("your status shows to everyone and can be cleared", async ({ page }) => {
   await expect(meButton(page)).toContainText("🎧 Deep work");
 
   const members = await openMembers(page);
-  await expect(members.getByText("🎧 Deep work")).toBeVisible();
+  await expect(members.getByLabel("Status: 🎧 Deep work", { exact: true })).toBeVisible();
+  await expect(members.getByText("Deep work")).toBeVisible();
   await expect(members.getByText("· Busy")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(members).toBeHidden();

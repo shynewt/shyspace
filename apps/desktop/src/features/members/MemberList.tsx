@@ -1,9 +1,10 @@
 import { Search } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { Member } from "../../lib/api";
-import { displayName } from "../../lib/people";
+import { displayName, presenceLabel } from "../../lib/people";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Badge, Input } from "../../ui";
+import { alertsLabel, StatusEmoji } from "./StatusEmoji";
 
 type ListProps = {
   /** The list's accessible name, like "Members". */
@@ -54,12 +55,6 @@ export function MemberRows({ label, members, actions }: ListProps) {
   );
 }
 
-const PRESENCE_LABELS: Record<Member["presence"], string> = {
-  online: "Online",
-  away: "Away",
-  unreachable: "Not reachable right now",
-};
-
 function MemberRow({ member, isMe, actions }: { member: Member; isMe: boolean; actions: ReactNode }) {
   const name = displayName(member.name, member.id);
   return (
@@ -69,35 +64,32 @@ function MemberRow({ member, isMe, actions }: { member: Member; isMe: boolean; a
         name={name}
         isBot={member.is_bot}
         size={32}
-        presence={member.active ? member.presence : undefined}
+        presence={member.active && !member.is_bot ? member.presence : undefined}
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-[13.5px] font-medium">
           <span className="truncate">{name}</span>
+          <StatusEmoji member={member} />
           {isMe && <span className="shrink-0 text-[12px] font-normal text-muted">(you)</span>}
           {member.is_admin && <Badge>Admin</Badge>}
           {member.is_bot && <Badge tone="accent">Bot</Badge>}
         </div>
-        <div className="truncate text-[12px] text-muted">
-          <MemberStatusLine member={member} />
-        </div>
+        <MemberStatusLine member={member} />
       </div>
       {actions}
     </li>
   );
 }
 
+/** Removed, or their status text (the emoji sits by the name) or else presence. Agents show only their tag. */
 function MemberStatusLine({ member }: { member: Member }) {
-  if (!member.active) return <span>Removed</span>;
-  if (!member.status) return <span>{PRESENCE_LABELS[member.presence]}</span>;
+  if (!member.active) return <p className="truncate text-[12px] text-muted">Removed</p>;
+  if (member.is_bot) return null;
+  const alerts = member.status && alertsLabel(member.status);
   return (
-    <span>
-      {member.status.emoji} {member.status.text}
-      {member.status.alerts !== "all" && (
-        <span className="ml-1 text-warning-text">
-          · {member.status.alerts === "nothing" ? "Busy" : "Mentions only"}
-        </span>
-      )}
-    </span>
+    <p className="truncate text-[12px] text-muted">
+      {member.status?.text || presenceLabel(member.presence)}
+      {alerts && <span className="ml-1 text-warning-text">· {alerts}</span>}
+    </p>
   );
 }

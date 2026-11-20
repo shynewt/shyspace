@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { Channel, LaterItem, LinkedMessage, Page, Session } from "./api";
+import type { Channel, LaterItem, LinkedMessage, Member, Page, Session } from "./api";
 import type { SettingsTarget } from "./settings";
 
 export type View =
@@ -17,6 +17,8 @@ export type WorkspaceContextValue = {
   session: Session;
   channels: Channel[];
   pages: Page[];
+  /** Everyone, former members too, with ended statuses dropped; undefined until loaded. */
+  members: Member[] | undefined;
   view: View | null;
   navigate: (view: View) => void;
   /** Opens Settings, at Profile unless a section is given. */

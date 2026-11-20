@@ -1,7 +1,7 @@
 import { Smile } from "lucide-react";
 import { useRef, useState } from "react";
 import { api, type MemberStatus, type NotifyLevel } from "../../lib/api";
-import { formatTime } from "../../lib/people";
+import { formatStatusEnd } from "../../lib/people";
 import { showToast } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useFormAction } from "../../lib/useFormAction";
@@ -32,12 +32,6 @@ function clearTime(choice: ClearAfter, currentEnd: number | null, now: Date): nu
     return endOfDay.getTime();
   }
   return null;
-}
-
-/** "17:00" for later today, "Sat 02:00" for another day. */
-function describeEnd(ms: number): string {
-  const isToday = new Date(ms).toDateString() === new Date().toDateString();
-  return isToday ? formatTime(ms) : `${new Date(ms).toLocaleDateString([], { weekday: "short" })} ${formatTime(ms)}`;
 }
 
 /** Sets your status: what others see by your name, and how quiet your alerts are meanwhile. */
@@ -78,7 +72,7 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
     setAlerts(preset.alerts);
   };
   const clearChoices: Array<{ value: ClearAfter; label: string }> = [
-    ...(currentEnd ? [{ value: "unchanged" as const, label: `Until ${describeEnd(currentEnd)}` }] : []),
+    ...(currentEnd ? [{ value: "unchanged" as const, label: `Until ${formatStatusEnd(currentEnd)}` }] : []),
     { value: "never", label: "Never" },
     { value: "hour", label: "1 hour" },
     { value: "four_hours", label: "4 hours" },

@@ -2,19 +2,20 @@ import { AtSign, Bot } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { api } from "../../lib/api";
+import type { Member } from "../../lib/api";
 import { emojiQueryAt } from "../../lib/emojiQuery";
+import { useMembers } from "../../lib/members";
 import { mentionQueryAt, withMentionLinks } from "../../lib/mentions";
 import { usePreferences, validRecentEmoji, withRecentEmoji } from "../../lib/preferences";
 import { reportError } from "../../lib/toast";
-import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, cx, pop, springs } from "../../ui";
 import { type CatalogEmoji, type EmojiCatalog, loadEmojiCatalog, searchEmoji } from "../../ui/emojiData";
+import { describeStatus, shownStatus } from "../members/StatusEmoji";
 
 const MAX_SUGGESTIONS = 6;
 
-type Person = { kind: "person"; name: string; id: string | null; isBot: boolean; detail: string };
+type Person = { kind: "person"; name: string; member: Member | null; detail: string };
 type EmojiSuggestion = { kind: "emoji"; emoji: CatalogEmoji };
 type Suggestion = Person | EmojiSuggestion;
 
@@ -22,8 +23,8 @@ type Suggestion = Person | EmojiSuggestion;
 type Query = { kind: "person" | "emoji"; start: number; query: string };
 
 const EVERYONE: Person[] = [
-  { kind: "person", name: "channel", id: null, isBot: false, detail: "Notify everyone in this channel" },
-  { kind: "person", name: "here", id: null, isBot: false, detail: "Notify everyone online" },
+  { kind: "person", name: "channel", member: null, detail: "Notify everyone in this channel" },
+  { kind: "person", name: "here", member: null, detail: "Notify everyone online" },
 ];
 
 /**
@@ -33,8 +34,7 @@ const EVERYONE: Person[] = [
  */
 export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null>, setText: (text: string) => void) {
   const { session } = useWorkspace();
-  const loadMembers = useCallback(() => api.members(), []);
-  const members = useLive(loadMembers, (change) => change.kind === "members") ?? [];
+  const members = useMembers() ?? [];
   const [preferences, updatePreferences] = usePreferences();
   const [query, setQuery] = useState<Query | null>(null);
   const [selected, setSelected] = useState(0);
@@ -64,13 +64,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     const wanted = query.query.toLowerCase();
     const people: Person[] = members
       .filter((member) => member.active && member.id !== session.me && member.name)
-      .map((member) => ({
-        kind: "person",
-        name: member.name,
-        id: member.id,
-        isBot: member.is_bot,
-        detail: member.is_bot ? "bot" : "",
-      }));
+      .map((member) => ({ kind: "person", name: member.name, member, detail: "" }));
     return [...people, ...EVERYONE]
       .filter((suggestion) => suggestion.name.toLowerCase().startsWith(wanted))
       .slice(0, MAX_SUGGESTIONS);
@@ -97,7 +91,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
       });
     } else {
       inserted = `@${suggestion.name} `;
-      if (suggestion.id) picked.current.set(suggestion.name, suggestion.id);
+      if (suggestion.member) picked.current.set(suggestion.name, suggestion.member.id);
     }
     const before = element.value.slice(0, query.start) + inserted;
     flushSync(() => {
@@ -151,7 +145,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     >
       {suggestions.map((suggestion, index) => (
         <button
-          key={suggestion.kind === "emoji" ? suggestion.emoji.emoji : (suggestion.id ?? suggestion.name)}
+          key={suggestion.kind === "emoji" ? suggestion.emoji.emoji : (suggestion.member?.id ?? suggestion.name)}
           type="button"
           role="option"
           id={`${listId}-${index}`}
@@ -183,18 +177,35 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
 }
 
 function PersonRow({ person }: { person: Person }) {
-  return (
-    <>
-      {person.id ? (
-        <Avatar id={person.id} name={person.name} isBot={person.isBot} size={22} />
-      ) : (
+  const { member } = person;
+  if (!member) {
+    return (
+      <>
         <span className="grid h-[22px] w-[22px] place-items-center rounded-full bg-surface-2 text-muted">
           <AtSign size={13} />
         </span>
-      )}
+        <span className="font-medium">{person.name}</span>
+        <span className="truncate text-[12px] text-faint">{person.detail}</span>
+      </>
+    );
+  }
+  const status = shownStatus(member);
+  return (
+    <>
+      <Avatar
+        id={member.id}
+        name={person.name}
+        isBot={member.is_bot}
+        size={22}
+        presence={member.is_bot ? undefined : member.presence}
+      />
       <span className="font-medium">{person.name}</span>
-      {person.isBot && <Bot size={13} className="text-accent" />}
-      <span className="truncate text-[12px] text-faint">{person.id ? "" : person.detail}</span>
+      {status?.emoji && (
+        <span role="img" aria-label={`Status: ${describeStatus(status)}`}>
+          {status.emoji}
+        </span>
+      )}
+      {member.is_bot && <Bot size={13} className="text-accent" />}
     </>
   );
 }

@@ -1,9 +1,27 @@
+import type { PresenceState } from "./api";
+
+const PRESENCE_LABELS: Record<PresenceState, string> = {
+  online: "Online",
+  away: "Away",
+  unreachable: "Not reachable right now",
+};
+
+export function presenceLabel(presence: PresenceState): string {
+  return PRESENCE_LABELS[presence];
+}
+
 export function displayName(name: string, id: string) {
   return name.trim() || `member ${id.slice(0, 6)}`;
 }
 
 export function formatTime(ms: number) {
   return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/** When a status ends: "17:00" later today, "Sat 02:00" on another day. */
+export function formatStatusEnd(ms: number): string {
+  const isToday = new Date(ms).toDateString() === new Date().toDateString();
+  return isToday ? formatTime(ms) : `${new Date(ms).toLocaleDateString([], { weekday: "short" })} ${formatTime(ms)}`;
 }
 
 /** "Friday, November 20, 2026 at 9:05 AM". */

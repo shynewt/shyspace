@@ -1,19 +1,13 @@
 import { Eye, EyeOff, Settings, Smile, TriangleAlert, X } from "lucide-react";
 import { useState } from "react";
 import { api, type Member } from "../../lib/api";
-import { displayName } from "../../lib/people";
+import { displayName, presenceLabel } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Menu, type MenuItem } from "../../ui";
 import { StorageAttentionSign, useStorageNeedsAttention } from "../settings/StorageProtection";
 import { StatusDialog } from "./StatusDialog";
-
-const PRESENCE_LABELS: Record<Member["presence"], string> = {
-  online: "Online",
-  away: "Away",
-  unreachable: "Not reachable right now",
-};
 
 /** You, at the foot of the sidebar: your status, appearing offline, and Settings. */
 export function MeMenu() {
@@ -86,5 +80,5 @@ function statusLine(me: Member, isOffline: boolean): string {
     if (me.status.alerts === "nothing") return "Alerts paused";
   }
   if (isOffline) return "Appearing offline";
-  return PRESENCE_LABELS[me.presence];
+  return presenceLabel(me.presence);
 }

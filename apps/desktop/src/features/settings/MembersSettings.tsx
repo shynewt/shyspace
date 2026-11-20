@@ -1,8 +1,7 @@
 import { Tabs } from "radix-ui";
 import type { ReactNode } from "react";
-import { api } from "../../lib/api";
+import { useMembers } from "../../lib/members";
 import type { MembersTab } from "../../lib/settings";
-import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { cx, SectionLabel } from "../../ui";
 import { CreateInvite, OpenInvites } from "../members/Invites";
@@ -65,7 +64,7 @@ function TabTrigger({ value, isActive, children }: { value: MembersTab; isActive
 
 function MemberDirectory() {
   const { session } = useWorkspace();
-  const members = useLive(api.members, (change) => change.kind === "members");
+  const members = useMembers();
   if (!members) return null;
   const active = members.filter((member) => member.active);
   const former = members.filter((member) => !member.active);
