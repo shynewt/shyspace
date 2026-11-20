@@ -2,11 +2,13 @@ import { Bot, Hash, Lock } from "lucide-react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type Message, type MessageCursor } from "../../lib/api";
+import { channelReference, channelTitle, composerLabel } from "../../lib/channels";
 import { formatDay } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { EmptyState, Spinner, springs, Tooltip } from "../../ui";
+import { ChannelTitle } from "../private/ChannelTitle";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 import { ThreadPanel } from "./ThreadPanel";
@@ -53,6 +55,7 @@ function toRows(messages: Message[], unreadFrom: string | null): Row[] {
 export function ChannelView({ channelId, thread, focus }: { channelId: string; thread?: string; focus?: string }) {
   const { channels, session } = useWorkspace();
   const channel = channels.find((candidate) => candidate.id === channelId);
+  const members = useLive(api.members, (change) => change.kind === "members");
   // Where you left off, as of opening the channel: the line stays put while
   // you read, until Escape dismisses it.
   const [lastReadOnOpen] = useState(() => channel?.last_read ?? null);
@@ -158,8 +161,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-          <Hash size={17} className="text-decorative" />
-          <h1 className="text-[15px] font-semibold">{channel?.name ?? "…"}</h1>
+          {channel ? <ChannelTitle channel={channel} members={members} /> : <h1 className="text-[15px]">…</h1>}
           <AgentsNote />
           <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
             <Lock size={11} /> End-to-end encrypted
@@ -169,7 +171,7 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
         <div
           ref={scroller}
           role="log"
-          aria-label={`Messages in #${channel?.name ?? ""}`}
+          aria-label={`Messages in ${channelReference(channel, members)}`}
           onScroll={(event) => {
             const element = event.currentTarget;
             isPinnedToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_EDGE_PX;
@@ -183,8 +185,13 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
             </div>
           )}
           {messages && messages.length === 0 && (
-            <EmptyState icon={<Hash size={22} />} title={`This is the start of #${channel?.name ?? ""}`}>
-              Say hi. Only workspace members can read what you write.
+            <EmptyState
+              icon={channel?.kind === "public" ? <Hash size={22} /> : <Lock size={22} />}
+              title={`This is the start of ${channel?.kind === "dm" ? "your conversation with " : "#"}${channel ? channelTitle(channel, members) : ""}`}
+            >
+              {channel?.kind === "public"
+                ? "Say hi. Only workspace members can read what you write."
+                : "Only the people in it can read what you write, not even the workspace admin."}
             </EmptyState>
           )}
           <AnimatePresence initial={false}>
@@ -216,17 +223,23 @@ export function ChannelView({ channelId, thread, focus }: { channelId: string; t
           </AnimatePresence>
         </div>
 
-        <Composer
-          channelId={channelId}
-          label={`Message #${channel?.name ?? ""}`}
-          threadRoot={null}
-          onSent={() => {
-            isPinnedToBottom.current = true;
-          }}
-          editing={editing}
-          onEditDone={() => setEditing(null)}
-          onEditLast={() => setEditing(messages?.findLast((message) => message.can_edit) ?? null)}
-        />
+        {channel?.is_member === false ? (
+          <p className="mx-5 mb-4 rounded-xl border border-line bg-surface-2 px-4 py-3 text-[13px] text-muted">
+            You're no longer in this channel. You can still read what was said while you were in it.
+          </p>
+        ) : (
+          <Composer
+            channelId={channelId}
+            label={composerLabel(channel, members)}
+            threadRoot={null}
+            onSent={() => {
+              isPinnedToBottom.current = true;
+            }}
+            editing={editing}
+            onEditDone={() => setEditing(null)}
+            onEditLast={() => setEditing(messages?.findLast((message) => message.can_edit) ?? null)}
+          />
+        )}
       </div>
       <AnimatePresence>
         {openThread && (

@@ -1,4 +1,15 @@
-import { ArrowDownAZ, ChevronRight, Clock, Ellipsis, FolderPlus, ListFilter, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowDownAZ,
+  ChevronRight,
+  Clock,
+  Ellipsis,
+  FolderPlus,
+  ListFilter,
+  Lock,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type SectionSort, type SidebarSection } from "../../lib/api";
@@ -7,6 +18,7 @@ import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs } from "../../ui";
+import { NewPrivateChannelDialog } from "../private/NewPrivateDialogs";
 import { ChannelList, listedChannels } from "./ChannelList";
 
 const SORTS: { sort: SectionSort; label: string; icon: ReactNode }[] = [
@@ -19,6 +31,7 @@ export function ChannelSections() {
   const sections = useLive(api.sidebarSections, (change) => change.kind === "channels" || change.kind === "messages");
   const [isUnreadOnly, setUnreadOnly] = useState(false);
   const [isAddingSection, setAddingSection] = useState(false);
+  const [isCreatingPrivate, setCreatingPrivate] = useState(false);
   // Each opening of the new-channel field is a fresh one: reopening while
   // the last one fades out must not revive it, already submitted.
   const [newChannelRound, setNewChannelRound] = useState<number | null>(null);
@@ -60,8 +73,10 @@ export function ChannelSections() {
             )
           }
           onAddSection={() => setAddingSection(true)}
+          onNewPrivateChannel={section.is_builtin ? () => setCreatingPrivate(true) : undefined}
         />
       ))}
+      <NewPrivateChannelDialog open={isCreatingPrivate} onOpenChange={setCreatingPrivate} />
       <AnimatePresence>
         {isAddingSection && (
           <SectionNameInput
@@ -84,6 +99,7 @@ function Section({
   onAddDone,
   builtinActions,
   onAddSection,
+  onNewPrivateChannel,
 }: {
   section: SidebarSection;
   sections: SidebarSection[];
@@ -92,6 +108,8 @@ function Section({
   onAddDone: () => void;
   builtinActions: ReactNode;
   onAddSection: () => void;
+  /** Offered in the menu of the section new channels go to. */
+  onNewPrivateChannel?: () => void;
 }) {
   const { channels, view } = useWorkspace();
   const [isRenaming, setRenaming] = useState(false);
@@ -110,6 +128,9 @@ function Section({
     },
     { label: "New section", icon: <FolderPlus size={14} />, onSelect: onAddSection },
   ];
+  if (onNewPrivateChannel) {
+    items.unshift({ label: "New private channel", icon: <Lock size={14} />, onSelect: onNewPrivateChannel });
+  }
   if (!section.is_builtin) {
     items.unshift({ label: "Rename section", icon: <Pencil size={14} />, onSelect: () => setRenaming(true) });
     items.push({

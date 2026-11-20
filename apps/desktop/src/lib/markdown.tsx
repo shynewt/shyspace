@@ -11,7 +11,8 @@ import { reportError } from "./toast";
 
 /** The id part of `shy://page/<id>` and `shy://message/<id>` links. */
 const PAGE_ID = "[0-9a-f]+";
-const MESSAGE_ID = "[0-9a-f]+";
+/** A message id; in a private channel or DM it starts with the channel, like `p:…/…`. */
+const MESSAGE_ID = "(?:(?:p|dm):[0-9a-f]+/)?[0-9a-f]+";
 
 const PAGE_LINK = new RegExp(`^shy://page/(${PAGE_ID})$`);
 const MESSAGE_LINK = new RegExp(`^shy://message/(${MESSAGE_ID})$`);

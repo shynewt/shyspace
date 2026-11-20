@@ -1,4 +1,4 @@
-import { Bell, BellMinus, BellOff, Ellipsis, FolderInput, Hash, Pencil, Trash2 } from "lucide-react";
+import { Bell, BellMinus, BellOff, Ellipsis, FolderInput, Hash, Lock, Pencil, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Channel, type NotifyLevel, type SidebarSection } from "../../lib/api";
@@ -30,7 +30,10 @@ export function listedChannels(
   view: View | null,
   isUnreadOnly: boolean,
 ): Channel[] {
-  const inSection = channelIds.flatMap((id) => channels.filter((channel) => channel.id === id));
+  // DMs have their own section.
+  const inSection = channelIds.flatMap((id) =>
+    channels.filter((channel) => channel.id === id && channel.kind !== "dm"),
+  );
   if (!isUnreadOnly) return inSection;
   // The open channel stays listed, so filtering never hides where you are.
   return inSection.filter((channel) => channel.unread > 0 || (view?.kind === "channel" && view.id === channel.id));
@@ -134,7 +137,7 @@ function ChannelItem({
     <>
       <NavItem
         view={{ kind: "channel", id: channel.id }}
-        icon={<Hash size={15} />}
+        icon={channel.kind === "private" ? <Lock size={15} aria-label="Private" /> : <Hash size={15} />}
         label={channel.name}
         unread={channel.unread}
         mentions={channel.unread_mentions}

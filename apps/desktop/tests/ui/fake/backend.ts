@@ -130,9 +130,9 @@ export class FakeBackend {
   /** Desktop notifications the app asked to show. */
   readonly alertsShown: { title: string; body: string }[] = [];
 
-  /** Someone else made a private channel with you in it. */
-  receivePrivateChannel(owner: string, name: string, members: string[]): string {
-    return this.private.receive(owner, name, members);
+  /** Someone else made a private channel with you (and `others`) in it. */
+  receivePrivateChannel(owner: string, name: string, others: string[] = []): string {
+    return this.private.receive(owner, name, others);
   }
 
   receiveMessage(author: string, channelName: string, text: string): string {

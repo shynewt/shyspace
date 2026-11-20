@@ -38,7 +38,7 @@ Keep the diff to what the task needs. If you notice an unrelated problem, open a
 | `apps/desktop/src-tauri` | one Tauri command per `Workspace` call, event forwarding | contain business logic |
 | `apps/desktop/src/lib` | the `invoke` bridge (`api.ts`), hooks, pure helpers | render UI |
 | `apps/desktop/src/ui` | the design system: tokens, motion presets, shared components | know about workspaces, chat or pages |
-| `apps/desktop/src/features/<feature>` | one folder per feature (`shell`, `chat`, `inbox`, `pages`, `members`, `search`, `onboarding`) | call `invoke` directly (go through `api.ts`), restyle `ui` components |
+| `apps/desktop/src/features/<feature>` | one folder per feature (`shell`, `chat`, `inbox`, `pages`, `members`, `private`, `search`, `onboarding`, …) | call `invoke` directly (go through `api.ts`), restyle `ui` components |
 
 Inside `shy-core`, each file has one job (see the file map in `docs/architecture.md`). A new concern gets a new module. Past ~400 lines, split the file by responsibility.
 

@@ -5,6 +5,7 @@ import { shortcutKeys } from "../../lib/shortcuts";
 import { useLive } from "../../lib/useLive";
 import { Kbd, Logo } from "../../ui";
 import { ChannelSections } from "./ChannelSections";
+import { DirectMessages } from "./DirectMessages";
 import { MeMenu } from "./MeMenu";
 import { NavItem } from "./NavItem";
 import { PagesSection } from "./PagesSection";
@@ -38,6 +39,7 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
         <InboxLink />
         <LaterLink />
         <ChannelSections />
+        <DirectMessages />
 
         <PagesSection />
       </nav>

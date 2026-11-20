@@ -75,10 +75,10 @@ export class FakePrivate {
     return this.view(channel)?.is_member ?? true;
   }
 
-  /** Someone else made a private channel with you in it, as their ops would. */
-  receive(owner: string, name: string, members: readonly string[]): string {
+  /** Someone else made a private channel with you (and `others`) in it, as their ops would. */
+  receive(owner: string, name: string, others: readonly string[]): string {
     const id = `p:${ownedId(owner)}${randomHex(8)}`;
-    this.channels.set(id, { kind: "private", members: [owner, ...members], owner });
+    this.channels.set(id, { kind: "private", members: [owner, this.context.me(), ...others], owner });
     this.context.listChannel(id, name);
     return id;
   }
