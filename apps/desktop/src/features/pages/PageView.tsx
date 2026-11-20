@@ -1,12 +1,12 @@
 import { Bookmark, BookmarkCheck, ChevronRight, Ellipsis, FilePlus2, Link2, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
-import { type Ref, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
-import { MAX_PAGE_TITLE_CHARS } from "../../lib/limits";
 import { reportError, showToast } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, ConfirmDialog, IconButton, Menu, type MenuItem } from "../../ui";
 import { Editor } from "./Editor";
+import { PageTitle } from "./PageTitle";
 
 function ancestorsOf(page: Page | undefined, pages: Page[]): Page[] {
   const ancestors: Page[] = [];
@@ -23,7 +23,7 @@ export function PageView({ pageId }: { pageId: string }) {
   const { pages, navigate } = useWorkspace();
   const page = pages.find((candidate) => candidate.id === pageId);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
-  const title = useRef<HTMLInputElement>(null);
+  const title = useRef<{ focus: () => void }>(null);
 
   const copyLink = () =>
     navigator.clipboard
@@ -110,45 +110,12 @@ export function PageView({ pageId }: { pageId: string }) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.04 }}
         >
-          <TitleInput ref={title} pageId={pageId} title={page?.title ?? ""} />
+          <PageTitle ref={title} pageId={pageId} title={page?.title ?? ""} />
           <div className="mt-5">
             <Editor key={pageId} pageId={pageId} />
           </div>
         </motion.article>
       </div>
     </div>
-  );
-}
-
-/** Saves on blur or Enter, and follows remote renames while not editing. */
-function TitleInput({ pageId, title, ref }: { pageId: string; title: string; ref: Ref<HTMLInputElement> }) {
-  const [draft, setDraft] = useState(title);
-  const [isEditing, setEditing] = useState(false);
-
-  useEffect(() => {
-    if (!isEditing) setDraft(title);
-  }, [title, isEditing]);
-
-  const save = () => {
-    setEditing(false);
-    if (draft.trim() !== title) api.renamePage(pageId, draft).catch(reportError);
-  };
-
-  return (
-    <input
-      ref={ref}
-      aria-label="Page title"
-      value={draft}
-      onFocus={() => setEditing(true)}
-      onChange={(event) => setDraft(Array.from(event.target.value).slice(0, MAX_PAGE_TITLE_CHARS).join(""))}
-      onBlur={save}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        event.currentTarget.closest("article")?.querySelector<HTMLElement>(".cm-content")?.focus();
-      }}
-      placeholder="Untitled"
-      className="w-full bg-transparent text-[38px] leading-tight font-bold tracking-tight outline-none placeholder:text-surface-3"
-    />
   );
 }

@@ -49,7 +49,7 @@ Dialogs, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primi
 
 ## Editor
 
-Pages are markdown in a CodeMirror editor (`features/pages/`). The text people and agents share is always plain markdown; the editor only changes how it looks (live preview, like Obsidian):
+Pages are markdown in a CodeMirror editor (`features/pages/`), under a title field that grows to fit; a new page starts in its title, and Enter moves on to the body. The text people and agents share is always plain markdown; the editor only changes how it looks (live preview, like Obsidian):
 
 - Lines nobody is editing read as formatted text: marks (`#`, `**`, `_`, backticks, link brackets and addresses, `>`) are hidden, list dashes become bullets, `- [ ]` becomes a checkbox, `---` a divider. Lines touched by your cursor or selection show their markdown, so you edit what is really there. While a mouse button is down nothing changes, so text doesn't jump under the pointer.
 - Page links (`shy://page/<id>`) and mentions are chips, also on the line being edited; the cursor steps over a chip as one unit. Page chips show the page's current title and open it on click.

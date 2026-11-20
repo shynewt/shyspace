@@ -100,7 +100,6 @@ function PageEditor({ pageId }: { pageId: string }) {
           ],
         }),
       });
-      if (text.length === 0) created.focus();
       setView(created);
     }, reportError);
 
