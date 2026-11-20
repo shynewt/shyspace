@@ -2,9 +2,9 @@ import { Undo2 } from "lucide-react";
 import { useState } from "react";
 import { api, type Channel, type NotifyLevel } from "../../lib/api";
 import { usePreferences } from "../../lib/preferences";
-import { reportError } from "../../lib/toast";
+import { errorMessage } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, SegmentedControl } from "../../ui";
+import { Button, FormError, SegmentedControl } from "../../ui";
 import { Setting } from "./layout";
 
 const DEFAULT_LEVEL: NotifyLevel = "all";
@@ -48,18 +48,33 @@ function ChannelAlerts() {
   const { channels } = useWorkspace();
   // A toast's Undo can't be reached while Settings is open (it's modal), so it's offered here.
   const [beforeReset, setBeforeReset] = useState<SavedLevel[] | null>(null);
+  // Toasts sit behind the modal Settings window, so failures show here too.
+  const [error, setError] = useState<string | null>(null);
   const sorted = [...channels].sort((left, right) => left.name.localeCompare(right.name));
   const changed = sorted.filter((channel) => channel.notify !== DEFAULT_LEVEL);
-  const setLevels = (levels: SavedLevel[]) =>
-    Promise.all(levels.map(({ channel, level }) => api.setNotifyLevel(channel.id, level)));
-  const resetAll = () => {
-    const previous = changed.map((channel) => ({ channel, level: channel.notify }));
-    setLevels(previous.map(({ channel }) => ({ channel, level: DEFAULT_LEVEL }))).then(
-      () => setBeforeReset(previous),
-      reportError,
+
+  /** Sets each level, reporting the ones that failed; resolves to those that worked. */
+  const setLevels = async (levels: SavedLevel[]): Promise<SavedLevel[]> => {
+    const results = await Promise.allSettled(levels.map(({ channel, level }) => api.setNotifyLevel(channel.id, level)));
+    const failures = results.flatMap((result, index) =>
+      result.status === "rejected" ? [`#${levels[index].channel.name}: ${errorMessage(result.reason)}`] : [],
     );
+    setError(failures.length > 0 ? `Couldn't change ${failures.join("; ")}` : null);
+    return levels.filter((_, index) => results[index].status === "fulfilled");
   };
-  const undoReset = (previous: SavedLevel[]) => setLevels(previous).then(() => setBeforeReset(null), reportError);
+  const resetAll = async () => {
+    const previous = changed.map((channel) => ({ channel, level: channel.notify }));
+    const reset = await setLevels(previous.map(({ channel }) => ({ channel, level: DEFAULT_LEVEL })));
+    const resetChannels = new Set(reset.map(({ channel }) => channel.id));
+    const undoable = previous.filter(({ channel }) => resetChannels.has(channel.id));
+    setBeforeReset(undoable.length > 0 ? undoable : null);
+  };
+  const undoReset = async (previous: SavedLevel[]) => {
+    const restored = await setLevels(previous);
+    const restoredChannels = new Set(restored.map(({ channel }) => channel.id));
+    const stillReset = previous.filter(({ channel }) => !restoredChannels.has(channel.id));
+    setBeforeReset(stillReset.length > 0 ? stillReset : null);
+  };
   return (
     <Setting
       title="Channels"
@@ -75,7 +90,7 @@ function ChannelAlerts() {
               label={`Alerts for #${channel.name}`}
               options={LEVELS}
               value={channel.notify}
-              onChange={(level) => api.setNotifyLevel(channel.id, level).catch(reportError)}
+              onChange={(level) => setLevels([{ channel, level }])}
             />
           </li>
         ))}
@@ -93,6 +108,7 @@ function ChannelAlerts() {
           </p>
         )}
       </div>
+      <FormError message={error} />
     </Setting>
   );
 }
