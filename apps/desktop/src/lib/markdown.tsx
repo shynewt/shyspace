@@ -84,11 +84,13 @@ export function pageIdsIn(text: string): string[] {
   return [...new Set([...text.matchAll(/shy:\/\/page\/([0-9a-f]+)/g)].map((match) => match[1]))];
 }
 
-/** One-line text for quotes and previews: page links shown by title, mentions as @name. */
+/** One-line text for quotes and previews: page links shown by title, message links in words, mentions as @name. */
 export function plainPreview(text: string, pageTitle: (id: string) => string | undefined): string {
   return text
     .replace(/\[(@[^\]]*)\]\(shy:\/\/(?:member|mention)\/[0-9a-z]+\)/g, "$1")
     .replace(/shy:\/\/page\/([0-9a-f]+)/g, (_, id: string) => pageTitle(id) ?? "Untitled page")
+    .replace(/\[([^\]]*)\]\(shy:\/\/message\/[0-9a-f]+\)/g, "$1")
+    .replace(/shy:\/\/message\/[0-9a-f]+/g, "a linked message")
     .replace(/\s+/g, " ");
 }
 

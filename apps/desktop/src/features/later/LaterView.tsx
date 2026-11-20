@@ -43,7 +43,7 @@ export function LaterView() {
               type="button"
               aria-expanded={isCompletedOpen}
               onClick={() => setCompletedOpen(!isCompletedOpen)}
-              className="flex items-center gap-1 text-left"
+              className="flex items-center gap-1 rounded-md text-left"
             >
               <motion.span
                 animate={{ rotate: isCompletedOpen ? 90 : 0 }}
