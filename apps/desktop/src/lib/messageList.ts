@@ -37,3 +37,25 @@ export function messageTop(list: HTMLElement, id: string): number | null {
   const message = messagesIn(list).find((candidate) => candidate.id === `${MESSAGE_ID_PREFIX}${id}`);
   return message ? topWithin(list, message) : null;
 }
+
+/**
+ * The message to hold still as content changes: the first whose top is on
+ * screen, and where that top is. Not the first message loaded, though: its
+ * header folds away when the messages before it load (it joins their
+ * group), which would move everything below it.
+ */
+export function steadiestMessageInView(list: HTMLElement): { id: string; top: number } | null {
+  const top = list.scrollTop;
+  const bottom = top + list.clientHeight;
+  const messages = messagesIn(list);
+  let fallback: { id: string; top: number } | null = null;
+  for (const [index, message] of messages.entries()) {
+    const messageTop = topWithin(list, message);
+    if (messageTop >= bottom) break;
+    if (messageTop < top) continue;
+    const candidate = { id: message.id.slice(MESSAGE_ID_PREFIX.length), top: messageTop };
+    if (index > 0) return candidate;
+    fallback = candidate;
+  }
+  return fallback;
+}

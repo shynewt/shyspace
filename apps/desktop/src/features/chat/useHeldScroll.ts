@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useRef } from "react";
-import { distanceFromBottom, messageTop } from "../../lib/messageList";
+import { distanceFromBottom, messageTop, steadiestMessageInView } from "../../lib/messageList";
 import { captureScrollAnchor } from "../../lib/scrollAnchor";
 
 /** Content arriving within this distance of the newest message keeps you following it. */
@@ -24,8 +24,11 @@ export function useHeldScroll(list: RefObject<HTMLElement | null>, onSettled: ()
   const settle = useCallback(() => {
     const element = list.current;
     if (!element) return;
-    const anchor = captureScrollAnchor(element);
-    held.current = anchor && { messageId: anchor.messageId, top: anchor.offsetPx + element.scrollTop };
+    const starting = steadiestMessageInView(element);
+    const cutOff = starting ? null : captureScrollAnchor(element);
+    held.current = starting
+      ? { messageId: starting.id, top: starting.top }
+      : cutOff && { messageId: cutOff.messageId, top: cutOff.offsetPx + element.scrollTop };
     lastScrollTop.current = element.scrollTop;
     onSettled();
   }, [list, onSettled]);
