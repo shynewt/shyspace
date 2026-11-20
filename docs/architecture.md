@@ -77,6 +77,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 | `invites/<token>/answer` | the admin's answer, read through a presigned link |
 | `recovery/snapshot` | the admin's recovery snapshot, encrypted with the recovery key |
 | `peers/<id>` | gossip bootstrap hints |
+| `health/versioning-probe`, `ops/lock-probe-<member>` | small probes that prove the bucket keeps deleted data (see `workspace/protection.rs`) |
 
 ## Pages
 
@@ -86,7 +87,7 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 
 | Path | Job |
 |---|---|
-| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `presence` (heartbeats and status) |
+| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `presence` (heartbeats and status), `protection` (whether the bucket keeps deleted data) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
 | `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `rebuild` (undoing ops that turned out not to count), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |

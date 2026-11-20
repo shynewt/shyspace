@@ -155,6 +155,11 @@ impl Workspace {
                     errors.push(error);
                 }
             }
+            // Not a sync error: syncing works either way, and the app shows
+            // the result on its own.
+            if let Err(error) = self.check_storage_protection_when_due().await {
+                warn!("couldn't check whether the bucket keeps deleted data: {error:#}");
+            }
         }
         {
             let mut status = self.status_lock();

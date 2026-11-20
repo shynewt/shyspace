@@ -11,7 +11,7 @@ use shy_core::{
     sync::SyncStatus,
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
-        Page, SearchHit, SectionSort, SidebarSection, StatusUpdate, StorageSettings,
+        Page, ProtectionCheck, SearchHit, SectionSort, SidebarSection, StatusUpdate, StorageSettings,
     },
     workspace::StorageUpdate,
 };
@@ -178,6 +178,20 @@ async fn test_bucket(bucket: BucketConfig) -> CommandResult<()> {
 #[tauri::command]
 async fn storage_settings(state: State<'_, AppState>) -> CommandResult<StorageSettings> {
     current(&state).await?.storage_settings().map_err(failed)
+}
+
+#[tauri::command]
+async fn storage_protection(state: State<'_, AppState>) -> CommandResult<ProtectionCheck> {
+    current(&state).await?.storage_protection().map_err(failed)
+}
+
+#[tauri::command]
+async fn check_storage_protection(state: State<'_, AppState>) -> CommandResult<ProtectionCheck> {
+    current(&state)
+        .await?
+        .check_storage_protection()
+        .await
+        .map_err(failed)
 }
 
 /// Returns the admin's new recovery kit, if they have one: it holds the keys.
@@ -638,6 +652,8 @@ pub fn run() {
             restore_workspace,
             test_bucket,
             storage_settings,
+            storage_protection,
+            check_storage_protection,
             update_storage,
             safety_code,
             recovery_kit,

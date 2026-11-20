@@ -54,7 +54,7 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 
 ## Known gaps
 
-- Bucket credentials are shared by all members, so any member can cause denial of service. After removing someone, the admin should rotate the keys: create a new key at the provider, enter it under **Members → Storage** (it reaches current members only), and delete the old key once everyone has synced.
+- Bucket credentials are shared by all members, so any member can cause denial of service, or delete the workspace's data unless the bucket keeps it. A retention lock on the write-once `ops/` and `mls/` (Cloudflare R2 bucket locks, S3 Object Lock) stops even someone with the keys; versioning (S3, Backblaze B2, MinIO) undoes accidents, but the shared keys can delete old versions too unless the provider's key rules forbid it. The admin's recovery snapshot (`recovery/snapshot`) is overwritten, so it can't sit under a lock; keep the recovery kit and a working admin device. The app proves which protection holds, daily, by writing small probes (`health/versioning-probe`, `ops/lock-probe-<member>`), and Settings warns until it's locked (`workspace/protection.rs`, #83). It can't tell S3 Object Lock from plain versioning, so it reports that as versioned.
 - Single admin. A recovery kit restores a lost admin device, but there is still only one admin at a time; restoring while the old device is alive would cause conflicting membership changes (#5).
 
 Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issues?q=label%3Asecurity>
