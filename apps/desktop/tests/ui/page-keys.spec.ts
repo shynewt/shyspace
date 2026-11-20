@@ -67,3 +67,12 @@ test("the shortcut cheat sheet opens from the editor without changing the page",
   await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toContainText("Bold");
   await expect.poll(() => pageText(page)).toBe("text");
 });
+
+test("alt and the arrows move a line in the page, without switching page", async ({ page }) => {
+  await page.keyboard.type("first\nsecond");
+  await page.keyboard.press("Alt+ArrowUp");
+  await expect.poll(() => pageText(page)).toBe("second\nfirst");
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect.poll(() => pageText(page)).toBe("first\nsecond");
+  await expect(page.getByLabel("Page title")).toHaveValue("Keys");
+});
