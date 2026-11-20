@@ -13,6 +13,7 @@ import { NotificationSettings } from "./NotificationSettings";
 import { PrivacySettings } from "./PrivacySettings";
 import { ProfileSettings } from "./ProfileSettings";
 import { RecoverySettings } from "./RecoverySettings";
+import { StorageAttentionDot } from "./StorageProtection";
 import { StorageSettings } from "./StorageSettings";
 
 /** Members takes its tab from the target, so it's rendered apart from these. */
@@ -124,7 +125,10 @@ function SettingsWindow({
                 section={section.id}
                 label={section.label}
                 isActive={section.id === target.section}
-                badge={section.id === "members" && session.is_admin && <WaitingRequestsBadge />}
+                badge={
+                  (section.id === "members" && session.is_admin && <WaitingRequestsBadge />) ||
+                  (section.id === "storage" && <StorageAttentionDot />)
+                }
               />
             ))}
           </Fragment>

@@ -6,6 +6,7 @@ import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Menu, type MenuItem } from "../../ui";
+import { StorageAttentionDot } from "../settings/StorageProtection";
 import { StatusDialog } from "./StatusDialog";
 
 const PRESENCE_LABELS: Record<Member["presence"], string> = {
@@ -57,6 +58,7 @@ export function MeMenu() {
               <span className="block truncate text-[13px] font-medium">{name}</span>
               <span className="block truncate text-[11.5px] text-muted">{statusLine(me, isOffline)}</span>
             </span>
+            <StorageAttentionDot />
           </button>
         }
       />

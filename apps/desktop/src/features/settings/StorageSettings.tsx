@@ -6,17 +6,22 @@ import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, CopyField, Dialog, Field, FormError, Input } from "../../ui";
 import { ManagedByAdmin } from "./layout";
+import { StorageProtection } from "./StorageProtection";
 
 export function StorageSettings() {
   const { session } = useWorkspace();
-  if (!session.is_admin) {
-    return (
-      <ManagedByAdmin>
-        Everything is stored encrypted in a bucket the admin chose. The bucket can't read any of it.
-      </ManagedByAdmin>
-    );
-  }
-  return <BucketSettings />;
+  return (
+    <div className="flex flex-col gap-6">
+      <StorageProtection />
+      {session.is_admin ? (
+        <BucketSettings />
+      ) : (
+        <ManagedByAdmin>
+          Everything is stored encrypted in a bucket the admin chose. The bucket can't read any of it.
+        </ManagedByAdmin>
+      )}
+    </div>
+  );
 }
 
 function BucketSettings() {
