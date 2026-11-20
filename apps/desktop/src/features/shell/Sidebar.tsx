@@ -1,29 +1,17 @@
-import { Bookmark, Inbox as InboxIcon, Plus, Search } from "lucide-react";
-import { type ReactNode, useCallback } from "react";
+import { Bookmark, Inbox as InboxIcon, Search } from "lucide-react";
+import { useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
-import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
-import { useWorkspace } from "../../lib/workspace";
-import { IconButton, Kbd, Logo, SectionLabel } from "../../ui";
+import { Kbd, Logo } from "../../ui";
 import { ChannelSections } from "./ChannelSections";
 import { MeMenu } from "./MeMenu";
 import { NavItem } from "./NavItem";
-import { PageTree } from "./PageTree";
+import { PagesSection } from "./PagesSection";
 import { SyncIndicator } from "./SyncIndicator";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 
 export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefined; onOpenSearch: () => void }) {
-  const { pages, navigate } = useWorkspace();
-
-  const createPage = async (parent: string | null) => {
-    try {
-      navigate({ kind: "page", id: await api.createPage("", parent) });
-    } catch (error) {
-      reportError(error);
-    }
-  };
-
   return (
     <aside className="flex w-[264px] shrink-0 flex-col border-r border-line bg-bg">
       <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
@@ -51,9 +39,7 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
         <LaterLink />
         <ChannelSections />
 
-        <Section title="Pages" addLabel="New page" onAdd={() => createPage(null)}>
-          <PageTree pages={pages} parent={null} depth={0} onCreateChild={createPage} />
-        </Section>
+        <PagesSection />
       </nav>
 
       <div className="border-t border-line p-2">
@@ -85,40 +71,4 @@ function LaterLink() {
   const now = Date.now();
   const due = later?.filter((item) => !item.is_done && item.remind_ms !== null && item.remind_ms <= now).length ?? 0;
   return <NavItem view={{ kind: "later" }} icon={<Bookmark size={15} />} label="Later" unread={due} countNoun="due" />;
-}
-
-function Section({
-  title,
-  addLabel,
-  onAdd,
-  extraAction,
-  children,
-}: {
-  title: string;
-  addLabel: string;
-  onAdd: () => void;
-  extraAction?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="mt-3">
-      <SectionLabel
-        action={
-          <span className="flex items-center">
-            {extraAction}
-            <IconButton
-              label={addLabel}
-              size="sm"
-              icon={<Plus size={14} />}
-              onClick={onAdd}
-              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-            />
-          </span>
-        }
-      >
-        {title}
-      </SectionLabel>
-      <div className="flex flex-col gap-px">{children}</div>
-    </div>
-  );
 }

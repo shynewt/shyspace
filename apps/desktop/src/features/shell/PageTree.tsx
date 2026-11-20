@@ -68,7 +68,8 @@ function PageNode({
         icon={<FileText size={15} />}
         onContextMenu={() => setMenuOpen(true)}
         leading={
-          hasChildren && (
+          // Pages without sub-pages keep the toggle's space, so nesting lines up.
+          hasChildren ? (
             <button
               type="button"
               aria-expanded={isOpen}
@@ -80,17 +81,22 @@ function PageNode({
                 <ChevronRight size={14} />
               </motion.span>
             </button>
+          ) : (
+            <span aria-hidden className="-mr-1 w-5 shrink-0" />
           )
         }
         trailing={
+          // Beside the name rather than over it: it takes room only while shown, and the name truncates sooner.
           <span
             className={cx(
-              "absolute right-1.5 flex group-hover:opacity-100 focus-within:opacity-100",
-              isMenuOpen ? "opacity-100" : "opacity-0",
+              "flex shrink-0 overflow-hidden",
+              isMenuOpen
+                ? "w-auto pl-0.5"
+                : "w-0 group-hover:w-auto group-hover:pl-0.5 focus-within:w-auto focus-within:pl-0.5",
             )}
           >
             <IconButton
-              label="New sub-page"
+              label={`New sub-page in ${title}`}
               size="sm"
               icon={<Plus size={13} />}
               onClick={() => onCreateChild(page.id)}
