@@ -112,6 +112,27 @@ impl Store {
         .collect()
     }
 
+    /// Where a removed member's log ends, if they were removed.
+    pub fn frozen_last_seq(&self, member: &PublicKey) -> Result<Option<u64>> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT last_seq FROM frozen_authors WHERE member = ?",
+                [member.as_bytes()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The last epoch `member` belonged to.
+    pub fn last_member_epoch(&self, member: &PublicKey) -> Result<Option<u64>> {
+        Ok(self.db.query_row(
+            "SELECT MAX(epoch) FROM epoch_members WHERE member = ?",
+            [member.as_bytes()],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn is_beyond_frozen_log(&self, member: &PublicKey, seq: u64) -> Result<bool> {
         self.exists(
             "SELECT 1 FROM frozen_authors WHERE member = ? AND last_seq < ?",

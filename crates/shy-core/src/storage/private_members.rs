@@ -138,4 +138,20 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?;
         Ok(members)
     }
+
+    /// Members the owner hasn't removed, in the order every device agrees
+    /// on: by the position of the owner op that added them, then by key.
+    /// Leaves don't count, as devices learn of them at different times.
+    pub fn members_in_owner_order(&self, channel: &str) -> Result<Vec<PublicKey>> {
+        let mut statement = self.db.prepare(&format!(
+            "SELECT a.member FROM private_adds a JOIN private_positions p
+                 ON p.channel = a.channel AND p.origin_author = a.origin_author AND p.origin_seq = a.origin_seq
+             WHERE a.channel = ?1 AND {OPEN_ADD}
+             GROUP BY a.member ORDER BY MIN(p.position), a.member"
+        ))?;
+        let members = statement
+            .query_map(params![channel, false], |row| read_key(row.get(0)?))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(members)
+    }
 }

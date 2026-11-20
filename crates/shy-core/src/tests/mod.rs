@@ -17,5 +17,6 @@ mod search;
 mod sections;
 mod size_attacks;
 mod storage;
+mod succession;
 mod support;
 mod threads;

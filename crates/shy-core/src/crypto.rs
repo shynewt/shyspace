@@ -115,6 +115,7 @@ pub fn open(envelope: &Envelope, epoch_key: &EpochKey) -> Result<VerifiedOp> {
     Ok(VerifiedOp {
         author: envelope.author,
         seq: envelope.seq,
+        epoch: envelope.epoch,
         body,
     })
 }

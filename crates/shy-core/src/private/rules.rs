@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     ops::{Op, VerifiedOp, is_owned_by},
-    storage::{Store, StoredKey},
+    storage::{ApplyContext, Store, StoredKey},
 };
 
 pub(crate) enum Verdict {
@@ -36,12 +36,13 @@ impl Store {
         verified: &VerifiedOp,
         body: &PrivateBody,
         key: &StoredKey,
+        context: ApplyContext<'_>,
     ) -> Result<Verdict> {
         if body.channel != key.channel || body.generation != key.generation {
             return Ok(Verdict::Void("sealed for another channel or key"));
         }
         match private_kind(&body.channel) {
-            Some(PrivateKind::Channel) => self.judge_in_channel(verified, body, key),
+            Some(PrivateKind::Channel) => self.judge_in_channel(verified, body, key, context),
             Some(PrivateKind::Dm) => self.judge_in_dm(verified, body),
             None => Ok(Verdict::Void("not a private channel")),
         }
@@ -52,6 +53,7 @@ impl Store {
         verified: &VerifiedOp,
         body: &PrivateBody,
         key: &StoredKey,
+        context: ApplyContext<'_>,
     ) -> Result<Verdict> {
         let channel = body.channel.as_str();
         if let PrivateOp::Create {
@@ -139,6 +141,14 @@ impl Store {
                     })
                 })
             }
+            PrivateOp::Succeed { position } => {
+                match self.judge_position(verified, channel, key.generation, *position)? {
+                    Some(verdict) => Ok(verdict),
+                    None => {
+                        self.judge_succession(channel, *position, &verified.author, verified.epoch, context)
+                    }
+                }
+            }
             PrivateOp::Leave => self.judge_membership(verified, channel, key.generation),
             PrivateOp::Content(op) => match self.judge_membership(verified, channel, key.generation)? {
                 Verdict::Apply => Ok(judge_content(channel, &verified.author, op, PrivateKind::Channel)),
@@ -161,9 +171,7 @@ impl Store {
     }
 
     /// An owner op counts only as the channel's next position, written by
-    /// whoever owns that position. One that finds its position taken by a
-    /// later op of the same owner should have won, if its key already
-    /// existed there.
+    /// whoever owns that position.
     fn judge_owner_op(
         &self,
         verified: &VerifiedOp,
@@ -172,28 +180,42 @@ impl Store {
         position: u64,
         then: impl FnOnce() -> Result<Verdict>,
     ) -> Result<Verdict> {
-        let next = self.next_position(channel)?;
-        if position > next {
-            return Ok(Verdict::Wait);
-        }
-        if position < next {
-            let taken_by = self.position_origin(channel, position)?;
-            let could_have_counted = self
-                .generation_position(channel, generation)?
-                .is_some_and(|announced_at| announced_at < position);
-            return Ok(match taken_by {
-                Some((author, seq))
-                    if author == verified.author && seq > verified.seq && could_have_counted =>
-                {
-                    Verdict::Supersede
-                }
-                _ => Verdict::Void("a position already taken"),
-            });
+        if let Some(verdict) = self.judge_position(verified, channel, generation, position)? {
+            return Ok(verdict);
         }
         if self.owner_at(channel, position)? != Some(verified.author) {
             return Ok(Verdict::Void("only the channel's owner can do that"));
         }
         then()
+    }
+
+    /// The verdict on an owner op for any position but the next one, or
+    /// `None` for the next. One that finds its position taken by a later op
+    /// of the same author should have won, if its key already existed there.
+    fn judge_position(
+        &self,
+        verified: &VerifiedOp,
+        channel: &str,
+        generation: u64,
+        position: u64,
+    ) -> Result<Option<Verdict>> {
+        let next = self.next_position(channel)?;
+        if position > next {
+            return Ok(Some(Verdict::Wait));
+        }
+        if position == next {
+            return Ok(None);
+        }
+        let taken_by = self.position_origin(channel, position)?;
+        let could_have_counted = self
+            .generation_position(channel, generation)?
+            .is_some_and(|announced_at| announced_at < position);
+        Ok(Some(match taken_by {
+            Some((author, seq)) if author == verified.author && seq > verified.seq && could_have_counted => {
+                Verdict::Supersede
+            }
+            _ => Verdict::Void("a position already taken"),
+        }))
     }
 
     /// An op counts only while its author belongs. One sealed with a key

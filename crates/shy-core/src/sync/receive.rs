@@ -162,10 +162,17 @@ fn apply_and_record(
         return Ok(Applied::default());
     }
     let applied = state.store.atomically(|store| {
-        let applied = store.apply_permitted(verified, context)?;
+        let mut applied = store.apply_permitted(verified, context)?;
         store.insert_applied(envelope, true)?;
         if applied.needs_rebuild {
             store.rebuild_views(context)?;
+        }
+        // The last op a removed member's log was waiting for: claims on
+        // channels they owned can be judged now, in this same transaction.
+        if store.frozen_last_seq(&verified.author)? == Some(verified.seq)
+            && store.settle_after_removal(&verified.author, context)?
+        {
+            applied.needs_rebuild = true;
         }
         Ok(applied)
     });

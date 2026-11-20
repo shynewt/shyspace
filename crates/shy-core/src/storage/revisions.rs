@@ -262,6 +262,7 @@ mod tests {
             self.ops.push(VerifiedOp {
                 author: *author,
                 seq,
+                epoch: 1,
                 body: OpBody {
                     lamport,
                     timestamp_ms: lamport as i64,

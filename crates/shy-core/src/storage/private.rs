@@ -238,6 +238,19 @@ impl Store {
             .optional()?)
     }
 
+    /// Whether we hold the key of every generation announced before
+    /// `position`. Owner ops only count under announced keys, so then we can
+    /// open anything that could take `position`.
+    pub fn holds_keys_announced_before(&self, channel: &str, position: u64) -> Result<bool> {
+        Ok(!self.exists(
+            "SELECT 1 FROM private_generations g JOIN private_positions p
+                 ON p.channel = g.channel AND p.origin_author = g.origin_author AND p.origin_seq = g.origin_seq
+             WHERE g.channel = ?1 AND p.position < ?2
+               AND NOT EXISTS (SELECT 1 FROM private_keys k WHERE k.channel = g.channel AND k.generation = g.generation)",
+            params![channel, position],
+        )?)
+    }
+
     /// The op that took `position` in the channel's owner log.
     pub fn position_origin(&self, channel: &str, position: u64) -> Result<Option<(PublicKey, u64)>> {
         let origin: Option<(Vec<u8>, u64)> = self

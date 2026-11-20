@@ -41,9 +41,9 @@ struct PageReplay {
 
 const VIEWS_VERSION_META: &str = "views_version";
 /// Raised when the rules for showing ops change (like the limits on names in
-/// #67, then on op sizes), so a store built under older rules rebuilds its
-/// views once.
-const VIEWS_VERSION: u8 = 2;
+/// #67, then on op sizes, then owner succession), so a store built under
+/// older rules rebuilds its views once.
+const VIEWS_VERSION: u8 = 3;
 
 impl Store {
     /// Rebuilds the views if they were built under older rules. Returns
@@ -66,7 +66,7 @@ impl Store {
     /// Ends a removed member's log at `last_seq`. Ops of theirs after it that
     /// already applied here (sent live just before the removal arrived) are
     /// undone, so this device ends up like those that never saw them.
-    /// Returns whether the views were rebuilt.
+    /// Returns whether the views changed.
     pub fn freeze_author(
         &self,
         member: &PublicKey,
@@ -80,11 +80,30 @@ impl Store {
                 params![member.as_bytes(), last_seq],
             )?;
             if dropped == 0 {
-                return Ok(false);
+                return store.settle_after_removal(member, context);
             }
             store.rebuild_views(context)?;
             Ok(true)
         })
+    }
+
+    /// Retries every waiting private op once `member`'s removal is settled
+    /// (it was frozen and their log up to the cut has arrived): some may wait
+    /// for exactly that, like a claim on a channel they owned. Returns
+    /// whether the views changed.
+    pub(crate) fn settle_after_removal(&self, member: &PublicKey, context: ApplyContext<'_>) -> Result<bool> {
+        let Some(cut) = self.frozen_last_seq(member)? else {
+            return Ok(false);
+        };
+        if self.last_seq(member)? < cut {
+            return Ok(false);
+        }
+        let applied = self.retry_sealed(&self.waiting_channels()?, context)?;
+        if applied.needs_rebuild {
+            self.rebuild_views(context)?;
+            return Ok(true);
+        }
+        Ok(!applied.changes.is_empty())
     }
 
     /// Replays every stored op into empty views and private state, in the

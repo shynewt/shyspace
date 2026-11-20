@@ -273,7 +273,7 @@ impl Workspace {
         self.pull()
             .await
             .context("can't reach the bucket to collect the member's last messages")?;
-        let (from_epoch, signed) = {
+        let (from_epoch, signed, view_changes) = {
             let mut state = self.state();
             let frozen = FrozenAuthor {
                 member,
@@ -281,15 +281,23 @@ impl Workspace {
             };
             let from_epoch = state.mls.epoch()?;
             let commit = state.mls.remove_member(&member)?;
-            state
-                .store
-                .freeze_author(&frozen.member, frozen.last_seq, self.apply_context())?;
+            let views_changed =
+                state
+                    .store
+                    .freeze_author(&frozen.member, frozen.last_seq, self.apply_context())?;
             let signed = self.record_commit(&state, from_epoch, commit, vec![frozen])?;
             state.mls.merge_pending_commit()?;
             state.record_epoch()?;
             Workspace::mark_recovery_snapshot_stale(&state.store)?;
-            (from_epoch, signed)
+            let view_changes = match views_changed {
+                true => state.store.all_view_changes()?,
+                false => Vec::new(),
+            };
+            (from_epoch, signed, view_changes)
         };
+        for change in view_changes {
+            self.emit(change);
+        }
         self.emit(Change::Members);
         self.refresh_recovery_snapshot().await?;
         self.upload_commit(from_epoch, signed).await

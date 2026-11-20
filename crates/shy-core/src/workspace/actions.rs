@@ -64,7 +64,15 @@ impl Workspace {
                 };
                 let envelope = crypto::seal(&self.inner.identity, &key, epoch, seq, &body)?;
                 ensure!(envelope.fits_size_limit(&body.op), too_large(&body.op));
-                let applied = store.apply_any(&VerifiedOp { author, seq, body }, context)?;
+                let applied = store.apply_any(
+                    &VerifiedOp {
+                        author,
+                        seq,
+                        epoch,
+                        body,
+                    },
+                    context,
+                )?;
                 // Our own private op must count, or nobody else would see it.
                 ensure!(
                     !is_sealed || store.is_private_applied(&author, seq)?,

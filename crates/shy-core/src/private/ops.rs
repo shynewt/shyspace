@@ -72,6 +72,28 @@ pub enum PrivateOp {
     /// A message, reaction, edit, delete (of the author's own) or rename
     /// inside the channel.
     Content(Op),
+    /// Takes over a channel whose owner was removed from the workspace (see
+    /// `private/succession.rs`). Last, so older versions read it as a kind
+    /// they don't know yet.
+    Succeed {
+        position: u64,
+    },
+}
+
+impl PrivateOp {
+    /// Where an owner op sits in the channel's owner log.
+    pub fn position(&self) -> Option<u64> {
+        match self {
+            Self::Create { .. } => Some(1),
+            Self::Add { position, .. }
+            | Self::Remove { position, .. }
+            | Self::Rotate { position, .. }
+            | Self::HandOver { position, .. }
+            | Self::OwnerDelete { position, .. }
+            | Self::Succeed { position } => Some(*position),
+            Self::Leave | Self::Content(_) => None,
+        }
+    }
 }
 
 /// One channel key for one recipient. A DM's grant names its members, which

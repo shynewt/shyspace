@@ -216,7 +216,7 @@ impl Store {
             if !may_settle_now(self.settling.get(), &body.op) {
                 return Ok(Settled::Waiting);
             }
-            return match self.judge(verified, &body, &key)? {
+            return match self.judge(verified, &body, &key, context)? {
                 Verdict::Wait => Ok(Settled::Waiting),
                 Verdict::Supersede => {
                     // An earlier op of the owner's for a position another
@@ -346,6 +346,11 @@ impl Store {
                 self.set_owner_from(channel, position + 1, to, origin)?;
                 applied.changes.push(Change::Channels);
             }
+            PrivateOp::Succeed { position } => {
+                self.record_position(channel, *position, origin)?;
+                self.set_owner_from(channel, position + 1, author, origin)?;
+                applied.changes.push(Change::Channels);
+            }
             PrivateOp::OwnerDelete { id, position } => {
                 self.record_position(channel, *position, origin)?;
                 applied.extend(self.apply_content(verified, Op::Delete { id: id.clone() })?);
@@ -372,6 +377,7 @@ impl Store {
         let content = VerifiedOp {
             author: verified.author,
             seq: verified.seq,
+            epoch: verified.epoch,
             body: OpBody {
                 lamport: verified.body.lamport,
                 timestamp_ms: verified.body.timestamp_ms,

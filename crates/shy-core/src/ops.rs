@@ -229,6 +229,8 @@ impl Envelope {
 pub struct VerifiedOp {
     pub author: PublicKey,
     pub seq: u64,
+    /// The membership epoch it was sealed in.
+    pub epoch: u64,
     pub body: OpBody,
 }
 

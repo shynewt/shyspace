@@ -8,6 +8,7 @@ use super::{
     crypto::{ChannelKey, Granting, Slot, commitment, new_channel_key, seal, wrap_key},
     ids::{MAX_DM_MEMBERS, PrivateKind, dm_id, private_channel_id, private_kind},
     ops::{GrantBody, Invitee, MAX_WRAPS_PER_GRANT, PrivateBody, PrivateOp},
+    rules::Verdict,
 };
 use crate::{
     ops::{EntityId, Op, is_owned_by, normalize_channel_name},
@@ -189,14 +190,20 @@ impl Workspace {
         Ok(channel)
     }
 
-    /// On channels we own, keeps out who left or was removed from the
-    /// workspace: the owner removes them, which makes a key they don't get.
+    /// Takes over channels whose removed owner we succeed, passes on those
+    /// we own but left, and on channels we own keeps out who left or was
+    /// removed from the workspace: the owner removes them, which makes a key
+    /// they don't get.
     pub(crate) fn tend_private_channels(&self) -> Result<()> {
         let me = self.me();
         let workspace_members = self.current_members()?;
         let channel_ids = self.state().store.private_channel_ids()?;
         for channel in channel_ids {
-            if private_kind(&channel) != Some(PrivateKind::Channel) || self.ensure_owner(&channel).is_err() {
+            if private_kind(&channel) != Some(PrivateKind::Channel) {
+                continue;
+            }
+            self.claim_if_successor(&channel)?;
+            if self.ensure_owner(&channel).is_err() || self.pass_on_if_left(&channel, &workspace_members)? {
                 continue;
             }
             let to_remove: Vec<PublicKey> = {
@@ -215,6 +222,44 @@ impl Workspace {
             }
         }
         Ok(())
+    }
+
+    /// Writes our claim on `channel` if its owner was removed and we are
+    /// next in line, judged exactly as every other device will judge it.
+    fn claim_if_successor(&self, channel: &str) -> Result<()> {
+        let verdict = {
+            let state = self.state();
+            let position = state.store.next_position(channel)?;
+            let epoch = state.mls.epoch()?;
+            state
+                .store
+                .judge_succession(channel, position, &self.me(), epoch, self.apply_context())?
+        };
+        if matches!(verdict, Verdict::Apply) {
+            self.write_owner_op(channel, |position| PrivateOp::Succeed { position })?;
+        }
+        Ok(())
+    }
+
+    /// An owner who left (only a successor can be one) hands the channel to
+    /// the earliest member still in it. Returns whether it did.
+    fn pass_on_if_left(&self, channel: &str, workspace_members: &[PublicKey]) -> Result<bool> {
+        let me = self.me();
+        let next_owner = {
+            let store = &self.state().store;
+            let staying = store.private_members(channel, Ending::Left)?;
+            if staying.contains(&me) {
+                return Ok(false);
+            }
+            store.members_in_owner_order(channel)?.into_iter().find(|member| {
+                *member != me && staying.contains(member) && workspace_members.contains(member)
+            })
+        };
+        let Some(to) = next_owner else {
+            return Ok(false);
+        };
+        self.write_owner_op(channel, |position| PrivateOp::HandOver { to, position })?;
+        Ok(true)
     }
 
     /// Seals `op` into `channel`. A delete of someone else's message (or of
