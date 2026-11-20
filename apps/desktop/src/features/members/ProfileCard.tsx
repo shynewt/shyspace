@@ -14,7 +14,8 @@ import { alertsLabel, shownStatus } from "./StatusEmoji";
 const HOVER_OPEN_MS = 600;
 const HOVER_CLOSE_MS = 300;
 
-type OpenedBy = "hover" | "click";
+/** "pointer": a click; "keyboard": Enter or Space on the name. */
+type OpenedBy = "hover" | "pointer" | "keyboard";
 
 type HoverProps = {
   onPointerEnter: (event: React.PointerEvent) => void;
@@ -51,7 +52,7 @@ export function ProfileCard({
   const member = useMember(memberId);
   const { openSettings, navigate } = useWorkspace();
   const [isOpen, setOpen] = useState(false);
-  const openedBy = useRef<OpenedBy>("click");
+  const openedBy = useRef<OpenedBy>("pointer");
   const isFocusHandedOn = useRef(false);
   const timers = useRef<{ open?: ReturnType<typeof setTimeout>; close?: ReturnType<typeof setTimeout> }>({});
   const card = useRef<HTMLDivElement>(null);
@@ -104,11 +105,12 @@ export function ProfileCard({
         event.preventDefault();
         clearTimers();
         opener.current = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
-        if (isOpenRef.current && openedBy.current === "click") return setOpen(false);
+        if (isOpenRef.current && openedBy.current !== "hover") return setOpen(false);
         const wasHoverOpen = isOpenRef.current;
-        openedBy.current = "click";
+        // A keyboard press on a button clicks with detail 0.
+        openedBy.current = event.detail === 0 ? "keyboard" : "pointer";
         setOpen(true);
-        if (wasHoverOpen) card.current?.querySelector<HTMLElement>("button")?.focus();
+        if (wasHoverOpen) focusInside(card.current, openedBy.current);
       },
     };
   }, [member]);
@@ -135,11 +137,15 @@ export function ProfileCard({
             collisionPadding={12}
             aria-label={`${control.name}'s profile`}
             asChild
-            onOpenAutoFocus={(event) => openedBy.current === "hover" && event.preventDefault()}
+            onOpenAutoFocus={(event) => {
+              if (openedBy.current === "keyboard") return;
+              event.preventDefault();
+              if (openedBy.current === "pointer") focusInside(card.current, "pointer");
+            }}
             onCloseAutoFocus={(event) => {
               // Radix skips its own return after a click on the name (that counts as outside), so it's done here.
               event.preventDefault();
-              if (openedBy.current === "click" && !isFocusHandedOn.current) opener.current?.focus();
+              if (openedBy.current !== "hover" && !isFocusHandedOn.current) opener.current?.focus();
               isFocusHandedOn.current = false;
             }}
             onInteractOutside={(event) => {
@@ -150,6 +156,7 @@ export function ProfileCard({
           >
             <motion.div
               ref={card}
+              tabIndex={-1}
               {...pop}
               transition={springs.snappy}
               className="z-50 w-[280px] rounded-xl border border-line bg-surface p-4 shadow-float outline-none"
@@ -305,4 +312,14 @@ function CardBody({
       </div>
     </div>
   );
+}
+
+/**
+ * Where focus goes as the card opens: its first action after a keyboard
+ * press, the card itself after a click. A click must show no focus ring,
+ * and WebKit can count a button focused by script as :focus-visible.
+ */
+function focusInside(card: HTMLElement | null, openedBy: "pointer" | "keyboard") {
+  if (openedBy === "keyboard") card?.querySelector<HTMLElement>("button")?.focus();
+  else card?.focus();
 }

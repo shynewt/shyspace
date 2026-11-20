@@ -141,7 +141,7 @@ test("a card opened by pausing, then clicked, gives focus back to the name on Es
   await name.hover();
   await expect(card(page, "Grace")).toBeVisible();
   await name.click();
-  await expect(card(page, "Grace").getByRole("button", { name: "Message" })).toBeFocused();
+  await expect(card(page, "Grace")).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(card(page, "Grace")).toHaveCount(0);
@@ -204,4 +204,29 @@ test("the caret is right after a mention from a card at once", async ({ page }) 
     return box instanceof HTMLTextAreaElement ? [box.value, box.selectionStart] : null;
   });
   expect(result).toEqual(["hi @Grace ", 10]);
+});
+
+const outlineOf = (element: HTMLElement | SVGElement) => getComputedStyle(element).outlineStyle;
+
+test("a card opened with the mouse shows no focus ring; from the keyboard it does", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("Mine");
+  await composer.press("Enter");
+  await nameButton(page, "Ada").click();
+  // Focus goes into the card itself, so no button shows a ring however the engine judges :focus-visible.
+  await expect(card(page, "Ada")).toBeFocused();
+  expect(await card(page, "Ada").evaluate(outlineOf)).toBe("none");
+  await page.keyboard.press("Tab");
+  await expect(card(page, "Ada").getByRole("button", { name: "View in members" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(card(page, "Ada")).toHaveCount(0);
+  await nameButton(page, "Ada").click();
+  await page.mouse.click(5, 5);
+  await expect(card(page, "Ada")).toHaveCount(0);
+
+  await nameButton(page, "Grace").focus();
+  await page.keyboard.press("Enter");
+  const message = card(page, "Grace").getByRole("button", { name: "Message" });
+  await expect(message).toBeFocused();
+  expect(await message.evaluate(outlineOf)).not.toBe("none");
 });
