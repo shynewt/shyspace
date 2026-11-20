@@ -134,3 +134,29 @@ test("the composer's key hints show only while it's focused and empty", async ({
   await page.getByRole("log", { name: "Messages in #general" }).click();
   await expect(hints).toHaveCount(0);
 });
+
+test("a tall code block folds until opened, and copies its code", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const code = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n");
+  await page.getByLabel("Message #general").fill(`\`\`\`\n${code}\n\`\`\``);
+  await page.getByLabel("Message #general").press("Enter");
+  const message = page.getByRole("article").filter({ hasText: "line 1" });
+  const block = message.locator("pre");
+  expect((await block.boundingBox())?.height).toBeLessThanOrEqual(260);
+
+  await message.getByRole("button", { name: "Show more" }).click();
+  expect((await block.boundingBox())?.height).toBeGreaterThan(500);
+  await expect(message.getByRole("button", { name: "Show less" })).toBeVisible();
+
+  await block.hover();
+  await message.getByRole("button", { name: "Copy code" }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(code);
+});
+
+test("a short code block doesn't fold", async ({ page }) => {
+  await page.getByLabel("Message #general").fill("```\nshort\n```");
+  await page.getByLabel("Message #general").press("Enter");
+  const message = page.getByRole("article").filter({ hasText: "short" });
+  await expect(message.locator("pre")).toBeVisible();
+  await expect(message.getByRole("button", { name: "Show more" })).toHaveCount(0);
+});

@@ -1,9 +1,10 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type ReactNode, useState } from "react";
+import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { ConfirmDialog, Tooltip } from "../ui";
+import { ConfirmDialog, cx, IconButton, Tooltip } from "../ui";
 import { PAGE_LINK_PREFIX } from "./api";
 import { isMentionLink, linkMentions } from "./mentions";
 import { reportError } from "./toast";
@@ -22,6 +23,9 @@ const BARE_MESSAGE_LINK = new RegExp(`(?<!\\]\\()shy://message/(${MESSAGE_ID})`,
 const PAGE_LINK_LINE = new RegExp(`^[ \\t]*shy://page/(${PAGE_ID})[ \\t]*(?:\\n|$)`, "gm");
 const MESSAGE_LINK_LINE = new RegExp(`^[ \\t]*shy://message/${MESSAGE_ID}[ \\t]*(?:\\n|$)`, "gm");
 const SAFE_EXTERNAL = /^(https?:|mailto:)/i;
+
+const CODE_MAX_HEIGHT_PX = 240;
+const COPIED_FEEDBACK_MS = 1400;
 
 type MarkdownNode = NonNullable<ExtraProps["node"]>;
 
@@ -79,6 +83,7 @@ export function ChatMarkdown({
         </ExternalLink>
       );
     },
+    pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   };
   return (
     <Markdown
@@ -142,6 +147,69 @@ function ExternalLink({ href, text, children }: { href: string; text: string; ch
         confirmLabel="Open link"
         onConfirm={open}
       />
+    </>
+  );
+}
+
+/** A code block with a copy button; a tall one folds to a few lines until opened. */
+function CodeBlock({ children }: { children: ReactNode }) {
+  const pre = useRef<HTMLPreElement>(null);
+  const [isTall, setTall] = useState(false);
+  const [isExpanded, setExpanded] = useState(false);
+  const [isCopied, setCopied] = useState(false);
+
+  useLayoutEffect(() => {
+    if (pre.current) setTall(pre.current.scrollHeight > CODE_MAX_HEIGHT_PX);
+  });
+
+  useEffect(() => {
+    if (!isCopied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [isCopied]);
+
+  const copy = () => {
+    const code = pre.current?.textContent;
+    if (code === null || code === undefined) return;
+    // Markdown ends a code block's text with a line break that isn't part of the code.
+    navigator.clipboard.writeText(code.replace(/\n$/, "")).then(() => setCopied(true), reportError);
+  };
+  const isFolded = isTall && !isExpanded;
+
+  return (
+    <>
+      <div className="group/code relative">
+        <pre
+          ref={pre}
+          style={isFolded ? { maxHeight: CODE_MAX_HEIGHT_PX } : undefined}
+          className={cx(isFolded && "overflow-y-hidden")}
+        >
+          {children}
+        </pre>
+        {isFolded && (
+          <div className="pointer-events-none absolute inset-x-px bottom-px h-14 rounded-b-lg bg-linear-to-t from-surface-2 to-transparent" />
+        )}
+        <span className="absolute right-1.5 bottom-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 keyboard-focus-within:opacity-100">
+          <IconButton
+            label={isCopied ? "Copied" : "Copy code"}
+            size="sm"
+            icon={isCopied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+            onClick={copy}
+            className="bg-surface shadow-card"
+          />
+        </span>
+      </div>
+      {isTall && (
+        <button
+          type="button"
+          aria-expanded={isExpanded}
+          onClick={() => setExpanded(!isExpanded)}
+          className="mt-1 flex items-center gap-1 rounded-md text-[12px] font-medium text-accent-text hover:underline"
+        >
+          {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {isExpanded ? "Show less" : "Show more"}
+        </button>
+      )}
     </>
   );
 }
