@@ -121,3 +121,34 @@ test("emoji data loads only once a colon search starts", async ({ page }) => {
   await expect(emojiSuggestions(page)).toBeVisible();
   expect(emojiRequests.some((url) => url.includes("emojibase-data"))).toBe(true);
 });
+
+/** Picks with a click and reads the box in the same moment: a key typed right after must land after the emoji. */
+async function textAndCaretAfterClicking(page: Page, cell: string) {
+  return page.getByRole("gridcell", { name: cell }).evaluate((element: HTMLElement) => {
+    element.click();
+    const box = document.activeElement;
+    return box instanceof HTMLTextAreaElement ? [box.value, box.selectionStart] : null;
+  });
+}
+
+test("the caret is right after a picked emoji at once", async ({ page }) => {
+  await composer(page).fill("ab");
+  await composer(page).evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(1, 1));
+  await page.getByRole("button", { name: "Insert emoji" }).first().click();
+  await page.getByLabel("Search emoji").fill("tada");
+  await expect(page.getByRole("gridcell", { name: "Party popper" })).toBeVisible();
+
+  expect(await textAndCaretAfterClicking(page, "Party popper")).toEqual(["a🎉b", 3]);
+});
+
+test("the caret is right after an emoji chosen from suggestions at once", async ({ page }) => {
+  await composer(page).fill("x");
+  await composer(page).pressSequentially(" :tada");
+  await expect(emojiSuggestions(page)).toBeVisible();
+
+  const result = await composer(page).evaluate((element: HTMLTextAreaElement) => {
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    return [element.value, element.selectionStart];
+  });
+  expect(result).toEqual(["x 🎉", 4]);
+});

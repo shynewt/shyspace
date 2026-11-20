@@ -1,6 +1,7 @@
 import { ArrowUp, Pencil, Smile, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { api, type Message } from "../../lib/api";
 import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
@@ -114,9 +115,13 @@ export function Composer({
     const element = input.current;
     if (!element) return;
     const before = element.value.slice(0, element.selectionStart) + emoji;
-    updateText(before + element.value.slice(element.selectionEnd));
-    setEmojiOpen(false);
-    requestAnimationFrame(() => element.setSelectionRange(before.length, before.length));
+    flushSync(() => {
+      updateText(before + element.value.slice(element.selectionEnd));
+      setEmojiOpen(false);
+    });
+    // At once, not on the next frame, so a key typed straight after lands after the emoji.
+    element.focus();
+    element.setSelectionRange(before.length, before.length);
   };
 
   const isHintShown = editing !== null || (isFocused && text === "");

@@ -111,10 +111,12 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     const before = element.value.slice(0, element.selectionStart);
     const head = `${before}${before === "" || /\s$/.test(before) ? "" : " "}@${name} `;
     picked.current.set(name, memberId);
-    setText(head + element.value.slice(element.selectionEnd));
-    setQuery(null);
+    flushSync(() => {
+      setText(head + element.value.slice(element.selectionEnd));
+      setQuery(null);
+    });
     element.focus();
-    requestAnimationFrame(() => element.setSelectionRange(head.length, head.length));
+    element.setSelectionRange(head.length, head.length);
   };
 
   /** Handles the keys the list owns; returns whether it used the key. */
