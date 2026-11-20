@@ -1,6 +1,7 @@
 import { AtSign, Bot } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { api } from "../../lib/api";
 import { emojiQueryAt } from "../../lib/emojiQuery";
 import { mentionQueryAt, withMentionLinks } from "../../lib/mentions";
@@ -99,9 +100,12 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
       if (suggestion.id) picked.current.set(suggestion.name, suggestion.id);
     }
     const before = element.value.slice(0, query.start) + inserted;
-    setText(before + element.value.slice(caret));
-    setQuery(null);
-    requestAnimationFrame(() => element.setSelectionRange(before.length, before.length));
+    flushSync(() => {
+      setText(before + element.value.slice(caret));
+      setQuery(null);
+    });
+    // Now, not on the next frame: a key typed in between would land at the end, then the caret would jump back.
+    element.setSelectionRange(before.length, before.length);
   };
 
   /** Handles the keys the list owns; returns whether it used the key. */
