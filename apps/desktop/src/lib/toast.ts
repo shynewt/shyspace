@@ -3,12 +3,16 @@ import { useSyncExternalStore } from "react";
 export type Toast = {
   id: number;
   text: string;
-  tone: "error" | "info";
-  /** Offers an Undo button that runs this. */
-  undo?: () => Promise<void>;
+  /** "success" confirms something you did; "info" tells you something; errors are announced as alerts. */
+  tone: "success" | "info" | "error" | "reminder";
+  /** A button beside the text. */
+  action?: { kind: "undo" | "open"; run: () => Promise<void> | void };
 };
 
+const TOAST_MS = 2600;
+const ERROR_TOAST_MS = 6000;
 const UNDO_TOAST_MS = 5000;
+const REMINDER_TOAST_MS = 15000;
 
 let toasts: Toast[] = [];
 let nextId = 1;
@@ -17,24 +21,31 @@ function publish() {
   for (const notify of subscribers) notify();
 }
 
-export function showToast(text: string, tone: Toast["tone"] = "info") {
-  const toast = { id: nextId++, text, tone };
-  toasts = [...toasts, toast];
+function show(toast: Omit<Toast, "id">, durationMs: number) {
+  const id = nextId++;
+  toasts = [...toasts, { id, ...toast }];
   publish();
-  setTimeout(() => dismissToast(toast.id), tone === "error" ? 6000 : 2600);
+  setTimeout(() => dismissToast(id), durationMs);
+}
+
+export function showToast(text: string, tone: "success" | "info" = "success") {
+  show({ text, tone }, TOAST_MS);
 }
 
 /** A confirmation with an Undo button, shown long enough to reach it. */
 export function showUndoToast(text: string, undo: () => Promise<void>) {
-  const toast: Toast = { id: nextId++, text, tone: "info", undo };
-  toasts = [...toasts, toast];
-  publish();
-  setTimeout(() => dismissToast(toast.id), UNDO_TOAST_MS);
+  show({ text, tone: "success", action: { kind: "undo", run: undo } }, UNDO_TOAST_MS);
+}
+
+/** A reminder that came due, with a button to open what was saved. */
+export function showReminderToast(text: string, open: () => void) {
+  show({ text, tone: "reminder", action: { kind: "open", run: open } }, REMINDER_TOAST_MS);
 }
 
 export function reportError(error: unknown) {
   console.error(error);
-  showToast(typeof error === "string" ? error : error instanceof Error ? error.message : String(error), "error");
+  const text = typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
+  show({ text, tone: "error" }, ERROR_TOAST_MS);
 }
 
 export function dismissToast(id: number) {

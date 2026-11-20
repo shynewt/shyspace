@@ -158,3 +158,20 @@ test("a saved message that links to another shows the link as words", async ({ p
   await expect(list).toContainText("see a linked message first");
   await expect(list).not.toContainText("shy://");
 });
+
+test("a reminder's toast opens what you saved", async ({ page }) => {
+  await messageMenu(page, "Read the spec");
+  await chooseInSubmenu(page, "Remind me", "In 20 minutes");
+  await later(page).click();
+  await page.evaluate(() =>
+    window.fake.handle("save_for_later", {
+      item: window.fake.messageWithText("Read the spec"),
+      remindMs: Date.now() + 1000,
+    }),
+  );
+
+  const toast = page.getByRole("status").filter({ hasText: "Reminder: Read the spec" });
+  await toast.getByRole("button", { name: "Open" }).click({ timeout: 10_000 });
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await expect(toast).toHaveCount(0);
+});

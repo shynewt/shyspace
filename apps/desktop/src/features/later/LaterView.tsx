@@ -8,7 +8,7 @@ import { describeReminder, REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showUndoToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
-import { useWorkspace } from "../../lib/workspace";
+import { savedItemView, useWorkspace } from "../../lib/workspace";
 import { Avatar, cx, EmptyState, IconButton, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
 
 /** Messages and pages you saved for yourself, with their reminders. */
@@ -85,12 +85,8 @@ function LaterRow({ item }: { item: LaterItem }) {
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const linked = item.message;
   const openItem = () => {
-    if (linked) {
-      const { message, thread_root } = linked;
-      navigate({ kind: "channel", id: message.channel, thread: thread_root ?? undefined, focus: message.id });
-    } else if (item.page) {
-      navigate({ kind: "page", id: item.page.id });
-    }
+    const view = savedItemView(item);
+    if (view) navigate(view);
   };
   const author = linked ? displayName(linked.message.author_name, linked.message.author) : null;
   const where = linked

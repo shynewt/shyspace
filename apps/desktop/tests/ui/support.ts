@@ -53,3 +53,17 @@ export async function answerWith(page: Page, command: string, value: unknown, ch
     { command, value, change },
   );
 }
+
+/** From now on fails `command` with `error`, as the core does when something goes wrong. */
+export async function failWith(page: Page, command: string, error: string) {
+  await page.evaluate(
+    ({ command, error }) => {
+      const answer = window.fake.handle.bind(window.fake);
+      window.fake.handle = (asked, args) => {
+        if (asked === command) throw error;
+        return answer(asked, args);
+      };
+    },
+    { command, error },
+  );
+}

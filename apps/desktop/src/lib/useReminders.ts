@@ -1,7 +1,7 @@
 import { useEffect } from "react";
-import { api, onChange } from "./api";
+import { api, type LaterItem, onChange } from "./api";
 import { plainPreview } from "./markdown";
-import { reportError, showToast } from "./toast";
+import { reportError, showReminderToast } from "./toast";
 
 /** Checks at least this often, in case the clock jumps (sleep, time zones). */
 const LONGEST_WAIT_MS = 30 * 1000;
@@ -11,7 +11,7 @@ const PREVIEW_CHARS = 140;
  * Fires reminders right when they come due while the app runs; ones missed
  * while it was closed fire at launch.
  */
-export function useReminders() {
+export function useReminders(onOpen: (item: LaterItem) => void) {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let isStopped = false;
@@ -21,7 +21,7 @@ export function useReminders() {
         const text = item.message?.message.text;
         const what = text ? plainPreview(text, () => undefined) : item.page?.title || "something you saved";
         const body = what.length > PREVIEW_CHARS ? `${what.slice(0, PREVIEW_CHARS - 1)}…` : what;
-        showToast(`Reminder: ${body}`);
+        showReminderToast(`Reminder: ${body}`, () => onOpen(item));
         api.showAlert("Reminder", body).catch(reportError);
       }
     };
@@ -47,5 +47,5 @@ export function useReminders() {
       clearTimeout(timer);
       unsubscribe();
     };
-  }, []);
+  }, [onOpen]);
 }

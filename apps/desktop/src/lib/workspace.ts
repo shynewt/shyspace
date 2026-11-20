@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { Channel, Page, Session } from "./api";
+import type { Channel, LaterItem, LinkedMessage, Page, Session } from "./api";
 
 export type View =
   /** `thread` opens that thread beside the channel; `focus` scrolls to and highlights a message. */
@@ -26,6 +26,18 @@ export function useWorkspace() {
   const value = useContext(WorkspaceContext);
   if (!value) throw new Error("useWorkspace must be used inside the workspace shell");
   return value;
+}
+
+/** The channel with a linked message shown in place, in its thread if it's a reply. */
+export function linkedMessageView({ message, thread_root }: LinkedMessage): View {
+  return { kind: "channel", id: message.channel, thread: thread_root ?? undefined, focus: message.id };
+}
+
+/** Where a saved item lives: its message, or its page. */
+export function savedItemView(item: LaterItem): View | null {
+  if (item.message) return linkedMessageView(item.message);
+  if (item.page) return { kind: "page", id: item.page.id };
+  return null;
 }
 
 export function sameView(left: View | null, right: View | null) {

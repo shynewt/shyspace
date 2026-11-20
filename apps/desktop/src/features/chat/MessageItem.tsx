@@ -19,7 +19,7 @@ import { displayName, formatFullDate, formatTime, formatWhen } from "../../lib/p
 import { REMINDER_CHOICES } from "../../lib/reminders";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
-import { useWorkspace } from "../../lib/workspace";
+import { linkedMessageView, useWorkspace } from "../../lib/workspace";
 import { Avatar, Badge, ConfirmDialog, cx, IconButton, Menu, type MenuItem, Popover, springs, Tooltip } from "../../ui";
 import { MessageCard } from "./MessageCard";
 import { PageCard } from "./PageCard";
@@ -57,9 +57,8 @@ export const MessageItem = memo(function MessageItem({
 
   const openLinkedMessage = (id: string) =>
     api.linkedMessage(id).then((linked) => {
-      if (!linked) return showToast("That message was deleted.");
-      const { message: target, thread_root } = linked;
-      navigate({ kind: "channel", id: target.channel, thread: thread_root ?? undefined, focus: target.id });
+      if (!linked) return showToast("That message was deleted.", "info");
+      navigate(linkedMessageView(linked));
     }, reportError);
 
   const toggleReaction = (emoji: string) => {

@@ -42,7 +42,7 @@ Keep feedback under about 250 ms. Reduced-motion settings are respected globally
 | `SegmentedControl` | picking one of a few modes |
 | `CopyField` | codes and commands with a copy button |
 | `ConfirmDialog` | asks before something that can't be undone (deletes); stays open showing the error if it fails |
-| `Toasts` | transient messages; trigger with `showToast` / `reportError` from `lib/toast.ts` |
+| `Toasts` | transient messages above the message box, from `lib/toast.ts`: `showToast` (a success, or `"info"`), `showUndoToast`, `showReminderToast` (with Open) and `reportError` (announced as an alert) |
 
 Dialogs, drawers, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primitives) primitives for focus handling and keyboard support, styled by us.
 

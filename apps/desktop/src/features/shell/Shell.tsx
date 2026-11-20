@@ -1,13 +1,14 @@
 import { UserX } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type Session } from "../../lib/api";
+import { api, type LaterItem, type Session } from "../../lib/api";
 import { SHORTCUTS } from "../../lib/shortcuts";
+import { showToast } from "../../lib/toast";
 import { useAlerts } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
 import { usePresence } from "../../lib/usePresence";
 import { useReminders } from "../../lib/useReminders";
-import { sameView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
+import { sameView, savedItemView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { InboxView } from "../inbox/InboxView";
@@ -85,11 +86,16 @@ export function Shell({ session }: { session: Session }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [view, channels, pages, sections]);
 
-  useAlerts(view);
-  useReminders();
-  usePresence();
-
   const navigate = useCallback((next: View) => setView(next), []);
+  const openSaved = useCallback((item: LaterItem) => {
+    const target = savedItemView(item);
+    if (target) setView(target);
+    else showToast("What you saved no longer exists.", "info");
+  }, []);
+
+  useAlerts(view);
+  useReminders(openSaved);
+  usePresence();
   const context = useMemo(
     () => ({ session, channels, pages, view, navigate }),
     [session, channels, pages, view, navigate],
