@@ -175,3 +175,16 @@ test("a reminder's toast opens what you saved", async ({ page }) => {
   await expect(page.getByLabel("Message #general")).toBeVisible();
   await expect(toast).toHaveCount(0);
 });
+
+test("Later keeps a reminder beside its item, in a readable width", async ({ page }) => {
+  await messageMenu(page, "Read the spec");
+  await chooseInSubmenu(page, "Remind me", "In 20 minutes");
+  await later(page).click();
+
+  const list = page.getByRole("list", { name: "Saved for later" });
+  const where = await list.getByText("Grace in #general").boundingBox();
+  const reminder = await list.getByText(/(Today|Tomorrow) \d/).boundingBox();
+  if (!where || !reminder) throw new Error("Later not laid out");
+  expect(reminder.x - (where.x + where.width)).toBeLessThan(24);
+  expect((await list.boundingBox())?.width).toBeLessThanOrEqual(760);
+});

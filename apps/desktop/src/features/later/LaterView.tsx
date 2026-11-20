@@ -25,52 +25,54 @@ export function LaterView() {
         <h1 className="text-[15px] font-semibold">Later</h1>
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        {items && items.length === 0 && (
-          <EmptyState icon={<Bookmark size={22} />} title="Nothing saved for later">
-            Save a message or page from its menu, with a reminder if you like. Only you see this list.
-          </EmptyState>
-        )}
-        <ul aria-label="Saved for later" className="flex flex-col gap-1">
-          <AnimatePresence initial={false}>
-            {open.map((item) => (
-              <LaterRow key={item.id} item={item} />
-            ))}
-          </AnimatePresence>
-        </ul>
-        {done.length > 0 && (
-          <section className="mt-5">
-            <button
-              type="button"
-              aria-expanded={isCompletedOpen}
-              onClick={() => setCompletedOpen(!isCompletedOpen)}
-              className="flex items-center gap-1 rounded-md text-left"
-            >
-              <motion.span
-                animate={{ rotate: isCompletedOpen ? 90 : 0 }}
-                transition={springs.snappy}
-                className="grid text-decorative"
-              >
-                <ChevronRight size={14} />
-              </motion.span>
-              <SectionLabel>Completed · {done.length}</SectionLabel>
-            </button>
+        <div className="mx-auto max-w-[760px]">
+          {items && items.length === 0 && (
+            <EmptyState icon={<Bookmark size={22} />} title="Nothing saved for later">
+              Save a message or page from its menu, with a reminder if you like. Only you see this list.
+            </EmptyState>
+          )}
+          <ul aria-label="Saved for later" className="flex flex-col gap-1">
             <AnimatePresence initial={false}>
-              {isCompletedOpen && (
-                <motion.ul
-                  aria-label="Completed"
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="flex flex-col gap-1 overflow-hidden"
-                >
-                  {done.map((item) => (
-                    <LaterRow key={item.id} item={item} />
-                  ))}
-                </motion.ul>
-              )}
+              {open.map((item) => (
+                <LaterRow key={item.id} item={item} />
+              ))}
             </AnimatePresence>
-          </section>
-        )}
+          </ul>
+          {done.length > 0 && (
+            <section className="mt-5">
+              <button
+                type="button"
+                aria-expanded={isCompletedOpen}
+                onClick={() => setCompletedOpen(!isCompletedOpen)}
+                className="flex items-center gap-1 rounded-md text-left"
+              >
+                <motion.span
+                  animate={{ rotate: isCompletedOpen ? 90 : 0 }}
+                  transition={springs.snappy}
+                  className="grid text-decorative"
+                >
+                  <ChevronRight size={14} />
+                </motion.span>
+                <SectionLabel>Completed · {done.length}</SectionLabel>
+              </button>
+              <AnimatePresence initial={false}>
+                {isCompletedOpen && (
+                  <motion.ul
+                    aria-label="Completed"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="flex flex-col gap-1 overflow-hidden"
+                  >
+                    {done.map((item) => (
+                      <LaterRow key={item.id} item={item} />
+                    ))}
+                  </motion.ul>
+                )}
+              </AnimatePresence>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -152,7 +154,7 @@ function LaterRow({ item }: { item: LaterItem }) {
           {item.remind_ms !== null && !item.is_done && (
             <span
               className={cx(
-                "ml-auto flex shrink-0 items-center gap-1 rounded-full px-2 text-[11px]",
+                "flex shrink-0 items-center gap-1 rounded-full px-2 text-[11px]",
                 isOverdue ? "bg-danger/15 text-danger-text" : "bg-accent-soft text-accent-text",
               )}
             >

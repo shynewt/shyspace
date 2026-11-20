@@ -40,45 +40,47 @@ export function InboxView() {
         <MarkAllReadDialog open={isConfirmingMarkAll} onOpenChange={setConfirmingMarkAll} />
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        {isEmpty && (
-          <EmptyState icon={<CheckCheck size={22} />} title="You're all caught up">
-            Mentions of you and new replies in threads you follow show up here.
-          </EmptyState>
-        )}
-        {inbox && inbox.attention.length > 0 && (
-          <section aria-label="Mentions and replies" className="mb-6">
-            <SectionLabel>Mentions and replies</SectionLabel>
-            <ul className="flex flex-col gap-1">
-              <AnimatePresence initial={false}>
-                {inbox.attention.map((item) => (
-                  <AttentionRow key={item.message.id} item={item} />
+        <div className="mx-auto max-w-[760px]">
+          {isEmpty && (
+            <EmptyState icon={<CheckCheck size={22} />} title="You're all caught up">
+              Mentions of you and new replies in threads you follow show up here.
+            </EmptyState>
+          )}
+          {inbox && inbox.attention.length > 0 && (
+            <section aria-label="Mentions and replies" className="mb-6">
+              <SectionLabel>Mentions and replies</SectionLabel>
+              <ul className="flex flex-col gap-1">
+                <AnimatePresence initial={false}>
+                  {inbox.attention.map((item) => (
+                    <AttentionRow key={item.message.id} item={item} />
+                  ))}
+                </AnimatePresence>
+              </ul>
+            </section>
+          )}
+          {drafts.length > 0 && (
+            <section aria-label="Drafts" className="mb-6">
+              <SectionLabel>Drafts</SectionLabel>
+              <ul className="flex flex-col gap-1">
+                <AnimatePresence initial={false}>
+                  {drafts.map((draft) => (
+                    <DraftRow key={draft.target} draft={draft} />
+                  ))}
+                </AnimatePresence>
+              </ul>
+            </section>
+          )}
+          {unreadChannels.length > 0 && (
+            <section aria-label="Unread channels">
+              <SectionLabel>Unread channels</SectionLabel>
+              <ul className="flex flex-col gap-1">
+                {unreadChannels.map((channel) => (
+                  <UnreadChannelRow key={channel.id} channel={channel} />
                 ))}
-              </AnimatePresence>
-            </ul>
-          </section>
-        )}
-        {drafts.length > 0 && (
-          <section aria-label="Drafts" className="mb-6">
-            <SectionLabel>Drafts</SectionLabel>
-            <ul className="flex flex-col gap-1">
-              <AnimatePresence initial={false}>
-                {drafts.map((draft) => (
-                  <DraftRow key={draft.target} draft={draft} />
-                ))}
-              </AnimatePresence>
-            </ul>
-          </section>
-        )}
-        {unreadChannels.length > 0 && (
-          <section aria-label="Unread channels">
-            <SectionLabel>Unread channels</SectionLabel>
-            <ul className="flex flex-col gap-1">
-              {unreadChannels.map((channel) => (
-                <UnreadChannelRow key={channel.id} channel={channel} />
-              ))}
-            </ul>
-          </section>
-        )}
+              </ul>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -74,3 +74,17 @@ test("muted channels stay out of the inbox", async ({ page }) => {
   await expect(page.getByText("You're all caught up")).toBeVisible();
   await expect(page.getByRole("region", { name: "Unread channels" })).toHaveCount(0);
 });
+
+test("the inbox keeps a readable width", async ({ page }) => {
+  await page.evaluate(() =>
+    window.fake.receiveMessage(
+      window.fake.memberNamed("Grace"),
+      "random",
+      `[@Ada](shy://member/${window.fake.session?.me}) hi`,
+    ),
+  );
+  await page.getByRole("button", { name: /^Inbox/ }).click();
+  const attention = page.getByRole("region", { name: "Mentions and replies" });
+  await expect(attention).toBeVisible();
+  expect((await attention.boundingBox())?.width).toBeLessThanOrEqual(760);
+});
