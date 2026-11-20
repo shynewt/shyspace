@@ -50,7 +50,7 @@ function ProtectionNotice({ protection }: { protection: ProtectionCheck }) {
   switch (protection.state) {
     case "locked":
       return (
-        <p className="flex items-center gap-2 text-[13px]">
+        <p className="flex items-center gap-2 text-sm">
           <ShieldCheck size={16} className="shrink-0 text-success" />
           <span>
             <span className="font-medium text-success-text">Protected.</span> The bucket refuses to delete the
@@ -60,7 +60,7 @@ function ProtectionNotice({ protection }: { protection: ProtectionCheck }) {
       );
     case "unknown":
       return (
-        <p className="flex items-center gap-2 text-[13px] text-muted">
+        <p className="flex items-center gap-2 text-sm text-muted">
           <ShieldQuestion size={16} className="shrink-0 text-decorative" />
           Couldn't check yet whether the bucket keeps deleted data.
         </p>
@@ -105,8 +105,8 @@ function Notice({ tone, title, children }: { tone: "warning" | "danger"; title: 
       )}
     >
       <ShieldAlert size={18} className={cx("mt-px shrink-0", tone === "danger" ? "text-danger" : "text-warning")} />
-      <div className="flex min-w-0 flex-col gap-1.5 text-[12.5px] leading-relaxed">
-        <h4 className={cx("text-[13.5px] font-semibold", tone === "danger" ? "text-danger-text" : "text-warning-text")}>
+      <div className="flex min-w-0 flex-col gap-1.5 text-sm leading-relaxed">
+        <h4 className={cx("text-base font-semibold", tone === "danger" ? "text-danger-text" : "text-warning-text")}>
           {title}
         </h4>
         {children}
@@ -148,11 +148,11 @@ const PROVIDER_STEPS: { provider: string; steps: ReactNode }[] = [
 function ProviderSteps() {
   return (
     <details className="group rounded-xl border border-line px-3.5 py-2.5">
-      <summary className="flex cursor-default list-none items-center gap-1.5 rounded-md text-[13px] font-medium [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-default list-none items-center gap-1.5 rounded-md text-sm font-medium [&::-webkit-details-marker]:hidden">
         <ChevronRight size={14} className="text-decorative transition-transform group-open:rotate-90" />
         How to protect your bucket
       </summary>
-      <dl className="mt-2.5 flex flex-col gap-2 text-[12.5px] leading-relaxed">
+      <dl className="mt-2.5 flex flex-col gap-2 text-sm leading-relaxed">
         {PROVIDER_STEPS.map(({ provider, steps }) => (
           <div key={provider}>
             <dt className="font-medium">{provider}</dt>
@@ -160,7 +160,7 @@ function ProviderSteps() {
           </div>
         ))}
       </dl>
-      <p className="mt-2.5 text-[12.5px] leading-relaxed">
+      <p className="mt-2.5 text-sm leading-relaxed">
         <span className="font-medium">Don't lock the whole bucket.</span>{" "}
         <span className="text-muted">
           shyspace deletes and overwrites some of its own files (invites, the recovery snapshot, peers), so a
@@ -187,7 +187,7 @@ function CheckAgain({ checkedMs }: { checkedMs: number | null }) {
         >
           Check again
         </Button>
-        <span className="text-[12px] text-faint">
+        <span className="text-xs text-faint">
           {checkedMs === null ? "Not checked yet" : `Last checked ${formatWhen(checkedMs, new Date())}`}
         </span>
       </div>

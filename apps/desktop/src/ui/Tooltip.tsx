@@ -32,7 +32,7 @@ export function Tooltip({
               <motion.div
                 {...pop}
                 transition={springs.snappy}
-                className="z-50 rounded-md bg-ink px-2 py-1 text-[11.5px] font-medium text-bg shadow-float"
+                className="z-50 rounded-md bg-ink px-2 py-1 text-xs font-medium text-bg shadow-float"
               >
                 {label}
               </motion.div>

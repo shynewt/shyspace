@@ -37,7 +37,7 @@ export function SearchableMemberList({ label, members, actions }: ListProps) {
       {shown.length > 0 ? (
         <MemberRows label={label} members={shown} actions={actions} />
       ) : (
-        <p className="px-2 py-6 text-center text-[13px] text-muted">No one matches “{query.trim()}”.</p>
+        <p className="px-2 py-6 text-center text-sm text-muted">No one matches “{query.trim()}”.</p>
       )}
     </div>
   );
@@ -67,10 +67,10 @@ function MemberRow({ member, isMe, actions }: { member: Member; isMe: boolean; a
         presence={member.active && !member.is_bot ? member.presence : undefined}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-[13.5px] font-medium">
+        <div className="flex items-center gap-1.5 text-base font-medium">
           <span className="truncate">{name}</span>
           <StatusEmoji member={member} />
-          {isMe && <span className="shrink-0 text-[12px] font-normal text-muted">(you)</span>}
+          {isMe && <span className="shrink-0 text-xs font-normal text-muted">(you)</span>}
           {member.is_admin && <Badge>Admin</Badge>}
           {member.is_bot && <Badge tone="accent">Agent</Badge>}
         </div>
@@ -83,11 +83,11 @@ function MemberRow({ member, isMe, actions }: { member: Member; isMe: boolean; a
 
 /** Removed, or their status text (the emoji sits by the name) or else presence. Agents show only their tag. */
 function MemberStatusLine({ member }: { member: Member }) {
-  if (!member.active) return <p className="truncate text-[12px] text-muted">Removed</p>;
+  if (!member.active) return <p className="truncate text-xs text-muted">Removed</p>;
   if (member.is_bot) return null;
   const alerts = member.status && alertsLabel(member.status);
   return (
-    <p className="truncate text-[12px] text-muted">
+    <p className="truncate text-xs text-muted">
       {member.status?.text || presenceLabel(member.presence)}
       {alerts && <span className="ml-1 text-warning-text">· {alerts}</span>}
     </p>

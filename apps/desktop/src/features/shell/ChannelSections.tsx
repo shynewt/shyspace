@@ -159,7 +159,7 @@ function Section({
             type="button"
             aria-expanded={isOpen}
             onClick={() => api.setSectionCollapsed(section.id, isOpen).catch(reportError)}
-            className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-[11px] font-semibold tracking-wide text-faint uppercase hover:text-muted"
+            className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-2xs font-semibold tracking-wide text-faint uppercase hover:text-muted"
           >
             <motion.span animate={{ rotate: isOpen ? 90 : 0 }} transition={springs.snappy} className="grid">
               <ChevronRight size={12} />
@@ -252,7 +252,7 @@ function SectionNameInput({
         }}
         onBlur={submit}
         placeholder="Section name"
-        className="mt-3 h-7 w-full rounded-lg bg-surface px-2.5 text-[12px] font-semibold tracking-wide uppercase ring-2 ring-accent/30 outline-none placeholder:text-faint placeholder:normal-case"
+        className="mt-3 h-7 w-full rounded-lg bg-surface px-2.5 text-xs font-semibold tracking-wide uppercase ring-2 ring-accent/30 outline-none placeholder:text-faint placeholder:normal-case"
       />
     </motion.div>
   );

@@ -48,13 +48,13 @@ function BucketForm({ settings }: { settings: Settings }) {
   return (
     <>
       <form onSubmit={save.run} className="flex flex-col gap-3">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-xl border border-line bg-bg px-3.5 py-2.5 text-[12.5px]">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-xl border border-line bg-bg px-3.5 py-2.5 text-sm">
           <dt className="text-muted">Endpoint</dt>
           <dd className="selectable truncate">{settings.endpoint}</dd>
           <dt className="text-muted">Bucket</dt>
           <dd className="selectable truncate">{settings.bucket}</dd>
         </dl>
-        <p className="text-[12px] leading-relaxed text-muted">
+        <p className="text-xs leading-relaxed text-muted">
           The endpoint and bucket stay fixed: the workspace's data lives there. You can change the region and keys.
         </p>
         <Field label="Region">

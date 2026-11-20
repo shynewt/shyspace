@@ -15,9 +15,9 @@ const VARIANTS: Record<Variant, string> = {
 };
 
 const SIZES: Record<Size, string> = {
-  sm: "h-7 gap-1.5 rounded-md px-2.5 text-[12.5px]",
-  md: "h-8 gap-2 rounded-lg px-3 text-[13px]",
-  lg: "h-10 gap-2 rounded-lg px-4 text-[14px]",
+  sm: "h-7 gap-1.5 rounded-md px-2.5 text-sm",
+  md: "h-8 gap-2 rounded-lg px-3 text-sm",
+  lg: "h-10 gap-2 rounded-lg px-4 text-base",
 };
 
 type ButtonProps = Omit<ComponentPropsWithoutRef<typeof motion.button>, "children"> & {

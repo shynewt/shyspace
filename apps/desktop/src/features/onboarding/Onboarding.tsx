@@ -51,7 +51,7 @@ export function Onboarding({ onReady }: { onReady: (session: Session) => void })
           animate={{ opacity: 1, y: 0 }}
         >
           <Logo size={48} />
-          <h1 className="mt-4 text-[26px] font-semibold tracking-tight">Welcome to shyspace</h1>
+          <h1 className="mt-4 text-2xl font-semibold tracking-tight">Welcome to shyspace</h1>
           <p className="mt-1.5 text-muted">Chat, pages and agents, end-to-end encrypted. No server to run.</p>
         </motion.div>
 
@@ -144,10 +144,10 @@ function CreateForm({ onReady }: { onReady: (session: Session) => void }) {
           )}
         </Field>
       </div>
-      <div className="mt-2 flex items-center gap-2 text-[12px] font-medium tracking-wide text-muted uppercase">
+      <div className="mt-2 flex items-center gap-2 text-xs font-medium tracking-wide text-muted uppercase">
         <Lock size={13} /> Storage bucket
       </div>
-      <p className="-mt-1 text-[12.5px] leading-relaxed text-muted">
+      <p className="-mt-1 text-sm leading-relaxed text-muted">
         Any S3-compatible bucket (AWS, Cloudflare R2, MinIO…). It only ever stores encrypted data and is the mailbox
         while teammates are offline.
       </p>
@@ -215,18 +215,18 @@ function BucketTest({
         </Button>
         <AnimatePresence mode="wait" initial={false}>
           {isVerified ? (
-            <motion.span key="ok" {...rise} className="flex items-center gap-1 text-[12.5px] text-success-text">
+            <motion.span key="ok" {...rise} className="flex items-center gap-1 text-sm text-success-text">
               <CircleCheck size={14} /> The bucket works
             </motion.span>
           ) : (
-            <motion.span key="hint" {...rise} className="text-[12px] text-muted">
+            <motion.span key="hint" {...rise} className="text-xs text-muted">
               {check.kind === "passed" ? "Settings changed; test again." : "Required before creating."}
             </motion.span>
           )}
         </AnimatePresence>
       </div>
       {check.kind === "failed" && (
-        <p className="selectable flex gap-1.5 text-[12px] leading-relaxed text-danger-text">
+        <p className="selectable flex gap-1.5 text-xs leading-relaxed text-danger-text">
           <CircleAlert size={14} className="mt-0.5 shrink-0" />
           {check.message}
         </p>
@@ -308,7 +308,7 @@ function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
             onChange={(event) => setInvite(event.target.value)}
             placeholder="shy2_…"
             rows={4}
-            className="font-mono text-[12px]"
+            className="font-mono text-xs"
           />
         )}
       </Field>
@@ -351,17 +351,17 @@ function WaitingForApproval({ safetyCode, onCancel }: { safetyCode: string; onCa
           <KeyRound size={22} />
         </div>
       </div>
-      <h2 className="mt-4 text-[15px] font-semibold">Waiting for the admin…</h2>
-      <p className="mt-1 max-w-[340px] text-[13px] leading-relaxed text-muted">
+      <h2 className="mt-4 text-lg font-semibold">Waiting for the admin…</h2>
+      <p className="mt-1 max-w-[340px] text-sm leading-relaxed text-muted">
         They approve your request from their app. Read them your safety code so they know it's really you.
       </p>
       <div className="mt-3 rounded-xl border border-line bg-bg px-4 py-3">
-        <div className="flex items-center justify-center gap-1.5 text-[11.5px] font-medium text-muted">
+        <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-muted">
           <ShieldCheck size={13} /> Your safety code
         </div>
-        <div className="selectable mt-1 font-mono text-[16px] tracking-wider">{safetyCode}</div>
+        <div className="selectable mt-1 font-mono text-lg tracking-wider">{safetyCode}</div>
       </div>
-      <p className="mt-3 text-[12px] text-faint">Keep this window open.</p>
+      <p className="mt-3 text-xs text-faint">Keep this window open.</p>
       <Button variant="ghost" onClick={onCancel} className="mt-2">
         Cancel request
       </Button>
@@ -388,7 +388,7 @@ function RestoreForm({ onReady }: { onReady: (session: Session) => void }) {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
-      <p className="flex gap-2 text-[12.5px] leading-relaxed text-muted">
+      <p className="flex gap-2 text-sm leading-relaxed text-muted">
         <LifeBuoy size={16} className="mt-0.5 shrink-0" />
         For a workspace admin whose device was lost. Only restore if the old device is gone: two admins at once would
         conflict.
@@ -402,7 +402,7 @@ function RestoreForm({ onReady }: { onReady: (session: Session) => void }) {
             onChange={(event) => setKit(event.target.value)}
             placeholder="shyrec1_…"
             rows={4}
-            className="font-mono text-[12px]"
+            className="font-mono text-xs"
           />
         )}
       </Field>

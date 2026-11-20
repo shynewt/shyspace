@@ -108,7 +108,7 @@ export const MessageItem = memo(function MessageItem({
             <span className="flex justify-end pt-[3px]">
               <MessageTime
                 ms={message.created_ms}
-                className="text-[10.5px] whitespace-nowrap text-faint opacity-0 group-hover:opacity-100"
+                className="text-2xs whitespace-nowrap text-faint opacity-0 group-hover:opacity-100"
               />
             </span>
           ) : (
@@ -121,22 +121,22 @@ export const MessageItem = memo(function MessageItem({
         <div className="min-w-0 flex-1">
           {onOpenThread && message.reply_to && (
             // In the channel, a reply only shows when what it answered is gone.
-            <div className="mb-0.5 flex items-center gap-1.5 text-[12px] text-faint">
+            <div className="mb-0.5 flex items-center gap-1.5 text-xs text-faint">
               <CornerUpLeft size={12} className="shrink-0" /> Reply to a deleted message
             </div>
           )}
           {!isContinuation && (
             <div className="flex items-baseline gap-2">
-              <ProfileCardTrigger opensOnHover className="rounded text-[13.5px] font-semibold hover:underline">
+              <ProfileCardTrigger opensOnHover className="rounded text-base font-semibold hover:underline">
                 {name}
               </ProfileCardTrigger>
               {author && <StatusEmoji member={author} />}
               {message.author_is_bot && <Badge tone="accent">Agent</Badge>}
-              <MessageTime ms={message.created_ms} className="text-[11.5px] text-faint" />
+              <MessageTime ms={message.created_ms} className="text-xs text-faint" />
             </div>
           )}
           <SavedLabel saved={message.saved} />
-          <div className="prose-chat selectable text-[14px]">
+          <div className="prose-chat selectable text-base">
             <ChatMarkdown
               text={message.text}
               myId={session.me}
@@ -149,7 +149,7 @@ export const MessageItem = memo(function MessageItem({
                 </ProfileCard>
               )}
             />
-            {message.is_edited && <span className="edited-mark ml-1 text-[11px] text-faint">(edited)</span>}
+            {message.is_edited && <span className="edited-mark ml-1 text-2xs text-faint">(edited)</span>}
           </div>
 
           {linkedPages.map((id) => (
@@ -175,7 +175,7 @@ export const MessageItem = memo(function MessageItem({
                     transition={springs.pop}
                     onClick={() => toggleReaction(reaction.emoji)}
                     className={cx(
-                      "flex h-6 items-center gap-1 rounded-full border px-2 text-[12px] transition-colors",
+                      "flex h-6 items-center gap-1 rounded-full border px-2 text-xs transition-colors",
                       reaction.mine
                         ? "border-accent/40 bg-accent-soft text-accent-text"
                         : "border-line bg-surface hover:border-surface-3",
@@ -227,7 +227,7 @@ export const MessageItem = memo(function MessageItem({
                     animate={{ opacity: 1, scale: 1, transition: { ...springs.pop, delay: index * 0.025 } }}
                     whileHover={{ scale: 1.25 }}
                     onClick={() => toggleReaction(emoji)}
-                    className="grid h-8 w-8 place-items-center rounded-md text-[17px] hover:bg-surface-2"
+                    className="grid h-8 w-8 place-items-center rounded-md text-xl hover:bg-surface-2"
                   >
                     {emoji}
                   </motion.button>
@@ -261,7 +261,7 @@ export const MessageItem = memo(function MessageItem({
           onConfirm={() => api.deleteMessage(message.id)}
         >
           {isConfirmingDelete && (
-            <blockquote className="selectable line-clamp-3 border-l-3 border-surface-3 pl-2.5 text-[13px] text-ink">
+            <blockquote className="selectable line-clamp-3 border-l-3 border-surface-3 pl-2.5 text-sm text-ink">
               {plainPreview(message.text, (id) => titles.get(id))}
             </blockquote>
           )}
@@ -352,7 +352,7 @@ function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => vo
     <button
       type="button"
       onClick={onOpen}
-      className="mt-1 flex items-center gap-2 rounded-md px-1.5 py-0.5 -ml-1.5 text-[12.5px] hover:bg-surface-2"
+      className="mt-1 flex items-center gap-2 rounded-md px-1.5 py-0.5 -ml-1.5 text-sm hover:bg-surface-2"
     >
       <span className="font-medium text-accent-text">
         {count} {count === 1 ? "reply" : "replies"}
@@ -361,7 +361,7 @@ function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => vo
         <span className="text-faint">Last reply {formatWhen(message.last_reply_ms, new Date())}</span>
       )}
       {message.unread_replies > 0 && (
-        <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-on-accent">
+        <span className="rounded-full bg-accent px-1.5 text-2xs font-semibold text-on-accent">
           {message.unread_replies} new
         </span>
       )}

@@ -198,23 +198,21 @@ function PaletteBody({ onClose, onMarkAllRead }: { onClose: () => void; onMarkAl
             }
           }}
           placeholder="Search, jump to, or run an action…"
-          className="h-13 flex-1 bg-transparent text-[15px] outline-none placeholder:text-faint"
+          className="h-13 flex-1 bg-transparent text-lg outline-none placeholder:text-faint"
         />
       </div>
       {!query && (
-        <p className="border-b border-line px-4 py-1.5 text-[11.5px] text-faint">
+        <p className="border-b border-line px-4 py-1.5 text-xs text-faint">
           Filters: <code>from:name</code> <code>in:#channel</code> <code>before:2026-11-19</code>{" "}
           <code>after:2026-11-01</code>
         </p>
       )}
       <div id="palette-results" ref={list} role="listbox" className="max-h-[420px] overflow-y-auto p-2">
-        {items.length === 0 && (
-          <p className="px-3 py-8 text-center text-[13px] text-muted">Nothing found for “{query}”</p>
-        )}
+        {items.length === 0 && <p className="px-3 py-8 text-center text-sm text-muted">Nothing found for “{query}”</p>}
         {items.map((item, index) => (
           <div key={item.key}>
             {(index === 0 || items[index - 1].group !== item.group) && (
-              <div className="px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-faint uppercase">
+              <div className="px-3 pt-2 pb-1 text-2xs font-semibold tracking-wide text-faint uppercase">
                 {item.group}
               </div>
             )}
@@ -238,8 +236,8 @@ function PaletteBody({ onClose, onMarkAllRead }: { onClose: () => void; onMarkAl
                 {item.icon}
               </span>
               <span className="relative min-w-0 flex-1">
-                <span className="block truncate text-[13.5px] font-medium">{item.title}</span>
-                {item.detail && <span className="mt-0.5 block truncate text-[12.5px] text-muted">{item.detail}</span>}
+                <span className="block truncate text-base font-medium">{item.title}</span>
+                {item.detail && <span className="mt-0.5 block truncate text-sm text-muted">{item.detail}</span>}
               </span>
               {item.shortcut && (
                 <span className="relative mt-0.5 flex gap-1">

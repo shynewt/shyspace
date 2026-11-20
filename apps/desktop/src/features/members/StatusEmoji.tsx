@@ -35,7 +35,7 @@ export function StatusEmoji({ member }: { member: Member }) {
       <button
         type="button"
         aria-label={`Status: ${description}`}
-        className="shrink-0 cursor-default rounded text-[13px] leading-none"
+        className="shrink-0 cursor-default rounded text-sm leading-none"
       >
         {status.emoji}
       </button>

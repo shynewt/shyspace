@@ -142,7 +142,7 @@ export function Composer({
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.16 }}
               >
-                <div className="flex items-center gap-2 border-b border-line bg-accent-soft/50 px-3 py-1 text-[12px] text-accent-text">
+                <div className="flex items-center gap-2 border-b border-line bg-accent-soft/50 px-3 py-1 text-xs text-accent-text">
                   <Pencil size={13} />
                   <span className="font-medium">Editing message</span>
                   <IconButton
@@ -183,7 +183,7 @@ export function Composer({
                 }
               }}
               placeholder={label}
-              className="max-h-[200px] min-h-8 flex-1 resize-none bg-transparent py-[5.5px] text-[14px] leading-[1.5] outline-none placeholder:text-faint"
+              className="max-h-[200px] min-h-8 flex-1 resize-none bg-transparent py-[5.5px] text-base leading-[1.5] outline-none placeholder:text-faint"
             />
             <Popover
               open={isEmojiOpen}
@@ -205,7 +205,7 @@ export function Composer({
         </motion.div>
       </div>
       {/* In the space under the box, so showing it never moves the box. */}
-      <div className="absolute inset-x-6 bottom-1.5 flex h-[18px] items-center gap-3 overflow-hidden text-[11px] text-faint">
+      <div className="absolute inset-x-6 bottom-1.5 flex h-[18px] items-center gap-3 overflow-hidden text-2xs text-faint">
         <LengthCount length={sentLength} isTooLong={isTooLong} />
         <AnimatePresence initial={false}>
           {isHintShown && (

@@ -117,7 +117,7 @@ function PrivateMembers({ channel, onLeft }: { channel: Channel; onLeft: () => v
               Leave channel
             </Button>
           ) : (
-            <p className="text-[12px] text-muted">To leave, make someone else the owner first.</p>
+            <p className="text-xs text-muted">To leave, make someone else the owner first.</p>
           )}
           {isOwner && (
             <Button

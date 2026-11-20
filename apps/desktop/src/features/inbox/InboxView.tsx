@@ -26,7 +26,7 @@ export function InboxView() {
     <div className="flex h-full flex-col">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
         <InboxIcon size={17} className="text-decorative" />
-        <h1 className="text-[15px] font-semibold">Inbox</h1>
+        <h1 className="text-lg font-semibold">Inbox</h1>
         {inbox && !isEmpty && (
           <Button
             variant="ghost"
@@ -110,15 +110,13 @@ function AttentionRow({ item }: { item: InboxItem }) {
       >
         <Avatar id={message.author} name={name} isBot={message.author_is_bot} size={32} />
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
+          <span className="flex items-center gap-1.5 text-sm text-muted">
             {item.reason === "mention" ? <AtSign size={12} /> : <MessageSquareReply size={12} />}
             <b className="font-semibold text-ink">{name}</b> {where}{" "}
             <ChannelName channelId={message.channel} className="min-w-0" />
             <span className="ml-auto shrink-0 text-faint">{formatWhen(message.created_ms, new Date())}</span>
           </span>
-          <span className="mt-0.5 block truncate text-[13.5px]">
-            {plainPreview(message.text, (id) => titles.get(id))}
-          </span>
+          <span className="mt-0.5 block truncate text-base">{plainPreview(message.text, (id) => titles.get(id))}</span>
         </span>
       </button>
     </motion.li>
@@ -144,13 +142,11 @@ function DraftRow({ draft }: { draft: Draft }) {
       >
         <Pencil size={15} className="mt-0.5 shrink-0 text-decorative" />
         <span className="min-w-0 flex-1">
-          <span className="block text-[12.5px] text-muted">
+          <span className="block text-sm text-muted">
             {isThread ? "Reply in a thread in" : "In"}{" "}
             <ChannelName channelId={draft.channel} className="font-semibold text-ink" />
           </span>
-          <span className="mt-0.5 block truncate text-[13.5px]">
-            {plainPreview(draft.text, (id) => titles.get(id))}
-          </span>
+          <span className="mt-0.5 block truncate text-base">{plainPreview(draft.text, (id) => titles.get(id))}</span>
         </span>
       </button>
     </motion.li>
@@ -168,10 +164,10 @@ function UnreadChannelRow({ channel }: { channel: Channel }) {
       <button
         type="button"
         onClick={() => navigate({ kind: "channel", id: channel.id })}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13.5px] font-semibold"
+        className="flex min-w-0 flex-1 items-center gap-2 text-left text-base font-semibold"
       >
         <ChannelName channelId={channel.id} className="min-w-0" />
-        <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-on-accent tabular-nums">
+        <span className="rounded-full bg-accent px-1.5 text-2xs font-semibold text-on-accent tabular-nums">
           {channel.unread}
         </span>
       </button>

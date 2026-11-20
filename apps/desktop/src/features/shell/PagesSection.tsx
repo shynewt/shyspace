@@ -29,7 +29,7 @@ export function PagesSection() {
           type="button"
           aria-expanded={isOpen}
           onClick={() => setOpen(!isOpen)}
-          className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-[11px] font-semibold tracking-wide text-faint uppercase hover:text-muted"
+          className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-2xs font-semibold tracking-wide text-faint uppercase hover:text-muted"
         >
           <motion.span animate={{ rotate: isOpen ? 90 : 0 }} transition={springs.snappy} className="grid">
             <ChevronRight size={12} />

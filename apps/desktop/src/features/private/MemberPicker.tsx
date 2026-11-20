@@ -36,7 +36,7 @@ export function MemberPicker({
     );
   }
   if (members.length === 0) {
-    return <p className="px-2 py-6 text-center text-[13px] text-muted">No one else is in this workspace yet.</p>;
+    return <p className="px-2 py-6 text-center text-sm text-muted">No one else is in this workspace yet.</p>;
   }
   return (
     <div className="max-h-[320px] overflow-y-auto">

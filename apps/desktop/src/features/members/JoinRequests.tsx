@@ -24,7 +24,7 @@ export function JoinRequestsBadge({ count }: { count: number }) {
           exit={{ scale: 0.4, opacity: 0 }}
           transition={springs.pop}
           aria-label={`${count} join ${count === 1 ? "request" : "requests"} waiting`}
-          className="relative ml-auto grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-on-accent tabular-nums"
+          className="relative ml-auto grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-accent px-1.5 text-2xs font-semibold text-on-accent tabular-nums"
         >
           {count}
         </motion.span>
@@ -43,7 +43,7 @@ export function JoinRequestList() {
   if (!requests) return null;
   if (requests.length === 0) {
     return (
-      <p className="px-2 py-6 text-center text-[13px] text-muted">
+      <p className="px-2 py-6 text-center text-sm text-muted">
         No one is waiting to join. Requests show here when someone uses an invite.
       </p>
     );
@@ -79,23 +79,23 @@ function JoinRequest({ invite }: { invite: Invite }) {
       transition={springs.smooth}
     >
       <Card highlighted>
-        <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+        <div className="flex items-center gap-1.5 text-sm font-semibold">
           {invite.requester_is_bot && <Bot size={14} className="text-accent" />}
           {invite.requester_name} wants to join
         </div>
-        {invite.label && <div className="mt-0.5 text-[12px] text-muted">Invite: {invite.label}</div>}
+        {invite.label && <div className="mt-0.5 text-xs text-muted">Invite: {invite.label}</div>}
         {invite.requester_is_bot && (
-          <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+          <p className="mt-1.5 text-xs leading-relaxed text-muted">
             This is an AI agent. It will read every channel and page, and what it reads goes to its AI provider:
             end-to-end encryption ends there.
           </p>
         )}
         <div className="mt-2 rounded-lg bg-surface px-2.5 py-2">
-          <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-muted">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted">
             <ShieldCheck size={13} /> Safety code
           </div>
-          <div className="selectable mt-0.5 font-mono text-[13px] tracking-wider">{invite.requester_safety_code}</div>
-          <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+          <div className="selectable mt-0.5 font-mono text-sm tracking-wider">{invite.requester_safety_code}</div>
+          <p className="mt-1 text-xs leading-relaxed text-muted">
             Ask them to read you the code their screen shows. Only let them in if it matches.
           </p>
         </div>

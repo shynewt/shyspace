@@ -173,7 +173,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
           }}
           onMouseMove={() => setSelected(index)}
           className={cx(
-            "flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px]",
+            "flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm",
             index === selected && "bg-surface-2",
           )}
         >
@@ -202,7 +202,7 @@ function PersonRow({ person }: { person: Person }) {
           <AtSign size={13} />
         </span>
         <span className="font-medium">{person.name}</span>
-        <span className="truncate text-[12px] text-faint">{person.detail}</span>
+        <span className="truncate text-xs text-faint">{person.detail}</span>
       </>
     );
   }
@@ -230,11 +230,11 @@ function PersonRow({ person }: { person: Person }) {
 function EmojiRow({ emoji }: { emoji: CatalogEmoji }) {
   return (
     <>
-      <span aria-hidden className="grid w-[22px] place-items-center text-[18px]">
+      <span aria-hidden className="grid w-[22px] place-items-center text-xl">
         {emoji.emoji}
       </span>
       <span className="font-medium">{emoji.label}</span>
-      {emoji.shortcodes[0] && <span className="truncate text-[12px] text-faint">:{emoji.shortcodes[0]}:</span>}
+      {emoji.shortcodes[0] && <span className="truncate text-xs text-faint">:{emoji.shortcodes[0]}:</span>}
     </>
   );
 }

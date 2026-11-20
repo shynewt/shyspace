@@ -20,7 +20,7 @@ export function AgentsNote() {
           }
           side="bottom"
         >
-          <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-[11.5px] text-accent-text">
+          <span className="flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs text-accent-text">
             <Bot size={12} /> {agents} {agents === 1 ? "agent" : "agents"} can read this
           </span>
         </Tooltip>

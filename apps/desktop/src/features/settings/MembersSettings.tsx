@@ -53,7 +53,7 @@ function TabTrigger({ value, isActive, children }: { value: MembersTab; isActive
     <Tabs.Trigger
       value={value}
       className={cx(
-        "-mb-px flex h-9 items-center gap-1.5 rounded-t-md border-b-2 text-[13px] -outline-offset-2 transition-colors",
+        "-mb-px flex h-9 items-center gap-1.5 rounded-t-md border-b-2 text-sm -outline-offset-2 transition-colors",
         isActive ? "border-accent font-medium text-ink" : "border-transparent text-muted hover:text-ink",
       )}
     >

@@ -30,7 +30,7 @@ export function CreateInvite() {
             Create invite
           </Button>
         </div>
-        <p className="text-[11.5px] leading-relaxed text-faint">A note for you, like their name. They don't see it.</p>
+        <p className="text-xs leading-relaxed text-faint">A note for you, like their name. They don't see it.</p>
       </form>
       <FormError message={create.error} />
       <AnimatePresence>
@@ -42,7 +42,7 @@ export function CreateInvite() {
             className="flex flex-col gap-1.5"
           >
             <CopyField value={created.code} label="Copy invite code" />
-            <p className="text-[12px] leading-relaxed text-muted">
+            <p className="text-xs leading-relaxed text-muted">
               Send this code to {created.label || "them"} privately. It works once, within 7 days, and holds no
               passwords. When it's used, you approve the request under Requests.
             </p>
@@ -61,7 +61,7 @@ export function OpenInvites() {
     <div>
       <SectionLabel>Codes waiting to be used</SectionLabel>
       {open.length === 0 ? (
-        <p className="px-2.5 text-[12.5px] text-muted">None right now.</p>
+        <p className="px-2.5 text-sm text-muted">None right now.</p>
       ) : (
         <ul aria-label="Codes waiting to be used" className="flex flex-col">
           {open.map((invite) => (
@@ -78,9 +78,9 @@ function OpenInvite({ invite }: { invite: Invite }) {
   const revoke = () =>
     api.revokeInvite(invite.token).then(() => showToast("Invite revoked. The code no longer works."), reportError);
   return (
-    <li className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px]">
+    <li className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm">
       <span className="min-w-0 flex-1 truncate">{name}</span>
-      <span className="shrink-0 text-[12px] text-muted">
+      <span className="shrink-0 text-xs text-muted">
         Expires {new Date(invite.expires_ms).toLocaleDateString([], { month: "short", day: "numeric" })}
       </span>
       <Button

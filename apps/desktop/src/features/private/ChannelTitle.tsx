@@ -14,7 +14,7 @@ export function ChannelTitle({ channel, members }: { channel: Channel; members: 
     return (
       <>
         {first && <Avatar id={first} name={title} size={22} />}
-        <h1 className="truncate text-[15px] font-semibold">{title}</h1>
+        <h1 className="truncate text-lg font-semibold">{title}</h1>
       </>
     );
   }
@@ -31,14 +31,14 @@ export function ChannelTitle({ channel, members }: { channel: Channel; members: 
     return (
       <>
         <Hash size={17} className="text-decorative" />
-        <h1 className="truncate text-[15px] font-semibold">{title}</h1>
+        <h1 className="truncate text-lg font-semibold">{title}</h1>
       </>
     );
   }
   return (
     <>
       <Lock size={16} className="text-decorative" aria-label="Private channel" />
-      <h1 className="truncate text-[15px] font-semibold">{title}</h1>
+      <h1 className="truncate text-lg font-semibold">{title}</h1>
       <IconButton
         label={`People in #${channel.name}`}
         size="sm"

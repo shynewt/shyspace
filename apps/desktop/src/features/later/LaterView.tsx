@@ -25,7 +25,7 @@ export function LaterView() {
     <div className="flex h-full flex-col">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
         <Bookmark size={17} className="text-decorative" />
-        <h1 className="text-[15px] font-semibold">Later</h1>
+        <h1 className="text-lg font-semibold">Later</h1>
       </header>
       <div className="flex-1 overflow-y-auto px-5 py-4">
         <div className="mx-auto max-w-[760px]">
@@ -148,7 +148,7 @@ function LaterRow({ item }: { item: LaterItem }) {
         </span>
       )}
       <button type="button" onClick={openItem} className="min-w-0 flex-1 text-left">
-        <span className="flex items-center gap-1.5 text-[12.5px] text-muted">
+        <span className="flex items-center gap-1.5 text-sm text-muted">
           {linked ? (
             <span className="flex min-w-0 items-center gap-1">
               <span className="shrink-0">{author} in </span>
@@ -160,7 +160,7 @@ function LaterRow({ item }: { item: LaterItem }) {
           {item.remind_ms !== null && !item.is_done && (
             <span
               className={cx(
-                "flex shrink-0 items-center gap-1 rounded-full px-2 text-[11px]",
+                "flex shrink-0 items-center gap-1 rounded-full px-2 text-2xs",
                 isOverdue ? "bg-danger/15 text-danger-text" : "bg-accent-soft text-accent-text",
               )}
             >
@@ -168,7 +168,7 @@ function LaterRow({ item }: { item: LaterItem }) {
             </span>
           )}
         </span>
-        <span className={cx("mt-0.5 block truncate text-[13.5px]", item.is_done && "text-faint line-through")}>
+        <span className={cx("mt-0.5 block truncate text-base", item.is_done && "text-faint line-through")}>
           {preview}
         </span>
       </button>

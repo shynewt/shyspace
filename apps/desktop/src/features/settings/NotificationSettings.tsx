@@ -91,7 +91,7 @@ function ChannelAlerts() {
       <ul aria-label="Channel alerts" className="flex flex-col">
         {sorted.map((channel) => (
           <li key={channel.id} className="flex items-center gap-3 py-1">
-            <ChannelName channelId={channel.id} className="flex-1 text-[13px]" />
+            <ChannelName channelId={channel.id} className="flex-1 text-sm" />
             <SegmentedControl<NotifyLevel>
               label={`Alerts for ${names.reference(channel.id)}`}
               options={LEVELS}
@@ -106,7 +106,7 @@ function ChannelAlerts() {
           Reset all to every message
         </Button>
         {beforeReset && (
-          <p role="status" className="flex items-center gap-1 text-[12.5px] text-muted">
+          <p role="status" className="flex items-center gap-1 text-sm text-muted">
             {beforeReset.length === 1 ? "1 channel was reset." : `${beforeReset.length} channels were reset.`}
             <Button variant="ghost" size="sm" icon={<Undo2 size={13} />} onClick={() => undoReset(beforeReset)}>
               Undo

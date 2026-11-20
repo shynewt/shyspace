@@ -20,7 +20,7 @@ export function MessageCard({ messageId }: { messageId: string }) {
   const linked = useLive(loadLinked, (change) => change.kind === "messages");
   if (linked === undefined) return null;
   if (linked === null) {
-    return <div className="mt-1.5 text-[12.5px] text-faint italic">A linked message that no longer exists</div>;
+    return <div className="mt-1.5 text-sm text-faint italic">A linked message that no longer exists</div>;
   }
   const { message } = linked;
   const author = displayName(message.author_name, message.author);
@@ -40,12 +40,10 @@ export function MessageCard({ messageId }: { messageId: string }) {
     >
       <Quote size={15} className="mt-0.5 shrink-0 text-decorative" />
       <span className="min-w-0 flex-1">
-        <span className="block text-[12px] text-muted">
+        <span className="block text-xs text-muted">
           <b className="font-semibold text-ink">{author}</b> in <ChannelName channelId={message.channel} />
         </span>
-        <span className="mt-0.5 line-clamp-2 block text-[13px]">
-          {plainPreview(message.text, (id) => titles.get(id))}
-        </span>
+        <span className="mt-0.5 line-clamp-2 block text-sm">{plainPreview(message.text, (id) => titles.get(id))}</span>
       </span>
     </motion.button>
   );

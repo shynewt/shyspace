@@ -181,6 +181,29 @@
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
+/*
+ * The type scale: every font size in the app is one of these. It replaces
+ * Tailwind's sizes of the same names, without their line heights, so a size
+ * never changes the line height.
+ */
+@theme {
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-xs--line-height: initial;
+  --text-sm: 13px;
+  --text-sm--line-height: initial;
+  --text-base: 14px;
+  --text-base--line-height: initial;
+  --text-lg: 15px;
+  --text-lg--line-height: initial;
+  --text-xl: 20px;
+  --text-xl--line-height: initial;
+  --text-2xl: 26px;
+  --text-2xl--line-height: initial;
+  --text-3xl: 38px;
+  --text-3xl--line-height: initial;
+}
+
 /* In the base layer so Tailwind utilities (like outline-none) can override it. */
 @layer base {
   html,
@@ -194,7 +217,7 @@
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: var(--text-base);
     -webkit-font-smoothing: antialiased;
     user-select: none;
   }

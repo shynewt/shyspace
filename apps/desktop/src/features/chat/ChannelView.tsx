@@ -303,9 +303,9 @@ export function ChannelView({
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-          {channel ? <ChannelTitle channel={channel} members={members} /> : <h1 className="text-[15px]">…</h1>}
+          {channel ? <ChannelTitle channel={channel} members={members} /> : <h1 className="text-lg">…</h1>}
           <AgentsNote />
-          <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-[11.5px] text-muted">
+          <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs text-muted">
             <Lock size={11} /> End-to-end encrypted
           </span>
         </header>

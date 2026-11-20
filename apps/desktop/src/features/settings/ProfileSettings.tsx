@@ -40,7 +40,7 @@ export function ProfileSettings() {
       >
         Save profile
       </Button>
-      <p className="mt-2 text-[12px] leading-relaxed text-muted">
+      <p className="mt-2 text-xs leading-relaxed text-muted">
         Your status and appearing offline are in the menu under your name, at the bottom of the sidebar.
       </p>
     </form>

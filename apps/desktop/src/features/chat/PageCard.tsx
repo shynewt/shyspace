@@ -31,14 +31,14 @@ export function PageCard({ pageId }: { pageId: string }) {
         <FileText size={17} />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1 text-[13.5px] font-semibold">
+        <div className="flex items-center gap-1 text-base font-semibold">
           <span className="truncate">{page.title || "Untitled"}</span>
           <ArrowUpRight
             size={14}
             className="shrink-0 text-decorative transition group-hover/card:translate-x-0.5 group-hover/card:-translate-y-0.5 group-hover/card:text-accent"
           />
         </div>
-        <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted">{preview || "Empty page"}</p>
+        <p className="mt-0.5 line-clamp-2 text-sm leading-snug text-muted">{preview || "Empty page"}</p>
       </div>
     </motion.button>
   );

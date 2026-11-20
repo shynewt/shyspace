@@ -38,7 +38,7 @@ export function SegmentedControl<Value extends string>({
           <label
             key={option.value}
             className={cx(
-              "relative z-10 grid h-8 place-items-center rounded-[10px] px-3 text-[13px] whitespace-nowrap transition-colors",
+              "relative z-10 grid h-8 place-items-center rounded-[10px] px-3 text-sm whitespace-nowrap transition-colors",
               width === "full" && "flex-1",
               isSelected ? "font-semibold text-accent-text" : "font-medium text-muted hover:text-ink",
             )}

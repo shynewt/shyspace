@@ -115,7 +115,7 @@ function SettingsWindow({
           <Fragment key={group.id}>
             <div
               aria-hidden
-              className="truncate px-2.5 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-faint uppercase first:pt-1"
+              className="truncate px-2.5 pt-3 pb-1 text-2xs font-semibold tracking-wide text-faint uppercase first:pt-1"
             >
               {group.title}
             </div>
@@ -144,8 +144,8 @@ function SettingsWindow({
           className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 -outline-offset-2 data-[state=inactive]:hidden"
         >
           <header className="mb-5">
-            <h3 className="text-[15px] font-semibold">{section.label}</h3>
-            <p className="mt-0.5 text-[12.5px] text-muted">{SECTION_VIEWS[section.id].description}</p>
+            <h3 className="text-lg font-semibold">{section.label}</h3>
+            <p className="mt-0.5 text-sm text-muted">{SECTION_VIEWS[section.id].description}</p>
           </header>
           {section.id === "members" ? (
             <MembersSettings
@@ -176,7 +176,7 @@ function SectionTab({
     <Tabs.Trigger
       value={section}
       className={cx(
-        "relative flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] -outline-offset-2 transition-colors",
+        "relative flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-sm -outline-offset-2 transition-colors",
         isActive ? "font-medium text-ink" : "text-muted hover:bg-surface-2 hover:text-ink",
       )}
     >

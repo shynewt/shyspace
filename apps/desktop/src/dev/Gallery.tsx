@@ -36,7 +36,7 @@ export default function Gallery() {
       <div className="mx-auto flex max-w-[860px] flex-col gap-8 px-8 py-10">
         <header className="flex items-center gap-3">
           <Logo size={32} />
-          <h1 className="text-[22px] font-semibold tracking-tight">shyspace design system</h1>
+          <h1 className="text-xl font-semibold tracking-tight">shyspace design system</h1>
         </header>
 
         <Example title="Buttons">
@@ -122,7 +122,7 @@ export default function Gallery() {
             ]}
           />
           <Popover trigger={<Button>Open popover</Button>}>
-            <div className="p-3 text-[13px]">Anchored to its trigger.</div>
+            <div className="p-3 text-sm">Anchored to its trigger.</div>
           </Popover>
           <Popover trigger={<Button>Pick an emoji</Button>} side="bottom" align="start">
             <EmojiPicker onSelect={(emoji) => showToast(`Picked ${emoji}`)} />
@@ -150,7 +150,7 @@ export default function Gallery() {
             </Card>
             <Card highlighted>
               <SectionLabel>Highlighted card</SectionLabel>
-              <p className="text-[13px] text-muted">For things that need attention, like join requests.</p>
+              <p className="text-sm text-muted">For things that need attention, like join requests.</p>
             </Card>
           </div>
         </Example>
@@ -198,7 +198,7 @@ export default function Gallery() {
 function Example({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h2 className="mb-3 text-[13px] font-semibold text-muted">{title}</h2>
+      <h2 className="mb-3 text-sm font-semibold text-muted">{title}</h2>
       <div className="flex flex-wrap items-center gap-3">{children}</div>
     </section>
   );

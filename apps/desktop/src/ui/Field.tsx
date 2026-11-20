@@ -16,11 +16,11 @@ export function Field({
   const id = useId();
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <label htmlFor={id} className="text-[12px] font-medium text-muted">
+      <label htmlFor={id} className="text-xs font-medium text-muted">
         {label}
       </label>
       {children(id)}
-      {hint && <span className="text-[11.5px] leading-relaxed text-faint">{hint}</span>}
+      {hint && <span className="text-xs leading-relaxed text-faint">{hint}</span>}
     </div>
   );
 }

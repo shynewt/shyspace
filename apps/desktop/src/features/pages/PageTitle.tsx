@@ -58,7 +58,7 @@ export function PageTitle({ pageId, title, ref }: { pageId: string; title: strin
         event.currentTarget.closest("article")?.querySelector<HTMLElement>(".cm-content")?.focus();
       }}
       placeholder="Untitled"
-      className="block w-full resize-none overflow-hidden bg-transparent text-[38px] leading-tight font-bold tracking-tight outline-none placeholder:text-muted"
+      className="block w-full resize-none overflow-hidden bg-transparent text-3xl leading-tight font-bold tracking-tight outline-none placeholder:text-muted"
     />
   );
 }

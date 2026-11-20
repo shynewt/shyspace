@@ -29,7 +29,7 @@ export function Toasts() {
             initial={{ opacity: 0, y: 16, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.95, transition: { duration: 0.15 } }}
-            className="pointer-events-auto flex max-w-[520px] items-center rounded-xl border border-line bg-surface text-[13px] shadow-float"
+            className="pointer-events-auto flex max-w-[520px] items-center rounded-xl border border-line bg-surface text-sm shadow-float"
           >
             <button
               type="button"

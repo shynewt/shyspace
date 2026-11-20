@@ -83,7 +83,7 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
     <form onSubmit={save.run} className="flex flex-col gap-4 p-5 pt-4">
       <div className="flex gap-2">
         <div className="flex shrink-0 flex-col gap-1.5">
-          <span aria-hidden className="text-[12px] font-medium text-muted">
+          <span aria-hidden className="text-xs font-medium text-muted">
             Emoji
           </span>
           <EmojiChoice emoji={emoji} onChange={setEmoji} />
@@ -110,7 +110,7 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
               type="button"
               onClick={() => choosePreset(preset)}
               className={cx(
-                "flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left text-[13px] transition-colors hover:bg-surface-2",
+                "flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left text-sm transition-colors hover:bg-surface-2",
                 text === preset.text && emoji === preset.emoji && "bg-surface-2",
               )}
             >
@@ -179,7 +179,7 @@ function EmojiChoice({ emoji, onChange }: { emoji: string; onChange: (emoji: str
         <button
           type="button"
           aria-label={emoji ? `Choose an emoji (now ${emoji})` : "Choose an emoji"}
-          className="grid h-9 w-12 place-items-center rounded-lg border border-line bg-bg text-[18px] transition-colors hover:border-surface-3 data-[state=open]:border-accent"
+          className="grid h-9 w-12 place-items-center rounded-lg border border-line bg-bg text-xl transition-colors hover:border-surface-3 data-[state=open]:border-accent"
         >
           {emoji || <Smile size={16} className="text-decorative" />}
         </button>

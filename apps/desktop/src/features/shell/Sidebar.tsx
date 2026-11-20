@@ -27,7 +27,7 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
         <button
           type="button"
           onClick={onOpenSearch}
-          className="flex h-8 w-full items-center gap-2 rounded-lg border border-line bg-surface px-2.5 text-[13px] text-muted transition hover:border-surface-3 hover:text-ink"
+          className="flex h-8 w-full items-center gap-2 rounded-lg border border-line bg-surface px-2.5 text-sm text-muted transition hover:border-surface-3 hover:text-ink"
         >
           <Search size={14} />
           <span className="flex-1 text-left">Search</span>

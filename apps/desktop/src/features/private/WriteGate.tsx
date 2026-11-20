@@ -24,7 +24,5 @@ export function WriteGate({ channelId, children }: { channelId: string; children
     members,
   );
   if (!notice) return children;
-  return (
-    <p className="mx-5 mb-4 rounded-xl border border-line bg-surface-2 px-4 py-3 text-[13px] text-muted">{notice}</p>
-  );
+  return <p className="mx-5 mb-4 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm text-muted">{notice}</p>;
 }

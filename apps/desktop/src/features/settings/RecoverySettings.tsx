@@ -22,7 +22,7 @@ function RecoveryKit() {
   const reveal = useFormAction(async () => setKit(await api.recoveryKit()));
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-[13px] leading-relaxed">
+      <p className="text-sm leading-relaxed">
         If you lose this device, nobody can add or remove members. Save your recovery kit in a password manager: it
         restores your admin role on a new device.
       </p>

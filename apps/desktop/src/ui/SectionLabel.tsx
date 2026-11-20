@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 export function SectionLabel({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="group flex h-7 items-center justify-between px-2.5">
-      <span className="text-[11.5px] font-semibold tracking-wide text-faint uppercase">{children}</span>
+      <span className="text-xs font-semibold tracking-wide text-faint uppercase">{children}</span>
       {action}
     </div>
   );

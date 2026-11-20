@@ -76,7 +76,7 @@ export function NavItem({
           })
         }
         className={cx(
-          "relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-[13.5px] transition-colors",
+          "relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-base transition-colors",
           isActive ? "font-medium text-ink" : "text-muted hover:bg-surface-2/70 hover:text-ink",
           hasUnread && "font-semibold text-ink",
           isMuted && !hasUnread && !isActive && "opacity-60",
@@ -97,7 +97,7 @@ export function NavItem({
             animate={{ scale: 1, opacity: 1 }}
             transition={springs.pop}
             className={cx(
-              "ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-[10.5px] font-semibold tabular-nums group-hover:opacity-0",
+              "ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-2xs font-semibold tabular-nums group-hover:opacity-0",
               mentions > 0 ? "bg-danger text-white" : "bg-accent text-on-accent",
             )}
           >

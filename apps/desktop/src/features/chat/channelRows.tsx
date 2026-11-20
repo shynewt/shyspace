@@ -54,7 +54,7 @@ export function UnreadLine() {
       className="my-2 flex items-center gap-3 px-5"
     >
       <div className="h-px flex-1 bg-danger/60" />
-      <span className="text-[11px] font-semibold tracking-wide text-danger-text uppercase">New messages</span>
+      <span className="text-2xs font-semibold tracking-wide text-danger-text uppercase">New messages</span>
     </motion.div>
   );
 }
@@ -63,7 +63,7 @@ export function DayDivider({ label }: { label: string }) {
   return (
     <div className="my-3 flex items-center gap-3 px-5">
       <div className="h-px flex-1 bg-line" />
-      <span className="text-[11.5px] font-medium text-faint">{label}</span>
+      <span className="text-xs font-medium text-faint">{label}</span>
       <div className="h-px flex-1 bg-line" />
     </div>
   );

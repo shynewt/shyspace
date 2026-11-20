@@ -82,7 +82,7 @@ export function ThreadPanel({
       className="flex w-[380px] shrink-0 flex-col border-l border-line bg-surface"
     >
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-4">
-        <h2 className="text-[14px] font-semibold">Thread</h2>
+        <h2 className="text-base font-semibold">Thread</h2>
         {first && (
           <Button
             variant="ghost"
@@ -123,7 +123,7 @@ export function ThreadPanel({
         )}
         {replies.length > 0 && (
           <div className="my-2 flex items-center gap-3 px-5">
-            <span className="text-[11.5px] font-medium text-faint">
+            <span className="text-xs font-medium text-faint">
               {replies.length} {replies.length === 1 ? "reply" : "replies"}
             </span>
             <div className="h-px flex-1 bg-line" />

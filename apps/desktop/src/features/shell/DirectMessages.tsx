@@ -18,7 +18,7 @@ export function DirectMessages() {
   return (
     <section aria-label="Direct messages" className="mt-3">
       <div className="group/section flex h-7 items-center gap-0.5 pr-1 pl-2">
-        <span className="flex-1 truncate text-[11px] font-semibold tracking-wide text-faint uppercase">
+        <span className="flex-1 truncate text-2xs font-semibold tracking-wide text-faint uppercase">
           Direct messages
         </span>
         <IconButton
@@ -38,7 +38,7 @@ export function DirectMessages() {
           <button
             type="button"
             onClick={() => setStarting(true)}
-            className="flex h-8 items-center rounded-lg px-2.5 text-left text-[13px] text-faint hover:bg-surface-2 hover:text-muted"
+            className="flex h-8 items-center rounded-lg px-2.5 text-left text-sm text-faint hover:bg-surface-2 hover:text-muted"
           >
             Message someone privately
           </button>

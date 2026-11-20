@@ -242,7 +242,7 @@ export function SuggestionMenu({
           }}
           onMouseMove={() => setSelected(index)}
           className={cx(
-            "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-[13px] text-ink",
+            "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-sm text-ink",
             index === selectedIndex && "bg-surface-2",
           )}
         >
@@ -251,7 +251,7 @@ export function SuggestionMenu({
           {option.detail && (
             <span
               className={cx(
-                "ml-auto shrink-0 truncate pl-2 text-[11.5px] text-muted",
+                "ml-auto shrink-0 truncate pl-2 text-xs text-muted",
                 suggestion.kind === "command" && "font-mono",
               )}
             >

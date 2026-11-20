@@ -15,7 +15,7 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
   return (
     <span
       className={cx(
-        "inline-flex items-center gap-1 rounded px-1.5 py-px text-[10.5px] font-semibold tracking-wide uppercase",
+        "inline-flex items-center gap-1 rounded px-1.5 py-px text-2xs font-semibold tracking-wide uppercase",
         TONES[tone],
       )}
     >

@@ -14,7 +14,7 @@ export function AgentsSettings() {
   const agents = members?.filter((member) => member.is_bot && member.active) ?? [];
   return (
     <div className="flex flex-col gap-5">
-      <p className="text-[13px] leading-relaxed">
+      <p className="text-sm leading-relaxed">
         Agents, like Claude Code, join as members, so they can read every channel and page. What they read goes to their
         AI provider: end-to-end encryption ends there.
       </p>
@@ -26,7 +26,7 @@ export function AgentsSettings() {
             actions={(agent) => session.is_admin && <RemoveMemberButton member={agent} />}
           />
         ) : (
-          <p className="text-[13px] text-muted">No agents yet.</p>
+          <p className="text-sm text-muted">No agents yet.</p>
         ))}
       {session.is_admin ? <AddAgent /> : <AskAdmin />}
     </div>
@@ -36,7 +36,7 @@ export function AgentsSettings() {
 function AskAdmin() {
   const adminName = useAdminName();
   if (!adminName) return null;
-  return <p className="text-[13px] text-muted">Ask {adminName} to add an agent.</p>;
+  return <p className="text-sm text-muted">Ask {adminName} to add an agent.</p>;
 }
 
 function AddAgent() {
@@ -49,7 +49,7 @@ function AddAgent() {
   });
   return (
     <section aria-labelledby="add-agent" className="flex flex-col gap-3 border-t border-line pt-4">
-      <h4 id="add-agent" className="text-[13px] font-semibold">
+      <h4 id="add-agent" className="text-sm font-semibold">
         Add an agent
       </h4>
       <form onSubmit={create.run} className="flex items-end gap-2">
@@ -65,7 +65,7 @@ function AddAgent() {
       <FormError message={create.error} />
       {invite ? (
         <>
-          <p className="text-[12px] leading-relaxed text-muted">
+          <p className="text-xs leading-relaxed text-muted">
             Run these where {invite.agentName} works, then let it in under{" "}
             <button
               type="button"
@@ -79,7 +79,7 @@ function AddAgent() {
           <CopyField value={agentCommands(invite.agentName, invite.code)} label="Copy commands" />
         </>
       ) : (
-        <p className="text-[12px] leading-relaxed text-muted">
+        <p className="text-xs leading-relaxed text-muted">
           The invite comes with the commands to run where the agent works, like Claude Code with the shy CLI installed.
         </p>
       )}

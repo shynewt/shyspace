@@ -50,7 +50,7 @@ export function PageView({ pageId }: { pageId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-13 shrink-0 items-center gap-3 border-b border-line px-5 text-[13px] text-muted">
+      <header className="flex h-13 shrink-0 items-center gap-3 border-b border-line px-5 text-sm text-muted">
         <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
           <ol className="flex min-w-0 items-center gap-0.5">
             {ancestorsOf(page, pages).map((ancestor) => (

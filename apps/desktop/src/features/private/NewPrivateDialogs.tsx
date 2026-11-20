@@ -137,7 +137,7 @@ function NewDmForm({ onDone }: { onDone: () => void }) {
         chosen={chosen}
         onToggle={(member) => setChosen(toggled(chosen, member))}
       />
-      {isTooMany && <p className="text-[12px] text-warning-text">A DM can have up to {MAX_DM_OTHERS} other people.</p>}
+      {isTooMany && <p className="text-xs text-warning-text">A DM can have up to {MAX_DM_OTHERS} other people.</p>}
       <FormError message={error} />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onDone}>

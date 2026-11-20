@@ -25,7 +25,7 @@ export function SavedLabel({ saved }: { saved: SavedMark | null }) {
         aria-label={`${description}. Open Later`}
         onClick={() => navigate({ kind: "later" })}
         className={cx(
-          "mb-0.5 flex w-fit items-center gap-1 rounded text-[12px] font-medium hover:underline",
+          "mb-0.5 flex w-fit items-center gap-1 rounded text-xs font-medium hover:underline",
           isDue ? "text-danger-text" : "text-accent-text",
         )}
       >

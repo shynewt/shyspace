@@ -16,8 +16,8 @@ export function Setting({
   return (
     <div className="flex flex-col gap-2 border-b border-line py-4 first:pt-0 last:border-b-0">
       <div>
-        <div className="text-[13px] font-medium">{title}</div>
-        {description && <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{description}</p>}
+        <div className="text-sm font-medium">{title}</div>
+        {description && <p className="mt-0.5 text-xs leading-relaxed text-muted">{description}</p>}
       </div>
       {children}
     </div>
@@ -38,9 +38,9 @@ export function ManagedByAdmin({ children }: { children?: ReactNode }) {
   const adminName = useAdminName();
   if (!adminName) return null;
   return (
-    <div className="flex flex-col gap-1 text-[13px]">
+    <div className="flex flex-col gap-1 text-sm">
       <p>Managed by {adminName}.</p>
-      {children && <p className="text-[12px] leading-relaxed text-muted">{children}</p>}
+      {children && <p className="text-xs leading-relaxed text-muted">{children}</p>}
     </div>
   );
 }

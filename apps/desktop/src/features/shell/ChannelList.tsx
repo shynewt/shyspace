@@ -229,7 +229,7 @@ function ChannelNameInput({
           }}
           onBlur={submit}
           placeholder="channel-name"
-          className="min-w-0 flex-1 bg-transparent text-[13.5px] outline-none placeholder:text-faint"
+          className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-faint"
         />
       </div>
     </motion.div>

@@ -60,8 +60,8 @@ export function MeMenu() {
           >
             <Avatar id={me.id} name={name} size={28} presence={isOffline ? undefined : me.presence} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium">{name}</span>
-              <span className="block truncate text-[11.5px] text-muted">{statusLine(me, isOffline)}</span>
+              <span className="block truncate text-sm font-medium">{name}</span>
+              <span className="block truncate text-xs text-muted">{statusLine(me, isOffline)}</span>
             </span>
             <StorageAttentionSign />
           </button>

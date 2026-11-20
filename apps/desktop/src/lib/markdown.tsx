@@ -227,7 +227,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
           type="button"
           aria-expanded={isExpanded}
           onClick={() => setExpanded(!isExpanded)}
-          className="mt-1 flex items-center gap-1 rounded-md text-[12px] font-medium text-accent-text hover:underline"
+          className="mt-1 flex items-center gap-1 rounded-md text-xs font-medium text-accent-text hover:underline"
         >
           {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           {isExpanded ? "Show less" : "Show more"}

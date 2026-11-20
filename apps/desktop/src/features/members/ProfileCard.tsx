@@ -266,10 +266,10 @@ export function CardBody({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
-            <h2 className="truncate text-[15px] font-semibold">{name}</h2>
-            {isMe && <span className="shrink-0 text-[12px] text-muted">(you)</span>}
+            <h2 className="truncate text-lg font-semibold">{name}</h2>
+            {isMe && <span className="shrink-0 text-xs text-muted">(you)</span>}
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
             {member.is_admin && <Badge>Admin</Badge>}
             {member.is_bot && <Badge tone="accent">Agent</Badge>}
             {!member.active && <span>No longer in this workspace</span>}
@@ -278,12 +278,12 @@ export function CardBody({
         </div>
       </div>
       {status && (
-        <div className="rounded-lg bg-surface-2 px-3 py-2 text-[13px]">
+        <div className="rounded-lg bg-surface-2 px-3 py-2 text-sm">
           {(status.emoji || status.text) && (
             <p className="selectable">{[status.emoji, status.text].filter(Boolean).join(" ")}</p>
           )}
           {(status.until_ms !== null || alerts) && (
-            <p className="mt-0.5 text-[12px] text-muted">
+            <p className="mt-0.5 text-xs text-muted">
               {status.until_ms !== null && `Until ${formatStatusEnd(status.until_ms)}`}
               {status.until_ms !== null && alerts && " · "}
               {alerts && <span className="text-warning-text">{alerts}</span>}

@@ -12,7 +12,7 @@ Calm and warm: soft neutral surfaces, one accent (violet unless you pick another
   - `text-muted` for secondary text, `text-faint` for small informational text (timestamps, hints, section labels). Both pass on `bg` and `surface`; only `text-muted` also passes on `surface-2`, so use it for text on `surface-2` fills (like `Kbd`).
   - `text-decorative` is for decoration only: an icon beside a label, a chevron, a spinner. Never for something someone has to read.
   - Semantic colors: the plain token (`bg-danger`, a dot, an icon) is for fills and graphics, and white text passes on its fills; the `-text` token (`text-danger-text`) is for text, also on its tints like `bg-danger/15`. The same goes for `accent` and `accent-text`, except that text on an accent fill is `on-accent`.
-- **Type:** the system UI font, 13–15 px for interface text, larger only for page titles.
+- **Type:** the system UI font, in one scale (`@theme` in `styles.css`): `text-2xs` 11 px (badges, keys, tiny labels), `text-xs` 12 px (hints, timestamps, section labels), `text-sm` 13 px (most interface text), `text-base` 14 px (message and preview text, the body default), `text-lg` 15 px (dialog and view titles), `text-xl` 20 px (emoji in pickers and buttons), `text-2xl` 26 px and `text-3xl` 38 px (onboarding and page titles). They replace Tailwind's sizes of the same names (font size only; line height stays as set), and `tests/ui/design-rules.spec.ts` fails on a hand-picked size like `text-[13px]`.
 - **Shape:** `rounded-lg` (8 px) for controls, `rounded-xl` (12 px) for cards, `rounded-2xl` (16 px) for dialogs.
 
 ## Motion

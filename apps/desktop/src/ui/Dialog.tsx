@@ -60,11 +60,11 @@ export function Dialog({
                     placement === "top" ? "max-h-[calc(86dvh-1rem)]" : "max-h-[calc(100dvh-2rem)]",
                   )}
                 >
-                  <RadixDialog.Title className={hideTitle ? "sr-only" : "px-5 pt-5 text-[15px] font-semibold"}>
+                  <RadixDialog.Title className={hideTitle ? "sr-only" : "px-5 pt-5 text-lg font-semibold"}>
                     {title}
                   </RadixDialog.Title>
                   {description ? (
-                    <RadixDialog.Description className="px-5 pt-1 text-[13px] leading-relaxed text-muted">
+                    <RadixDialog.Description className="px-5 pt-1 text-sm leading-relaxed text-muted">
                       {description}
                     </RadixDialog.Description>
                   ) : (
