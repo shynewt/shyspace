@@ -224,6 +224,20 @@ impl Store {
         Ok(())
     }
 
+    /// The position of the owner op that announced key `generation`.
+    pub fn generation_position(&self, channel: &str, generation: u64) -> Result<Option<u64>> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT p.position FROM private_generations g JOIN private_positions p
+                     ON p.channel = g.channel AND p.origin_author = g.origin_author AND p.origin_seq = g.origin_seq
+                 WHERE g.channel = ? AND g.generation = ?",
+                params![channel, generation],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// The op that took `position` in the channel's owner log.
     pub fn position_origin(&self, channel: &str, position: u64) -> Result<Option<(PublicKey, u64)>> {
         let origin: Option<(Vec<u8>, u64)> = self

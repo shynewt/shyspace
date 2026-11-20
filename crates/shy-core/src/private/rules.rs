@@ -87,7 +87,7 @@ impl Store {
                 invitee,
                 from_generation,
                 position,
-            } => self.judge_owner_op(verified, channel, *position, || {
+            } => self.judge_owner_op(verified, channel, key.generation, *position, || {
                 Ok(if *from_generation != self.latest_generation(channel)? {
                     Verdict::Void("an add from another key generation")
                 } else if self.owner_membership(channel, &invitee.member)?.is_some() {
@@ -101,7 +101,7 @@ impl Store {
                 generation,
                 position,
                 ..
-            } => self.judge_owner_op(verified, channel, *position, || {
+            } => self.judge_owner_op(verified, channel, key.generation, *position, || {
                 Ok(if *generation != self.latest_generation(channel)? + 1 {
                     Verdict::Void("not the next key generation")
                 } else if self.owner_membership(channel, member)?.is_none() {
@@ -112,24 +112,26 @@ impl Store {
             }),
             PrivateOp::Rotate {
                 generation, position, ..
-            } => self.judge_owner_op(verified, channel, *position, || {
+            } => self.judge_owner_op(verified, channel, key.generation, *position, || {
                 Ok(if *generation == self.latest_generation(channel)? + 1 {
                     Verdict::Apply
                 } else {
                     Verdict::Void("not the next key generation")
                 })
             }),
-            PrivateOp::HandOver { to, position } => self.judge_owner_op(verified, channel, *position, || {
-                Ok(
-                    if *to == verified.author || self.owner_membership(channel, to)?.is_none() {
-                        Verdict::Void("handed over to someone who isn't in the channel")
-                    } else {
-                        Verdict::Apply
-                    },
-                )
-            }),
+            PrivateOp::HandOver { to, position } => {
+                self.judge_owner_op(verified, channel, key.generation, *position, || {
+                    Ok(
+                        if *to == verified.author || self.owner_membership(channel, to)?.is_none() {
+                            Verdict::Void("handed over to someone who isn't in the channel")
+                        } else {
+                            Verdict::Apply
+                        },
+                    )
+                })
+            }
             PrivateOp::OwnerDelete { id, position } => {
-                self.judge_owner_op(verified, channel, *position, || {
+                self.judge_owner_op(verified, channel, key.generation, *position, || {
                     Ok(if id == channel || is_message_in(id, channel) {
                         Verdict::Apply
                     } else {
@@ -159,11 +161,14 @@ impl Store {
     }
 
     /// An owner op counts only as the channel's next position, written by
-    /// whoever owns that position.
+    /// whoever owns that position. One that finds its position taken by a
+    /// later op of the same owner should have won, if its key already
+    /// existed there.
     fn judge_owner_op(
         &self,
         verified: &VerifiedOp,
         channel: &str,
+        generation: u64,
         position: u64,
         then: impl FnOnce() -> Result<Verdict>,
     ) -> Result<Verdict> {
@@ -173,8 +178,15 @@ impl Store {
         }
         if position < next {
             let taken_by = self.position_origin(channel, position)?;
+            let could_have_counted = self
+                .generation_position(channel, generation)?
+                .is_some_and(|announced_at| announced_at < position);
             return Ok(match taken_by {
-                Some((author, seq)) if author == verified.author && seq > verified.seq => Verdict::Supersede,
+                Some((author, seq))
+                    if author == verified.author && seq > verified.seq && could_have_counted =>
+                {
+                    Verdict::Supersede
+                }
                 _ => Verdict::Void("a position already taken"),
             });
         }
