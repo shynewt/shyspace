@@ -17,6 +17,14 @@ podman run -d --name shyspace-s3 -p 9000:9000 \
 curl --aws-sigv4 "aws:amz:us-east-1:s3" --user shyadmin:shysecret123 -X PUT http://localhost:9000/shyspace
 ```
 
+Then turn on versioning, so the bucket keeps old data and Settings › Storage shows "Partly protected" instead of the red warning:
+
+```sh
+curl --aws-sigv4 "aws:amz:us-east-1:s3" --user shyadmin:shysecret123 -X PUT "http://localhost:9000/shyspace?versioning" \
+  -H 'Content-Type: application/xml' \
+  --data '<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></VersioningConfiguration>'
+```
+
 The CLI reads bucket settings from `SHY_S3_ENDPOINT`, `SHY_S3_BUCKET`, `SHY_S3_ACCESS_KEY_ID`, `SHY_S3_SECRET_ACCESS_KEY` (and `SHY_S3_REGION`).
 
 ## Running

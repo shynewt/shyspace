@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Settings, Smile, X } from "lucide-react";
+import { Eye, EyeOff, Settings, Smile, TriangleAlert, X } from "lucide-react";
 import { useState } from "react";
 import { api, type Member } from "../../lib/api";
 import { displayName } from "../../lib/people";
@@ -6,7 +6,7 @@ import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Menu, type MenuItem } from "../../ui";
-import { StorageAttentionDot } from "../settings/StorageProtection";
+import { StorageAttentionSign, useStorageNeedsAttention } from "../settings/StorageProtection";
 import { StatusDialog } from "./StatusDialog";
 
 const PRESENCE_LABELS: Record<Member["presence"], string> = {
@@ -21,13 +21,24 @@ export function MeMenu() {
   const members = useLive(api.members, (change) => change.kind === "members");
   const isOffline = useLive(api.appearOffline, (change) => change.kind === "members");
   const [isStatusOpen, setStatusOpen] = useState(false);
+  const storageNeedsAttention = useStorageNeedsAttention();
   const me = members?.find((member) => member.id === session.me);
   if (!me || isOffline === undefined) return <div className="h-11" />;
 
   const name = displayName(me.name, me.id);
-  const items: MenuItem[] = [
-    { label: me.status ? "Edit status" : "Set status", icon: <Smile size={14} />, onSelect: () => setStatusOpen(true) },
-  ];
+  const items: MenuItem[] = [];
+  if (storageNeedsAttention) {
+    items.push({
+      label: "Storage needs attention",
+      icon: <TriangleAlert size={14} className="text-danger" />,
+      onSelect: () => openSettings({ section: "storage" }),
+    });
+  }
+  items.push({
+    label: me.status ? "Edit status" : "Set status",
+    icon: <Smile size={14} />,
+    onSelect: () => setStatusOpen(true),
+  });
   if (me.status) {
     items.push({
       label: "Clear status",
@@ -58,7 +69,7 @@ export function MeMenu() {
               <span className="block truncate text-[13px] font-medium">{name}</span>
               <span className="block truncate text-[11.5px] text-muted">{statusLine(me, isOffline)}</span>
             </span>
-            <StorageAttentionDot />
+            <StorageAttentionSign />
           </button>
         }
       />

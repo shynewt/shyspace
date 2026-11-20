@@ -1,11 +1,11 @@
-import { ChevronRight, RefreshCw, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { ChevronRight, RefreshCw, ShieldAlert, ShieldCheck, ShieldQuestion, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { api, type ProtectionCheck } from "../../lib/api";
 import { formatWhen } from "../../lib/people";
 import { useFormAction } from "../../lib/useFormAction";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, cx, FormError } from "../../ui";
+import { Button, cx, FormError, Tooltip } from "../../ui";
 import { useAdminName } from "./layout";
 
 /** Whether the bucket keeps deleted and overwritten data, as last checked. */
@@ -13,16 +13,23 @@ export function useStorageProtection(): ProtectionCheck | undefined {
   return useLive(api.storageProtection, (change) => change.kind === "storage_protection");
 }
 
-/** A dot for wherever the way to Storage starts, while the bucket can lose data. */
-export function StorageAttentionDot() {
-  const protection = useStorageProtection();
-  if (protection?.state !== "unprotected") return null;
+/** Whether the bucket can lose data, so someone should act. */
+export function useStorageNeedsAttention(): boolean {
+  return useStorageProtection()?.state === "unprotected";
+}
+
+/** A warning sign for wherever the way to Storage starts, while the bucket can lose data. */
+export function StorageAttentionSign() {
+  if (!useStorageNeedsAttention()) return null;
   return (
-    <span
-      role="img"
-      aria-label="Storage needs attention"
-      className="relative ml-auto h-2 w-2 shrink-0 rounded-full bg-danger"
-    />
+    <Tooltip label="Storage can lose data">
+      <TriangleAlert
+        role="img"
+        aria-label="Storage needs attention"
+        size={14}
+        className="relative ml-auto shrink-0 text-danger"
+      />
+    </Tooltip>
   );
 }
 

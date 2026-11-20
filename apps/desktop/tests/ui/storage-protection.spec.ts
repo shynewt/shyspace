@@ -134,3 +134,24 @@ test.describe("as a member", () => {
     await expect(storage).toContainText("Managed by Ada.");
   });
 });
+
+test("the warning sign explains itself and the me menu leads to the fix", async ({ page }) => {
+  await setProtection(page, "unprotected");
+  const sign = meButton(page).getByRole("img", { name: "Storage needs attention" });
+  await sign.hover();
+  await expect(page.getByRole("tooltip", { name: "Storage can lose data" })).toBeVisible();
+
+  await meButton(page).click();
+  await page.getByRole("menuitem", { name: "Storage needs attention" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" }).getByRole("tab", { name: /^Storage/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+});
+
+test("the me menu has no storage item while the bucket is protected", async ({ page }) => {
+  await setProtection(page, "locked");
+  await meButton(page).click();
+  await expect(page.getByRole("menuitem", { name: "Set status" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Storage needs attention" })).toHaveCount(0);
+});
