@@ -1,5 +1,5 @@
 import { UserX } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LaterItem, type Session } from "../../lib/api";
 import type { SettingsTarget } from "../../lib/settings";
@@ -114,23 +114,21 @@ export function Shell({ session }: { session: Session }) {
       >
         <Sidebar status={status} onOpenSearch={() => setPaletteOpen(true)} />
         <main className="relative min-w-0 flex-1 bg-surface">
-          <AnimatePresence mode="wait" initial={false}>
-            {view && (
-              <motion.div
-                key={viewKey(view)}
-                className="absolute inset-0"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, transition: { duration: 0.1 } }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-              >
-                {view.kind === "channel" && <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} />}
-                {view.kind === "page" && <PageView pageId={view.id} />}
-                {view.kind === "inbox" && <InboxView />}
-                {view.kind === "later" && <LaterView />}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* No exit animation: switching while a view fades in could leave AnimatePresence waiting forever on an exit, with nothing shown. */}
+          {view && (
+            <motion.div
+              key={viewKey(view)}
+              className="absolute inset-0"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            >
+              {view.kind === "channel" && <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} />}
+              {view.kind === "page" && <PageView pageId={view.id} />}
+              {view.kind === "inbox" && <InboxView />}
+              {view.kind === "later" && <LaterView />}
+            </motion.div>
+          )}
         </main>
       </motion.div>
       <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} />

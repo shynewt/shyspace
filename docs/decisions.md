@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Views switch without an exit animation (2026-11)
+A view fades and rises in; the one it replaces goes at once. With an exit animation (Motion's `AnimatePresence mode="wait"`), switching again while the new view was fading in could leave Motion waiting forever on the exit, with nothing shown. Slow frames made that common, and WebKit's tests caught it. A UI test switches views quickly on simulated slow frames.
+
 ## Emoji data ships with the app (2026-11)
 The emoji picker is frimousse, on Emojibase data. By default it downloads that data from a CDN, which would tell a third party when someone opens a picker in a private app. And the app's content policy lets the page connect only to the core, so it can't fetch the data even from itself. So `ui/emojiData.ts` imports `emojibase-data`'s English files as a lazily loaded module and hands them to the picker; the picker itself loads on first open too, so neither weighs on startup. That function is the one place that builds the categories, so a later "Custom" category goes there. A UI test fails if the picker makes any request outside the app, or doesn't work under the app's connect rules. Because the data is ours, frimousse doesn't check which emoji the system font can draw; we offer Emoji 15.1 and older. Updating emoji means updating the package.
 

@@ -58,3 +58,34 @@ test("syncing through the bucket alone looks calm, not like a warning", async ({
   });
   expect(dot).not.toBe(warning);
 });
+
+test("switching views while one fades in on a slow machine still shows the one chosen", async ({ page }) => {
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Inbox", level: 1 })).toBeVisible();
+
+  // Frames take 60 ms, as on a busy machine, and each switch comes a frame after the last view appears.
+  const shown = await page.evaluate(async () => {
+    const slowFrame = () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => {
+          const end = performance.now() + 60;
+          while (performance.now() < end) {}
+          resolve(null);
+        }),
+      );
+    const heading = () => document.querySelector("main h1")?.textContent;
+    const headings: (string | null | undefined)[] = [];
+    for (let round = 0; round < 12; round++) {
+      for (const name of ["Later", "Inbox"]) {
+        const button = [...document.querySelectorAll("nav button")].find((item) => item.textContent === name);
+        if (!(button instanceof HTMLButtonElement)) throw new Error(`no ${name} button`);
+        button.click();
+        for (let frame = 0; frame < 40 && heading() !== name; frame++) await slowFrame();
+        headings.push(heading());
+        await slowFrame();
+      }
+    }
+    return headings;
+  });
+  expect(shown).toEqual(Array.from({ length: 12 }, () => ["Later", "Inbox"]).flat());
+});
