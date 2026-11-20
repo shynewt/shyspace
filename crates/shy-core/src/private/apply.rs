@@ -8,14 +8,14 @@ use anyhow::{Result, bail};
 use tracing::warn;
 
 use super::{
-    crypto::{Granting, SealedPayload, Slot, Wrap, key_hint, open, unwrap_key},
+    crypto::{Granting, SealedPayload, Slot, Wrap, commitment, key_hint, open, unwrap_key},
     ids::{MAX_DM_MEMBERS, PrivateKind, dm_id, private_kind},
     ops::{GrantBody, MAX_WRAPS_PER_GRANT, PrivateBody, PrivateOp},
     rules::Verdict,
 };
 use crate::{
     ops::{Op, OpBody, RuleViolation, VerifiedOp, clean_channel_name, rule_violation},
-    storage::{Applied, ApplyContext, Ending, Membership, Origin, Store, StoredKey, WaitingSealed},
+    storage::{Applied, ApplyContext, Ending, Membership, Origin, Settling, Store, StoredKey, WaitingSealed},
     views::Change,
 };
 
@@ -88,8 +88,9 @@ impl Store {
         };
         match private_kind(&grant.channel) {
             Some(PrivateKind::Channel) if grant.dm_members.is_empty() && grant.generation >= 1 => {
-                if self.has_too_many_unvouched_keys(&verified.author)? {
-                    warn!("ignoring a key grant: too many keys nobody vouched for from one member");
+                let announced = self.commitment_of(&grant.channel, grant.generation)?;
+                if announced.is_some_and(|announced| announced != commitment(&grant.key)) {
+                    warn!("ignoring a key its channel's owner didn't announce");
                     return Ok(None);
                 }
             }
@@ -212,11 +213,20 @@ impl Store {
                 // A kind of private op a newer version added.
                 return Ok(Settled::Waiting);
             };
-            if self.defers_private_content.get() && matches!(body.op, PrivateOp::Content(_)) {
+            if !may_settle_now(self.settling.get(), &body.op) {
                 return Ok(Settled::Waiting);
             }
             return match self.judge(verified, &body, &key)? {
                 Verdict::Wait => Ok(Settled::Waiting),
+                Verdict::Supersede => {
+                    // An earlier op of the owner's for a position another
+                    // already took: it wins, and the views start over.
+                    self.delete_waiting_sealed(&verified.author, verified.seq)?;
+                    Ok(Settled::Applied(Applied {
+                        needs_rebuild: true,
+                        ..Applied::default()
+                    }))
+                }
                 Verdict::Void(reason) => {
                     warn!("skipping a private op: {reason}");
                     self.delete_waiting_sealed(&verified.author, verified.seq)?;
@@ -266,6 +276,7 @@ impl Store {
                 self.record_position(channel, 1, origin)?;
                 self.set_owner_from(channel, 1, author, origin)?;
                 self.record_generation(channel, 1, commitment, origin)?;
+                self.drop_unannounced_keys(channel, 1, commitment)?;
                 let creator = Membership {
                     after_seq: verified.seq - 1,
                     from_generation: 1,
@@ -317,6 +328,7 @@ impl Store {
                     origin,
                 )?;
                 self.record_generation(channel, *generation, commitment, origin)?;
+                self.drop_unannounced_keys(channel, *generation, commitment)?;
                 applied.needs_rebuild = self.has_applied_after(channel, member, at_seq)?;
                 applied.changes.push(Change::Channels);
             }
@@ -327,6 +339,7 @@ impl Store {
             } => {
                 self.record_position(channel, *position, origin)?;
                 self.record_generation(channel, *generation, commitment, origin)?;
+                self.drop_unannounced_keys(channel, *generation, commitment)?;
             }
             PrivateOp::HandOver { to, position } => {
                 self.record_position(channel, *position, origin)?;
@@ -373,6 +386,16 @@ impl Store {
             },
             None => Applied::default(),
         })
+    }
+}
+
+/// While a rebuild settles in phases, only some kinds of private op apply.
+fn may_settle_now(settling: Settling, op: &PrivateOp) -> bool {
+    match settling {
+        Settling::Nothing => false,
+        Settling::OwnerOps => !matches!(op, PrivateOp::Leave | PrivateOp::Content(_)),
+        Settling::Leaves => !matches!(op, PrivateOp::Content(_)),
+        Settling::Everything => true,
     }
 }
 

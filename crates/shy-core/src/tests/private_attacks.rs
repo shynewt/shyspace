@@ -585,3 +585,73 @@ async fn starting_a_channel_twice_ends_the_same_on_every_device() {
     let name = |member: &Workspace| listed(member, &channel).map(|listed| listed.name);
     assert_eq!(name(&carol), name(&dave));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_owner_ops_for_one_position_end_the_same_everywhere() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    // Bob writes position 2 twice: first an add sealed with a key that only
+    // the second (a new key generation) announces, so devices open them in
+    // the opposite order to his log.
+    let gen1 = newest_key(&bob, &channel);
+    let gen2 = StoredKey {
+        channel: channel.clone(),
+        generation: 2,
+        key: new_channel_key(),
+    };
+    let mut forger = Forger::new(&bob);
+    let mut ops = Vec::new();
+    for member in [&carol, &dave] {
+        ops.push(forger.seal(forged_grant(&bob, member, &channel, 2, gen2.key)));
+    }
+    ops.push(forger.seal_private(
+        &gen2,
+        PrivateOp::Add {
+            invitee: crate::private::ops::Invitee {
+                member: admin.me(),
+                after_seq: own_last_seq(&admin),
+            },
+            from_generation: 1,
+            position: 2,
+        },
+    ));
+    ops.push(forger.seal_private(
+        &gen1,
+        PrivateOp::Rotate {
+            generation: 2,
+            commitment: commitment(&gen2.key),
+            position: 2,
+        },
+    ));
+    for envelope in ops {
+        carol.receive(envelope.clone()).unwrap();
+        dave.receive(envelope).unwrap();
+    }
+
+    for member in [&carol, &dave] {
+        let store = &member.state().store;
+        assert_eq!(store.latest_generation(&channel).unwrap(), 2);
+        assert_eq!(store.next_position(&channel).unwrap(), 3);
+    }
+    assert_eq!(members_of(&carol, &channel), members_of(&dave, &channel));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keys_that_contradict_the_owners_announcement_are_not_kept() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    let mut forger = Forger::new(&carol);
+    for _ in 0..3 {
+        dave.receive(forger.seal(forged_grant(&carol, &dave, &channel, 1, new_channel_key())))
+            .unwrap();
+    }
+    assert_eq!(dave.state().store.channel_keys(Some(&channel)).unwrap().len(), 1);
+}

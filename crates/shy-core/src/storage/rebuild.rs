@@ -9,7 +9,7 @@ use iroh::PublicKey;
 use rusqlite::params;
 use tracing::warn;
 
-use super::{ApplyContext, Store};
+use super::{ApplyContext, Settling, Store};
 use crate::{
     ops::{Op, RuleViolation, VerifiedOp},
     pages::PageMerge,
@@ -65,20 +65,30 @@ impl Store {
 
     /// Replays every stored op into empty views and private state, in the
     /// order they were first applied. Ops merge the same way in any order, so
-    /// this gives what a device that never saw the dropped ops has. Private
-    /// content waits until who belongs is settled, then is judged against
-    /// that. Runs inside a transaction.
+    /// this gives what a device that never saw the dropped ops has. Sealed ops
+    /// then settle in phases: the owner logs, then leaves, then content, each
+    /// in its authors' order. Runs inside a transaction.
     pub(crate) fn rebuild_views(&self, context: ApplyContext<'_>) -> Result<()> {
         for table in SHARED_VIEW_TABLES {
             self.db.execute(&format!("DELETE FROM {table}"), [])?;
         }
         self.clear_private_state()?;
-        self.defers_private_content.set(true);
-        let replayed = self.replay_log(context);
-        self.defers_private_content.set(false);
-        replayed?;
-        self.retry_sealed(&self.waiting_channels()?, context)?;
-        Ok(())
+        let settled = [
+            Settling::Nothing,
+            Settling::OwnerOps,
+            Settling::Leaves,
+            Settling::Everything,
+        ]
+        .into_iter()
+        .try_for_each(|phase| {
+            self.settling.set(phase);
+            match phase {
+                Settling::Nothing => self.replay_log(context),
+                _ => self.retry_sealed(&self.waiting_channels()?, context).map(drop),
+            }
+        });
+        self.settling.set(Settling::Everything);
+        settled
     }
 
     fn replay_log(&self, context: ApplyContext<'_>) -> Result<()> {

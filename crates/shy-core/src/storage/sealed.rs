@@ -46,10 +46,10 @@ impl Store {
         )
     }
 
-    /// Waiting sealed ops of `channel`, oldest first.
+    /// Waiting sealed ops of `channel`, in each author's order.
     pub(crate) fn waiting_in(&self, channel: &str) -> Result<Vec<WaitingSealed>> {
         self.waiting(
-            "SELECT author, seq, hint, channel FROM sealed_pending WHERE channel = ? ORDER BY rowid",
+            "SELECT author, seq, hint, channel FROM sealed_pending WHERE channel = ? ORDER BY author, seq",
             [channel],
         )
     }

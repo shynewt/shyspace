@@ -8,7 +8,7 @@ use rusqlite::{OptionalExtension, params};
 
 use super::Store;
 use crate::private::{
-    crypto::{ChannelKey, Commitment, LabeledKey},
+    crypto::{ChannelKey, Commitment, LabeledKey, commitment},
     ids::PrivateKind,
 };
 
@@ -25,10 +25,6 @@ pub(super) const PRIVATE_STATE_TABLES: &[&str] = &[
     "sealed_pending",
     "private_applied",
 ];
-
-/// Most keys one granter may hand us that no owner has vouched for yet, so
-/// junk keys can't pile up. Honest grants are vouched for within a few ops.
-const MAX_UNVOUCHED_KEYS_PER_GRANTER: u32 = 256;
 
 /// The op a row comes from.
 #[derive(Clone, Copy)]
@@ -209,18 +205,38 @@ impl Store {
         Ok(inserted > 0)
     }
 
-    /// Whether `granter` already handed us as many channel keys nobody has
-    /// vouched for as we keep.
-    pub(crate) fn has_too_many_unvouched_keys(&self, granter: &PublicKey) -> Result<bool> {
-        let unvouched: u32 = self.db.query_row(
-            "SELECT count(*) FROM private_keys k
-             WHERE k.origin_author = ? AND k.channel LIKE 'p:%'
-               AND NOT EXISTS (SELECT 1 FROM private_generations g
-                   WHERE g.channel = k.channel AND g.generation = k.generation)",
-            [granter.as_bytes()],
-            |row| row.get(0),
-        )?;
-        Ok(unvouched >= MAX_UNVOUCHED_KEYS_PER_GRANTER)
+    /// Drops keys held for `generation` that aren't the one its owner
+    /// announced; nothing could ever use them.
+    pub(crate) fn drop_unannounced_keys(
+        &self,
+        channel: &str,
+        generation: u64,
+        announced: &Commitment,
+    ) -> Result<()> {
+        for key in self.channel_keys(Some(channel))? {
+            if key.generation == generation && commitment(&key.key) != *announced {
+                self.db.execute(
+                    "DELETE FROM private_keys WHERE channel = ? AND generation = ? AND key = ?",
+                    params![channel, generation, key.key.as_slice()],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The op that took `position` in the channel's owner log.
+    pub fn position_origin(&self, channel: &str, position: u64) -> Result<Option<(PublicKey, u64)>> {
+        let origin: Option<(Vec<u8>, u64)> = self
+            .db
+            .query_row(
+                "SELECT origin_author, origin_seq FROM private_positions WHERE channel = ? AND position = ?",
+                params![channel, position],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        origin
+            .map(|(author, seq)| Ok((read_key(author)?, seq)))
+            .transpose()
     }
 
     /// Every key we hold for `channel` (or for all channels), vouched for or

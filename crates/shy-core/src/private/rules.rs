@@ -2,8 +2,9 @@
 //! which must wait for something still missing, and which never will.
 //!
 //! Owner ops form one numbered log per channel, applied strictly in order,
-//! so each is judged against the same state on every device. Everything else
-//! is judged by who belonged when, which only ever shrinks as removals and
+//! so each is judged against the same state on every device (if an owner
+//! writes two ops for one position, the earlier in their log wins).
+//! Everything else is judged by who belonged when, which only ever shrinks as removals and
 //! leaves arrive; content that turns out not to count is undone by a rebuild.
 
 use anyhow::Result;
@@ -23,6 +24,9 @@ pub(crate) enum Verdict {
     Apply,
     Wait,
     Void(&'static str),
+    /// An owner op earlier in its author's log than the one that took its
+    /// position: it should have won.
+    Supersede,
 }
 
 impl Store {
@@ -168,7 +172,11 @@ impl Store {
             return Ok(Verdict::Wait);
         }
         if position < next {
-            return Ok(Verdict::Void("a position already taken"));
+            let taken_by = self.position_origin(channel, position)?;
+            return Ok(match taken_by {
+                Some((author, seq)) if author == verified.author && seq > verified.seq => Verdict::Supersede,
+                _ => Verdict::Void("a position already taken"),
+            });
         }
         if self.owner_at(channel, position)? != Some(verified.author) {
             return Ok(Verdict::Void("only the channel's owner can do that"));

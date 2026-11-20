@@ -55,11 +55,20 @@ impl Store {
 #[cfg(test)]
 pub(crate) const TEST_DB_KEY: &str = "x'0000000000000000000000000000000000000000000000000000000000000000'";
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Settling {
+    Nothing,
+    OwnerOps,
+    Leaves,
+    Everything,
+}
+
 pub struct Store {
     db: Connection,
-    /// While a rebuild settles who belongs, private content waits, so it is
-    /// judged against the final membership rather than the replay's order.
-    pub(crate) defers_private_content: std::cell::Cell<bool>,
+    /// Which sealed ops may apply now. A rebuild settles the owner logs first,
+    /// then leaves, then content, so each is judged against settled state
+    /// rather than the replay's order.
+    pub(crate) settling: std::cell::Cell<Settling>,
 }
 
 impl Store {
@@ -71,7 +80,7 @@ impl Store {
         schema::migrate(&mut db)?;
         Ok(Self {
             db,
-            defers_private_content: std::cell::Cell::new(false),
+            settling: std::cell::Cell::new(Settling::Everything),
         })
     }
 
