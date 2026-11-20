@@ -45,3 +45,18 @@ test("search results show mentions and links as words", async ({ page }) => {
   await expect(hit).not.toContainText("shy://");
   await expect(hit.locator("mark.hit")).toHaveText(["channel", "standup"]);
 });
+
+test("hostile message text can't stall the previews", async ({ page }) => {
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  await page.evaluate(() => {
+    const mallory = window.fake.addMember("Mallory");
+    const mention = `[@Ada](shy://member/${window.fake.session?.me}) `;
+    for (let index = 0; index < 20; index += 1) {
+      window.fake.receiveMessage(mallory, "general", mention + "*a ".repeat(13000));
+    }
+  });
+
+  await expect(page.getByRole("region", { name: "Mentions and replies" }).getByRole("button")).toHaveCount(20, {
+    timeout: 3000,
+  });
+});

@@ -24,6 +24,8 @@ const PAGE_LINK_LINE = new RegExp(`^[ \\t]*shy://page/(${PAGE_ID})[ \\t]*(?:\\n|
 const MESSAGE_LINK_LINE = new RegExp(`^[ \\t]*shy://message/${MESSAGE_ID}[ \\t]*(?:\\n|$)`, "gm");
 const SAFE_EXTERNAL = /^(https?:|mailto:)/i;
 
+/** Previews show a line or two; reading further into a long (or hostile) message only costs time. */
+const PREVIEW_SOURCE_CHARS = 1000;
 const CODE_MAX_HEIGHT_PX = 240;
 const COPIED_FEEDBACK_MS = 1400;
 
@@ -229,6 +231,8 @@ export function messageIdsIn(text: string): string[] {
  */
 export function plainPreview(text: string, pageTitle: (id: string) => string | undefined): string {
   return text
+    .slice(0, PREVIEW_SOURCE_CHARS)
+    .replace(/[\uD800-\uDBFF]$/, "")
     .replace(/!?\[([^\]]*)\]\([^)\s]*\)/g, "$1")
     .replace(/\]\([^)\s]*\)/g, "")
     .replace(/\[([^\]]*)\]\([^)\s]*?(…?)$/, "$1$2")
