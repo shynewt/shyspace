@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { allowClipboard } from "./support";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("");
@@ -135,8 +136,8 @@ test("the composer's key hints show only while it's focused and empty", async ({
   await expect(hints).toHaveCount(0);
 });
 
-test("a tall code block folds until opened, and copies its code", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("a tall code block folds until opened, and copies its code", async ({ page, context, browserName }) => {
+  await allowClipboard(context, browserName);
   const code = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n");
   await page.getByLabel("Message #general").fill(`\`\`\`\n${code}\n\`\`\``);
   await page.getByLabel("Message #general").press("Enter");

@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { type BrowserContext, expect, type Page } from "@playwright/test";
 import type { Change } from "../../src/lib/api";
 
 /**
@@ -14,6 +14,12 @@ export async function chooseInSubmenu(page: Page, submenu: string, choice: strin
   if (!box) throw new Error(`no box for ${choice}`);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 12 });
   await item.click();
+}
+
+/** Lets the page read what it copies. WebKit has no clipboard-write permission; a click is enough to write there. */
+export async function allowClipboard(context: BrowserContext, browserName: string) {
+  const permissions = browserName === "webkit" ? ["clipboard-read"] : ["clipboard-read", "clipboard-write"];
+  await context.grantPermissions(permissions);
 }
 
 declare global {

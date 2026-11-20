@@ -48,8 +48,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm exec playwright install --with-deps chromium-headless-shell
+      - run: pnpm exec playwright install --with-deps chromium-headless-shell webkit
       - run: pnpm test:ui --forbid-only --reporter=github
+        env:
+          UI_TEST_BROWSERS: chromium,webkit
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

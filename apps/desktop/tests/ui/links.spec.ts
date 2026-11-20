@@ -1,8 +1,8 @@
 import { expect, type Page, test } from "@playwright/test";
-import { openedLinks, recordOpenedLinks } from "./support";
+import { allowClipboard, openedLinks, recordOpenedLinks } from "./support";
 
-test.beforeEach(async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test.beforeEach(async ({ page, context, browserName }) => {
+  await allowClipboard(context, browserName);
   await page.goto("");
   await page.getByRole("button", { name: "general", exact: true }).click();
 });

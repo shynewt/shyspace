@@ -98,7 +98,7 @@ cargo test --workspace
 (cd apps/desktop && pnpm typecheck && pnpm lint && pnpm test:ui)
 ```
 
-For changes to sync, networking or the CLI, also run `python3 scripts/e2e_mcp.py` (needs the local bucket; see `docs/development.md`). For UI changes, also run the app and check the change by hand.
+For changes to sync, networking or the CLI, also run `python3 scripts/e2e_mcp.py` (needs the local bucket; see `docs/development.md`). For UI changes, also run `pnpm test:ui:webkit` (WebKit, the app's engine, in a Podman container; see `docs/development.md`) and run the app and check the change by hand.
 
 "Done" means you ran these and saw them pass. If a check fails or you couldn't run it, say so and show the error.
 
