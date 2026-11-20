@@ -53,4 +53,5 @@ Dialogs, drawers, menus, popovers and tooltips use [Radix](https://www.radix-ui.
 - Need something new? First check whether an existing component (or a variant of it) fits. Add a component to `ui/` only when a third screen needs the same thing.
 - New components go in `ui/`, get an entry in `ui/index.ts`, and appear in the gallery.
 - Every interactive element works with the keyboard and has an accessible name.
+- Focus rings are for keyboard use. After a click, focus that Radix moves (back to a menu's trigger, into a dialog) gets no ring: `lib/useInputModality.ts` marks how the app was last used. Controls that show on hover also show for keyboard focus with `keyboard-focus-within:`, not `focus-within:`, which stays on after a click.
 - Sidebar counts mean "this needs you" (unread messages, mentions, a reminder that's due): a coloured badge and a bold label. Things that are only waiting, like saved items, get no count.

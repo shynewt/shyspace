@@ -106,3 +106,15 @@ test("the edited mark sits on the message's last line", async ({ page }) => {
   if (!text || !mark) throw new Error("message not laid out");
   expect(mark.y).toBeLessThan(text.y + text.height);
 });
+
+test("a message's toolbar goes away once the pointer moves on, even after using it", async ({ page }) => {
+  await send(page, "Alpha", "Beta");
+  const alpha = page.getByRole("article").filter({ hasText: "Alpha" });
+  await alpha.hover();
+  await alpha.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Save for later" }).click();
+
+  await page.getByRole("article").filter({ hasText: "Beta" }).hover();
+  const toolbar = alpha.getByRole("button", { name: "React" }).locator("xpath=..");
+  await expect(toolbar).toHaveCSS("opacity", "0");
+});

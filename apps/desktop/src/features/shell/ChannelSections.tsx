@@ -140,7 +140,7 @@ function Section({
             <span className="truncate">{section.name}</span>
           </button>
           {builtinActions}
-          <span className="opacity-0 group-hover/section:opacity-100 focus-within:opacity-100">
+          <span className="opacity-0 group-hover/section:opacity-100 keyboard-focus-within:opacity-100">
             <Menu
               trigger={
                 <IconButton label={`Actions for the ${section.name} section`} size="sm" icon={<Ellipsis size={13} />} />

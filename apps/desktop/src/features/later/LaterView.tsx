@@ -170,7 +170,7 @@ function LaterRow({ item }: { item: LaterItem }) {
       </button>
       <span
         className={cx(
-          "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
+          "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 keyboard-focus-within:opacity-100",
           isMenuOpen && "opacity-100",
         )}
       >

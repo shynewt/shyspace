@@ -66,7 +66,7 @@ export const MessageItem = memo(function MessageItem({
       id={`message-${message.id}`}
       aria-label={`${name} at ${formatTime(message.created_ms)}`}
       className={cx(
-        "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 focus-within:bg-surface-2/50",
+        "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 keyboard-focus-within:bg-surface-2/50",
         isContinuation ? "py-0.5" : "pt-2 pb-0.5",
         isHighlighted && "bg-accent-soft/70",
         message.mentions_me && !isHighlighted && "bg-warning/8 shadow-[inset_2px_0_0_var(--warning)]",
@@ -167,7 +167,7 @@ export const MessageItem = memo(function MessageItem({
           "absolute -top-3 right-5 flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5 shadow-card transition",
           isPickerOpen || isMenuOpen
             ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+            : "opacity-0 group-hover:opacity-100 keyboard-focus-within:opacity-100",
         )}
       >
         <Popover
