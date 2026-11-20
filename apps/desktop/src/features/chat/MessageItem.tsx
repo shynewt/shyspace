@@ -54,6 +54,13 @@ export const MessageItem = memo(function MessageItem({
   const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
   const name = displayName(message.author_name, message.author);
 
+  const openLinkedMessage = (id: string) =>
+    api.linkedMessage(id).then((linked) => {
+      if (!linked) return showToast("That message was deleted.");
+      const { message: target, thread_root } = linked;
+      navigate({ kind: "channel", id: target.channel, thread: thread_root ?? undefined, focus: target.id });
+    }, reportError);
+
   const toggleReaction = (emoji: string) => {
     const isMine = message.reactions.find((reaction) => reaction.emoji === emoji)?.mine ?? false;
     api.react(message.id, emoji, !isMine).catch(reportError);
@@ -113,6 +120,7 @@ export const MessageItem = memo(function MessageItem({
             myId={session.me}
             pageTitle={(id) => titles.get(id)}
             onOpenPage={(id) => navigate({ kind: "page", id })}
+            onOpenMessage={openLinkedMessage}
           />
           {message.is_edited && <span className="edited-mark ml-1 text-[11px] text-faint">(edited)</span>}
         </div>

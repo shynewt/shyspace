@@ -41,7 +41,7 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 - **Desktop notifications show message text** to the operating system's notification center, outside the app's encrypted storage. Settings → Notifications can hide the text, leaving only who wrote and where.
 - **Personal state isn't shared:** read positions, alert levels, drafts and saved-for-later items never leave the device (drafts sit in the encrypted database, not browser storage) and aren't in the admin's recovery snapshot, so other members (and the bucket) can't see what you've read.
 - **Encryption at rest:** both local databases use SQLCipher with keys derived from a device key kept in the OS keychain (or a key file the user places elsewhere). The identity key and bucket credentials are inside the encrypted database; `workspace.json` holds only public settings. See `keys.rs`, `storage/mod.rs`.
-- **Chat rendering:** message HTML is sanitized with DOMPurify; only http(s), mailto and `shy://page/` links are allowed. External links open in the system browser.
+- **Chat rendering:** messages become React elements through react-markdown, never HTML: raw HTML and images are dropped, and only http(s), mailto and `shy://` page, message and mention links survive (`lib/markdown.tsx`). External links show their full address on hover, ask before opening when their text shows a different address than they open, and open in the system browser.
 
 ## Known gaps
 
