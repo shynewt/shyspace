@@ -4,7 +4,7 @@ use anyhow::Result;
 use tracing::warn;
 
 use super::peers::peers_to_dial;
-use crate::{ops::now_ms, workspace::Workspace};
+use crate::{ops::now_ms, transport::bucket::split_into_segments, workspace::Workspace};
 
 impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
@@ -49,15 +49,19 @@ impl Workspace {
         Ok(())
     }
 
-    /// Uploads our ops that aren't in the bucket yet, as one segment.
+    /// Uploads our ops that aren't in the bucket yet, in as few segments as
+    /// others can still read.
     pub(crate) async fn push(&self) -> Result<()> {
         let me = self.me();
         let unpushed = self.state().store.unpushed(&me)?;
-        let Some(last) = unpushed.last().map(|envelope| envelope.seq) else {
-            return Ok(());
-        };
-        self.bucket().put_segment(&unpushed).await?;
-        self.state().store.mark_pushed(&me, last)?;
+        for segment in split_into_segments(&unpushed)? {
+            let last = segment
+                .last()
+                .expect("split_into_segments never makes an empty segment")
+                .seq;
+            self.bucket().put_segment(segment).await?;
+            self.state().store.mark_pushed(&me, last)?;
+        }
         Ok(())
     }
 

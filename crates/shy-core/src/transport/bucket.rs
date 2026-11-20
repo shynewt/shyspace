@@ -41,6 +41,33 @@ const LOCK_PROBE_PREFIX: &str = "ops/lock-probe-";
 /// load arbitrary amounts of data into memory.
 const MAX_OBJECT_SIZE: u64 = 32 * 1024 * 1024;
 
+/// Splits a log's run of envelopes, in order, into segments that each stay
+/// under the size readers accept. A segment holds a count (at most 10 bytes)
+/// and then the envelopes back to back.
+pub fn split_into_segments(envelopes: &[Envelope]) -> Result<Vec<&[Envelope]>> {
+    const COUNT_BYTES: usize = 10;
+    let limit = usize::try_from(MAX_OBJECT_SIZE)?;
+    let mut segments = Vec::new();
+    let (mut start, mut size) = (0, COUNT_BYTES);
+    for (index, envelope) in envelopes.iter().enumerate() {
+        let envelope_size = postcard::to_stdvec(envelope)?.len();
+        ensure!(
+            COUNT_BYTES + envelope_size <= limit,
+            "op {} is too large to upload",
+            envelope.seq
+        );
+        if size + envelope_size > limit {
+            segments.push(&envelopes[start..index]);
+            (start, size) = (index, COUNT_BYTES);
+        }
+        size += envelope_size;
+    }
+    if start < envelopes.len() {
+        segments.push(&envelopes[start..]);
+    }
+    Ok(segments)
+}
+
 fn parse_member_path(name: &str) -> Option<PublicKey> {
     let bytes: [u8; 32] = hex::decode(name).ok()?.try_into().ok()?;
     PublicKey::from_bytes(&bytes).ok()
@@ -221,6 +248,8 @@ impl Bucket {
         Ok(paths)
     }
 
+    /// Uploads `envelopes` as one segment; see [`split_into_segments`] for
+    /// keeping it readable.
     pub async fn put_segment(&self, envelopes: &[Envelope]) -> Result<()> {
         let (Some(first), Some(last)) = (envelopes.first(), envelopes.last()) else {
             return Ok(());
@@ -531,5 +560,29 @@ mod tests {
             assert!(url.contains("X-Amz-Signature="), "{url}");
             assert!(!url.contains("very-secret-key"), "{url}");
         }
+    }
+
+    #[test]
+    fn a_long_run_splits_into_readable_segments_in_order() {
+        let author = iroh::SecretKey::generate().public();
+        let envelope = |seq| Envelope {
+            author,
+            seq,
+            epoch: 1,
+            nonce: [0; 24],
+            ciphertext: vec![0; 3 * 1024 * 1024],
+        };
+        let run: Vec<_> = (1..=25).map(envelope).collect();
+
+        let segments = split_into_segments(&run).unwrap();
+
+        assert!(segments.len() > 1);
+        for segment in &segments {
+            let size = postcard::to_stdvec(segment).unwrap().len();
+            assert!(size as u64 <= MAX_OBJECT_SIZE, "a segment of {size} bytes");
+        }
+        let seqs: Vec<u64> = segments.concat().iter().map(|envelope| envelope.seq).collect();
+        assert_eq!(seqs, (1..=25).collect::<Vec<_>>());
+        assert_eq!(split_into_segments(&run[..2]).unwrap().len(), 1);
     }
 }

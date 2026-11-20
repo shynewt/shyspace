@@ -265,3 +265,24 @@ async fn a_shut_down_workspace_lets_go_of_everything_and_reopens() {
         .await
         .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn many_large_pastes_made_offline_all_reach_others() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    // Each near the page update limit; together well past the bucket's
+    // object limit, so they can't go up as one segment.
+    let paste = "a long chapter. ".repeat(crate::ops::MAX_PAGE_UPDATE_BYTES / 17);
+    let pages: Vec<_> = (0..9)
+        .map(|index| {
+            let page = admin.create_page(&format!("Book {index}"), None).unwrap();
+            admin.edit_page(&page, Edit::Append(&paste)).unwrap();
+            page
+        })
+        .collect();
+
+    sync_all(&[&admin, &bob]).await;
+
+    for page in pages {
+        assert_eq!(bob.page_text(&page).unwrap().len(), paste.len());
+    }
+}

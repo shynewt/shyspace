@@ -60,7 +60,7 @@ Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even i
 2. retry parked ops;
 3. repair missing or altered commits in the bucket (everyone); admin only: refresh the recovery snapshot first, then collect join requests and deliver answers;
 4. pull new segments from everyone who was ever a member, ourselves included (newcomers need removed members' history; a restored device needs its own);
-5. push our unpushed ops as one segment;
+5. push our unpushed ops as segments, each under the 32 MB that readers accept;
 6. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
 
 An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried.
