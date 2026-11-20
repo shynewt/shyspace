@@ -16,7 +16,7 @@ use bytes::Bytes;
 use futures_lite::StreamExt;
 use iroh::PublicKey;
 use object_store::{
-    ObjectStore, ObjectStoreExt, PutPayload,
+    GetOptions, ObjectStore, ObjectStoreExt, PutPayload,
     aws::AmazonS3Builder,
     path::Path,
     prefix::PrefixStore,
@@ -25,10 +25,17 @@ use object_store::{
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::{ops::Envelope, views::member_id};
+use crate::{
+    ops::Envelope,
+    views::{StorageProtection, member_id},
+};
 
 const RECOVERY_SNAPSHOT: &str = "recovery/snapshot";
 const ACCESS_CHECK: &str = "access-check";
+const VERSIONING_PROBE: &str = "health/versioning-probe";
+/// Beside the authors' logs, never inside one, so no log listing sees it.
+/// One per member: a locked bucket keeps every probe for good.
+const LOCK_PROBE_PREFIX: &str = "ops/lock-probe-";
 
 /// Objects larger than this are ignored, so a hostile writer can't make us
 /// load arbitrary amounts of data into memory.
@@ -332,6 +339,70 @@ impl Bucket {
             "the bucket didn't return what was written"
         );
         self.delete(&path).await.context("can't delete from the bucket")
+    }
+
+    /// Whether deleted or overwritten data can be brought back, proved
+    /// rather than asked. Locked: the bucket refuses to delete this member's
+    /// probe among the ops (a retention lock on the write-once `ops/` and
+    /// `mls/`), which stops even someone with the keys. Versioned: an
+    /// overwritten probe's first version still reads back, which undoes
+    /// accidents but not someone with the keys, who can delete old versions.
+    pub async fn check_protection(&self, member: &PublicKey) -> Result<StorageProtection> {
+        if self.refuses_deleting_ops(member).await? {
+            return Ok(StorageProtection::Locked);
+        }
+        if self.keeps_versions().await? {
+            return Ok(StorageProtection::Versioned);
+        }
+        Ok(StorageProtection::Unprotected)
+    }
+
+    async fn refuses_deleting_ops(&self, member: &PublicKey) -> Result<bool> {
+        let path = Path::from(format!("{LOCK_PROBE_PREFIX}{}", member_id(member)));
+        let wrote = self.put(&path, rand::random::<[u8; 16]>().to_vec()).await;
+        let exists = || async { self.get(&path).await.context("can't read from the bucket") };
+        if wrote.is_err() {
+            // A lock also refuses overwriting the probe left by the last check.
+            return match exists().await?.is_some() {
+                true => Ok(true),
+                false => wrote.map(|()| false).context("can't write to the bucket"),
+            };
+        }
+        // Only two refusals in a row with the probe still there prove a lock;
+        // one failed delete could be the network.
+        for _ in 0..2 {
+            if self.store.delete(&path).await.is_ok() {
+                return Ok(false);
+            }
+        }
+        Ok(exists().await?.is_some())
+    }
+
+    async fn keeps_versions(&self) -> Result<bool> {
+        let path = Path::from(VERSIONING_PROBE);
+        let first_bytes = rand::random::<[u8; 16]>();
+        let first = self
+            .store
+            .put(&path, PutPayload::from(first_bytes.to_vec()))
+            .await
+            .context("can't write to the bucket")?;
+        self.put(&path, rand::random::<[u8; 16]>().to_vec())
+            .await
+            .context("can't write to the bucket")?;
+        let Some(version) = first.version.filter(|version| version != "null") else {
+            return Ok(false);
+        };
+        let options = GetOptions {
+            version: Some(version),
+            ..GetOptions::default()
+        };
+        match self.store.get_opts(&path, options).await {
+            Ok(earlier) => Ok(earlier.bytes().await?.as_ref() == first_bytes),
+            Err(object_store::Error::NotFound { .. } | object_store::Error::NotImplemented { .. }) => {
+                Ok(false)
+            }
+            Err(error) => Err(error).context("can't read from the bucket"),
+        }
     }
 
     pub async fn announce_peer(&self, peer: &PublicKey) -> Result<()> {

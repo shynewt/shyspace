@@ -5,6 +5,7 @@ mod inbox;
 mod later;
 mod lifecycle;
 mod presence;
+mod protection;
 mod reads;
 mod sections;
 mod storage;

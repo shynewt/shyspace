@@ -269,6 +269,28 @@ pub struct StorageSettings {
     pub access_key_id: String,
 }
 
+/// Whether the bucket keeps deleted or overwritten data, so a member with
+/// its keys can't destroy the workspace for good.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageProtection {
+    /// Deletes are refused: safe from accidents and from anyone with the keys.
+    Locked,
+    /// Old versions are kept: accidents can be undone, but someone with the
+    /// keys could still delete them.
+    Versioned,
+    Unprotected,
+    /// Never checked, or the last check failed.
+    Unknown,
+}
+
+/// The last protection check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectionCheck {
+    pub state: StorageProtection,
+    pub checked_ms: Option<i64>,
+}
+
 /// What changed, so listeners refresh only the affected view.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -308,6 +330,8 @@ pub enum Change {
     Invites,
     /// The bucket settings changed; the workspace reconnects.
     Storage,
+    /// A new result from checking whether the bucket keeps deleted data.
+    StorageProtection,
     Sync,
     Removed,
 }

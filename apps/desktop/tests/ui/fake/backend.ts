@@ -14,8 +14,10 @@ import type {
   LaterItem,
   Member,
   Page,
+  ProtectionCheck,
   SectionSort,
   Session,
+  StorageProtection,
   StorageSettings,
 } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
@@ -96,6 +98,14 @@ export class FakeBackend {
   /** What the app told the core about this device's presence, in order. */
   readonly ownPresenceLog: string[] = [];
   private isAppearingOffline = false;
+
+  private storageProtection: ProtectionCheck = { state: "unknown", checked_ms: null };
+
+  /** Sets what checking the bucket finds, as a provider's settings would. */
+  setStorageProtection(state: StorageProtection): void {
+    this.storageProtection = { state, checked_ms: Date.now() };
+    this.notify({ kind: "storage_protection" });
+  }
 
   /** Sets another member's presence, as their heartbeats would. */
   setPresence(member: string, presence: "online" | "away" | "unreachable"): void {
@@ -255,6 +265,12 @@ export class FakeBackend {
         return `shyrec1_${randomHex(48)}`;
       case "storage_settings":
         return this.requireStorage();
+      case "storage_protection":
+        return this.storageProtection;
+      case "check_storage_protection":
+        this.storageProtection = { ...this.storageProtection, checked_ms: Date.now() };
+        this.notify({ kind: "storage_protection" });
+        return this.storageProtection;
       case "update_storage":
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
       case "show_alert":

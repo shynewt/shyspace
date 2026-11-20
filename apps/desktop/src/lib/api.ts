@@ -103,6 +103,13 @@ export type Invite = {
   requester_safety_code: string | null;
 };
 export type StorageSettings = { endpoint: string; bucket: string; region: string; access_key_id: string };
+/**
+ * Whether the bucket keeps deleted or overwritten data. "locked": deletes are refused, safe even from someone
+ * with the keys. "versioned": accidents can be undone, but someone with the keys could delete old versions.
+ * "unknown": never checked, or the last check failed.
+ */
+export type StorageProtection = "locked" | "versioned" | "unprotected" | "unknown";
+export type ProtectionCheck = { state: StorageProtection; checked_ms: number | null };
 export type SyncStatus = {
   peers: number;
   last_sync_ms: number | null;
@@ -138,6 +145,7 @@ export type Change =
   | { kind: "members" }
   | { kind: "invites" }
   | { kind: "storage" }
+  | { kind: "storage_protection" }
   | { kind: "sync" }
   | { kind: "removed" };
 
@@ -149,6 +157,10 @@ export const api = {
   restoreWorkspace: (kit: string) => invoke<Session>("restore_workspace", { kit }),
   testBucket: (bucket: BucketConfig) => invoke<void>("test_bucket", { bucket }),
   storageSettings: () => invoke<StorageSettings>("storage_settings"),
+  /** The last check's result, without asking the bucket. */
+  storageProtection: () => invoke<ProtectionCheck>("storage_protection"),
+  /** Checks the bucket now (takes a few seconds). */
+  checkStorageProtection: () => invoke<ProtectionCheck>("check_storage_protection"),
   /** Resolves to the admin's new recovery kit, if they have one. */
   updateStorage: (region: string, accessKeyId: string, secretAccessKey: string) =>
     invoke<string | null>("update_storage", { region, accessKeyId, secretAccessKey }),

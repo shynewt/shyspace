@@ -76,6 +76,10 @@ impl Workspace {
                     .bucket
                     .write()
                     .expect("bucket lock poisoned by an earlier panic") = bucket;
+                // New keys can have other rights; the next sync checks again.
+                if let Err(error) = self.forget_storage_protection() {
+                    warn!("can't forget the last storage check: {error:#}");
+                }
                 self.inner.wake.notify_one();
             }
             Err(error) => warn!("can't use the new storage settings: {error:#}"),

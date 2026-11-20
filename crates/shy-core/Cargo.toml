@@ -32,5 +32,8 @@ tracing = "0.1.44"
 yrs = "0.28"
 zeroize = "1"
 
+[dev-dependencies]
+async-trait = "0.1"
+
 [lints]
 workspace = true
