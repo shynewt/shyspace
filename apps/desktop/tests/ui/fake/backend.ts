@@ -220,6 +220,7 @@ export class FakeBackend {
         return this.laterItems();
       case "take_due_reminders": {
         const due = this.later.takeDue(Date.now());
+        if (due.length > 0) this.notify({ kind: "later" });
         return this.laterItems().filter((item) => due.includes(item.id));
       }
       case "set_draft":

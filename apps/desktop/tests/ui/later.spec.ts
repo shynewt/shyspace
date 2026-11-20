@@ -45,6 +45,28 @@ test("a reminder fires when it comes due", async ({ page }) => {
   expect(await page.evaluate(() => window.fake.alertsShown)).toEqual([{ title: "Reminder", body: "Read the spec" }]);
 });
 
+test("Later stands out only when a reminder is due", async ({ page }) => {
+  await messageMenu(page, "Read the spec");
+  await chooseInSubmenu(page, "Remind me", "In 20 minutes");
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  const quiet = page.getByRole("button", { name: "Later, 1 saved" });
+  await expect(quiet).toHaveCSS("font-weight", "400");
+
+  await page.evaluate(() =>
+    window.fake.handle("save_for_later", {
+      item: window.fake.messageWithText("Read the spec"),
+      remindMs: Date.now() + 1000,
+    }),
+  );
+  const due = page.getByRole("button", { name: "Later, 1 due, 1 saved" });
+  await expect(due).toBeVisible({ timeout: 10_000 });
+  await expect(due).toHaveCSS("font-weight", "600");
+
+  await due.click();
+  await page.getByRole("list", { name: "Saved for later" }).getByRole("button", { name: "Mark as done" }).click();
+  await expect(page.getByRole("button", { name: "Later", exact: true })).toBeVisible();
+});
+
 test("a page can be saved from its header", async ({ page }) => {
   await page.getByRole("button", { name: "New page" }).click();
   await page.getByLabel("Page title").fill("Spec");
