@@ -67,7 +67,26 @@ export function requireNotifyLevel(args: InvokeArgs | undefined, name: string): 
 
 const DETAIL_TEXTS = ["title", "pronouns", "bio", "email", "phone", "website", "location", "time_zone"] as const;
 
-/** The `details` argument, checked to have the shape the core reads, with text trimmed as the core keeps it. */
+/** The simple rules the core refuses your own details by (shy-core's profile.rs), with its messages. */
+const DETAIL_RULES: { name: "email" | "phone" | "website"; isValid: (value: string) => boolean; problem: string }[] = [
+  {
+    name: "email",
+    isValid: (email) => /^[^@\s?#%]+@[^@\s?#%]+\.[^@\s?#%]+$/.test(email),
+    problem: "an email address looks like name@example.com (up to 254 characters)",
+  },
+  {
+    name: "phone",
+    isValid: (phone) => /^[0-9 +().-]+$/.test(phone) && /[0-9]/.test(phone),
+    problem: "a phone number uses digits, spaces and + ( ) - . (up to 32 characters)",
+  },
+  {
+    name: "website",
+    isValid: (website) => /^https?:\/\/[^/?#@\\\s]+([/?#]\S*)?$/i.test(website),
+    problem: "a website starts with https:// or http:// (up to 200 characters)",
+  },
+];
+
+/** The `details` argument, checked as the core checks your own (shape and the simple rules), text trimmed as it keeps it. */
 export function requireDetails(args: InvokeArgs | undefined): ProfileDetails {
   const value = argument(args, "details");
   if (typeof value !== "object" || value === null) throw new Error('fake backend: missing "details"');
@@ -76,6 +95,9 @@ export function requireDetails(args: InvokeArgs | undefined): ProfileDetails {
     const text: unknown = Reflect.get(value, name);
     if (typeof text !== "string") throw new Error(`fake backend: details.${name} must be a string`);
     details[name] = text.trim();
+  }
+  for (const rule of DETAIL_RULES) {
+    if (details[rule.name] !== "" && !rule.isValid(details[rule.name])) throw rule.problem;
   }
   const hours: unknown = Reflect.get(value, "working_hours");
   if (hours === null) return details;

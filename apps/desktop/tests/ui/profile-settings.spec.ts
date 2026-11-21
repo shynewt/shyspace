@@ -199,3 +199,32 @@ test("a dismissed completion line stays away on this device", async ({ page }) =
   await expect(page.getByRole("dialog", { name: "Settings" }).getByLabel("Display name")).toBeVisible();
   await expect(page.getByText(/Add your role and time zone/)).toHaveCount(0);
 });
+
+test("details the core would refuse fail in the fake too, so a UI slip can't pass a test", async ({ page }) => {
+  await openProfile(page);
+  const refusal = (details: Record<string, unknown>) =>
+    page.evaluate(
+      (details) =>
+        window.__TAURI_INTERNALS__.invoke("set_profile_details", { details }).then(
+          () => "saved",
+          (error: unknown) => String(error),
+        ),
+      details,
+    );
+  const empty = {
+    title: "",
+    pronouns: "",
+    bio: "",
+    email: "",
+    phone: "",
+    website: "",
+    location: "",
+    time_zone: "",
+    working_hours: null,
+  };
+  expect(await refusal({ ...empty, website: "javascript:alert(1)" })).toMatch(/website starts with https/);
+  expect(await refusal({ ...empty, website: "https://bank.example@evil.example" })).toMatch(/website/);
+  expect(await refusal({ ...empty, email: "ada@example" })).toMatch(/email address/);
+  expect(await refusal({ ...empty, phone: "call me" })).toMatch(/phone number/);
+  expect(await refusal({ ...empty, website: "https://example.com/a?b#c", email: "ada@example.com" })).toBe("saved");
+});
