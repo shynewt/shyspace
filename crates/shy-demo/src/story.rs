@@ -1,7 +1,7 @@
 //! What happens in the demo workspace: a small studio getting a launch out of
 //! the door. It leaves something to see on every screen: unread messages and
 //! mentions, threads, reactions, a private channel, DMs, notes, pages,
-//! statuses, sidebar sections, and reminders both due and coming up.
+//! statuses, profiles, sidebar sections, and reminders both due and coming up.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail};
 use shy_core::{
     Workspace,
     ops::EntityId,
+    profile::{ProfileDetails, WorkingHours},
     views::{NotifyLevel, StatusUpdate},
 };
 
@@ -92,6 +93,7 @@ pub async fn tell(cast: &Cast) -> Result<()> {
     let launch = plan_in_private(cast, &pages).await?;
     talk_directly(cast, &pages).await?;
     set_statuses(cast)?;
+    share_profiles(cast)?;
     cast.sync_everyone().await?;
     send(
         cast.turn("Theo").await?,
@@ -463,6 +465,85 @@ fn set_statuses(cast: &Cast) -> Result<()> {
             alerts: NotifyLevel::Nothing,
         })
         .context("setting a status")
+}
+
+const WEEKDAYS: u8 = 0b001_1111;
+
+fn hours(days: u8, start_hour: u16, end_hour: u16) -> Option<WorkingHours> {
+    Some(WorkingHours {
+        days,
+        start_minute: start_hour * 60,
+        end_minute: end_hour * 60,
+    })
+}
+
+/// Profiles in several time zones, one with night shifts across midnight.
+/// Ada fills in only her title, so her profile still suggests what to add.
+fn share_profiles(cast: &Cast) -> Result<()> {
+    let profiles = [
+        (
+            ADMIN,
+            ProfileDetails {
+                title: "Founder".into(),
+                ..ProfileDetails::default()
+            },
+        ),
+        (
+            "Maya",
+            ProfileDetails {
+                title: "Product designer".into(),
+                pronouns: "she/her".into(),
+                bio: "Designs the calm parts of Northwind. Sketches on paper first, always.\nPortfolio: https://maya.example.com".into(),
+                email: "maya@northwind.example".into(),
+                website: "https://maya.example.com".into(),
+                location: "Lisbon studio".into(),
+                time_zone: "Europe/Lisbon".into(),
+                working_hours: hours(WEEKDAYS, 9, 17),
+                ..ProfileDetails::default()
+            },
+        ),
+        (
+            "Theo",
+            ProfileDetails {
+                title: "Engineer".into(),
+                pronouns: "he/him".into(),
+                email: "theo@northwind.example".into(),
+                location: "Remote, Tokyo".into(),
+                time_zone: "Asia/Tokyo".into(),
+                working_hours: hours(WEEKDAYS, 10, 18),
+                ..ProfileDetails::default()
+            },
+        ),
+        (
+            "Priya",
+            ProfileDetails {
+                title: "Marketing lead".into(),
+                pronouns: "she/her".into(),
+                phone: "+1 (212) 555-0142".into(),
+                location: "Remote, Brooklyn".into(),
+                time_zone: "America/New_York".into(),
+                working_hours: hours(WEEKDAYS, 9, 17),
+                ..ProfileDetails::default()
+            },
+        ),
+        (
+            "Sam",
+            ProfileDetails {
+                title: "Support".into(),
+                pronouns: "they/them".into(),
+                bio: "Night shifts, so the queue is empty by morning.".into(),
+                time_zone: "Europe/Berlin".into(),
+                working_hours: hours(0b100_1111, 22, 6),
+                ..ProfileDetails::default()
+            },
+        ),
+    ];
+    for (name, details) in profiles {
+        cast.get(name)
+            .set_profile_details(&details)
+            .with_context(|| format!("sharing {name}'s profile"))?;
+    }
+    Ok(())
 }
 
 /// Ada has read the start of #general and all of #random, sorted two channels
