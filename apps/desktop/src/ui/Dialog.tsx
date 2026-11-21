@@ -48,7 +48,7 @@ export function Dialog({
         {open && (
           <RadixDialog.Portal forceMount>
             <RadixDialog.Overlay asChild>
-              <motion.div {...fade} className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" />
+              <motion.div {...fade} className="fixed inset-0 z-40 bg-scrim backdrop-blur-[2px]" />
             </RadixDialog.Overlay>
             <div
               className={cx(

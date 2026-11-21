@@ -11,6 +11,7 @@ import { useLive } from "../../lib/useLive";
 import { savedItemView, useWorkspace } from "../../lib/workspace";
 import { Avatar, cx, EmptyState, IconButton, ListRow, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
+import { ViewHeader } from "../shell/ViewHeader";
 import { ReminderPicker } from "./ReminderPicker";
 import { remindMeItem } from "./remindMeItem";
 
@@ -23,12 +24,12 @@ export function LaterView() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-        <Bookmark size={17} className="text-decorative" />
-        <h1 className="text-lg font-semibold">Later</h1>
-      </header>
+      <ViewHeader>
+        <Bookmark size={17} className="shrink-0 text-decorative" />
+        <h1 className="truncate text-lg font-semibold">Later</h1>
+      </ViewHeader>
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        <div className="mx-auto max-w-[760px]">
+        <div className="mx-auto max-w-reading">
           {items && items.length === 0 && (
             <EmptyState icon={<Bookmark size={22} />} title="Nothing saved for later">
               Save a message or page from its menu, with a reminder if you like. Only you see this list.

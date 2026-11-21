@@ -21,10 +21,13 @@ import { FullProfileDialog } from "../members/FullProfileDialog";
 import { PageView } from "../pages/PageView";
 import { CommandPalette } from "../search/CommandPalette";
 import { SettingsDialog } from "../settings/SettingsDialog";
+import { ShellLayout } from "./ShellLayout";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
 import { StatusDialog } from "./StatusDialog";
 import { useAttentionBadge } from "./useAttentionBadge";
+import { useSidebar } from "./useSidebar";
+import { ViewHeader } from "./ViewHeader";
 
 export function Shell({ session }: { session: Session }) {
   // Unread counts change as messages arrive.
@@ -42,6 +45,7 @@ export function Shell({ session }: { session: Session }) {
     loadedPages,
   );
   const view = entry?.view ?? null;
+  const sidebar = useSidebar();
   /** What the search palette opens with; null while it's closed. */
   const [paletteQuery, setPaletteQuery] = useState<string | null>(null);
   const [isStatusOpen, setStatusOpen] = useState(false);
@@ -63,6 +67,7 @@ export function Shell({ session }: { session: Session }) {
     previouslyListedIds.current = listedIds;
   }, [view, listedIds, channels, replace]);
 
+  const { toggle: toggleSidebar } = sidebar;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // Keys something focused already used, like the page editor's Alt+↓, stay theirs.
@@ -101,11 +106,13 @@ export function Shell({ session }: { session: Session }) {
           return setShortcutsOpen(true);
         case "settings":
           return setSettingsTarget((current) => current ?? { section: "profile" });
+        case "toggleSidebar":
+          return toggleSidebar();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, channels, pages, sections, navigate, back, forward]);
+  }, [view, channels, pages, sections, navigate, back, forward, toggleSidebar]);
 
   useMouseBackAndForward(back, forward);
 
@@ -129,44 +136,57 @@ export function Shell({ session }: { session: Session }) {
     (memberId: string, returnFocusTo: HTMLElement | null = null) => setShownProfile({ memberId, returnFocusTo }),
     [],
   );
+  const { leaveDrawer } = sidebar;
+  // Choosing somewhere to go is what the drawer is for, so it closes; changes from elsewhere (a delete) leave it.
+  const navigateFromScreen = useCallback(
+    (target: View) => {
+      leaveDrawer();
+      navigate(target);
+    },
+    [leaveDrawer, navigate],
+  );
   const context = useMemo(
-    () => ({ session, channels, pages, members, view, navigate, openSettings, openSearch, openStatus, openProfile }),
-    [session, channels, pages, members, view, navigate, openSettings, openSearch, openStatus, openProfile],
+    () => ({
+      session,
+      channels,
+      pages,
+      members,
+      view,
+      navigate: navigateFromScreen,
+      openSettings,
+      openSearch,
+      openStatus,
+      openProfile,
+    }),
+    [session, channels, pages, members, view, navigateFromScreen, openSettings, openSearch, openStatus, openProfile],
   );
   const me = members?.find((member) => member.id === session.me);
 
   return (
     <WorkspaceContext.Provider value={context}>
       <AttentionBadge />
-      <motion.div
-        className="flex h-full"
-        initial={{ opacity: 0, scale: 0.985 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
-      >
-        <Sidebar status={status} onOpenSearch={() => setPaletteQuery("")} />
-        <main className="relative min-w-0 flex-1 bg-surface">
-          {/* No exit animation: switching while a view fades in could leave AnimatePresence waiting forever on an exit, with nothing shown. */}
-          {view && (
-            <motion.div
-              key={viewKey(view)}
-              className="absolute inset-0"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              {view.kind === "channel" && (
-                <ScrollMemoryContext.Provider value={scrollMemory}>
-                  <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} restore={restore} />
-                </ScrollMemoryContext.Provider>
-              )}
-              {view.kind === "page" && <PageView pageId={view.id} />}
-              {view.kind === "inbox" && <InboxView />}
-              {view.kind === "later" && <LaterView />}
-            </motion.div>
-          )}
-        </main>
-      </motion.div>
+      <ShellLayout sidebar={sidebar} sidebarContent={<Sidebar status={status} onOpenSearch={() => openSearch()} />}>
+        {/* No exit animation: switching while a view fades in could leave AnimatePresence waiting forever on an exit, with nothing shown. */}
+        {view && (
+          <motion.div
+            key={viewKey(view)}
+            className="absolute inset-0"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+          >
+            {view.kind === "channel" && (
+              <ScrollMemoryContext.Provider value={scrollMemory}>
+                <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} restore={restore} />
+              </ScrollMemoryContext.Provider>
+            )}
+            {view.kind === "page" && <PageView pageId={view.id} />}
+            {view.kind === "inbox" && <InboxView />}
+            {view.kind === "later" && <LaterView />}
+          </motion.div>
+        )}
+        {!view && !sidebar.isDocked && <ViewHeader />}
+      </ShellLayout>
       <CommandPalette
         open={paletteQuery !== null}
         initialQuery={paletteQuery ?? ""}

@@ -110,7 +110,7 @@ test("the arrow keys move between choices", async ({ page }) => {
 });
 
 test("settings fit the smallest window and scroll inside it", async ({ page }) => {
-  await page.setViewportSize({ width: 820, height: 560 });
+  await page.setViewportSize({ width: 640, height: 560 });
   const settings = await openSettings(page);
   await expect(settings).toBeInViewport({ ratio: 1 });
   await page.evaluate(() => {

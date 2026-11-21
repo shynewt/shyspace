@@ -15,15 +15,18 @@ export function TooltipProvider({ children }: { children: ReactNode }) {
 export function Tooltip({
   label,
   side = "top",
+  shouldShow,
   children,
 }: {
   label: ReactNode;
   side?: "top" | "bottom" | "left" | "right";
+  /** Asked as it's about to show; false keeps it hidden, e.g. while the text it repeats is on screen. */
+  shouldShow?: () => boolean;
   children: ReactNode;
 }) {
   const [isOpen, setOpen] = useState(false);
   return (
-    <RadixTooltip.Root open={isOpen} onOpenChange={setOpen}>
+    <RadixTooltip.Root open={isOpen} onOpenChange={(open) => setOpen(open && (shouldShow?.() ?? true))}>
       <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
       <AnimatePresence>
         {isOpen && (

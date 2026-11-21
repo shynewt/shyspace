@@ -180,6 +180,8 @@
   --color-success-text: var(--success-text);
   --color-warning: var(--warning);
   --color-warning-text: var(--warning-text);
+  /* Behind a modal (dialogs, the sidebar drawer). */
+  --color-scrim: rgb(0 0 0 / 0.3);
   --shadow-card: var(--shadow);
   --shadow-float: var(--shadow-lg);
   --font-sans: "Inter", "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -207,6 +209,27 @@
   --text-2xl--line-height: initial;
   --text-3xl: 38px;
   --text-3xl--line-height: initial;
+}
+
+/*
+ * Layout widths: the shell's regions and the widths where they change. Static,
+ * so every one is on :root, where lib/layout.ts reads those that switch
+ * behaviour (docked or sliding over). In px, so code and CSS agree exactly.
+ */
+@theme static {
+  --width-sidebar: 264px;
+  --width-sidebar-compact: 232px;
+  --width-side-panel: 380px;
+  /* What a channel keeps beside a docked side panel; with less, the panel slides over it. */
+  --width-channel-min: 560px;
+  --max-width-reading: 760px;
+  /* Window widths: the sidebar docks from the first, and is full width from the second. */
+  --breakpoint-sidebar-docks: 900px;
+  --breakpoint-sidebar-full: 1100px;
+  /* Header widths: labels show from the first; below the second, info moves into one button. */
+  --container-header-labels: 720px;
+  --container-header-pills: 480px;
+  --container-composer-hints: 460px;
 }
 
 /* In the base layer so Tailwind utilities (like outline-none) can override it. */

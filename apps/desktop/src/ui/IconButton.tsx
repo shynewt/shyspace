@@ -1,20 +1,42 @@
 import { motion } from "motion/react";
-import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cx } from "./cx";
+import { Kbd } from "./Kbd";
 import { springs } from "./motion";
 import { Tooltip } from "./Tooltip";
 
-type IconButtonProps = Omit<ComponentPropsWithoutRef<typeof motion.button>, "children" | "aria-label"> & {
+type IconButtonProps = Omit<ComponentProps<typeof motion.button>, "children" | "aria-label"> & {
   /** Read by screen readers and shown as the tooltip. */
   label: string;
+  /** Keys that do the same, shown in the tooltip. */
+  shortcut?: string[];
   icon: ReactNode;
   size?: "sm" | "md";
   isActive?: boolean;
 };
 
-export function IconButton({ label, icon, size = "md", isActive = false, className, ...props }: IconButtonProps) {
+export function IconButton({
+  label,
+  shortcut,
+  icon,
+  size = "md",
+  isActive = false,
+  className,
+  ...props
+}: IconButtonProps) {
   return (
-    <Tooltip label={label}>
+    <Tooltip
+      label={
+        shortcut ? (
+          <span className="flex items-center gap-2">
+            {label}
+            <Kbd>{shortcut.join(" ")}</Kbd>
+          </span>
+        ) : (
+          label
+        )
+      }
+    >
       <motion.button
         type="button"
         aria-label={label}

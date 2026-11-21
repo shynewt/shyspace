@@ -128,7 +128,7 @@ export function Composer({
   const isHintShown = editing !== null || (isFocused && text === "");
 
   return (
-    <div className="relative shrink-0 px-5 pt-1 pb-7">
+    <div className="@container/composer relative shrink-0 px-5 pt-1 pb-7">
       <div className="relative">
         <AnimatePresence>{picker.list}</AnimatePresence>
         <motion.div
@@ -227,7 +227,7 @@ export function Composer({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.12 }}
-              className="flex items-center gap-3"
+              className="flex items-center gap-3 @max-composer-hints/composer:hidden"
             >
               {editing ? (
                 <>

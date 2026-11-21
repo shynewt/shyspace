@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
 import { reportError, showToast } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, ConfirmDialog, IconButton, Menu, type MenuItem } from "../../ui";
+import { ConfirmDialog, cx, IconButton, Menu, type MenuItem } from "../../ui";
+import { HeaderAction, ViewHeader } from "../shell/ViewHeader";
 import { Editor } from "./Editor";
 import { PageTitle } from "./PageTitle";
 
@@ -50,22 +51,29 @@ export function PageView({ pageId }: { pageId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-13 shrink-0 items-center gap-3 border-b border-line px-5 text-sm text-muted">
+      <ViewHeader className="text-sm text-muted">
         <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
           <ol className="flex min-w-0 items-center gap-0.5">
-            {ancestorsOf(page, pages).map((ancestor) => (
-              <li key={ancestor.id} className="flex min-w-0 shrink items-center gap-0.5">
+            {ancestorsOf(page, pages).map((ancestor, index, ancestors) => (
+              <li
+                key={ancestor.id}
+                className={cx(
+                  "flex min-w-0 shrink items-center gap-0.5",
+                  // A narrow header keeps only the parent.
+                  index < ancestors.length - 1 && "@max-header-labels/header:hidden",
+                )}
+              >
                 <button
                   type="button"
                   onClick={() => navigate({ kind: "page", id: ancestor.id })}
-                  className="max-w-[180px] truncate rounded px-1 hover:bg-surface-2 hover:text-ink"
+                  className="max-w-45 truncate rounded px-1 hover:bg-surface-2 hover:text-ink"
                 >
                   {ancestor.title || "Untitled"}
                 </button>
                 <ChevronRight size={13} aria-hidden className="shrink-0 text-decorative" />
               </li>
             ))}
-            <li className="flex min-w-0 items-center">
+            <li className="flex min-w-30 items-center">
               <button
                 type="button"
                 aria-current="page"
@@ -78,9 +86,7 @@ export function PageView({ pageId }: { pageId: string }) {
           </ol>
         </nav>
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="sm" icon={<Link2 size={14} />} onClick={copyLink}>
-            Copy link
-          </Button>
+          <HeaderAction icon={<Link2 size={14} />} label="Copy link" onClick={copyLink} />
           {page && (
             <IconButton
               label={page.is_saved ? "Saved for later" : "Save for later"}
@@ -94,7 +100,7 @@ export function PageView({ pageId }: { pageId: string }) {
           )}
           <Menu trigger={<IconButton label="More page actions" icon={<Ellipsis size={15} />} />} items={actions} />
         </div>
-      </header>
+      </ViewHeader>
       <ConfirmDialog
         open={isConfirmingDelete}
         onOpenChange={setConfirmingDelete}
@@ -105,7 +111,7 @@ export function PageView({ pageId }: { pageId: string }) {
       />
       <div className="flex-1 overflow-y-auto">
         <motion.article
-          className="mx-auto max-w-[760px] px-12 pt-14"
+          className="mx-auto max-w-reading px-6 pt-8 @2xl/main:px-12 @2xl/main:pt-14"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.04 }}

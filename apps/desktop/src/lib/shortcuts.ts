@@ -35,7 +35,8 @@ export type ShortcutId =
   | "previousUnread"
   | "nextUnread"
   | "cheatSheet"
-  | "settings";
+  | "settings"
+  | "toggleSidebar";
 
 export type Shortcut = {
   id: ShortcutId;
@@ -92,6 +93,12 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["Alt", "Shift", "↓"],
     description: "Next unread channel",
     matches: (event) => event.altKey && event.shiftKey && event.key === "ArrowDown",
+  },
+  {
+    id: "toggleSidebar",
+    keys: [MOD_LABEL, "\\"],
+    description: "Show or hide the sidebar",
+    matches: (event) => hasMod(event) && !event.shiftKey && event.key === "\\",
   },
   {
     id: "settings",

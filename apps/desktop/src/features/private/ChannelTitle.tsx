@@ -23,7 +23,7 @@ export function ChannelTitle({ channel, members }: { channel: Channel; members: 
       <>
         <NotebookPen size={16} className="text-decorative" />
         <h1 className="truncate text-lg font-semibold">{title}</h1>
-        <span className="shrink-0 text-xs text-faint">Only you can see them</span>
+        <span className="shrink-0 text-xs text-faint @max-header-labels/header:hidden">Only you can see them</span>
       </>
     );
   }

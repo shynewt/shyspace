@@ -9,18 +9,21 @@ import { DirectMessages } from "./DirectMessages";
 import { MeMenu } from "./MeMenu";
 import { NavItem } from "./NavItem";
 import { PagesSection } from "./PagesSection";
+import { SidebarToggle } from "./ShellLayout";
 import { SyncIndicator } from "./SyncIndicator";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 
+/** The sidebar's content; `ShellLayout` places it, docked or as a drawer. */
 export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefined; onOpenSearch: () => void }) {
   return (
-    <aside className="flex w-[264px] shrink-0 flex-col border-r border-line bg-bg">
-      <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2.5 pt-4 pr-2.5 pb-3 pl-4">
         <Logo size={26} />
         <div className="min-w-0 flex-1">
           <WorkspaceMenu />
           <SyncIndicator status={status} />
         </div>
+        <SidebarToggle placement="sidebar" />
       </div>
 
       <div className="px-3 pb-2">
@@ -47,7 +50,7 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
       <div className="border-t border-line p-2">
         <MeMenu />
       </div>
-    </aside>
+    </div>
   );
 }
 

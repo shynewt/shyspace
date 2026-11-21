@@ -106,11 +106,11 @@ function SettingsWindow({
       value={target.section}
       onValueChange={choose}
       orientation="vertical"
-      className="mt-4 flex h-[min(540px,calc(100dvh-6rem))] border-t border-line"
+      className="@container/settings mt-4 flex h-[min(540px,calc(100dvh-6rem))] border-t border-line"
     >
       <Tabs.List
         aria-label="Settings sections"
-        className="flex w-[196px] shrink-0 flex-col gap-px overflow-y-auto border-r border-line bg-bg p-2"
+        className="flex w-45 shrink-0 flex-col @2xl/settings:w-49 gap-px overflow-y-auto border-r border-line bg-bg p-2"
       >
         {groups.map((group) => (
           <Fragment key={group.id}>

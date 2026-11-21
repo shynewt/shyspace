@@ -23,6 +23,8 @@ type Preferences = {
   recentEmoji: RecentEmoji[];
   /** Hides the line in Settings › Profile suggesting what to add. */
   isProfileNudgeDismissed: boolean;
+  /** Hides the docked sidebar; a narrow window's drawer ignores it. */
+  isSidebarHidden: boolean;
 };
 
 const DEFAULTS: Preferences = {
@@ -32,6 +34,7 @@ const DEFAULTS: Preferences = {
   alertsShowText: true,
   recentEmoji: [],
   isProfileNudgeDismissed: false,
+  isSidebarHidden: false,
 };
 const RECENT_EMOJI_LIMIT = 16;
 const KEY = "shyspace.preferences";

@@ -9,6 +9,7 @@ import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Button, CountBadge, EmptyState, ListRow, RelativeTime, SectionLabel, springs } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
+import { HeaderAction, ViewHeader } from "../shell/ViewHeader";
 import { MarkAllReadDialog } from "./MarkAllReadDialog";
 
 /** Everything that needs your attention, across channels and threads. */
@@ -24,24 +25,21 @@ export function InboxView() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
-        <InboxIcon size={17} className="text-decorative" />
-        <h1 className="text-lg font-semibold">Inbox</h1>
+      <ViewHeader>
+        <InboxIcon size={17} className="shrink-0 text-decorative" />
+        <h1 className="truncate text-lg font-semibold">Inbox</h1>
         {inbox && !isEmpty && (
-          <Button
-            variant="ghost"
-            size="sm"
+          <HeaderAction
             icon={<CheckCheck size={14} />}
+            label="Mark all as read"
             onClick={() => setConfirmingMarkAll(true)}
             className="ml-auto"
-          >
-            Mark all as read
-          </Button>
+          />
         )}
         <MarkAllReadDialog open={isConfirmingMarkAll} onOpenChange={setConfirmingMarkAll} />
-      </header>
+      </ViewHeader>
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        <div className="mx-auto max-w-[760px]">
+        <div className="mx-auto max-w-reading">
           {isEmpty && (
             <EmptyState icon={<CheckCheck size={22} />} title="You're all caught up">
               Mentions of you and new replies in threads you follow show up here.

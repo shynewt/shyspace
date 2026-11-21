@@ -1,12 +1,13 @@
 import { Bell, BellOff, X } from "lucide-react";
-import { motion, useIsPresent } from "motion/react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useIsPresent } from "motion/react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWindowAttention } from "../../lib/useWindowAttention";
-import { Button, IconButton, Spinner, springs } from "../../ui";
+import { Button, IconButton, Spinner } from "../../ui";
 import { WriteGate } from "../private/WriteGate";
+import { SidePanel } from "../shell/SidePanel";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 import { knownReadPosition, useReadPosition } from "./useReadPosition";
@@ -20,12 +21,15 @@ export function ThreadPanel({
   focus,
   channelId,
   onClose,
+  returnFocusTo,
 }: {
   root: string;
   /** A reply to scroll to and highlight, from a message link. */
   focus?: string;
   channelId: string;
   onClose: () => void;
+  /** Where focus goes on closing when what opened the thread is gone. */
+  returnFocusTo: RefObject<HTMLElement | null>;
 }) {
   const loadThread = useCallback(() => api.thread(root), [root]);
   const thread = useLive(
@@ -73,14 +77,7 @@ export function ThreadPanel({
   };
 
   return (
-    <motion.aside
-      aria-label="Thread"
-      initial={{ opacity: 0, x: 24 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 24 }}
-      transition={springs.smooth}
-      className="flex w-[380px] shrink-0 flex-col border-l border-line bg-surface"
-    >
+    <SidePanel label="Thread" onClose={onClose} returnFocusTo={returnFocusTo}>
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-4">
         <h2 className="text-base font-semibold">Thread</h2>
         {first && (
@@ -155,6 +152,6 @@ export function ThreadPanel({
           mentionTarget={mentionTarget}
         />
       </WriteGate>
-    </motion.aside>
+    </SidePanel>
   );
 }

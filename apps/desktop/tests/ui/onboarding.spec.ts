@@ -70,3 +70,14 @@ test("a join request can be cancelled while waiting, keeping what you typed", as
   await page.evaluate(() => window.fake.approveJoin());
   await expect(page.getByRole("button", { name: "general", exact: true })).toBeVisible();
 });
+
+test("in the smallest window the whole form can be scrolled to, from the welcome to the button", async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 560 });
+  const welcome = page.getByRole("heading", { name: "Welcome to shyspace" });
+  await welcome.scrollIntoViewIfNeeded();
+  await expect(welcome).toBeInViewport({ ratio: 1 });
+  const create = page.getByRole("button", { name: "Create workspace" });
+  await create.scrollIntoViewIfNeeded();
+  await expect(create).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(640);
+});

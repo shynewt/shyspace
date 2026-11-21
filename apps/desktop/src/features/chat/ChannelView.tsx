@@ -1,4 +1,3 @@
-import { Lock } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
@@ -11,7 +10,8 @@ import { useWindowAttention } from "../../lib/useWindowAttention";
 import { useWorkspace } from "../../lib/workspace";
 import { ChannelTitle } from "../private/ChannelTitle";
 import { WriteGate } from "../private/WriteGate";
-import { AgentsNote } from "./AgentsNote";
+import { ViewHeader } from "../shell/ViewHeader";
+import { ChannelInfo } from "./ChannelInfo";
 import { Composer } from "./Composer";
 import { firstUnreadId, MessageRows, toRows, UNREAD_LINE_ID } from "./channelRows";
 import { LocalTimeHint } from "./LocalTimeHint";
@@ -301,15 +301,12 @@ export function ChannelView({
   };
 
   return (
-    <div className="flex h-full">
+    <div className="relative flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-5">
+        <ViewHeader>
           {channel ? <ChannelTitle channel={channel} members={members} /> : <h1 className="text-lg">…</h1>}
-          <AgentsNote />
-          <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs text-muted">
-            <Lock size={11} /> End-to-end encrypted
-          </span>
-        </header>
+          <ChannelInfo />
+        </ViewHeader>
 
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div
@@ -369,6 +366,7 @@ export function ChannelView({
             focus={focus}
             channelId={channelId}
             onClose={() => navigate({ kind: "channel", id: channelId })}
+            returnFocusTo={scroller}
           />
         )}
       </AnimatePresence>
