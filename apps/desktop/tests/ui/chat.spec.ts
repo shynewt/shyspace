@@ -154,6 +154,19 @@ test("a tall code block folds until opened, and copies its code", async ({ page,
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(code);
 });
 
+test("an opened code block stays open when a new message arrives", async ({ page }) => {
+  const code = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n");
+  await page.getByLabel("Message #general").fill(`\`\`\`\n${code}\n\`\`\``);
+  await page.getByLabel("Message #general").press("Enter");
+  const message = page.getByRole("article").filter({ hasText: "line 1" });
+  await message.getByRole("button", { name: "Show more" }).click();
+
+  await page.getByLabel("Message #general").fill("Next");
+  await page.getByLabel("Message #general").press("Enter");
+  await expect(page.getByRole("article").filter({ hasText: "Next" })).toBeVisible();
+  await expect(message.getByRole("button", { name: "Show less" })).toBeVisible();
+});
+
 test("a short code block doesn't fold", async ({ page }) => {
   await page.getByLabel("Message #general").fill("```\nshort\n```");
   await page.getByLabel("Message #general").press("Enter");

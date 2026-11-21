@@ -1,5 +1,14 @@
 import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -64,66 +73,88 @@ export function ChatMarkdown({
       return `[${title}](${PAGE_LINK_PREFIX}${id})`;
     })
     .replace(BARE_MESSAGE_LINK, (link: string) => `[a message](${link})`);
-  const components: Components = {
-    a: ({ href = "", children, node }) => {
-      const message = href.match(MESSAGE_LINK)?.[1];
-      if (message) {
-        return (
-          <button type="button" className="page-chip" onClick={() => onOpenMessage(message)}>
-            {children}
-          </button>
-        );
-      }
-      if (isMentionLink(href)) {
-        const className = linkMentions(href, myId) ? "mention mention-me" : "mention";
-        const memberId = mentionedMemberId(href);
-        if (memberId && renderMemberMention) return renderMemberMention(memberId, children, className);
-        return <span className={className}>{children}</span>;
-      }
-      const page = href.match(PAGE_LINK)?.[1];
-      if (page) {
-        return (
-          <button type="button" className="page-chip" onClick={() => onOpenPage(page)}>
-            {children}
-          </button>
-        );
-      }
-      return (
-        <ExternalLink href={href} text={node ? textOf(node) : ""}>
-          {children}
-        </ExternalLink>
-      );
-    },
-    pre: ({ children, node }) => (
-      <CodeBlock language={node ? languageOf(node) : ""} code={node ? textOf(node) : ""}>
-        {children}
-      </CodeBlock>
-    ),
-    table: ({ children }) => (
-      <div className="table-scroll">
-        <table>{children}</table>
-      </div>
-    ),
-    aside: ({ children, node }) => {
-      const kind = node?.properties.dataCallout;
-      return isCalloutKind(kind) ? <Callout kind={kind}>{children}</Callout> : <aside>{children}</aside>;
-    },
-  };
   return (
-    <Markdown
-      remarkPlugins={[remarkGfm, remarkBreaks]}
-      rehypePlugins={[rehypeCallouts]}
-      skipHtml
-      urlTransform={(url) =>
-        SAFE_EXTERNAL.test(url) || PAGE_LINK.test(url) || MESSAGE_LINK.test(url) || isMentionLink(url) ? url : ""
-      }
-      disallowedElements={["img"]}
-      components={components}
-    >
-      {withTitles}
-    </Markdown>
+    <LinkContext.Provider value={{ myId, onOpenPage, onOpenMessage, renderMemberMention }}>
+      <Markdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        rehypePlugins={[rehypeCallouts]}
+        skipHtml
+        urlTransform={(url) =>
+          SAFE_EXTERNAL.test(url) || PAGE_LINK.test(url) || MESSAGE_LINK.test(url) || isMentionLink(url) ? url : ""
+        }
+        disallowedElements={["img"]}
+        components={COMPONENTS}
+      >
+        {withTitles}
+      </Markdown>
+    </LinkContext.Provider>
   );
 }
+
+type LinkHandlers = {
+  myId: string;
+  onOpenPage: (id: string) => void;
+  onOpenMessage: (id: string) => void;
+  renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
+};
+
+const LinkContext = createContext<LinkHandlers | null>(null);
+
+function MarkdownLink({ href = "", children, node }: ComponentProps<"a"> & ExtraProps) {
+  const handlers = useContext(LinkContext);
+  if (!handlers) throw new Error("a markdown link outside ChatMarkdown");
+  const { myId, onOpenPage, onOpenMessage, renderMemberMention } = handlers;
+  const message = href.match(MESSAGE_LINK)?.[1];
+  if (message) {
+    return (
+      <button type="button" className="page-chip" onClick={() => onOpenMessage(message)}>
+        {children}
+      </button>
+    );
+  }
+  if (isMentionLink(href)) {
+    const className = linkMentions(href, myId) ? "mention mention-me" : "mention";
+    const memberId = mentionedMemberId(href);
+    if (memberId && renderMemberMention) return renderMemberMention(memberId, children, className);
+    return <span className={className}>{children}</span>;
+  }
+  const page = href.match(PAGE_LINK)?.[1];
+  if (page) {
+    return (
+      <button type="button" className="page-chip" onClick={() => onOpenPage(page)}>
+        {children}
+      </button>
+    );
+  }
+  return (
+    <ExternalLink href={href} text={node ? textOf(node) : ""}>
+      {children}
+    </ExternalLink>
+  );
+}
+
+/**
+ * Module-level, so each render gets the same component types: new ones would
+ * make React rebuild those elements, losing their state (an opened code block)
+ * and briefly shrinking the message, which moves a scrolled list in WebKit.
+ */
+const COMPONENTS: Components = {
+  a: MarkdownLink,
+  pre: ({ children, node }) => (
+    <CodeBlock language={node ? languageOf(node) : ""} code={node ? textOf(node) : ""}>
+      {children}
+    </CodeBlock>
+  ),
+  table: ({ children }) => (
+    <div className="table-scroll">
+      <table>{children}</table>
+    </div>
+  ),
+  aside: ({ children, node }) => {
+    const kind = node?.properties.dataCallout;
+    return isCalloutKind(kind) ? <Callout kind={kind}>{children}</Callout> : <aside>{children}</aside>;
+  },
+};
 
 /** The language a fenced block names (```ts), from its `language-ts` class. */
 function languageOf(pre: MarkdownNode): string {

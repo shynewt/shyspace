@@ -288,6 +288,22 @@ test("sending your own message takes you down and hides the pill", async ({ page
   await expect(newMessagesPill(page)).toHaveCount(0);
 });
 
+test("sending keeps you at the newest message with a table further up", async ({ page }) => {
+  await readHistory(page, 20);
+  await graceSays(page, "general", "| Area | Merged |\n| --- | ---: |\n| Sync | 6 |\n| Pages | 5 |\n| Desktop | 3 |");
+  const composer = page.getByLabel("Message #general");
+  for (const text of ["One", "Two", "Three"]) {
+    await composer.fill(text);
+    await composer.press("Enter");
+    await expect(log(page).getByText(text, { exact: true })).toBeInViewport();
+    await page.waitForTimeout(300);
+    const distance = await log(page).evaluate(
+      (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+    );
+    expect(distance, `after sending "${text}"`).toBeLessThanOrEqual(1);
+  }
+});
+
 test("a message arriving while you read history moves the view 0px", async ({ page }) => {
   await readHistory(page);
   await scrollUpTo(page, "Old 20");
