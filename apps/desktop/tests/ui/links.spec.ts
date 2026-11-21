@@ -37,6 +37,17 @@ test("a pasted message link shows a card that jumps to the message", async ({ pa
   await expect(page.locator(`#message-${link.split("/").pop()}`)).toBeVisible();
 });
 
+test("a link to a message you can't see says why it might be hidden", async ({ page }) => {
+  await page.getByLabel("Message #general").fill("For the launch team: shy://message/0123456789abcdef");
+  await page.getByLabel("Message #general").press("Enter");
+
+  const message = page.getByRole("article").filter({ hasText: "For the launch team" });
+  await expect(message.getByRole("note")).toHaveText(
+    "A message you can't seeIt may be in a private channel you're not in, or deleted.",
+  );
+  await expect(message.getByRole("button", { name: /Message from/ })).toHaveCount(0);
+});
+
 async function send(page: Page, channel: string, text: string) {
   const composer = page.getByLabel(`Message #${channel}`);
   await composer.fill(text);

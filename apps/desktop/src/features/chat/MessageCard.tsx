@@ -1,4 +1,4 @@
-import { Quote } from "lucide-react";
+import { Lock, Quote } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useMemo } from "react";
 import { api } from "../../lib/api";
@@ -20,7 +20,20 @@ export function MessageCard({ messageId }: { messageId: string }) {
   const linked = useLive(loadLinked, (change) => change.kind === "messages");
   if (linked === undefined) return null;
   if (linked === null) {
-    return <div className="mt-1.5 text-sm text-faint italic">A linked message that no longer exists</div>;
+    return (
+      <div
+        role="note"
+        className="mt-1.5 flex w-full max-w-[440px] items-start gap-3 rounded-xl border border-line border-dashed p-3"
+      >
+        <Lock size={15} className="mt-0.5 shrink-0 text-decorative" aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-muted">A message you can't see</span>
+          <span className="mt-0.5 block text-xs text-faint">
+            It may be in a private channel you're not in, or deleted.
+          </span>
+        </span>
+      </div>
+    );
   }
   const { message } = linked;
   const author = displayName(message.author_name, message.author);
