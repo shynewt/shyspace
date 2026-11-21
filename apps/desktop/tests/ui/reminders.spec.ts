@@ -193,6 +193,7 @@ test("a reminder can be changed or dropped from Later", async ({ page }) => {
 test("arrows held with Super or Ctrl leave the calendar's day alone", async ({ page }) => {
   await openApp(page, MONDAY_MORNING);
   const picker = await openPicker(page);
+  await options(picker).filter({ hasText: "Pick a date and time…" }).click();
   const today = picker.getByRole("button", { name: "Monday, November 23", exact: true });
   await today.focus();
 
