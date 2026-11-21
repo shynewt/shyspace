@@ -1506,3 +1506,67 @@ async fn profile_contacts_that_hide_where_they_go_are_cleared() {
         assert_eq!(kept.title, "Engineer");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn profile_details_sealed_in_a_dm_change_nothing() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let dm = bob.open_dm(&[admin.my_id()]).unwrap();
+    bob.send_message(&dm, "hi", None).unwrap();
+    sync_all(&[&bob, &admin]).await;
+    let key = bob.state().store.channel_keys(Some(&dm)).unwrap().pop().unwrap();
+
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal_private(
+            &key,
+            crate::private::ops::PrivateOp::Content(Op::ProfileDetails {
+                details: titled("Smuggled"),
+            }),
+        ))
+        .unwrap();
+    assert_eq!(details_of(&admin, &bob.my_id()), Default::default());
+    admin
+        .receive(forger.seal_private(
+            &key,
+            crate::private::ops::PrivateOp::Content(Op::Message {
+                id: crate::private::ids::new_private_message_id(&dm, &bob.me()),
+                channel: dm.clone(),
+                text: "still here".into(),
+                reply_to: None,
+            }),
+        ))
+        .unwrap();
+    let texts: Vec<_> = admin
+        .messages(&dm, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(texts.contains(&"still here".to_string()), "later ops still apply");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn profile_details_applied_just_before_a_removal_are_undone() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    bob.set_profile_details(&titled("Engineer")).unwrap();
+    bob.sync().await;
+    carol.sync().await;
+    assert_eq!(details_of(&carol, &bob.my_id()).title, "Engineer");
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    // Bob changes his details live, before Carol hears about the removal.
+    carol
+        .receive(Forger::new(&bob).seal(Op::ProfileDetails {
+            details: titled("Admin"),
+        }))
+        .unwrap();
+    assert_eq!(details_of(&carol, &bob.my_id()).title, "Admin");
+
+    carol.sync().await;
+    admin.sync().await;
+    for member in [&admin, &carol] {
+        assert_eq!(details_of(member, &bob.my_id()).title, "Engineer");
+    }
+}
