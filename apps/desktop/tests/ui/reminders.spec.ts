@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { chooseInSubmenu } from "./support";
 
 const MONDAY_MORNING = new Date("2026-11-23T10:00:00");
@@ -71,38 +71,95 @@ test("on a Friday evening there's no later today and no this weekend", async ({ 
   ]);
 });
 
-test("a typed time is shown in words, then set", async ({ page }) => {
+function options(picker: Locator) {
+  return picker.getByRole("option");
+}
+
+test("a delay reads the same with or without “in”", async ({ page }) => {
   await openApp(page, MONDAY_MORNING);
   const picker = await openPicker(page);
 
-  await picker.getByLabel("When").fill("fri 3pm");
+  for (const typed of ["in 5 min", "5min", "5 minutes", "5m"]) {
+    await picker.getByLabel("When").fill("");
+    await expect(options(picker)).toHaveText(["Pick a date and time…"]);
+    await picker.getByLabel("When").fill(typed);
+    await expect(options(picker)).toHaveText([/^Today at 10:05 AM\s*in 5 minutes$/, "Pick a date and time…"]);
+  }
+});
 
-  await expect(picker.getByText("Friday, Nov 27 at 3:00 PM")).toBeVisible();
-  await picker.getByRole("button", { name: "Set reminder" }).click();
+test("a bare number offers what it could mean, and arrows and Enter choose one", async ({ page }) => {
+  await openApp(page, MONDAY_MORNING);
+  const picker = await openPicker(page);
+
+  await picker.getByLabel("When").fill("5");
+
+  await expect(options(picker)).toHaveText([
+    /^Today at 10:05 AM/,
+    /^Today at 3:00 PM/,
+    /^Today at 5:00 PM/,
+    /^Saturday, Nov 28 at 10:00 AM/,
+    "Pick a date and time…",
+  ]);
+  await page.keyboard.press("ArrowDown");
+  await expect(options(picker).nth(1)).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
   await expect(picker).toBeHidden();
   await later(page).click();
-  await expect(page.getByRole("list", { name: "Saved for later" })).toContainText("Nov 27");
+  await expect(page.getByRole("list", { name: "Saved for later" })).toContainText("Today 3:00 PM");
 });
 
-test("a time that has passed can't be set", async ({ page }) => {
+test("an hour without am or pm on a day offers daytime first", async ({ page }) => {
   await openApp(page, MONDAY_MORNING);
   const picker = await openPicker(page);
 
-  await picker.getByLabel("Time").fill("8:00");
+  await picker.getByLabel("When").fill("fri 3");
 
+  await expect(options(picker)).toHaveText([
+    /^Friday, Nov 27 at 3:00 PM\s*in 4 days$/,
+    /^Friday, Nov 27 at 3:00 AM/,
+    "Pick a date and time…",
+  ]);
+});
+
+test("a date by its month is set with a click", async ({ page }) => {
+  await openApp(page, MONDAY_MORNING);
+  const picker = await openPicker(page);
+
+  await picker.getByLabel("When").fill("30 nov 2pm");
+  await options(picker).first().click();
+
+  await expect(picker).toBeHidden();
+  await later(page).click();
+  await expect(page.getByRole("list", { name: "Saved for later" })).toContainText("Nov 30");
+});
+
+test("a time that has passed, or isn't a time, says so", async ({ page }) => {
+  await openApp(page, MONDAY_MORNING);
+  const picker = await openPicker(page);
+  await expect(picker.getByText("Type when, like “in 5 min”, “tomorrow 9” or “fri 3pm”.")).toBeVisible();
+
+  await picker.getByLabel("When").fill("today 8am");
   await expect(picker.getByText("That time has already passed.")).toBeVisible();
-  await expect(picker.getByRole("button", { name: "Set reminder" })).toBeDisabled();
+  await expect(options(picker)).toHaveText(["Pick a date and time…"]);
+
   await picker.getByLabel("When").fill("tomorrow nonsense");
-  await expect(picker.getByText("Try “tomorrow 9”, “fri 3pm” or “in 2h”.")).toBeVisible();
+  await expect(picker.getByText("No time matches that. Try “in 5 min”, “tomorrow 9” or “fri 3pm”.")).toBeVisible();
 });
 
-test("the calendar moves by day and week with the arrow keys", async ({ page }) => {
+test("the calendar opens on request and moves by day and week with the arrow keys", async ({ page }) => {
   await openApp(page, MONDAY_MORNING);
   const picker = await openPicker(page);
+  await expect(picker.getByRole("table")).toHaveCount(0);
+
+  await options(picker).filter({ hasText: "Pick a date and time…" }).click();
   const today = picker.getByRole("button", { name: "Monday, November 23", exact: true });
   await expect(today).toHaveAttribute("aria-pressed", "true");
   await expect(picker.getByRole("button", { name: "Sunday, November 22", exact: true })).toBeDisabled();
+  await picker.getByLabel("Time").fill("8:00");
+  await expect(picker.getByText("That time has already passed.")).toBeVisible();
+  await expect(picker.getByRole("button", { name: "Set reminder" })).toBeDisabled();
 
+  await picker.getByLabel("Time").fill("11:00");
   await today.focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowDown");
@@ -122,9 +179,9 @@ test("a reminder can be changed or dropped from Later", async ({ page }) => {
 
   await row.click({ button: "right" });
   const picker = await chooseCustom(page, "Change reminder");
-  await expect(picker.getByText("Tuesday, Nov 24 at 9:00 AM")).toBeVisible();
-  await picker.getByLabel("Time").fill("14:30");
-  await picker.getByRole("button", { name: "Set reminder" }).click();
+  await expect(picker.getByText("Set for Tomorrow at 9:00 AM")).toBeVisible();
+  await picker.getByLabel("When").fill("tomorrow 2:30pm");
+  await page.keyboard.press("Enter");
   await expect(row).toContainText("Tomorrow 2:30 PM");
 
   await row.click({ button: "right" });

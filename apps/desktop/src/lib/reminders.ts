@@ -59,25 +59,48 @@ export function nextRoundHour(now: Date): Date {
 }
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-const UNITS_MS: [RegExp, number][] = [
-  [/^(m|min|mins|minutes?)$/, MINUTE_MS],
-  [/^(h|hr|hrs|hours?)$/, HOUR_MS],
-  [/^(d|days?)$/, DAY_MS],
-  [/^(w|wk|weeks?)$/, 7 * DAY_MS],
+const MONTHS = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+];
+/** Each unit matches its abbreviations exactly, or any start of its full name ("min", "minu", "minutes"). */
+const UNITS: { name: string; abbreviations: string[]; ms: number }[] = [
+  { name: "minutes", abbreviations: ["m", "min", "mins"], ms: MINUTE_MS },
+  { name: "hours", abbreviations: ["h", "hr", "hrs"], ms: HOUR_MS },
+  { name: "days", abbreviations: ["d"], ms: DAY_MS },
+  { name: "weeks", abbreviations: ["w", "wk", "wks"], ms: 7 * DAY_MS },
 ];
 
-/** "in 2h", "in 30 min", "in 3 days". */
-function parseDelay(text: string, now: Date): Date | null {
-  const match = /^in\s+(\d{1,3})\s*([a-z]+)$/.exec(text);
-  if (!match) return null;
-  const unit = UNITS_MS.find(([pattern]) => pattern.test(match[2]));
-  return unit ? new Date(now.getTime() + Number(match[1]) * unit[1]) : null;
+function unitMs(word: string): number | null {
+  const unit = UNITS.find(({ name, abbreviations }) => abbreviations.includes(word) || name.startsWith(word));
+  return unit ? unit.ms : null;
 }
 
-/** "9", "9am", "9:30 pm", "15:00", "noon": hours and minutes, or null. */
-export function parseTimeOfDay(typed: string): { hour: number; minute: number } | null {
+/** "5min", "5 minutes", "in 2h", "an hour", "3 days": a delay from now, with or without "in". */
+function parseDelay(text: string, now: Date): Date | null {
+  const match = /^(?:in )?(\d{1,3}|an?) ?([a-z]+)$/.exec(text);
+  if (!match) return null;
+  const count = /^\d/.test(match[1]) ? Number(match[1]) : 1;
+  const ms = unitMs(match[2]);
+  return ms && count > 0 ? new Date(now.getTime() + count * ms) : null;
+}
+
+type Clock = { hour: number; minute: number; isAmbiguous: boolean };
+
+/** "9", "9am", "9:30 pm", "15:00", "noon". `isAmbiguous` when "5:30" could be morning or afternoon. */
+function parseClock(typed: string): Clock | null {
   const text = typed.trim().toLowerCase();
-  if (text === "noon") return { hour: 12, minute: 0 };
+  if (text === "noon") return { hour: 12, minute: 0, isAmbiguous: false };
   const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/.exec(text);
   if (!match) return null;
   let hour = Number(match[1]);
@@ -86,40 +109,107 @@ export function parseTimeOfDay(typed: string): { hour: number; minute: number } 
   if (minute > 59 || hour > 23 || (half && (hour === 0 || hour > 12))) return null;
   if (half === "pm" && hour < 12) hour += 12;
   if (half === "am" && hour === 12) hour = 0;
-  return { hour, minute };
+  const isAmbiguous = !half && hour >= 1 && hour <= 12 && !match[1].startsWith("0");
+  return { hour, minute, isAmbiguous };
 }
 
-/** "today", "tomorrow" or a weekday ("fri", "friday"): the next such day, never today for a weekday. */
-function parseDay(word: string, now: Date): Date | null {
-  if (word === "today") return now;
-  if (word === "tomorrow" || word === "tmr" || word === "tmrw") return daysAfter(now, 1);
-  if (word.length < 3) return null;
-  const weekday = WEEKDAYS.findIndex((name) => name.startsWith(word));
-  return weekday === -1 ? null : nextWeekday(now, weekday);
+/** "9", "9am", "9:30 pm", "15:00", "noon": hours and minutes, or null. A bare hour reads as on a 24-hour clock. */
+export function parseTimeOfDay(typed: string): { hour: number; minute: number } | null {
+  const clock = parseClock(typed);
+  return clock && { hour: clock.hour, minute: clock.minute };
+}
+
+/** The hours a clock could mean: 5 and 17 for an ambiguous "5". */
+function hoursOf(clock: Clock): number[] {
+  return clock.isAmbiguous ? [clock.hour % 12, (clock.hour % 12) + 12] : [clock.hour];
+}
+
+/** Each next time the clock shows `clock`, soonest first: "5:30" at 10am is 5:30 pm today, then 5:30 am tomorrow. */
+function nextTimesShowing(clock: Clock, now: Date): Date[] {
+  return hoursOf(clock)
+    .map((hour) => {
+      const today = atHour(now, hour, clock.minute);
+      return today > now ? today : daysAfter(today, 1);
+    })
+    .sort((left, right) => left.getTime() - right.getTime());
+}
+
+const isDaytime = (hour: number) => hour >= MORNING_HOUR - 2 && hour < EVENING_HOUR;
+
+function startsName(word: string, names: string[], shortest: number): number {
+  return word.length < shortest ? -1 : names.findIndex((name) => name.startsWith(word));
+}
+
+/** "nov 30", "30 nov", "november 30th": that date this year, or next year once it has passed. */
+function parseDate(first: string, second: string, now: Date): Date | null {
+  const isDayFirst = /^\d/.test(first);
+  const monthWord = isDayFirst ? second : first;
+  const dayMatch = /^(\d{1,2})(?:st|nd|rd|th)?$/.exec(isDayFirst ? first : second);
+  const month = startsName(monthWord, MONTHS, 3);
+  if (!dayMatch || month === -1) return null;
+  const dayOfMonth = Number(dayMatch[1]);
+  for (const year of [now.getFullYear(), now.getFullYear() + 1]) {
+    const date = new Date(year, month, dayOfMonth);
+    if (date.getMonth() !== month) return null;
+    if (date.toDateString() === now.toDateString() || date > now) return date;
+  }
+  return null;
+}
+
+/** The day the words start with, and the words left for a time: "today", "tom", "fri", "nov 30", "30 nov". */
+function parseDay(words: string[], now: Date): { day: Date; rest: string[] } | null {
+  const [first, second = "", ...others] = words;
+  const date = parseDate(first, second, now);
+  if (date) return { day: date, rest: others };
+  const rest = words.slice(1);
+  if (first === "today") return { day: now, rest };
+  if (first === "tmr" || first === "tmrw" || startsName(first, ["tomorrow"], 3) === 0) {
+    return { day: daysAfter(now, 1), rest };
+  }
+  const weekday = startsName(first, WEEKDAYS, 3);
+  return weekday === -1 ? null : { day: nextWeekday(now, weekday), rest };
 }
 
 /**
- * A typed time, or null if it isn't one: "in 2h", "3pm", "tomorrow 9",
- * "fri", "friday 3:30pm". A time alone is today, or tomorrow once it has
- * passed; a day alone is at 9 in the morning. Small on purpose, so it's
- * always clear what a phrase means.
+ * A typed day and time: "3pm", "5:30", "tomorrow 9", "fri", "friday 3:30pm",
+ * "nov 30 at 2pm". A day alone is at 9 in the morning. A time alone is the
+ * next time the clock shows it; on a given day, daytime comes first.
  */
-export function parseReminder(typed: string, now: Date): Date | null {
-  const text = typed.trim().toLowerCase().replace(/\s+/g, " ");
-  if (!text) return null;
-  const delayed = parseDelay(text, now);
-  if (delayed) return delayed;
-  const [first, ...rest] = text.split(" ");
-  const day = parseDay(first, now);
-  if (day) {
-    if (rest.length === 0) return atHour(day, MORNING_HOUR);
-    const time = parseTimeOfDay(rest.join(" ").replace(/^at /, ""));
-    return time ? atHour(day, time.hour, time.minute) : null;
+function parseMoment(text: string, now: Date): Date[] {
+  const dated = parseDay(text.split(" "), now);
+  if (!dated) {
+    const clock = parseClock(text.replace(/^at /, ""));
+    return clock ? nextTimesShowing(clock, now) : [];
   }
-  const time = parseTimeOfDay(text.replace(/^at /, ""));
-  if (!time) return null;
-  const today = atHour(now, time.hour, time.minute);
-  return today > now ? today : daysAfter(today, 1);
+  if (dated.rest.length === 0) return [atHour(dated.day, MORNING_HOUR)];
+  const clock = parseClock(dated.rest.join(" ").replace(/^at /, ""));
+  if (!clock) return [];
+  return hoursOf(clock)
+    .sort((left, right) => Number(isDaytime(right)) - Number(isDaytime(left)))
+    .map((hour) => atHour(dated.day, hour, clock.minute));
+}
+
+/** What a bare number could mean, likeliest first: "5" is in 5 minutes, in 5 hours, at 5, or in 5 days. */
+function readingsOfNumber(count: number, now: Date): Date[] {
+  const readings = [new Date(now.getTime() + count * MINUTE_MS)];
+  if (count <= 99) readings.push(new Date(now.getTime() + count * HOUR_MS));
+  const clock = parseClock(String(count));
+  if (clock) readings.push(...nextTimesShowing(clock, now).slice(0, 1));
+  if (count <= 365) readings.push(new Date(now.getTime() + count * DAY_MS));
+  return readings;
+}
+
+/**
+ * Every time `typed` could mean, likeliest first, or none if it isn't a time.
+ * Some may already have passed ("today 8am" in the afternoon).
+ */
+export function reminderReadings(typed: string, now: Date): Date[] {
+  const text = typed.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return [];
+  const bareNumber = /^(?:in )?(\d{1,3})$/.exec(text);
+  if (bareNumber) return Number(bareNumber[1]) > 0 ? readingsOfNumber(Number(bareNumber[1]), now) : [];
+  const delayed = parseDelay(text, now);
+  return delayed ? [delayed] : parseMoment(text, now);
 }
 
 /** `day` at the time of day `time` gives. */
@@ -127,10 +217,28 @@ export function onDayAt(day: Date, time: { hour: number; minute: number }): Date
   return atHour(day, time.hour, time.minute);
 }
 
-/** "Thursday, Nov 27 at 3:00 PM": a reminder time in full, for confirming a choice. */
-export function describeReminderInFull(at: Date): string {
+/** "Today at 3:00 PM", "Tomorrow at 9:00 AM", "Thursday, Nov 27 at 3:00 PM": a reminder time in full, for confirming a choice. */
+export function describeReminderInFull(at: Date, now: Date): string {
+  const time = formatTime(at.getTime());
+  if (at.toDateString() === now.toDateString()) return `Today at ${time}`;
+  if (at.toDateString() === daysAfter(now, 1).toDateString()) return `Tomorrow at ${time}`;
   const day = at.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
-  return `${day} at ${formatTime(at.getTime())}`;
+  return `${day} at ${time}`;
+}
+
+const DISTANCE_STEPS: { unit: Intl.RelativeTimeFormatUnit; ms: number; below: number }[] = [
+  { unit: "minute", ms: MINUTE_MS, below: HOUR_MS },
+  { unit: "hour", ms: HOUR_MS, below: DAY_MS },
+  { unit: "day", ms: DAY_MS, below: 14 * DAY_MS },
+  { unit: "week", ms: 7 * DAY_MS, below: 61 * DAY_MS },
+  { unit: "month", ms: 30 * DAY_MS, below: Number.POSITIVE_INFINITY },
+];
+
+/** "in 5 minutes", "in 3 hours", "in 2 weeks": how far off `at` is, roughly. */
+export function describeDistance(at: Date, now: Date): string {
+  const ms = Math.max(at.getTime() - now.getTime(), MINUTE_MS);
+  const step = DISTANCE_STEPS.find(({ below }) => ms < below) ?? DISTANCE_STEPS[DISTANCE_STEPS.length - 1];
+  return new Intl.RelativeTimeFormat([], { numeric: "always" }).format(Math.round(ms / step.ms), step.unit);
 }
 
 /** "Overdue", "Today 3:00 PM", "Tomorrow 9:00 AM", or "Mon, Nov 24 9:00 AM". */
