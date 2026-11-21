@@ -1,7 +1,7 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, type HTMLMotionProps, motion } from "motion/react";
 import { Tooltip as RadixTooltip } from "radix-ui";
 import { type ReactNode, useState } from "react";
-import { pop, springs } from "./motion";
+import { pop } from "./motion";
 
 /** Wrap the app once so tooltips share timing. */
 export function TooltipProvider({ children }: { children: ReactNode }) {
@@ -32,17 +32,27 @@ export function Tooltip({
         {isOpen && (
           <RadixTooltip.Portal forceMount>
             <RadixTooltip.Content side={side} sideOffset={6} asChild>
-              <motion.div
-                {...pop}
-                transition={springs.snappy}
-                className="z-50 rounded-md bg-ink px-2 py-1 text-xs font-medium text-bg shadow-float"
-              >
-                {label}
-              </motion.div>
+              <TooltipSurface>{label}</TooltipSurface>
             </RadixTooltip.Content>
           </RadixTooltip.Portal>
         )}
       </AnimatePresence>
     </RadixTooltip.Root>
+  );
+}
+
+/**
+ * Pops in after the hover delay; a tooltip opened at once (Radix's
+ * `instant-open`: moving on to a neighbour, or by focus) just appears.
+ */
+function TooltipSurface({ "data-state": state, ...props }: HTMLMotionProps<"div"> & { "data-state"?: string }) {
+  return (
+    <motion.div
+      {...props}
+      {...pop}
+      data-state={state}
+      initial={state === "instant-open" ? false : pop.initial}
+      className="z-50 origin-(--radix-tooltip-content-transform-origin) rounded-md bg-ink px-2 py-1 text-xs font-medium text-bg shadow-float"
+    />
   );
 }

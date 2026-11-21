@@ -4,7 +4,7 @@ import { useRef } from "react";
 import { useMember } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { useWorkspace } from "../../lib/workspace";
-import { pop, springs } from "../../ui";
+import { pop } from "../../ui";
 import { CARD_SURFACE, CardBody, focusInside } from "./ProfileCard";
 
 /** Something the card can be placed against: an element, or a spot like the cursor's. */
@@ -50,7 +50,7 @@ export function ProfileCardAt({
           }}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
-          <motion.div ref={card} tabIndex={-1} {...pop} transition={springs.snappy} className={CARD_SURFACE}>
+          <motion.div ref={card} tabIndex={-1} {...pop} className={CARD_SURFACE}>
             <CardBody
               member={member}
               onLeave={onLeave}

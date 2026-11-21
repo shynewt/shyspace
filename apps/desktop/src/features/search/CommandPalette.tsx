@@ -56,6 +56,7 @@ export function CommandPalette({
         title="Search"
         hideTitle
         placement="top"
+        entrance="instant"
         width={600}
         padding="none"
       >

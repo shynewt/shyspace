@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { DropdownMenu } from "radix-ui";
 import { Fragment, type ReactNode } from "react";
 import { cx } from "./cx";
-import { pop, springs } from "./motion";
+import { pop } from "./motion";
 
 export type MenuAction = {
   label: string;
@@ -54,7 +54,7 @@ export function Menu({
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} asChild>
-          <motion.div {...pop} transition={springs.snappy} className={SURFACE}>
+          <motion.div {...pop} className={cx(SURFACE, "origin-(--radix-dropdown-menu-content-transform-origin)")}>
             {items.map((item, index) =>
               "choices" in item ? (
                 <Choices key={item.label} item={item} />

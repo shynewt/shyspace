@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 import { Popover as RadixPopover } from "radix-ui";
 import type { ReactNode, RefObject } from "react";
-import { pop, springs } from "./motion";
+import { pop } from "./motion";
 
 /** A small floating surface anchored to its trigger, like an emoji picker. */
 export function Popover({
@@ -39,8 +39,7 @@ export function Popover({
         >
           <motion.div
             {...pop}
-            transition={springs.snappy}
-            className="z-50 rounded-xl border border-line bg-surface p-1 shadow-float outline-none"
+            className="z-50 origin-(--radix-popover-content-transform-origin) rounded-xl border border-line bg-surface p-1 shadow-float outline-none"
           >
             {children}
           </motion.div>

@@ -5,7 +5,7 @@ import type { Member } from "../../lib/api";
 import { useMember } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { useWorkspace } from "../../lib/workspace";
-import { pop, springs } from "../../ui";
+import { pop } from "../../ui";
 import { ProfileActions } from "./ProfileActions";
 import { Bio, DetailRows, ProfileHeader, StatusBox } from "./ProfileParts";
 
@@ -31,7 +31,8 @@ type CardControl = {
 
 const CardContext = createContext<CardControl | null>(null);
 
-export const CARD_SURFACE = "z-50 w-[320px] rounded-xl border border-line bg-surface p-4 shadow-float outline-none";
+export const CARD_SURFACE =
+  "z-50 w-[320px] origin-(--radix-popover-content-transform-origin) rounded-xl border border-line bg-surface p-4 shadow-float outline-none";
 
 /**
  * A member's profile card: who they are, their status and presence, and
@@ -161,7 +162,7 @@ export function ProfileCard({
             }}
             onPointerLeave={() => openedBy.current === "hover" && control.hoverProps.onPointerLeave()}
           >
-            <motion.div ref={card} tabIndex={-1} {...pop} transition={springs.snappy} className={CARD_SURFACE}>
+            <motion.div ref={card} tabIndex={-1} {...pop} className={CARD_SURFACE}>
               <CardBody
                 member={member}
                 onLeave={closeHandingFocusOn}

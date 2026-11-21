@@ -4,7 +4,7 @@ import { Dialog as RadixDialog } from "radix-ui";
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 import { IconButton } from "./IconButton";
-import { fade, pop, springs } from "./motion";
+import { fade, pop } from "./motion";
 
 type DialogProps = {
   open: boolean;
@@ -22,6 +22,8 @@ type DialogProps = {
   padding?: "standard" | "none";
   /** Where focus goes when it closes, when what opened it is gone (like a card). */
   returnFocusTo?: HTMLElement | null;
+  /** "instant" for a dialog opened many times a day, like the command palette. */
+  entrance?: "pop" | "instant";
   children: ReactNode;
 };
 
@@ -40,15 +42,17 @@ export function Dialog({
   hasCloseButton = false,
   padding = "standard",
   returnFocusTo,
+  entrance = "pop",
   children,
 }: DialogProps) {
+  const isInstant = entrance === "instant";
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <AnimatePresence>
         {open && (
           <RadixDialog.Portal forceMount>
             <RadixDialog.Overlay asChild>
-              <motion.div {...fade} className="fixed inset-0 z-40 bg-scrim backdrop-blur-[2px]" />
+              <motion.div {...(isInstant ? {} : fade)} className="fixed inset-0 z-40 bg-scrim" />
             </RadixDialog.Overlay>
             <div
               className={cx(
@@ -65,8 +69,7 @@ export function Dialog({
                 }}
               >
                 <motion.div
-                  {...pop}
-                  transition={springs.move}
+                  {...(isInstant ? {} : pop)}
                   style={{ width }}
                   className={cx(
                     "pointer-events-auto relative max-w-full overflow-y-auto rounded-2xl border border-line bg-surface shadow-float outline-none",

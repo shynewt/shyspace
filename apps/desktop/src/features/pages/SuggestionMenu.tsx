@@ -20,7 +20,7 @@ import { api, type Member, type Page, pageLink } from "../../lib/api";
 import { memberLink } from "../../lib/mentions";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, cx, pop, springs } from "../../ui";
+import { Avatar, cx, pop } from "../../ui";
 import { BLOCKS, type BlockKind, insertBlock } from "./editor/blocks";
 import { closeSuggestions, type MenuKey, openSuggestions, type Suggestion } from "./editor/suggestions";
 
@@ -220,7 +220,6 @@ export function SuggestionMenu({
   return (
     <motion.div
       {...pop}
-      transition={springs.snappy}
       id={listId}
       role="listbox"
       aria-label={LIST_NAMES[suggestion.kind]}
