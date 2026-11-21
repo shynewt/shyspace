@@ -77,6 +77,19 @@ test("a bad website or email is pointed out beside it and nothing is saved", asy
   await expect.poll(() => savedDetails(page)).toHaveLength(1);
 });
 
+test("a website with a user name before its host is refused beside it", async ({ page }) => {
+  const settings = await openProfile(page);
+  const website = settings.getByLabel("Website");
+  await website.fill("https://bank.example@evil.example/login");
+  await website.blur();
+  await expect(website).toHaveAttribute("aria-invalid", "true");
+  await settings.getByLabel("Email").fill("ceo\u{E0041}@corp.example");
+  await settings.getByLabel("Email").blur();
+  await expect(settings.getByLabel("Email")).toHaveAttribute("aria-invalid", "true");
+  await settings.getByRole("button", { name: "Save profile" }).click();
+  expect(await savedDetails(page)).toEqual([]);
+});
+
 test("the time zone picker suggests this computer's zone and filters by city", async ({ page }) => {
   const settings = await openProfile(page);
   const zone = settings.getByLabel("Time zone");

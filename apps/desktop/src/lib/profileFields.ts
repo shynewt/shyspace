@@ -9,7 +9,8 @@ import { characterCount, PROFILE_LIMITS } from "./limits";
 const SCHEME = /^[a-z][a-z0-9+.-]*:(?!\d)/i;
 const WEB_SCHEME = /^https?:\/\//i;
 /** Whitespace, controls, and the invisible characters the core drops (zero-width, direction marks, BOM). */
-const UNSAFE_IN_ADDRESS = /[\s\p{Cc}­؜᠎​-‏‪-‮⁠-⁯﻿]/u;
+const UNSAFE_IN_ADDRESS =
+  /[\s\p{Cc}\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u{E0000}-\u{E007F}]/u;
 const NOT_IN_EMAIL = /[?#%/\\<>"'()[\],;:@]/;
 
 /** What someone typed as a website, with `https://` added when they left the scheme out ("example.com"). */
@@ -22,7 +23,7 @@ export function withWebScheme(typed: string): string {
 export function websiteProblem(website: string): string | null {
   if (!website) return null;
   const host = website.replace(WEB_SCHEME, "").split(/[/?#]/)[0];
-  if (!WEB_SCHEME.test(website) || !host || UNSAFE_IN_ADDRESS.test(website))
+  if (!WEB_SCHEME.test(website) || !host || /[@\\]/.test(host) || UNSAFE_IN_ADDRESS.test(website))
     return "Use a web address like example.com.";
   if (characterCount(website) > PROFILE_LIMITS.website) return `Use at most ${PROFILE_LIMITS.website} characters.`;
   return null;

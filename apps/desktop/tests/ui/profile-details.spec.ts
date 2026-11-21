@@ -300,3 +300,23 @@ test("the header's name, title and tags sit centred within the avatar's height",
   expect(text.bottom).toBeLessThanOrEqual(avatar.bottom);
   expect(Math.abs((text.top + text.bottom) / 2 - (avatar.top + avatar.bottom) / 2)).toBeLessThanOrEqual(1);
 });
+
+test("a website shows its host and path, with the full address on hover", async ({ page }) => {
+  await openApp(page);
+  await recordOpenedLinks(page);
+  const grace = await openGracesCard(page, { website: "https://Grace.Example.com/talks/?from=card" });
+  const link = grace.getByRole("link", { name: "grace.example.com/talks" });
+  await link.hover();
+  await expect(page.getByRole("tooltip")).toContainText("https://Grace.Example.com/talks/?from=card");
+  await link.click();
+  expect(await openedLinks(page)).toEqual(["https://Grace.Example.com/talks/?from=card"]);
+});
+
+test("a bio address with a user name before its host stays plain text", async ({ page }) => {
+  await openApp(page);
+  const grace = await openGracesCard(page, {
+    bio: "Log in at https://accounts.google.com@evil.example/login or https://grace.example.com",
+  });
+  await expect(grace).toContainText("https://accounts.google.com@evil.example/login");
+  await expect(grace.getByRole("link")).toHaveText(["https://grace.example.com"]);
+});

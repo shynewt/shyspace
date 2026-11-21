@@ -1,7 +1,7 @@
 import { CalendarClock, Clock, Globe, Mail, MapPin, Phone } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef } from "react";
 import type { Member, WorkingHours } from "../../lib/api";
-import { isWebAddress, mailtoUrl, openExternal, shownWebsite, telUrl } from "../../lib/contact";
+import { hasUserInfo, mailtoUrl, openExternal, shownWebsite, telUrl } from "../../lib/contact";
 import {
   describeTimeDifference,
   describeWorkingHours,
@@ -13,7 +13,7 @@ import {
 } from "../../lib/localTime";
 import { displayName, formatStatusEnd, presenceLabel } from "../../lib/people";
 import { useMinuteClock } from "../../lib/useMinuteClock";
-import { Avatar, Badge, CopyButton, cx } from "../../ui";
+import { Avatar, Badge, CopyButton, cx, Tooltip } from "../../ui";
 import { alertsLabel, shownStatus } from "./StatusEmoji";
 
 const ICON_SIZE = 14;
@@ -132,16 +132,18 @@ function LinkRow({
       label={label}
       action={<CopyButton value={copyValue} label={`Copy ${label.toLowerCase()}`} />}
     >
-      <a
-        href={url}
-        onClick={(event) => {
-          event.preventDefault();
-          openExternal(url);
-        }}
-        className="text-ink underline-offset-2 hover:underline"
-      >
-        {text}
-      </a>
+      <Tooltip label={<span className="block max-w-[360px] break-all whitespace-normal">{url}</span>}>
+        <a
+          href={url}
+          onClick={(event) => {
+            event.preventDefault();
+            openExternal(url);
+          }}
+          className="text-ink underline-offset-2 hover:underline"
+        >
+          {text}
+        </a>
+      </Tooltip>
     </DetailRow>
   );
 }
@@ -192,13 +194,13 @@ export function DetailRows({ member, children }: { member: Member; children?: Re
         copyValue={phone}
       />
     ),
-    isWebAddress(website) && (
+    shownWebsite(website) && (
       <LinkRow
         key="website"
         icon={<Globe size={ICON_SIZE} />}
         label="Website"
         url={website}
-        text={shownWebsite(website)}
+        text={shownWebsite(website) ?? website}
         copyValue={website}
       />
     ),
@@ -219,6 +221,8 @@ function LinkedText({ text }: { text: string }) {
   for (const match of text.matchAll(WEB_LINK)) {
     const trailing = match[0].match(TRAILING_PUNCTUATION)?.[0] ?? "";
     const url = match[0].slice(0, match[0].length - trailing.length);
+    // An address naming a user before its host reads as one site and opens another: left as text.
+    if (hasUserInfo(url)) continue;
     parts.push(text.slice(shownUpTo, match.index));
     parts.push(
       <a
