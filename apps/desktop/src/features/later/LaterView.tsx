@@ -132,7 +132,7 @@ function LaterRow({ item }: { item: LaterItem }) {
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: 24, height: 0, transition: { duration: 0.22, ease: "easeIn" } }}
-      transition={springs.smooth}
+      transition={springs.move}
     >
       <ListRow
         onClick={openItem}

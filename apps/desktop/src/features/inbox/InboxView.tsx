@@ -97,7 +97,7 @@ function AttentionRow({ item }: { item: InboxItem }) {
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
-      transition={springs.smooth}
+      transition={springs.move}
     >
       <ListRow
         onClick={() =>
@@ -129,7 +129,7 @@ function DraftRow({ draft }: { draft: Draft }) {
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
-      transition={springs.smooth}
+      transition={springs.move}
     >
       <ListRow
         onClick={() => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined })}

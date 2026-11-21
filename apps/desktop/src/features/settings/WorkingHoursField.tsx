@@ -80,7 +80,7 @@ export function WorkingHoursField({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ ...springs.smooth, opacity: { duration: durations.base } }}
+            transition={{ ...springs.move, opacity: { duration: durations.base } }}
             className="overflow-hidden"
           >
             <fieldset

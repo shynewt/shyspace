@@ -66,7 +66,7 @@ export function Dialog({
               >
                 <motion.div
                   {...pop}
-                  transition={springs.smooth}
+                  transition={springs.move}
                   style={{ width }}
                   className={cx(
                     "pointer-events-auto relative max-w-full overflow-y-auto rounded-2xl border border-line bg-surface shadow-float outline-none",

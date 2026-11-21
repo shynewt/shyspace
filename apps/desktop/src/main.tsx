@@ -3,7 +3,7 @@ import { type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { useReducedMotionConfig } from "./lib/preferences";
-import { springs, TooltipProvider } from "./ui";
+import { TooltipProvider, tweens } from "./ui";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -22,7 +22,7 @@ createRoot(root).render(
 /** Motion everywhere follows the Reduce motion setting (by default, the system's). */
 function ChosenMotion({ children }: { children: ReactNode }) {
   return (
-    <MotionConfig reducedMotion={useReducedMotionConfig()} transition={springs.snappy}>
+    <MotionConfig reducedMotion={useReducedMotionConfig()} transition={tweens.base}>
       {children}
     </MotionConfig>
   );

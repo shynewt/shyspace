@@ -109,7 +109,7 @@ export function MessageRows({
               key={row.key}
               initial={{ opacity: 0, y: 10, scale: 0.99 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={springs.smooth}
+              transition={springs.move}
             >
               <MessageItem
                 message={row.message}

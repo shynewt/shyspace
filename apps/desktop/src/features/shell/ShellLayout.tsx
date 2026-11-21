@@ -146,7 +146,7 @@ function SidebarDrawer({
                 initial={{ x: "-100%" }}
                 animate={{ x: 0 }}
                 exit={{ x: "-100%" }}
-                transition={springs.smooth}
+                transition={springs.move}
                 data-sidebar
                 className="fixed inset-y-0 left-0 z-30 w-sidebar max-w-[calc(100%-3rem)] border-r border-line bg-bg shadow-float outline-none"
               >
@@ -187,5 +187,5 @@ export function SidebarToggle({ placement }: { placement: "sidebar" | "header" }
 
 /** How regions grow and shrink: the panel spring, or at once with reduced motion (Motion itself only skips transforms). */
 export function useRegionTransition(): Transition {
-  return useIsMotionReduced() ? { duration: 0 } : springs.smooth;
+  return useIsMotionReduced() ? { duration: 0 } : springs.move;
 }

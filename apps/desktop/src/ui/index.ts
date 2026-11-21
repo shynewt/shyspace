@@ -18,7 +18,7 @@ export { Kbd } from "./Kbd";
 export { ListRow } from "./ListRow";
 export { Logo } from "./Logo";
 export { Menu, type MenuItem } from "./Menu";
-export { durations, fade, pop, rise, springs } from "./motion";
+export { durations, easeOut, fade, pop, rise, springs, tweens } from "./motion";
 export { Notice } from "./Notice";
 export { Popover } from "./Popover";
 export { RelativeTime } from "./RelativeTime";

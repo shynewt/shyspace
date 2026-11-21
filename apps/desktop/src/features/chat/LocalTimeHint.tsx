@@ -32,7 +32,7 @@ export function LocalTimeHint({ channel }: { channel: Channel | undefined }) {
     <motion.p
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: durations.slow }}
+      transition={{ duration: durations.panel }}
       className="flex items-center gap-1.5 px-5 pb-1 text-xs text-muted"
     >
       <Moon size={12} className="shrink-0 text-decorative" />

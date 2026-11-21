@@ -91,7 +91,7 @@ export function SidePanel({
       initial={isOverlay ? { x: "100%" } : { opacity: 0, x: 24 }}
       animate={{ opacity: 1, x: 0 }}
       exit={isOverlay ? { x: "100%" } : { opacity: 0, x: 24 }}
-      transition={springs.smooth}
+      transition={springs.move}
       className={cx(
         "flex w-side-panel max-w-full shrink-0 flex-col border-l border-line bg-surface",
         isOverlay && "absolute inset-y-0 right-0 z-20 shadow-float",

@@ -17,16 +17,29 @@ Calm and warm: soft neutral surfaces, one accent (violet unless you pick another
 
 ## Motion
 
-All animation uses the presets in `ui/motion.ts`, through Motion:
+Motion should feel quick and never get in the way of work. The app runs in WebKitGTK, where layout on every frame, blur and filters are expensive.
 
-| Preset | Use |
-|---|---|
-| `springs.snappy` | feedback: buttons, chips, sliding selection pills |
-| `springs.smooth` | panels and dialogs entering, list items appearing |
-| `springs.pop` | small playful pops: reactions, counters, copy confirmations |
-| `rise`, `pop`, `fade` | enter and exit variants for content, floating surfaces, overlays |
+- **How often decides how much.** Things done many times a day (switching channels, moving with the keyboard, the command palette, hover) don't animate, or take at most 100 ms. Occasional things (dialogs, menus, the drawer, toasts) take 150 to 200 ms. Only rare moments (onboarding) may be playful.
+- **Exits are faster than entrances**, and nothing blocks input while it animates.
+- **Only transform and opacity animate**, never width, height, filters or `backdrop-filter`. The one exception is a row leaving a list (Inbox, Later, join requests), which collapses so the rows below close the gap.
+- **Fades and pop-ins are tweens** with one strong ease-out. **Springs** are for things that move in space and may be interrupted (panels, selection highlights), and are short and bounce-free; only `springs.pop` bounces a little.
+- **Reduced motion** is decided once, globally: `MotionConfig` in `main.tsx` follows the system unless Settings › Appearance › Reduce motion says On or Off. Motion then drops movement and keeps fades. Don't override it in components.
 
-Keep feedback under about 250 ms. Reduced motion is decided once, globally: `MotionConfig` in `main.tsx` follows the system unless Settings › Appearance › Reduce motion says On or Off. Don't override it in components.
+The tokens are in `ui/motion.ts`, and the same numbers are in the `@theme` in `styles.css` for CSS transitions:
+
+| Token | Value | Use |
+|---|---|---|
+| `easeOut`, `--ease-out` | `cubic-bezier(0.23, 1, 0.32, 1)` | every tween and CSS transition |
+| `durations.exit`, `duration-exit` | 80 ms | floating surfaces and content leaving |
+| `durations.fast`, `duration-fast` | 100 ms | hover feedback (the default for a bare `transition-colors`), a scrim leaving |
+| `durations.base`, `duration-base` | 150 ms | fades and pop-ins: menus, popovers, dialogs, content; Motion's default |
+| `durations.panel`, `duration-panel` | 200 ms | panels sliding |
+| `duration-highlight` | 500 ms | a message you jumped to: its highlight fades slowly |
+| `tweens.exit`, `.fast`, `.base`, `.instant` | | Motion transitions for those durations |
+| `springs.move` | 200 ms, no bounce | the drawer, the side panel, the docked sidebar |
+| `springs.snappy` | 160 ms, no bounce | a selection highlight moved by a click, a chevron turning |
+| `springs.pop` | 200 ms, a little bounce | a reaction added, a count changing |
+| `rise`, `pop`, `fade` | | enter and exit variants for content, floating surfaces, scrims |
 
 ## Layout
 

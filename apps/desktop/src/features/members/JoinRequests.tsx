@@ -76,7 +76,7 @@ function JoinRequest({ invite }: { invite: Invite }) {
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
-      transition={springs.smooth}
+      transition={springs.move}
     >
       <Card highlighted>
         <div className="flex items-center gap-1.5 text-sm font-semibold">

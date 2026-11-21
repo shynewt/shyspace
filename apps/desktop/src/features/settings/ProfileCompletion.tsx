@@ -20,7 +20,7 @@ export function ProfileCompletion({ details }: { details: ProfileDetails | undef
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: "auto" }}
           exit={{ opacity: 0, height: 0 }}
-          transition={springs.smooth}
+          transition={springs.move}
           className="overflow-hidden"
         >
           <div className="mb-5 flex items-start gap-3 rounded-xl bg-surface-2 py-2.5 pr-2 pl-3.5">
@@ -41,7 +41,7 @@ export function ProfileCompletion({ details }: { details: ProfileDetails | undef
                   className="h-full rounded-full bg-accent"
                   initial={false}
                   animate={{ width: `${(done / PROFILE_STEPS) * 100}%` }}
-                  transition={springs.smooth}
+                  transition={springs.move}
                 />
               </div>
             </div>

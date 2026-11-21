@@ -212,6 +212,23 @@
 }
 
 /*
+ * Motion: the same tokens as ui/motion.ts, for CSS transitions. A bare
+ * `transition-colors` takes the default (hover feedback); `duration-*` takes
+ * a named one.
+ */
+@theme {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --transition-duration-exit: 80ms;
+  --transition-duration-fast: 100ms;
+  --transition-duration-base: 150ms;
+  --transition-duration-panel: 200ms;
+  /* A message you jumped to: its highlight fades slowly, so your eye finds it. */
+  --transition-duration-highlight: 500ms;
+  --default-transition-duration: var(--transition-duration-fast);
+  --default-transition-timing-function: var(--ease-out);
+}
+
+/*
  * Layout widths: the shell's regions and the widths where they change. Static,
  * so every one is on :root, where lib/layout.ts reads those that switch
  * behaviour (docked or sliding over). In px, so code and CSS agree exactly.
