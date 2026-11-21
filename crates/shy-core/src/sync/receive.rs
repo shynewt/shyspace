@@ -1,11 +1,12 @@
 //! Accepting ops from others. An op is applied only if it decrypts, its
 //! signature is valid, and its author was a member in the op's epoch.
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use tracing::warn;
 
+use super::forks::SecondLook;
 use crate::{
-    crypto::{self, NewerFormat},
+    crypto::{self, EpochKey, NewerFormat},
     ops::{Envelope, MAX_PAGE_UPDATE_BYTES, RuleViolation, VerifiedOp},
     storage::{Applied, ApplyContext},
     views::Change,
@@ -14,7 +15,7 @@ use crate::{
 
 /// Ops for epochs further ahead than this are dropped instead of parked, so
 /// junk can't pile up waiting for a key that will never come.
-const MAX_PENDING_EPOCHS_AHEAD: u64 = 16;
+pub(super) const MAX_PENDING_EPOCHS_AHEAD: u64 = 16;
 /// SQLite integers are signed 64-bit.
 const MAX_STORED_NUMBER: u64 = i64::MAX as u64;
 
@@ -29,28 +30,41 @@ impl Workspace {
         let changes = {
             let state = self.state();
             if state.store.is_applied(&envelope.author, envelope.seq)? {
-                return Ok(());
-            }
-            match verify_or_wait(&state, &envelope)? {
-                Some(verified) if is_ready(&state, &verified)? => {
-                    self.apply_with_alert(&state, &envelope, &verified)?
+                match self.check_for_fork(&state, &envelope)? {
+                    SecondLook::Settled(changes) => changes,
+                    SecondLook::NotYet => {
+                        park(&state, &envelope)?;
+                        Vec::new()
+                    }
+                    SecondLook::Refused(reason) => bail!(reason),
                 }
-                // Not kept while it waits: gap repair reads it again once a
-                // later op of its author's waits behind it.
-                Some(verified) if !envelope.fits_size_limit(&verified.body.op) => {
-                    warn!("not keeping an oversized op that arrived before its turn");
-                    Vec::new()
-                }
-                _ => {
-                    park(&state, &envelope)?;
-                    Vec::new()
-                }
+            } else {
+                self.receive_new(&state, &envelope)?
             }
         };
         for change in changes {
             self.emit(change);
         }
         Ok(())
+    }
+
+    /// An op for a place in its author's log we haven't filled yet.
+    fn receive_new(&self, state: &State, envelope: &Envelope) -> Result<Vec<Change>> {
+        Ok(match verify_or_wait(state, envelope)? {
+            Some(verified) if is_ready(state, &verified)? => {
+                self.apply_with_alert(state, envelope, &verified)?
+            }
+            // Not kept while it waits: gap repair reads it again once a
+            // later op of its author's waits behind it.
+            Some(verified) if !envelope.fits_size_limit(&verified.body.op) => {
+                warn!("not keeping an oversized op that arrived before its turn");
+                Vec::new()
+            }
+            _ => {
+                park(state, envelope)?;
+                Vec::new()
+            }
+        })
     }
 
     fn apply_with_alert(
@@ -79,6 +93,11 @@ impl Workspace {
             let mut changes = Vec::new();
             for envelope in state.store.pending()? {
                 if state.store.is_applied(&envelope.author, envelope.seq)? {
+                    match self.check_for_fork(&state, &envelope)? {
+                        SecondLook::Settled(more) => changes.extend(more),
+                        SecondLook::NotYet => continue,
+                        SecondLook::Refused(reason) => warn!("dropping a parked op: {reason}"),
+                    }
                     state.store.delete_pending(&envelope)?;
                     continue;
                 }
@@ -120,19 +139,39 @@ fn verify_or_wait(state: &State, envelope: &Envelope) -> Result<Option<VerifiedO
 
 /// `Ok(None)` when we lack the epoch key yet.
 fn verify(state: &State, envelope: &Envelope) -> Result<Option<VerifiedOp>> {
+    match author_epoch_key(state, envelope)? {
+        AuthorKey::NotYet => Ok(None),
+        AuthorKey::Refused(reason) => bail!(reason),
+        AuthorKey::Ready(key) => Ok(Some(crypto::open(envelope, &key)?)),
+    }
+}
+
+pub(super) enum AuthorKey {
+    Ready(EpochKey),
+    /// The epoch key hasn't arrived yet.
+    NotYet,
+    /// Its author couldn't write it: not a member in its epoch, or past
+    /// their frozen log.
+    Refused(String),
+}
+
+/// The key to open `envelope` with, once we know its author could write it.
+pub(super) fn author_epoch_key(state: &State, envelope: &Envelope) -> Result<AuthorKey> {
     let Some(key) = state.store.epoch_key(envelope.epoch)? else {
-        return Ok(None);
+        return Ok(AuthorKey::NotYet);
     };
-    ensure!(
-        state.store.was_member_at(envelope.epoch, &envelope.author)?,
-        "author was not a member in epoch {}",
-        envelope.epoch
-    );
-    ensure!(
-        !state.store.is_beyond_frozen_log(&envelope.author, envelope.seq)?,
-        "op written after its author was removed"
-    );
-    Ok(Some(crypto::open(envelope, &key)?))
+    if !state.store.was_member_at(envelope.epoch, &envelope.author)? {
+        return Ok(AuthorKey::Refused(format!(
+            "author was not a member in epoch {}",
+            envelope.epoch
+        )));
+    }
+    if state.store.is_beyond_frozen_log(&envelope.author, envelope.seq)? {
+        return Ok(AuthorKey::Refused(
+            "op written after its author was removed".into(),
+        ));
+    }
+    Ok(AuthorKey::Ready(key))
 }
 
 /// An op applies only right after its author's previous one, so every

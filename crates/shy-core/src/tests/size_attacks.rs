@@ -259,3 +259,21 @@ async fn an_oversized_op_kept_by_an_older_version_is_skipped_on_rebuild() {
             .any(|text| text.starts_with("zzz"))
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn padding_someone_elses_op_past_the_limit_doesnt_get_it_refused() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let real = Forger::new(&bob).seal(message(&bob, &general, "the real message".into()));
+    let (_, epoch_key) = current_key(&admin);
+
+    // Another member re-encrypts Bob's op with padding and gets it to the
+    // admin first.
+    assert!(
+        admin
+            .receive(encrypted_again(&real, &epoch_key, MAX_OP_BYTES))
+            .is_err()
+    );
+    admin.receive(real).unwrap();
+    assert_eq!(texts_in(&admin, &general), ["the real message"]);
+}

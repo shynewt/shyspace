@@ -17,7 +17,7 @@ struct SignedBody {
     signature: Vec<u8>,
 }
 
-fn header_bytes(author: &PublicKey, seq: u64, epoch: u64) -> Vec<u8> {
+pub(crate) fn header_bytes(author: &PublicKey, seq: u64, epoch: u64) -> Vec<u8> {
     let mut header = Vec::with_capacity(48);
     header.extend_from_slice(author.as_bytes());
     header.extend_from_slice(&seq.to_be_bytes());
@@ -87,7 +87,44 @@ pub(crate) fn seal_bytes(
     })
 }
 
+/// Opens an op arriving from someone else.
 pub fn open(envelope: &Envelope, epoch_key: &EpochKey) -> Result<VerifiedOp> {
+    parse_body(envelope, open_body(envelope, epoch_key, Encoding::Exact)?)
+}
+
+/// Opens an op already in our log. Versions before the exact-encoding rule
+/// may have kept one padded within its size limit.
+pub fn open_kept(envelope: &Envelope, epoch_key: &EpochKey) -> Result<VerifiedOp> {
+    parse_body(envelope, open_body(envelope, epoch_key, Encoding::Any)?)
+}
+
+/// What `envelope`'s author signed, unparsed, so ops of kinds a newer
+/// version added can be compared too. Padding doesn't change it.
+pub fn signed_body(envelope: &Envelope, epoch_key: &EpochKey) -> Result<Vec<u8>> {
+    open_body(envelope, epoch_key, Encoding::Any)
+}
+
+fn parse_body(envelope: &Envelope, body_bytes: Vec<u8>) -> Result<VerifiedOp> {
+    let body: OpBody = postcard::from_bytes(&body_bytes).map_err(|_| anyhow::Error::new(NewerFormat))?;
+    ensure!(body.lamport > 0, "lamport clock must start at 1");
+    Ok(VerifiedOp {
+        author: envelope.author,
+        seq: envelope.seq,
+        epoch: envelope.epoch,
+        body,
+    })
+}
+
+enum Encoding {
+    /// Only the exact encoding of what the author signed. The encryption
+    /// isn't signed, so otherwise anyone with the epoch key could pad an op
+    /// past its size limit to get it refused.
+    Exact,
+    Any,
+}
+
+/// Decrypts `envelope` and checks its signature, returning the signed body.
+fn open_body(envelope: &Envelope, epoch_key: &EpochKey, encoding: Encoding) -> Result<Vec<u8>> {
     let header = header_bytes(&envelope.author, envelope.seq, envelope.epoch);
     let plaintext = XChaCha20Poly1305::new(epoch_key.into())
         .decrypt(
@@ -99,6 +136,14 @@ pub fn open(envelope: &Envelope, epoch_key: &EpochKey) -> Result<VerifiedOp> {
         )
         .map_err(|_| anyhow!("decryption failed for {}:{}", envelope.author, envelope.seq))?;
     let signed: SignedBody = postcard::from_bytes(&plaintext)?;
+    if matches!(encoding, Encoding::Exact) {
+        ensure!(
+            postcard::to_stdvec(&signed)? == plaintext,
+            "padded op from {}:{}",
+            envelope.author,
+            envelope.seq
+        );
+    }
     let signature_bytes: [u8; 64] = signed
         .signature
         .as_slice()
@@ -110,14 +155,7 @@ pub fn open(envelope: &Envelope, epoch_key: &EpochKey) -> Result<VerifiedOp> {
         .author
         .verify(&signed_message, &Signature::from_bytes(&signature_bytes))
         .context("bad signature")?;
-    let body: OpBody = postcard::from_bytes(&signed.body).map_err(|_| anyhow::Error::new(NewerFormat))?;
-    ensure!(body.lamport > 0, "lamport clock must start at 1");
-    Ok(VerifiedOp {
-        author: envelope.author,
-        seq: envelope.seq,
-        epoch: envelope.epoch,
-        body,
-    })
+    Ok(signed.body)
 }
 
 #[cfg(test)]

@@ -107,6 +107,9 @@ pub(crate) struct Inner {
     /// Gaps (author, missing seq) already fetched again this run, so a gap
     /// the bucket can't fill doesn't make every pass re-read everything.
     pub refetched_gaps: Mutex<std::collections::HashSet<(iroh::PublicKey, u64)>>,
+    /// Fork proof objects in the bucket already looked at, by path, with the
+    /// version we saw: our own found intact, and ones found overwritten.
+    pub seen_fork_proofs: Mutex<std::collections::HashMap<String, String>>,
     /// When we last dialed each peer over gossip, by our clock.
     pub last_dialed_ms: Mutex<std::collections::HashMap<iroh::PublicKey, i64>>,
     /// Others' presence, from heartbeats; in memory only.

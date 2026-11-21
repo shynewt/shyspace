@@ -3,6 +3,7 @@
 //!
 //! Layout under the workspace prefix:
 //!   ops/<author>/<first seq>-<last seq>   segments of envelopes
+//!   ops/forks/<author>/<seq>/<hash>       proof an author signed two versions of one op
 //!   mls/commit/<from epoch>               admin-signed commits, one per epoch
 //!   invites/<token>/request               a joiner's request (via presigned link)
 //!   invites/<token>/answer                the admin's answer (via presigned link)
@@ -27,7 +28,7 @@ use tracing::warn;
 
 use crate::{
     ops::Envelope,
-    views::{StorageProtection, member_id},
+    views::{StorageProtection, member_id, parse_member_id},
 };
 
 const RECOVERY_SNAPSHOT: &str = "recovery/snapshot";
@@ -202,6 +203,28 @@ fn padded(number: u64) -> String {
     format!("{number:020}")
 }
 
+const FORKS_PREFIX: &str = "ops/forks";
+
+/// A fork proof object in the bucket, as listed.
+pub struct ListedProof {
+    pub author: PublicKey,
+    pub seq: u64,
+    pub path: String,
+    /// Changes whenever the object is written again.
+    pub version: String,
+}
+/// Two versions as large as a segment may hold, and their framing.
+pub const MAX_FORK_PROOF_BYTES: u64 = 2 * MAX_OBJECT_SIZE + 4096;
+
+pub fn fork_proof_path(author: &PublicKey, seq: u64, proof: &[u8]) -> String {
+    format!(
+        "{FORKS_PREFIX}/{}/{}/{}",
+        member_id(author),
+        padded(seq),
+        blake3::hash(proof).to_hex()
+    )
+}
+
 fn segment_path(author: &PublicKey, first: u64, last: u64) -> Path {
     Path::from(format!(
         "ops/{}/{}-{}",
@@ -218,8 +241,12 @@ impl Bucket {
     }
 
     async fn get(&self, path: &Path) -> Result<Option<Bytes>> {
+        self.get_at_most(path, MAX_OBJECT_SIZE).await
+    }
+
+    async fn get_at_most(&self, path: &Path, limit: u64) -> Result<Option<Bytes>> {
         match self.store.get(path).await {
-            Ok(result) if result.meta.size > MAX_OBJECT_SIZE => {
+            Ok(result) if result.meta.size > limit => {
                 warn!("ignoring oversized object {path} ({} bytes)", result.meta.size);
                 Ok(None)
             }
@@ -278,6 +305,57 @@ impl Bucket {
             segments.push((path.to_string(), envelopes));
         }
         Ok(segments)
+    }
+
+    /// Stores proof that `author` signed two versions of op `seq`. The proof
+    /// checks itself, and its name holds its hash, so readers can tell when
+    /// someone overwrote it.
+    pub async fn put_fork_proof(&self, author: &PublicKey, seq: u64, proof: Vec<u8>) -> Result<()> {
+        self.put(&Path::from(fork_proof_path(author, seq, &proof)), proof)
+            .await
+    }
+
+    /// Every fork proof in the bucket. Names that don't parse are skipped.
+    pub async fn fork_proofs(&self) -> Result<Vec<ListedProof>> {
+        let prefix = Path::from(FORKS_PREFIX);
+        let mut stream = self.store.list(Some(&prefix));
+        let mut proofs = Vec::new();
+        while let Some(meta) = stream.next().await {
+            let meta = meta?;
+            let parts: Vec<_> = meta
+                .location
+                .parts()
+                .map(|part| part.as_ref().to_owned())
+                .collect();
+            let [_, _, author, seq, _] = parts.as_slice() else {
+                continue;
+            };
+            if let (Ok(author), Ok(seq)) = (parse_member_id(author), seq.parse()) {
+                // An overwrite always changes the ETag; stores without one
+                // still change the size or time.
+                let version = meta
+                    .e_tag
+                    .unwrap_or_else(|| format!("{}@{}", meta.size, meta.last_modified));
+                proofs.push(ListedProof {
+                    author,
+                    seq,
+                    path: meta.location.to_string(),
+                    version,
+                });
+            }
+        }
+        Ok(proofs)
+    }
+
+    /// Writes `bytes` at `path` whatever they are, as anyone holding the
+    /// bucket keys could.
+    #[cfg(test)]
+    pub async fn put_raw(&self, path: &str, bytes: Vec<u8>) -> Result<()> {
+        self.put(&Path::from(path), bytes).await
+    }
+
+    pub async fn fork_proof(&self, path: &str) -> Result<Option<Bytes>> {
+        self.get_at_most(&Path::from(path), MAX_FORK_PROOF_BYTES).await
     }
 
     /// Commits are signed by the admin (checked by readers), so a plain put

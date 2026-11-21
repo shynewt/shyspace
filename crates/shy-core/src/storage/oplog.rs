@@ -85,20 +85,21 @@ impl Store {
             |row| row.get(0),
         )?;
         self.open_stored(&bytes)?
-            .context("that op was refused for its size")
+            .context("that op never counts: it was refused for its size, or forked")
     }
 
-    /// An op from the log, or `None` for one refused for its size: kept
-    /// without content, or kept whole by an older version.
+    /// An op from the log, or `None` for one that never counts: refused for
+    /// its size (kept without content, or kept whole by an older version),
+    /// or one its author also signed another version of.
     pub(crate) fn open_stored(&self, bytes: &[u8]) -> Result<Option<VerifiedOp>> {
         let envelope: Envelope = postcard::from_bytes(bytes).context("reading a stored op")?;
-        if envelope.ciphertext.is_empty() {
+        if envelope.ciphertext.is_empty() || self.is_forked(&envelope.author, envelope.seq)? {
             return Ok(None);
         }
         let key = self
             .epoch_key(envelope.epoch)?
             .with_context(|| format!("no key for epoch {} of a stored op", envelope.epoch))?;
-        let verified = crypto::open(&envelope, &key).context("opening a stored op")?;
+        let verified = crypto::open_kept(&envelope, &key).context("opening a stored op")?;
         Ok(envelope.fits_size_limit(&verified.body.op).then_some(verified))
     }
 
@@ -116,7 +117,8 @@ impl Store {
         self.insert_applied(&header_only, true)
     }
 
-    /// Records an applied envelope and clears any parked copies of it.
+    /// Records an applied envelope and clears its parked copy. Other parked
+    /// versions of it stay until retrying them checks them for a fork.
     pub fn insert_applied(&self, envelope: &Envelope, is_pushed: bool) -> Result<()> {
         self.db.execute(
             "INSERT OR IGNORE INTO ops (author, seq, epoch, envelope, pushed) VALUES (?, ?, ?, ?, ?)",
@@ -128,11 +130,7 @@ impl Store {
                 is_pushed
             ],
         )?;
-        self.db.execute(
-            "DELETE FROM pending_ops WHERE author = ? AND seq = ?",
-            params![envelope.author.as_bytes(), envelope.seq],
-        )?;
-        Ok(())
+        self.delete_pending(envelope)
     }
 
     /// Parks an envelope we can't apply yet. Each distinct envelope gets its

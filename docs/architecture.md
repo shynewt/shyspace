@@ -61,10 +61,11 @@ Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even i
 2. retry parked ops;
 3. repair missing or altered commits in the bucket (everyone); admin only: refresh the recovery snapshot first, then collect join requests and deliver answers;
 4. pull new segments from everyone who was ever a member, ourselves included (newcomers need removed members' history; a restored device needs its own);
-5. push our unpushed ops as segments, each under the 32 MB that readers accept;
-6. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
+5. learn the forks proved in the bucket, and put there the proofs we have that it lacks (`sync/forks.rs`);
+6. push our unpushed ops as segments, each under the 32 MB that readers accept;
+7. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
 
-An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried.
+An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried. If a second, different version of an op we already have arrives, signed by its author, neither version counts (see Forked logs in `security.md`).
 
 ## Bucket layout
 
@@ -73,6 +74,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 | Path | Content |
 |---|---|
 | `ops/<author>/<first seq>-<last seq>` | a segment of that author's envelopes |
+| `ops/forks/<author>/<seq>/<hash>` | proof that the author signed two versions of that op: both envelopes |
 | `mls/commit/<from epoch>` | admin-signed MLS commits |
 | `invites/<token>/request` | a joiner's request, written through a presigned link |
 | `invites/<token>/answer` | the admin's answer, read through a presigned link |
@@ -90,8 +92,8 @@ A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop edit
 |---|---|
 | `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `presence` (heartbeats and status), `protection` (whether the bucket keeps deleted data) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
-| `sync/` | the background loop, `receive` (verifying and applying others' ops), `replicate` (bucket pull and push, gossip peers) |
-| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `rebuild` (undoing ops that turned out not to count), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
+| `sync/` | the background loop, `receive` (verifying and applying others' ops), `forks` (two versions of one op), `replicate` (bucket pull and push, gossip peers) |
+| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `forks`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `rebuild` (undoing ops that turned out not to count), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
 | `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |
 | `private/` | private channels and DMs: `ids`, `ops` (what's inside sealed ops and grants), `crypto` (sealed content, key wraps, commitments), `sealing` (each member's key for receiving channel keys), `apply` (grants and waiting sealed ops), `rules` (which private ops count), `actions` (create, add, remove, leave, hand over, DMs), `reads` |
 | `crypto.rs` | sign-then-encrypt ops |

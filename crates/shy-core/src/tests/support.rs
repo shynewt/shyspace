@@ -232,3 +232,39 @@ impl Forger<'_> {
         self.seal(Op::Sealed { payload })
     }
 }
+
+/// `envelope` decrypted and encrypted again, with `extra` bytes after its
+/// signed content, as anyone holding the epoch key could.
+pub fn encrypted_again(envelope: &Envelope, epoch_key: &crypto::EpochKey, extra: usize) -> Envelope {
+    use chacha20poly1305::{
+        XChaCha20Poly1305, XNonce,
+        aead::{Aead, Generate, KeyInit, Payload},
+    };
+    let header = crypto::header_bytes(&envelope.author, envelope.seq, envelope.epoch);
+    let cipher = XChaCha20Poly1305::new(epoch_key.into());
+    let mut plaintext = cipher
+        .decrypt(
+            &envelope.nonce.into(),
+            Payload {
+                msg: &envelope.ciphertext,
+                aad: &header,
+            },
+        )
+        .unwrap();
+    plaintext.resize(plaintext.len() + extra, 0);
+    let nonce = XNonce::generate();
+    let ciphertext = cipher
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: &plaintext,
+                aad: &header,
+            },
+        )
+        .unwrap();
+    Envelope {
+        nonce: nonce.into(),
+        ciphertext,
+        ..envelope.clone()
+    }
+}

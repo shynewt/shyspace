@@ -52,9 +52,13 @@ impl Applied {
 }
 
 impl Store {
-    /// Applies an op if its author may make it in this workspace;
-    /// a rule violation otherwise.
+    /// Applies an op if its author may make it in this workspace; a rule
+    /// violation otherwise. An op its author also signed another version
+    /// of changes nothing.
     pub fn apply_permitted(&self, verified: &VerifiedOp, context: ApplyContext<'_>) -> Result<Applied> {
+        if self.is_forked(&verified.author, verified.seq)? {
+            return Ok(Applied::default());
+        }
         if !verified.body.op.is_permitted(&verified.author, &context.admin) {
             return Err(rule_violation("only the admin may make this change"));
         }

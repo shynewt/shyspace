@@ -3,6 +3,7 @@
 //! ops arriving live over gossip.
 
 mod alerts;
+mod forks;
 mod peers;
 mod receive;
 mod replicate;
@@ -170,9 +171,17 @@ impl Workspace {
             if let Err(error) = repaired {
                 errors.push(error);
             }
+            // Forks first, so ops proved forked never apply or alert here.
+            let shared_forks = self.share_forks().await;
             let pulled = self.pull().await;
             let tended = self.tend_private_channels();
-            for result in [pulled, tended, self.push().await, self.join_peers().await] {
+            for result in [
+                shared_forks,
+                pulled,
+                tended,
+                self.push().await,
+                self.join_peers().await,
+            ] {
                 if let Err(error) = result {
                     errors.push(error);
                 }

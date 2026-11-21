@@ -3,6 +3,7 @@
 
 mod apply;
 mod epochs;
+mod forks;
 mod invites;
 mod later;
 mod oplog;
@@ -20,6 +21,7 @@ mod snapshot;
 mod threads;
 
 pub use apply::{Applied, ApplyContext};
+pub(crate) use forks::CheckedFork;
 pub use invites::PendingRequest;
 pub use private::{Origin, StoredKey};
 pub use private_members::{Ending, Membership};

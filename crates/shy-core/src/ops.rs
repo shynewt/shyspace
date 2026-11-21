@@ -198,7 +198,7 @@ pub struct OpBody {
 
 /// The unit that travels over gossip and sits in the bucket. Only the header
 /// is readable without the workspace keys.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Envelope {
     pub author: PublicKey,
     pub seq: u64,

@@ -13,6 +13,8 @@ use super::open_encrypted;
 const REPLAYABLE_TABLES: &[&str] = &[
     "ops",
     "pending_ops",
+    "forks",
+    "fork_proofs_checked",
     "cursors",
     "profiles",
     "channels",

@@ -1,6 +1,7 @@
 mod collaboration;
 mod drafts;
 mod editing;
+mod forks;
 mod hardening;
 mod inbox;
 mod invites;

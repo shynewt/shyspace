@@ -142,6 +142,13 @@ DELETE FROM private_adds; DELETE FROM dm_members; DELETE FROM sealed_pending; DE
     // Where a message sits in its author's log: their earliest message with
     // an id wins. Older rows have none and stay as they are.
     "ALTER TABLE messages ADD COLUMN seq INTEGER;",
+    // Op slots an author signed twice, with the proof; neither version counts.
+    // Fork proofs from the bucket already checked: refused, or waiting for an
+    // epoch key.
+    "
+CREATE TABLE forks (author BLOB NOT NULL, seq INTEGER NOT NULL, proof BLOB NOT NULL, PRIMARY KEY (author, seq));
+CREATE TABLE fork_proofs_checked (path TEXT PRIMARY KEY, waiting_for_epoch INTEGER);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
