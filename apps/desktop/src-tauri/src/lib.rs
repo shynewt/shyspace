@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use shy_core::{
     BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace,
+    profile::ProfileDetails,
     sync::SyncStatus,
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
@@ -715,6 +716,14 @@ async fn set_profile(state: State<'_, AppState>, name: String) -> CommandResult<
         .map_err(failed)
 }
 
+#[tauri::command]
+async fn set_profile_details(state: State<'_, AppState>, details: ProfileDetails) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_profile_details(&details)
+        .map_err(failed)
+}
+
 /// `SHY_DIR` lets several members run side by side on one machine.
 fn data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
     match std::env::var_os("SHY_DIR") {
@@ -833,6 +842,7 @@ pub fn run() {
             search,
             status,
             set_profile,
+            set_profile_details,
         ])
         .build(tauri::generate_context!())
         .expect("error while building shyspace")

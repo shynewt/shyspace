@@ -15,6 +15,7 @@ import type {
   Member,
   MemberStatus,
   Page,
+  ProfileDetails,
   ProtectionCheck,
   SectionSort,
   Session,
@@ -23,7 +24,16 @@ import type {
 } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
 import { FakeDrafts } from "./drafts";
-import { argument, type Kind, ownedId, randomHex, requireNotifyLevel, requireString } from "./helpers";
+import {
+  argument,
+  type Kind,
+  noDetails,
+  ownedId,
+  randomHex,
+  requireDetails,
+  requireNotifyLevel,
+  requireString,
+} from "./helpers";
 import { FakeInvites } from "./invites";
 import { FakeLater } from "./later";
 import { FakePrivate, NOT_PRIVATE } from "./private";
@@ -101,6 +111,7 @@ export class FakeBackend {
       active: true,
       status: null,
       presence: "unreachable",
+      details: noDetails(),
     });
     this.notify({ kind: "members" });
     return id;
@@ -146,6 +157,14 @@ export class FakeBackend {
     const found = this.members.find((candidate) => candidate.id === member);
     if (!found) throw new Error(`fake backend: no member ${member}`);
     found.status = status;
+    this.notify({ kind: "members" });
+  }
+
+  /** Sets what another member shares about themselves, as their own device would. */
+  setMemberDetails(member: string, details: Partial<ProfileDetails>): void {
+    const found = this.members.find((candidate) => candidate.id === member);
+    if (!found) throw new Error(`fake backend: no member ${member}`);
+    found.details = { ...noDetails(), ...details };
     this.notify({ kind: "members" });
   }
 
@@ -335,6 +354,9 @@ export class FakeBackend {
         me.name = requireString(args, "name").trim();
         return this.notify({ kind: "members" });
       }
+      case "set_profile_details":
+        this.myMember().details = requireDetails(args);
+        return this.notify({ kind: "members" });
       case "save_for_later":
         this.later.save(requireString(args, "item"), (argument(args, "remindMs") as number | null) ?? null);
         return this.notifyLater();
@@ -440,7 +462,18 @@ export class FakeBackend {
 
   private createWorkspace(workspaceName: string, name: string, bucket: BucketConfig): Session {
     const me = randomHex(32);
-    this.members = [{ id: me, name, is_bot: false, is_admin: true, active: true, status: null, presence: "online" }];
+    this.members = [
+      {
+        id: me,
+        name,
+        is_bot: false,
+        is_admin: true,
+        active: true,
+        status: null,
+        presence: "online",
+        details: noDetails(),
+      },
+    ];
     this.storage = {
       endpoint: bucket.endpoint,
       bucket: bucket.bucket,
@@ -466,8 +499,26 @@ export class FakeBackend {
     const admin = randomHex(32);
     const me = randomHex(32);
     this.members = [
-      { id: admin, name: "Ada", is_bot: false, is_admin: true, active: true, status: null, presence: "unreachable" },
-      { id: me, name, is_bot: false, is_admin: false, active: true, status: null, presence: "online" },
+      {
+        id: admin,
+        name: "Ada",
+        is_bot: false,
+        is_admin: true,
+        active: true,
+        status: null,
+        presence: "unreachable",
+        details: noDetails(),
+      },
+      {
+        id: me,
+        name,
+        is_bot: false,
+        is_admin: false,
+        active: true,
+        status: null,
+        presence: "online",
+        details: noDetails(),
+      },
     ];
     this.chat.addChannel(ownedId(admin), "general");
     this.session = { workspace_name: "Team", me, is_admin: false };

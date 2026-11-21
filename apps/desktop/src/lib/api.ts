@@ -85,6 +85,20 @@ export type Page = {
 };
 export type PresenceState = "online" | "away" | "unreachable";
 export type MemberStatus = { emoji: string; text: string; until_ms: number | null; alerts: NotifyLevel };
+/** One working interval in their time zone. `days`: bit 0 is Monday, bit 6 Sunday. An end not after the start crosses midnight. */
+export type WorkingHours = { days: number; start_minute: number; end_minute: number };
+/** What a member shares about themselves; an empty string is unset. */
+export type ProfileDetails = {
+  title: string;
+  pronouns: string;
+  bio: string;
+  email: string;
+  phone: string;
+  website: string;
+  location: string;
+  time_zone: string;
+  working_hours: WorkingHours | null;
+};
 export type Member = {
   id: string;
   name: string;
@@ -93,6 +107,7 @@ export type Member = {
   active: boolean;
   status: MemberStatus | null;
   presence: PresenceState;
+  details: ProfileDetails;
 };
 export type SearchHit = {
   kind: "message" | "page";
@@ -242,6 +257,7 @@ export const api = {
     invoke<void>("apply_doc_update", { page, update: Array.from(update) }),
   members: () => invoke<Member[]>("members"),
   setProfile: (name: string) => invoke<void>("set_profile", { name }),
+  setProfileDetails: (details: ProfileDetails) => invoke<void>("set_profile_details", { details }),
   setStatus: (emoji: string, text: string, untilMs: number | null, alerts: NotifyLevel) =>
     invoke<void>("set_status", { emoji, text, untilMs, alerts }),
   clearStatus: () => invoke<void>("clear_status"),

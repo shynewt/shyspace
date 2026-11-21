@@ -1,7 +1,22 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
-import type { NotifyLevel } from "../../../src/lib/api";
+import type { NotifyLevel, ProfileDetails } from "../../../src/lib/api";
 
 export type Kind = { kind: "person" | "bot" };
+
+/** Details of someone who shared none, as the core reports them. */
+export function noDetails(): ProfileDetails {
+  return {
+    title: "",
+    pronouns: "",
+    bio: "",
+    email: "",
+    phone: "",
+    website: "",
+    location: "",
+    time_zone: "",
+    working_hours: null,
+  };
+}
 
 let nextSeededByte: (() => number) | null = null;
 
@@ -48,4 +63,32 @@ export function requireNotifyLevel(args: InvokeArgs | undefined, name: string): 
   const level = NOTIFY_LEVELS.find((candidate) => candidate === value);
   if (!level) throw new Error(`fake backend: "${value}" is not a notification level`);
   return level;
+}
+
+const DETAIL_TEXTS = ["title", "pronouns", "bio", "email", "phone", "website", "location", "time_zone"] as const;
+
+/** The `details` argument, checked to have the shape the core reads, with text trimmed as the core keeps it. */
+export function requireDetails(args: InvokeArgs | undefined): ProfileDetails {
+  const value = argument(args, "details");
+  if (typeof value !== "object" || value === null) throw new Error('fake backend: missing "details"');
+  const details = noDetails();
+  for (const name of DETAIL_TEXTS) {
+    const text: unknown = Reflect.get(value, name);
+    if (typeof text !== "string") throw new Error(`fake backend: details.${name} must be a string`);
+    details[name] = text.trim();
+  }
+  const hours: unknown = Reflect.get(value, "working_hours");
+  if (hours === null) return details;
+  if (typeof hours !== "object" || hours === undefined) throw new Error("fake backend: bad working_hours");
+  const numberAt = (key: string): number => {
+    const part: unknown = Reflect.get(hours, key);
+    if (typeof part !== "number") throw new Error(`fake backend: working_hours.${key} must be a number`);
+    return part;
+  };
+  details.working_hours = {
+    days: numberAt("days"),
+    start_minute: numberAt("start_minute"),
+    end_minute: numberAt("end_minute"),
+  };
+  return details;
 }
