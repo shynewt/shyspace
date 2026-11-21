@@ -17,6 +17,7 @@ use rmcp::{
 use serde::Deserialize;
 use shy_core::{
     Edit, Workspace,
+    profile::ProfileDetails,
     views::{Change, Channel, ChannelKind, Message, NotifyLevel, PresenceState},
 };
 
@@ -246,7 +247,7 @@ impl ShyTools {
     }
 
     #[tool(
-        description = "List current members with their ids, whether they're online, and their status. Mention someone by writing [@Name](shy://member/<id>) in a message."
+        description = "List current members with their ids, role, pronouns and time zone if they shared them, whether they're online, and their status. Mention someone by writing [@Name](shy://member/<id>) in a message."
     )]
     fn list_members(&self) -> ToolResult {
         let members = self.workspace.members().map_err(failed)?;
@@ -272,7 +273,8 @@ impl ShyTools {
                         format!(" — {} {}{alerts}", status.emoji, status.text)
                     })
                     .unwrap_or_default();
-                format!("{}{bot} [{presence}]{status}: {}", member.name, member.id)
+                let about = profile_summary(&member.details);
+                format!("{}{about}{bot} [{presence}]{status}: {}", member.name, member.id)
             })
             .collect::<Vec<_>>()
             .join("\n"))
@@ -547,6 +549,23 @@ impl ServerHandler for ShyTools {
     }
 }
 
+/// " (Designer, she/her, time zone Europe/Lisbon)", or nothing if none are shared.
+fn profile_summary(details: &ProfileDetails) -> String {
+    let time_zone = (!details.time_zone.is_empty()).then(|| format!("time zone {}", details.time_zone));
+    let parts: Vec<String> = [
+        Some(details.title.clone()).filter(|title| !title.is_empty()),
+        Some(details.pronouns.clone()).filter(|pronouns| !pronouns.is_empty()),
+        time_zone,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    match parts.is_empty() {
+        true => String::new(),
+        false => format!(" ({})", parts.join(", ")),
+    }
+}
+
 pub async fn serve(workspace: Workspace) -> Result<()> {
     let service = ShyTools::new(workspace.clone()).serve(stdio()).await?;
     service.waiting().await?;
@@ -582,6 +601,17 @@ mod tests {
             unread_replies: 0,
             reactions: Vec::new(),
         }
+    }
+
+    #[test]
+    fn members_show_only_the_details_they_shared() {
+        assert_eq!(profile_summary(&ProfileDetails::default()), "");
+        let shared = ProfileDetails {
+            title: "Designer".into(),
+            time_zone: "Europe/Lisbon".into(),
+            ..ProfileDetails::default()
+        };
+        assert_eq!(profile_summary(&shared), " (Designer, time zone Europe/Lisbon)");
     }
 
     #[test]
