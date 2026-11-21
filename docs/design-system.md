@@ -42,6 +42,8 @@ The tokens are in `ui/motion.ts`, and the same numbers are in the `@theme` in `s
 | `springs.pop` | 200 ms, a little bounce | a reaction added, a count changing |
 | `rise`, `pop`, `fade` | | enter and exit variants for content, floating surfaces, scrims |
 
+`tests/ui/design-rules.spec.ts` fails on a number of seconds written into a transition (outside `ui/motion.ts` and endless loops like a spinner), on a numbered Tailwind duration like `duration-300`, and on Motion animating a width or height. `tests/ui/motion.spec.ts` checks the timings in a real page.
+
 ## Layout
 
 The app is for desktop windows, full screen (1280 to 2560 px wide) and split screen (640 to 1280). The smallest window is 640 × 560 (`tauri.conf.json`); a tiling window manager may go smaller, where nothing breaks but it needn't look great.
