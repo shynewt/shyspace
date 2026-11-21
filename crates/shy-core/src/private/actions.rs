@@ -292,10 +292,40 @@ impl Workspace {
         self.write_private(channel, make_op(position))
     }
 
-    /// Seals `op` into `channel` with the newest key we may use there.
+    /// Seals `op` into `channel` with the key we write there with.
     fn write_private(&self, channel: &str, op: PrivateOp) -> Result<()> {
-        let key = sending_key(&self.state().store, channel)?;
+        let key = match private_kind(channel) {
+            Some(PrivateKind::Dm) => self.own_dm_key(channel)?,
+            _ => sending_key(&self.state().store, channel)?,
+        };
         self.write_sealed(key, op)
+    }
+
+    /// The key we write a DM with: one we made ourselves, made the first
+    /// time. A key someone else made may have reached only some members.
+    /// Safe only while every DM grant this device writes goes to all of the
+    /// DM's current members at once, as here and in `open_dm`.
+    fn own_dm_key(&self, channel: &str) -> Result<StoredKey> {
+        let me = self.me();
+        let members = {
+            let store = &self.state().store;
+            if let Some(key) = store.dm_key_granted_by(channel, &me)? {
+                return Ok(key);
+            }
+            store.dm_members(channel)?
+        };
+        ensure!(members.contains(&me), "you aren't a member of this channel");
+        let workspace_members = self.current_members()?;
+        let recipients: Vec<PublicKey> = members
+            .iter()
+            .copied()
+            .filter(|member| workspace_members.contains(member))
+            .collect();
+        self.grant(channel, &[(0, new_channel_key())], &recipients, &members)?;
+        self.state()
+            .store
+            .dm_key_granted_by(channel, &me)?
+            .context("a DM key we just granted ourselves is missing")
     }
 
     fn write_sealed(&self, key: StoredKey, op: PrivateOp) -> Result<()> {
@@ -383,16 +413,11 @@ impl Workspace {
     }
 }
 
-/// Keys of `channel` its owners vouched for, oldest first. For a DM, every
-/// key we hold (they were checked when granted).
+/// Keys of private channel `channel` its owners vouched for, oldest first.
 fn vouched_keys(store: &Store, channel: &str) -> Result<Vec<StoredKey>> {
     let mut vouched = Vec::new();
     for key in store.channel_keys(Some(channel))? {
-        let is_vouched = match private_kind(channel) {
-            Some(PrivateKind::Dm) => true,
-            _ => store.commitment_of(channel, key.generation)? == Some(commitment(&key.key)),
-        };
-        if is_vouched {
+        if store.commitment_of(channel, key.generation)? == Some(commitment(&key.key)) {
             vouched.push(key);
         }
     }

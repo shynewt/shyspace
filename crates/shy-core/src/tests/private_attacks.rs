@@ -8,7 +8,7 @@ use crate::{
     ops::{Envelope, Op},
     private::{
         crypto::{Granting, commitment, new_channel_key, wrap_key},
-        ids::private_channel_id,
+        ids::{dm_id, private_channel_id},
         ops::{GrantBody, Invitee, PrivateOp},
     },
     storage::StoredKey,
@@ -697,4 +697,77 @@ async fn nobody_can_plant_a_key_in_someone_s_notes_before_they_open_them() {
         "Bob's notes never use the planted key"
     );
     assert_eq!(texts(&bob, &notes), ["my secret"]);
+}
+
+/// A grant from `granter` to `recipient` alone of `key` for the DM of `members`.
+fn forged_dm_grant(granter: &Workspace, recipient: &Workspace, members: &[&Workspace], key: [u8; 32]) -> Op {
+    let granting = Granting {
+        workspace_id: &granter.inner.config.workspace_id,
+        granter: &granter.me(),
+    };
+    let public = granter
+        .state()
+        .store
+        .sealing_key_of(&recipient.me())
+        .unwrap()
+        .unwrap();
+    let dm_members: Vec<_> = members.iter().map(|member| member.me()).collect();
+    let grant = GrantBody {
+        channel: dm_id(&granter.inner.config.workspace_id, &dm_members),
+        generation: 0,
+        key,
+        dm_members,
+    };
+    Op::KeyGrant {
+        wraps: vec![wrap_key(granting, &public, &postcard::to_stdvec(&grant).unwrap()).unwrap()],
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_cannot_split_a_group_dm_with_a_key_for_each_of_the_others() {
+    let (_root, _bucket, _admin, bob, carol, dave) = four_members().await;
+    let everyone = [&bob, &carol, &dave];
+    let dm = dm_id(
+        &dave.inner.config.workspace_id,
+        &everyone.map(|member| member.me()),
+    );
+
+    // Dave starts the DM by giving Bob one key and Carol another; each
+    // device gets both grants but can open only its own.
+    let mut forger = Forger::new(&dave);
+    let grants = [
+        forger.seal(forged_dm_grant(&dave, &bob, &everyone, new_channel_key())),
+        forger.seal(forged_dm_grant(&dave, &carol, &everyone, new_channel_key())),
+    ];
+    for grant in grants {
+        bob.receive(grant.clone()).unwrap();
+        carol.receive(grant).unwrap();
+    }
+
+    let (bob_before, carol_before) = (own_last_seq(&bob), own_last_seq(&carol));
+    bob.send_message(&dm, "hi carol", None).unwrap();
+    deliver(&bob, bob_before, &carol);
+    carol.send_message(&dm, "hi bob", None).unwrap();
+    deliver(&carol, carol_before, &bob);
+    assert_eq!(texts(&bob, &dm), ["hi carol", "hi bob"]);
+    assert_eq!(texts(&carol, &dm), ["hi carol", "hi bob"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_handed_to_one_member_never_carries_what_they_write() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let dm = bob.open_dm(&[carol.my_id(), dave.my_id()]).unwrap();
+    bob.send_message(&dm, "first", None).unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    // Dave gives Bob alone a key that sorts after every other.
+    let mut forger = Forger::new(&dave);
+    let grant = forger.seal(forged_dm_grant(&dave, &bob, &[&bob, &carol, &dave], [0xFF; 32]));
+    bob.receive(grant.clone()).unwrap();
+    carol.receive(grant).unwrap();
+
+    let bob_before = own_last_seq(&bob);
+    bob.send_message(&dm, "second", None).unwrap();
+    deliver(&bob, bob_before, &carol);
+    assert_eq!(texts(&carol, &dm), ["first", "second"]);
 }

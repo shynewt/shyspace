@@ -286,6 +286,30 @@ impl Store {
         Ok(keys)
     }
 
+    /// The first DM key we got in a grant signed by `granter`.
+    pub(crate) fn dm_key_granted_by(&self, channel: &str, granter: &PublicKey) -> Result<Option<StoredKey>> {
+        let key: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT key FROM private_keys WHERE channel = ? AND generation = 0 AND origin_author = ?
+                 ORDER BY origin_seq LIMIT 1",
+                params![channel, granter.as_bytes()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        key.map(|key| {
+            Ok(StoredKey {
+                channel: channel.to_owned(),
+                generation: 0,
+                key: key
+                    .try_into()
+                    .ok()
+                    .context("a stored DM key of the wrong length")?,
+            })
+        })
+        .transpose()
+    }
+
     pub(crate) fn put_dm_members(&self, channel: &str, members: &[PublicKey]) -> Result<()> {
         for member in members {
             self.db.execute(

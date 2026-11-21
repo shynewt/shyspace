@@ -1,7 +1,11 @@
 //! Private channels and DMs: sealing keys, grants, sealed content.
 
 use super::support::*;
-use crate::{Networking, Workspace};
+use crate::{
+    Networking, Workspace,
+    ops::Op,
+    private::{ids::new_private_message_id, ops::PrivateOp},
+};
 
 fn newest_sealing_key(member: &Workspace) -> Vec<u8> {
     member.state().store.sealing_secrets().unwrap()[0].public.clone()
@@ -178,6 +182,68 @@ async fn a_dm_is_shared_by_exactly_its_members() {
     assert_eq!(texts(&bob, &dm), ["PSST", "hi back"]);
     assert!(texts(&admin, &dm).is_empty());
     assert!(!lists(&admin, &dm));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_member_writes_a_dm_with_a_key_of_their_own() {
+    let (_root, _bucket, admin, bob, carol) = three_members().await;
+    let dm = bob.open_dm(&[carol.my_id(), admin.my_id()]).unwrap();
+    bob.send_message(&dm, "from bob", None).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    carol.send_message(&dm, "from carol", None).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+
+    let key_of = |member: &Workspace| member.state().store.dm_key_granted_by(&dm, &member.me()).unwrap();
+    let (bobs, carols) = (key_of(&bob).unwrap(), key_of(&carol).unwrap());
+    assert_ne!(bobs.key, carols.key);
+    for member in [&admin, &bob, &carol] {
+        assert_eq!(texts(member, &dm), ["from bob", "from carol"]);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_dm_key_skips_members_removed_from_the_workspace() {
+    let (_root, _bucket, admin, bob, carol) = three_members().await;
+    let dm = bob.open_dm(&[carol.my_id(), admin.my_id()]).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    sync_all(&[&admin, &carol]).await;
+
+    let before = carol.state().store.last_seq(&carol.me()).unwrap();
+    carol.send_message(&dm, "after bob left", None).unwrap();
+    let grant = carol.state().store.stored_op(&carol.me(), before + 1).unwrap();
+    let Op::KeyGrant { wraps } = grant.body.op else {
+        panic!("Carol's first DM send grants her key first");
+    };
+    assert_eq!(wraps.len(), 2, "a wrap for Carol and the admin, none for Bob");
+    sync_all(&[&admin, &carol]).await;
+    assert_eq!(texts(&admin, &dm), ["after bob left"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dm_message_sealed_with_someone_elses_key_still_counts() {
+    // Versions before #72 write with whichever key the DM's opener made.
+    let (_root, _bucket, admin, bob, carol) = three_members().await;
+    let dm = bob.open_dm(&[carol.my_id()]).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    let openers_key = bob
+        .state()
+        .store
+        .dm_key_granted_by(&dm, &bob.me())
+        .unwrap()
+        .unwrap();
+
+    let old_style = Forger::new(&carol).seal_private(
+        &openers_key,
+        PrivateOp::Content(Op::Message {
+            id: new_private_message_id(&dm, &carol.me()),
+            channel: dm.clone(),
+            text: "from an older version".into(),
+            reply_to: None,
+        }),
+    );
+    bob.receive(old_style).unwrap();
+    assert_eq!(texts(&bob, &dm), ["from an older version"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
