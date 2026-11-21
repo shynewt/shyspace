@@ -67,3 +67,25 @@ test("arrows held with Ctrl or Super don't move through the results", async ({ p
 
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 });
+
+test("search hits name a DM after the person and show a private channel's lock", async ({ page }) => {
+  await page.goto("");
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const dm = window.fake.handle("open_dm", { members: [grace] });
+    if (typeof dm === "string") window.fake.receiveMessageIn(grace, dm, "The zebra plan, between us");
+    window.fake.receivePrivateChannel(grace, "ops");
+    window.fake.receiveMessage(grace, "ops", "The zebra plan, for ops");
+  });
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+
+  await page.keyboard.press("Control+k");
+  await page.getByLabel("Search messages and pages").fill("zebra");
+  const inDm = page.getByRole("option", { name: /between us/ });
+  await expect(inDm.getByText("Grace", { exact: true })).toBeVisible();
+  await expect(inDm).not.toContainText("#");
+  const inPrivate = page.getByRole("option", { name: /for ops/ });
+  await expect(inPrivate.getByLabel("Private", { exact: true })).toBeVisible();
+  await expect(inPrivate).toContainText("ops");
+  await expect(inPrivate).not.toContainText("#ops");
+});

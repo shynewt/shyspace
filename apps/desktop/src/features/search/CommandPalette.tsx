@@ -21,6 +21,7 @@ import { useWorkspace, type View } from "../../lib/workspace";
 import { Dialog, Kbd, springs } from "../../ui";
 import { MarkAllReadDialog } from "../inbox/MarkAllReadDialog";
 import { ChannelGlyph } from "../private/ChannelGlyph";
+import { ChannelName } from "../private/ChannelName";
 
 const SEARCH_DELAY_MS = 120;
 const JUMP_LIMIT_WHILE_TYPING = 6;
@@ -30,7 +31,7 @@ type Item = {
   key: string;
   onChoose: () => void;
   icon: ReactNode;
-  title: string;
+  title: ReactNode;
   detail?: ReactNode;
   group: string;
   shortcut?: string[];
@@ -182,7 +183,7 @@ function PaletteBody({
           key: `hit:${hit.id}`,
           onChoose: go({ kind: "channel", id: hit.channel, thread: hit.thread_root ?? undefined, focus: hit.id }),
           icon: <MessageSquare size={15} />,
-          title: `#${hit.title}`,
+          title: <ChannelName channelId={hit.channel} />,
           detail: snippet(hit.snippet),
           group: "In messages",
         },
