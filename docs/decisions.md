@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Mobile apps will be native, on the shared Rust core (2026-11)
+iOS and Android get native interfaces (SwiftUI and Jetpack Compose) that call `shy-core` through generated bindings (UniFFI), not the desktop's React app in a Tauri mobile web view. A chat app is judged on fast scrolling lists, the keyboard, back-swipe and screen readers, which web views on phones do worst; Element X and Bitwarden made the same move onto a shared Rust core. What's shared is the core and the design rules (tokens, type scale, motion, behaviour); the screens are rewritten, and the page editor may stay an embedded web view. So the desktop layout is responsive for desktop windows only (full screen and split screen), and logic that every app needs belongs in the core, not in TypeScript. Mobile work is #19.
+
 ## Profile details: a new op, every field public, cut or cleared (2026-11)
 Title, pronouns, bio, contact, time zone and working hours travel in their own op, `ProfileDetails`, not as new fields on `Profile`: ops are postcard, which reads fields by position, so a longer `Profile` would stop every old `Profile` op from decoding. Versions before it park a member's ops from their first details onward until they update, the same cost as every new kind of op. Every filled field is visible to the whole workspace; there are no per-field audiences, which would need per-field keys. Free text from others is cut to its limit, like names; an email, phone, website or time zone that's too long or malformed is cleared, because a cut address can point somewhere else. Pictures wait for files (#13).
 
