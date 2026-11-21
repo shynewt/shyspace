@@ -9,6 +9,7 @@ mod later;
 mod oplog;
 mod private;
 mod private_members;
+mod profile_details;
 mod queries;
 mod reading;
 mod rebuild;

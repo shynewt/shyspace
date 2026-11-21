@@ -20,6 +20,7 @@ use crate::{
 /// Tables that hold only what ops produce.
 const SHARED_VIEW_TABLES: &[&str] = &[
     "profiles",
+    "profile_details",
     "channels",
     "messages",
     "reactions",

@@ -286,3 +286,34 @@ async fn many_large_pastes_made_offline_all_reach_others() {
         assert_eq!(bob.page_text(&page).unwrap().len(), paste.len());
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn profile_details_reach_everyone_and_newcomers() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let details = crate::profile::ProfileDetails {
+        title: "Engineer".into(),
+        pronouns: "he/him".into(),
+        time_zone: "Europe/Berlin".into(),
+        working_hours: Some(crate::profile::WorkingHours {
+            days: 0b001_1111,
+            start_minute: 9 * 60,
+            end_minute: 17 * 60,
+        }),
+        ..Default::default()
+    };
+    bob.set_profile_details(&details).unwrap();
+    sync_all(&[&bob, &admin]).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+
+    for member in [&admin, &bob, &carol] {
+        let seen = member
+            .members()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id == bob.my_id())
+            .unwrap()
+            .details;
+        assert_eq!(seen, details);
+    }
+}

@@ -88,7 +88,8 @@ impl Store {
             | Op::Status { .. }
             | Op::SealingKey { .. }
             | Op::KeyGrant { .. }
-            | Op::Sealed { .. } => {
+            | Op::Sealed { .. }
+            | Op::ProfileDetails { .. } => {
                 return Ok(false);
             }
         };

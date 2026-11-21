@@ -149,6 +149,14 @@ DELETE FROM private_adds; DELETE FROM dm_members; DELETE FROM sealed_pending; DE
 CREATE TABLE forks (author BLOB NOT NULL, seq INTEGER NOT NULL, proof BLOB NOT NULL, PRIMARY KEY (author, seq));
 CREATE TABLE fork_proofs_checked (path TEXT PRIMARY KEY, waiting_for_epoch INTEGER);
 ",
+    // Working hours are all three work_ columns, or none.
+    "
+CREATE TABLE profile_details (
+    member BLOB PRIMARY KEY, title TEXT NOT NULL, pronouns TEXT NOT NULL, bio TEXT NOT NULL,
+    email TEXT NOT NULL, phone TEXT NOT NULL, website TEXT NOT NULL, location TEXT NOT NULL,
+    time_zone TEXT NOT NULL, work_days INTEGER, work_start INTEGER, work_end INTEGER,
+    lamport INTEGER NOT NULL);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
@@ -180,5 +188,30 @@ mod tests {
         db.pragma_update(None, "user_version", MIGRATIONS.len() + 1)
             .unwrap();
         assert!(migrate(&mut db).is_err());
+    }
+
+    #[test]
+    fn a_database_from_before_profile_details_upgrades() {
+        let mut db = Connection::open_in_memory().unwrap();
+        let before = MIGRATIONS.len() - 1;
+        for migration in &MIGRATIONS[..before] {
+            db.execute_batch(migration).unwrap();
+        }
+        db.pragma_update(None, "user_version", before).unwrap();
+        db.execute(
+            "INSERT INTO forks (author, seq, proof) VALUES (x'01', 1, x'02')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut db).unwrap();
+        let kept: i64 = db
+            .query_row("SELECT COUNT(*) FROM forks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(kept, 1);
+        let details: i64 = db
+            .query_row("SELECT COUNT(*) FROM profile_details", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(details, 0);
     }
 }

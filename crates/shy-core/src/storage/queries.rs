@@ -206,6 +206,7 @@ impl Store {
                 active: row.get(3)?,
                 status: None,
                 presence: PresenceState::default(),
+                details: crate::profile::ProfileDetails::default(),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

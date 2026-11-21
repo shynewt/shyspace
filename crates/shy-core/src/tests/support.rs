@@ -202,11 +202,16 @@ impl<'a> Forger<'a> {
     }
 
     pub fn seal(&mut self, op: Op) -> Envelope {
+        self.seal_at(9_000 + self.next_seq, op)
+    }
+
+    /// Seals `op` at the next slot with a lamport clock of the forger's choosing.
+    pub fn seal_at(&mut self, lamport: u64, op: Op) -> Envelope {
         let (epoch, key) = current_key(self.author);
         let seq = self.next_seq;
         self.next_seq += 1;
         let body = OpBody {
-            lamport: 9_000 + seq,
+            lamport,
             timestamp_ms: now_ms().unwrap(),
             op,
         };

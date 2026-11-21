@@ -243,6 +243,12 @@ impl Store {
             Op::KeyGrant { .. } | Op::Sealed { .. } => {
                 return Err(rule_violation("a private op inside another"));
             }
+            Op::ProfileDetails { details } => {
+                if !self.put_profile_details(author, &details.cleaned(), lamport)? {
+                    return Ok(None);
+                }
+                Change::Members
+            }
             Op::SealingKey { public } => {
                 if !is_valid_sealing_public_key(public) {
                     return Err(rule_violation("malformed sealing key"));

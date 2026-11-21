@@ -1307,3 +1307,169 @@ async fn names_stored_by_an_older_version_are_cleaned_once_on_upgrade() {
         .unwrap();
     assert_eq!(name_of_bob(&reopened), "Bobnimda");
 }
+
+fn details_of(member: &Workspace, id: &str) -> crate::profile::ProfileDetails {
+    member
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == id)
+        .unwrap()
+        .details
+}
+
+fn titled(title: &str) -> crate::profile::ProfileDetails {
+    crate::profile::ProfileDetails {
+        title: title.into(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn profile_details_from_others_are_bounded_plain_and_safe_to_open() {
+    use crate::profile::{
+        MAX_BIO_CHARS, MAX_LOCATION_CHARS, MAX_PRONOUNS_CHARS, MAX_TITLE_CHARS, WorkingHours,
+    };
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let hostile = crate::profile::ProfileDetails {
+        title: format!("Ad\u{202E}min\u{0007}{}", "x".repeat(10_000)),
+        pronouns: format!("\u{200B}{}", "p".repeat(10_000)),
+        bio: format!("hello\u{2066}\r\n{}", "🎉".repeat(10_000)),
+        email: format!("{}@example.com", "a".repeat(10_000)),
+        phone: "javascript:alert(1)".into(),
+        website: "javascript:alert(document.cookie)".into(),
+        location: "l".repeat(10_000),
+        time_zone: "Europe/Lisbon\u{202E}; DROP TABLE".into(),
+        working_hours: Some(WorkingHours {
+            days: 0xFF,
+            start_minute: 9_000,
+            end_minute: 60_000,
+        }),
+    };
+    admin
+        .receive(Forger::new(&bob).seal(Op::ProfileDetails { details: hostile }))
+        .unwrap();
+
+    let kept = details_of(&admin, &bob.my_id());
+    assert!(kept.title.starts_with("Adminx"), "{}", kept.title);
+    assert_eq!(kept.title.chars().count(), MAX_TITLE_CHARS);
+    assert_eq!(kept.pronouns, "p".repeat(MAX_PRONOUNS_CHARS));
+    assert!(kept.bio.starts_with("hello\n🎉"));
+    assert_eq!(kept.bio.chars().count(), MAX_BIO_CHARS);
+    assert_eq!(kept.location.chars().count(), MAX_LOCATION_CHARS);
+    assert_eq!(
+        (
+            kept.email.as_str(),
+            kept.phone.as_str(),
+            kept.website.as_str(),
+            kept.time_zone.as_str()
+        ),
+        ("", "", "", ""),
+        "values that can't be cut or could open something else are cleared"
+    );
+    assert_eq!(kept.working_hours, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_http_websites_survive_from_others() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let mut forger = Forger::new(&bob);
+    for website in [
+        "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+        "JAVASCRIPT:alert(1)",
+        "vbscript:msgbox",
+        "file:///etc/passwd",
+    ] {
+        let details = crate::profile::ProfileDetails {
+            website: website.into(),
+            ..titled("Engineer")
+        };
+        admin
+            .receive(forger.seal(Op::ProfileDetails { details }))
+            .unwrap();
+        let kept = details_of(&admin, &bob.my_id());
+        assert_eq!(kept.website, "", "{website}");
+        assert_eq!(kept.title, "Engineer", "the rest of the op still counts");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_profile_details_op_does_not_replace_newer_ones() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal_at(
+            20_000,
+            Op::ProfileDetails {
+                details: titled("Current"),
+            },
+        ))
+        .unwrap();
+    admin
+        .receive(forger.seal_at(
+            10_000,
+            Op::ProfileDetails {
+                details: titled("Stale"),
+            },
+        ))
+        .unwrap();
+    assert_eq!(details_of(&admin, &bob.my_id()).title, "Current");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nobody_can_set_someone_elses_profile_details() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    bob.set_profile_details(&titled("Engineer")).unwrap();
+    sync_all(&[&bob, &admin]).await;
+
+    // Carol signs an op and claims Bob wrote it.
+    let mut claimed = Forger::new(&carol).seal(Op::ProfileDetails {
+        details: titled("Fired"),
+    });
+    claimed.author = bob.me();
+    claimed.seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    assert!(admin.receive(claimed).is_err());
+    assert_eq!(details_of(&admin, &bob.my_id()).title, "Engineer");
+
+    // An op has no field naming whose details it sets: Carol's own op only sets hers.
+    admin
+        .receive(Forger::new(&carol).seal(Op::ProfileDetails {
+            details: titled("Carol's title"),
+        }))
+        .unwrap();
+    assert_eq!(details_of(&admin, &bob.my_id()).title, "Engineer");
+    assert_eq!(details_of(&admin, &carol.my_id()).title, "Carol's title");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_member_cannot_change_their_profile_details() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    bob.set_profile_details(&titled("Engineer")).unwrap();
+    sync_all(&[&bob, &admin]).await;
+    assert_eq!(details_of(&admin, &bob.my_id()).title, "Engineer");
+
+    let mut forger = Forger::new(&bob);
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    let late = forger.seal(Op::ProfileDetails {
+        details: titled("Still here"),
+    });
+    assert!(admin.receive(late).is_err());
+    assert_eq!(details_of(&admin, &bob.my_id()).title, "Engineer");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn your_own_profile_details_are_refused_when_malformed() {
+    let (_root, _bucket, admin, _bob) = admin_and_bob().await;
+    let website = crate::profile::ProfileDetails {
+        website: "javascript:alert(1)".into(),
+        ..Default::default()
+    };
+    assert!(admin.set_profile_details(&website).is_err());
+    assert!(admin.set_profile_details(&titled(&"x".repeat(81))).is_err());
+    assert_eq!(details_of(&admin, &admin.my_id()), Default::default());
+
+    admin.set_profile_details(&titled("  Founder ")).unwrap();
+    assert_eq!(details_of(&admin, &admin.my_id()).title, "Founder");
+}

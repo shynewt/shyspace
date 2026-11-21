@@ -13,6 +13,7 @@ use crate::{
     },
     pages::{self, Edit},
     private::ids::{new_private_message_id, private_channel_of, private_kind},
+    profile::ProfileDetails,
     storage::{ItemKind, Store},
     views::{Change, Draft, Message, NotifyLevel},
 };
@@ -354,6 +355,15 @@ impl Workspace {
         self.write(Op::Profile {
             name: checked_profile_name(profile.name)?,
             is_bot: profile.is_bot,
+        })
+    }
+
+    /// Shares your profile details with everyone in the workspace,
+    /// replacing what you shared before. Refused, not changed, if a field
+    /// is too long or malformed.
+    pub fn set_profile_details(&self, details: &ProfileDetails) -> Result<()> {
+        self.write(Op::ProfileDetails {
+            details: details.checked()?,
         })
     }
 }

@@ -166,6 +166,7 @@ impl Workspace {
             let key = crate::views::parse_member_id(&member.id)?;
             member.status = self.state().store.member_status(key.as_bytes(), now)?;
             member.presence = self.presence_of(&key, now);
+            member.details = self.state().store.profile_details(key.as_bytes())?;
         }
         Ok(members)
     }

@@ -121,6 +121,12 @@ pub enum Op {
     Sealed {
         payload: crate::private::crypto::SealedPayload,
     },
+    /// The author's own profile details. The latest one wins. A variant of
+    /// its own, because adding fields to `Profile` would stop old `Profile`
+    /// ops from decoding.
+    ProfileDetails {
+        details: crate::profile::ProfileDetails,
+    },
 }
 
 /// An op that is validly signed but breaks a rule (someone else's id, an
@@ -173,7 +179,8 @@ impl Op {
             | Op::Status { .. }
             | Op::SealingKey { .. }
             | Op::KeyGrant { .. }
-            | Op::Sealed { .. } => Vec::new(),
+            | Op::Sealed { .. }
+            | Op::ProfileDetails { .. } => Vec::new(),
         }
     }
 
@@ -277,9 +284,14 @@ pub fn clean_emoji(raw: &str) -> String {
 /// emoji, and in a name they're invisible.
 pub fn clean_display_name(raw: &str) -> String {
     raw.chars()
-        .filter(|c| is_visible_in_emoji(*c) && !('\u{E0020}'..='\u{E007F}').contains(c))
+        .filter(|c| is_visible_in_name(*c))
         .take(MAX_PROFILE_NAME_CHARS)
         .collect()
+}
+
+/// Whether `c` may show in a name or other short text about a person.
+pub(crate) fn is_visible_in_name(c: char) -> bool {
+    is_visible_in_emoji(c) && !('\u{E0020}'..='\u{E007F}').contains(&c)
 }
 
 const MAX_STATUS_EMOJI_CHARS: usize = 16;
@@ -379,7 +391,7 @@ pub fn clean_channel_name(raw: &str) -> String {
 }
 
 /// Zero-width and text-direction characters, which can disguise a name.
-fn is_invisible_format_char(c: char) -> bool {
+pub(crate) fn is_invisible_format_char(c: char) -> bool {
     matches!(
         c,
         '\u{00AD}'
@@ -415,5 +427,31 @@ mod tests {
             let new = postcard::to_stdvec(&("🎧", "Focus", None::<i64>, alerts)).unwrap();
             assert_eq!(old, new);
         }
+    }
+
+    #[test]
+    fn profile_ops_written_before_profile_details_still_read() {
+        // Op::Profile { name: "Ada", is_bot: false } as every version wrote it.
+        let written = [0, 3, b'A', b'd', b'a', 0];
+        let op: Op = postcard::from_bytes(&written).unwrap();
+        assert_eq!(
+            op,
+            Op::Profile {
+                name: "Ada".into(),
+                is_bot: false
+            }
+        );
+    }
+
+    #[test]
+    fn profile_details_keep_their_slot_after_every_older_kind() {
+        let op = Op::ProfileDetails {
+            details: crate::profile::ProfileDetails::default(),
+        };
+        let encoded = postcard::to_stdvec(&op).unwrap();
+        assert_eq!(
+            encoded[0], 15,
+            "variants are positional; append new ones after it"
+        );
     }
 }

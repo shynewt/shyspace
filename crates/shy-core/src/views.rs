@@ -218,6 +218,8 @@ pub struct Member {
     pub status: Option<MemberStatus>,
     /// From live heartbeats; never stored or synced through the bucket.
     pub presence: PresenceState,
+    /// What they share about themselves; every field may be empty.
+    pub details: crate::profile::ProfileDetails,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

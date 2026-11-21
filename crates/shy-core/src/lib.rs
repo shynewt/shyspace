@@ -10,6 +10,7 @@ pub mod mentions;
 pub mod ops;
 pub mod pages;
 pub mod private;
+pub mod profile;
 pub mod search;
 pub mod storage;
 pub mod sync;

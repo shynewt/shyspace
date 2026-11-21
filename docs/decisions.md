@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Profile details: a new op, every field public, cut or cleared (2026-11)
+Title, pronouns, bio, contact, time zone and working hours travel in their own op, `ProfileDetails`, not as new fields on `Profile`: ops are postcard, which reads fields by position, so a longer `Profile` would stop every old `Profile` op from decoding. Versions before it park a member's ops from their first details onward until they update, the same cost as every new kind of op. Every filled field is visible to the whole workspace; there are no per-field audiences, which would need per-field keys. Free text from others is cut to its limit, like names; an email, phone, website or time zone that's too long or malformed is cleared, because a cut address can point somewhere else. Pictures wait for files (#13).
+
 ## Views switch without an exit animation (2026-11)
 A view fades and rises in; the one it replaces goes at once. With an exit animation (Motion's `AnimatePresence mode="wait"`), switching again while the new view was fading in could leave Motion waiting forever on the exit, with nothing shown. Slow frames made that common, and WebKit's tests caught it. A UI test switches views quickly on simulated slow frames.
 
