@@ -283,3 +283,71 @@ test.describe("selection highlights", () => {
     expect(await isHighlightOn(page, pill, '[data-sidebar] div:has(> [aria-current="page"])')).toBe(true);
   });
 });
+
+test.describe("the docked sidebar", () => {
+  test.beforeEach(async ({ page }) => openApp(page));
+
+  test("the shortcut hides and shows it at once", async ({ page }) => {
+    const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+    await expect.poll(async () => (await page.getByRole("main").boundingBox())?.x).toBe(264);
+
+    await pressAndWaitFrames(page, { key: "\\", ctrlKey: true }, 3);
+    await expect(sidebar).toHaveCount(0, { timeout: 1 });
+    expect((await page.getByRole("main").boundingBox())?.x).toBe(0);
+
+    await pressAndWaitFrames(page, { key: "\\", ctrlKey: true }, 3);
+    expect(IDENTITY).toContain(await sidebar.evaluate((element) => getComputedStyle(element).transform));
+    expect((await page.getByRole("main").boundingBox())?.x).toBe(264);
+  });
+
+  test("a click on the toggle slides it, while the content takes its new width at once", async ({ page }) => {
+    await expect.poll(async () => (await page.getByRole("main").boundingBox())?.x).toBe(264);
+    const frames = await page.evaluate(async () => {
+      const main = document.querySelector("main");
+      const toggle = document.querySelector('button[aria-label="Hide sidebar"]');
+      if (!main || !(toggle instanceof HTMLElement)) throw new Error("no main or toggle");
+      toggle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      toggle.click();
+      const seen: { mainWidth: number; sidebarTransform: string | null }[] = [];
+      const start = performance.now();
+      while (performance.now() - start < 400) {
+        await new Promise(requestAnimationFrame);
+        const sidebar = document.querySelector('[aria-label="Sidebar"]');
+        seen.push({
+          mainWidth: main.getBoundingClientRect().width,
+          sidebarTransform: sidebar && getComputedStyle(sidebar).transform,
+        });
+      }
+      return seen;
+    });
+    expect(new Set(frames.map((frame) => frame.mainWidth))).toEqual(new Set([1280]));
+    const sliding = frames.filter((frame) => frame.sidebarTransform && !IDENTITY.includes(frame.sidebarTransform));
+    expect(sliding.length).toBeGreaterThan(0);
+    expect(frames.findIndex((frame) => frame.sidebarTransform === null)).toBeGreaterThan(0);
+  });
+});
+
+test("with reduced motion, a click hides the docked sidebar without sliding", async ({ page }) => {
+  // Before the app loads: Motion reads the setting as each element mounts.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openApp(page);
+  await startSampling(page, '[aria-label="Sidebar"]');
+  await page.getByRole("button", { name: "Hide sidebar" }).click();
+  await expect(page.getByRole("complementary", { name: "Sidebar" })).toHaveCount(0);
+  // It may sit one frame fully off screen before it's removed, but never part way.
+  const lefts = (await sampledFrames(page)).filter((frame) => frame.isPresent).map((frame) => frame.left);
+  expect(lefts.every((left) => left === 0 || left <= -264)).toBe(true);
+});
+
+test("a docked thread appears without sliding", async ({ page }) => {
+  await openApp(page);
+  const message = await sendMessage(page, "Hello");
+  await message.hover();
+  await startSampling(page, '[aria-label="Thread"]');
+
+  await message.getByRole("button", { name: "Reply in thread" }).click();
+  await expect(page.getByRole("complementary", { name: "Thread" })).toBeVisible();
+  const frames = await sampledFrames(page);
+  expect(frames.filter((frame) => frame.isPresent).every((frame) => IDENTITY.includes(frame.transform))).toBe(true);
+  expect(entranceTime(frames)).toBeLessThanOrEqual(ENTRANCE_BUDGET_MS);
+});

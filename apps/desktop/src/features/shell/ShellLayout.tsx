@@ -1,16 +1,10 @@
 import { PanelLeft } from "lucide-react";
-import {
-  AnimatePresence,
-  motion,
-  type Transition,
-  useReducedMotionConfig as useIsMotionReduced,
-  useIsPresent,
-} from "motion/react";
+import { AnimatePresence, motion, type Transition, useIsPresent } from "motion/react";
 import { Dialog as RadixDialog } from "radix-ui";
 import { createContext, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef } from "react";
 import { layoutWidth, useElementWidth } from "../../lib/layout";
 import { shortcutKeys } from "../../lib/shortcuts";
-import { fade, IconButton, springs } from "../../ui";
+import { cx, fade, IconButton, instantAfterAKey, springs, tweens } from "../../ui";
 import type { SidebarState } from "./useSidebar";
 
 type ShellLayoutValue = {
@@ -45,29 +39,12 @@ export function ShellLayout({
   const mainWidth = useElementWidth(main) ?? window.innerWidth;
   const canDockSidePanel = mainWidth >= layoutWidth("--width-side-panel") + layoutWidth("--width-channel-min");
   const value = useMemo(() => ({ sidebar, canDockSidePanel }), [sidebar, canDockSidePanel]);
-  const regionTransition = useRegionTransition();
 
   return (
     <ShellLayoutContext.Provider value={value}>
-      <motion.div
-        className="flex h-full"
-        initial={{ opacity: 0, scale: 0.985 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
-      >
+      <motion.div className="relative flex h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
         <AnimatePresence initial={false}>
-          {sidebar.isDocked && (
-            <motion.div
-              key="sidebar"
-              initial={{ width: 0 }}
-              animate={{ width: "auto" }}
-              exit={{ width: 0 }}
-              transition={regionTransition}
-              className="shrink-0 overflow-hidden"
-            >
-              <DockedSidebar>{sidebarContent}</DockedSidebar>
-            </motion.div>
-          )}
+          {sidebar.isDocked && <DockedSidebar key="sidebar">{sidebarContent}</DockedSidebar>}
         </AnimatePresence>
         <main ref={main} tabIndex={-1} className="@container/main relative min-w-0 flex-1 bg-surface outline-none">
           {children}
@@ -80,19 +57,29 @@ export function ShellLayout({
   );
 }
 
-/** The docked sidebar; while it slides away it's inert, so nothing in it can be reached twice. */
+/**
+ * The docked sidebar. It slides in and out by transform; while it slides away
+ * it leaves the layout, so the content takes its new width at once instead of
+ * on every frame, and it's inert, so nothing in it can be reached twice.
+ */
 function DockedSidebar({ children }: { children: ReactNode }) {
   const isPresent = useIsPresent();
   return (
-    <aside
+    <motion.aside
       aria-label="Sidebar"
       data-sidebar
       inert={!isPresent}
       aria-hidden={!isPresent || undefined}
-      className="h-full w-sidebar-compact border-r border-line bg-bg sidebar-full:w-sidebar"
+      initial={{ x: "-100%" }}
+      animate={{ x: 0, transition: instantAfterAKey(springs.move) }}
+      exit={{ x: "-100%", transition: instantAfterAKey(tweens.exit) }}
+      className={cx(
+        "h-full w-sidebar-compact shrink-0 border-r border-line bg-bg sidebar-full:w-sidebar",
+        !isPresent && "absolute inset-y-0 left-0 z-20",
+      )}
     >
       {children}
-    </aside>
+    </motion.aside>
   );
 }
 
@@ -116,11 +103,12 @@ function SidebarDrawer({
   }, [sidebar.drawer]);
   return (
     <RadixDialog.Root open={isOpen} onOpenChange={(open) => !open && sidebar.closeDrawer()}>
-      <AnimatePresence>
+      {/* The drawer leaving takes how to leave from here: it doesn't render again itself. */}
+      <AnimatePresence custom={instantAfterAKey(tweens.fast)}>
         {isOpen && (
           <RadixDialog.Portal forceMount>
             <RadixDialog.Overlay asChild>
-              <motion.div {...fade} className="fixed inset-0 z-30 bg-scrim backdrop-blur-[2px]" />
+              <motion.div {...fade} className="fixed inset-0 z-30 bg-scrim" />
             </RadixDialog.Overlay>
             <RadixDialog.Content
               asChild
@@ -144,9 +132,9 @@ function SidebarDrawer({
             >
               <motion.div
                 initial={{ x: "-100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "-100%" }}
-                transition={springs.move}
+                animate={{ x: 0, transition: instantAfterAKey(springs.move) }}
+                exit="leaving"
+                variants={DRAWER_VARIANTS}
                 data-sidebar
                 className="fixed inset-y-0 left-0 z-30 w-sidebar max-w-[calc(100%-3rem)] border-r border-line bg-bg shadow-float outline-none"
               >
@@ -160,6 +148,8 @@ function SidebarDrawer({
     </RadixDialog.Root>
   );
 }
+
+const DRAWER_VARIANTS = { leaving: (transition: Transition) => ({ x: "-100%", transition }) };
 
 /**
  * The button that shows or hides the sidebar: in the sidebar's top row while
@@ -183,9 +173,4 @@ export function SidebarToggle({ placement }: { placement: "sidebar" | "header" }
       data-sidebar-toggle
     />
   );
-}
-
-/** How regions grow and shrink: the panel spring, or at once with reduced motion (Motion itself only skips transforms). */
-export function useRegionTransition(): Transition {
-  return useIsMotionReduced() ? { duration: 0 } : springs.move;
 }

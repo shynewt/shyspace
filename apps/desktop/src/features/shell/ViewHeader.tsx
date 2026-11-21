@@ -1,7 +1,7 @@
-import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { type ComponentProps, type ReactNode, useRef } from "react";
 import { Button, cx, springs, Tooltip } from "../../ui";
-import { SidebarToggle, useRegionTransition, useShellLayout } from "./ShellLayout";
+import { SidebarToggle, useShellLayout } from "./ShellLayout";
 
 /**
  * The bar at the top of a view (a channel, a page, Inbox, Later): one line,
@@ -23,20 +23,10 @@ export function ViewHeader({ children, className }: { children?: ReactNode; clas
   );
 }
 
-/** Grows into place as the sidebar goes; inert while it shrinks away. */
+/** Fades in as the sidebar goes, and goes at once as it comes back, since the header moves then anyway. */
 function HeaderSidebarToggle() {
-  const transition = useRegionTransition();
-  const isPresent = useIsPresent();
   return (
-    <motion.div
-      initial={{ width: 0, opacity: 0 }}
-      animate={{ width: "auto", opacity: 1 }}
-      exit={{ width: 0, opacity: 0 }}
-      transition={transition}
-      inert={!isPresent}
-      aria-hidden={!isPresent || undefined}
-      className="-ml-1.5 flex shrink-0 overflow-hidden"
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="-ml-1.5 flex shrink-0">
       <SidebarToggle placement="header" />
     </motion.div>
   );

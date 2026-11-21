@@ -1,6 +1,6 @@
 import { motion, useIsPresent } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
-import { cx, springs } from "../../ui";
+import { cx, instantAfterAKey, springs, tweens } from "../../ui";
 import { useShellLayout } from "./ShellLayout";
 
 /**
@@ -88,10 +88,7 @@ export function SidePanel({
       onPointerDownCapture={() => {
         isPointerDownInside.current = true;
       }}
-      initial={isOverlay ? { x: "100%" } : { opacity: 0, x: 24 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={isOverlay ? { x: "100%" } : { opacity: 0, x: 24 }}
-      transition={springs.move}
+      {...(isOverlay ? slideOver() : appearDocked)}
       className={cx(
         "flex w-side-panel max-w-full shrink-0 flex-col border-l border-line bg-surface",
         isOverlay && "absolute inset-y-0 right-0 z-20 shadow-float",
@@ -101,3 +98,19 @@ export function SidePanel({
     </motion.aside>
   );
 }
+
+/** Over the content, the panel slides in from the right edge, and away faster. */
+function slideOver() {
+  return {
+    initial: { x: "100%" },
+    animate: { x: 0, transition: instantAfterAKey(springs.move) },
+    exit: { x: "100%", transition: instantAfterAKey(tweens.fast) },
+  };
+}
+
+/** Docked, the content reflows to make room anyway, so the panel only fades in and goes at once. */
+const appearDocked = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1, transition: tweens.fast },
+  exit: { opacity: 0, transition: tweens.instant },
+};
