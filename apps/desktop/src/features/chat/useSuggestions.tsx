@@ -5,7 +5,7 @@ import { flushSync } from "react-dom";
 import { type Member, PAGE_LINK_PREFIX, type Page } from "../../lib/api";
 import { emojiQueryAt } from "../../lib/emojiQuery";
 import { useMembers } from "../../lib/members";
-import { mentionQueryAt, withMentionLinks } from "../../lib/mentions";
+import { exactlyNamed, mentionQueryAt, withMentionLinks, withTypedMentions } from "../../lib/mentions";
 import { usePreferences, validRecentEmoji, withRecentEmoji } from "../../lib/preferences";
 import { hasCommandModifier } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
@@ -22,6 +22,8 @@ const MAX_PAGE_SUGGESTIONS = 3;
 export type InsertMention = (name: string, memberId: string) => void;
 
 type Person = { kind: "person"; name: string; member: Member | null; detail: string };
+/** A real member, not @channel or @here. */
+type PersonWithMember = Person & { member: Member };
 type PageSuggestion = { kind: "page"; page: Page };
 type EmojiSuggestion = { kind: "emoji"; emoji: CatalogEmoji };
 type Suggestion = Person | PageSuggestion | EmojiSuggestion;
@@ -58,6 +60,13 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     if (wantsEmoji && !catalog) loadEmojiCatalog().then(setCatalog, reportError);
   }, [wantsEmoji, catalog]);
 
+  const people = useMemo(
+    (): PersonWithMember[] =>
+      members
+        .filter((member) => member.active && member.id !== session.me && member.name)
+        .map((member) => ({ kind: "person", name: member.name, member, detail: "" })),
+    [members, session.me],
+  );
   const recentEmoji = validRecentEmoji(preferences.recentEmoji);
   const recentKey = recentEmoji.map((entry) => entry.emoji).join("\n");
   const suggestions = useMemo((): Suggestion[] => {
@@ -71,9 +80,6 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
       }));
     }
     const wanted = query.query.toLowerCase();
-    const people: Person[] = members
-      .filter((member) => member.active && member.id !== session.me && member.name)
-      .map((member) => ({ kind: "person", name: member.name, member, detail: "" }));
     const matchingPeople = [...people, ...EVERYONE]
       .filter((suggestion) => suggestion.name.toLowerCase().startsWith(wanted))
       .slice(0, MAX_SUGGESTIONS);
@@ -84,7 +90,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
           .map((page) => ({ kind: "page", page }))
       : [];
     return [...matchingPeople, ...matchingPages];
-  }, [query, members, session.me, pages, catalog, recentKey]);
+  }, [query, people, pages, catalog, recentKey]);
 
   const isOpen = suggestions.length > 0;
 
@@ -154,6 +160,13 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
 
   /** Handles the keys the list owns; returns whether it used the key. */
   const onKeyDown = (event: React.KeyboardEvent): boolean => {
+    // A space after someone's whole name mentions them, as picking them would.
+    const typedPerson = event.key === " " && query?.kind === "person" ? exactlyNamed(query.query, people) : null;
+    if (typedPerson) {
+      choose(typedPerson);
+      event.preventDefault();
+      return true;
+    }
     if (!isOpen) return false;
     if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !hasCommandModifier(event)) {
       const step = event.key === "ArrowDown" ? 1 : -1;
@@ -169,7 +182,13 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     return true;
   };
 
-  const toSend = (text: string) => withMentionLinks(text, picked.current, pickedPages.current);
+  const toSend = (text: string) => {
+    const typed = withTypedMentions(
+      text,
+      people.map(({ name, member }) => ({ name, id: member.id })),
+    );
+    return withMentionLinks(typed.text, new Map([...typed.named, ...picked.current]), pickedPages.current);
+  };
   /** Shows a sent message's mention links as plain `@Name` again, remembering who they are. */
   const adopt = useCallback(
     (text: string) =>

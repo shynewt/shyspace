@@ -25,6 +25,30 @@ test("typing @ suggests people, and the picked name becomes a mention", async ({
   await expect(message.locator(".mention", { hasText: "@Grace" })).toBeVisible();
 });
 
+test("a space after someone's whole name mentions them without picking", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  await composer.pressSequentially("@grace thanks");
+  await expect(composer).toHaveValue("@Grace thanks");
+  await composer.press("Enter");
+
+  const message = page.getByRole("article").filter({ hasText: "thanks" });
+  await expect(message.locator(".mention", { hasText: "@Grace" })).toBeVisible();
+});
+
+test("a whole name sent right away mentions them, and a part of one doesn't", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("@grace, thanks");
+  await composer.press("Enter");
+  await expect(
+    page.getByRole("article").filter({ hasText: "thanks" }).locator(".mention", { hasText: "@Grace" }),
+  ).toBeVisible();
+
+  await composer.pressSequentially("@gra later");
+  await expect(composer).toHaveValue("@gra later");
+  await composer.press("Enter");
+  await expect(page.getByRole("article").filter({ hasText: "later" }).locator(".mention")).toHaveCount(0);
+});
+
 test("@channel becomes a mention without picking", async ({ page }) => {
   const composer = page.getByLabel("Message #general");
   await composer.fill("@channel standup now");

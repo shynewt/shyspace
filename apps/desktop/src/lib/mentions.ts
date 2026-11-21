@@ -71,3 +71,30 @@ export function withMentionLinks(
     return page ? `${PAGE_LINK_PREFIX}${page}` : whole;
   });
 }
+
+/** The one person whose whole name is `typed`, ignoring case; null if none or several. */
+export function exactlyNamed<Person extends { name: string }>(typed: string, people: readonly Person[]): Person | null {
+  const wanted = typed.toLowerCase();
+  const matching = people.filter((person) => person.name.toLowerCase() === wanted);
+  return matching.length === 1 ? matching[0] : null;
+}
+
+/**
+ * Writes each `@name` that is exactly one person's whole name (ignoring case)
+ * as their name, and returns who each is, so it becomes a mention without
+ * being picked. Anything else, like a prefix or a name two people share, stays
+ * plain text.
+ */
+export function withTypedMentions(
+  text: string,
+  people: readonly { name: string; id: string }[],
+): { text: string; named: Map<string, string> } {
+  const named = new Map<string, string>();
+  const replaced = text.replace(/(?<![[\p{L}\p{N}_])@([\p{L}\p{N}_-]+)(?![\p{L}\p{N}_])/gu, (whole, typed: string) => {
+    const person = exactlyNamed(typed, people);
+    if (!person) return whole;
+    named.set(person.name, person.id);
+    return `@${person.name}`;
+  });
+  return { text: replaced, named };
+}

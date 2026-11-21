@@ -1,6 +1,6 @@
 /** How picked names in the message box become links when sent. Runs without a browser. */
 import { expect, test } from "@playwright/test";
-import { withMentionLinks } from "../../src/lib/mentions";
+import { withMentionLinks, withTypedMentions } from "../../src/lib/mentions";
 
 test("picked people and pages become links, longest names first", () => {
   const people = new Map([
@@ -21,4 +21,25 @@ test("a page's title only links when it was picked, and as a whole word", () => 
   expect(withMentionLinks("@Planning and @Plan, not email@Plan", new Map(), pages)).toBe(
     "@Planning and shy://page/c1, not email@Plan",
   );
+});
+
+test("a typed @name that is exactly one person's name is theirs, whatever the case", () => {
+  const people = [
+    { name: "Maya", id: "m1" },
+    { name: "Mayank", id: "m2" },
+  ];
+  const typed = withTypedMentions("@maya, @MAYANK and @may, not email@maya", people);
+  expect(typed.text).toBe("@Maya, @Mayank and @may, not email@maya");
+  expect([...typed.named]).toEqual([
+    ["Maya", "m1"],
+    ["Mayank", "m2"],
+  ]);
+});
+
+test("a name two people share stays plain text", () => {
+  const people = [
+    { name: "Sam", id: "s1" },
+    { name: "sam", id: "s2" },
+  ];
+  expect(withTypedMentions("hi @sam", people)).toEqual({ text: "hi @sam", named: new Map() });
 });
