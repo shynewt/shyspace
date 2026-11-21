@@ -7,16 +7,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use shy_core::{
-    Edit, Workspace,
+    Workspace,
     ops::EntityId,
     views::{NotifyLevel, StatusUpdate},
 };
 
-use crate::cast::{ADMIN, Cast};
+use crate::{
+    cast::{ADMIN, Cast},
+    pages::{Pages, write_pages},
+};
 
 const MINUTE_MS: i64 = 60 * 1000;
 const HOUR_MS: i64 = 60 * MINUTE_MS;
 const SETTLE_ROUNDS: u32 = 20;
+
+/// Who says what, in order.
+type Lines<'a> = &'a [(&'static str, &'a str)];
 
 fn now_ms() -> Result<i64> {
     let since_epoch = SystemTime::now()
@@ -42,28 +48,34 @@ fn channel_id(member: &Workspace, name: &str) -> Result<EntityId> {
         .with_context(|| format!("no #{name} channel"))
 }
 
-fn say(member: &Workspace, channel: &str, text: &str) -> Result<EntityId> {
+fn send(member: &Workspace, channel: &str, text: &str, reply_to: Option<&str>) -> Result<EntityId> {
     member
-        .send_message(channel, text, None)
+        .send_message(channel, text, reply_to.map(str::to_owned))
         .with_context(|| format!("sending “{}”", text.chars().take(40).collect::<String>()))
 }
 
-fn reply(member: &Workspace, channel: &str, root: &str, text: &str) -> Result<EntityId> {
-    member
-        .send_message(channel, text, Some(root.to_owned()))
-        .context("sending a reply")
+/// Each line as a message in `channel`, or in the thread under `reply_to`.
+async fn converse(
+    cast: &Cast,
+    channel: &str,
+    reply_to: Option<&str>,
+    lines: Lines<'_>,
+) -> Result<Vec<EntityId>> {
+    let mut sent = Vec::new();
+    for (speaker, text) in lines {
+        sent.push(send(cast.turn(speaker).await?, channel, text, reply_to)?);
+    }
+    Ok(sent)
 }
 
-fn react(member: &Workspace, message: &str, emoji: &str) -> Result<()> {
-    member.react(message, emoji, true).context("reacting")
-}
-
-fn write_page(member: &Workspace, title: &str, markdown: &str) -> Result<EntityId> {
-    let page = member.create_page(title, None).context("creating a page")?;
-    member
-        .edit_page(&page, Edit::Append(markdown))
-        .context("writing a page")?;
-    Ok(page)
+async fn react(cast: &Cast, message: &str, reactions: &[(&'static str, &str)]) -> Result<()> {
+    for (who, emoji) in reactions {
+        cast.turn(who)
+            .await?
+            .react(message, emoji, true)
+            .context("reacting")?;
+    }
+    Ok(())
 }
 
 /// Unread messages, mentions and reminders are all from Ada's point of view.
@@ -78,52 +90,17 @@ pub async fn tell(cast: &Cast) -> Result<()> {
     cast.sync_everyone().await?;
     let chat = chat_in_public(cast, &pages).await?;
     let launch = plan_in_private(cast, &pages).await?;
-    talk_directly(cast).await?;
+    talk_directly(cast, &pages).await?;
     set_statuses(cast)?;
     cast.sync_everyone().await?;
-    say(
+    send(
         cast.turn("Theo").await?,
         &channel_id(cast.get(ADMIN), "general")?,
         &format!("For those on the launch: the timeline is settled, see shy://message/{launch}"),
+        None,
     )?;
     cast.sync_everyone().await?;
     arrange_for_ada(cast, &chat)
-}
-
-struct Pages {
-    launch_plan: EntityId,
-    brand: EntityId,
-    handbook: EntityId,
-}
-
-fn write_pages(cast: &Cast) -> Result<Pages> {
-    let launch_plan = write_page(
-        cast.get(ADMIN),
-        "Launch plan",
-        "## Goal\n\nShip **Lumen 1.0** to the first 500 customers.\n\n\
-         ## Timeline\n\n- [x] Feature freeze\n- [x] Beta with design partners\n- [ ] Release candidate\n\
-         - [ ] Launch day\n\n## Owners\n\n| Area | Who |\n| --- | --- |\n| Website | Maya |\n\
-         | Release | Theo |\n| Support | Priya |\n",
-    )?;
-    let brand = write_page(
-        cast.get("Maya"),
-        "Brand guidelines",
-        "## Colours\n\nOur accent is a calm violet. Use it for one thing per screen: the next step.\n\n\
-         ## Icons\n\n- 1.5 px strokes, rounded ends\n- 20 px grid, 2 px padding\n- No fills except for state\n\n\
-         > Simple beats clever. If an icon needs a label to make sense, keep the label and drop the icon.\n",
-    )?;
-    let handbook = write_page(
-        cast.get("Theo"),
-        "Engineering handbook",
-        "## Getting started\n\n```sh\ngit clone git@example.com:northwind/lumen.git\ncd lumen && make dev\n```\n\n\
-         ## Reviews\n\n1. Keep pull requests small.\n2. Every change comes with a test.\n\
-         3. Two approvals for anything touching payments.\n",
-    )?;
-    Ok(Pages {
-        launch_plan,
-        brand,
-        handbook,
-    })
 }
 
 /// Messages later used to set Ada's read position and reminders.
@@ -135,106 +112,207 @@ struct Chat {
 }
 
 async fn chat_in_public(cast: &Cast, pages: &Pages) -> Result<Chat> {
-    let ada = cast.get(ADMIN);
-    let general = channel_id(ada, "general")?;
-    let general_first = say(
-        cast.turn("Maya").await?,
-        &general,
-        "Morning all ☀️ The design review moves to **Thursday at 2pm**.",
-    )?;
-    react(cast.turn("Theo").await?, &general_first, "👍")?;
-    react(cast.turn("Sam").await?, &general_first, "👍")?;
-    say(
-        cast.turn("Theo").await?,
-        &general,
-        "Thanks! I'll bring the new onboarding flow.",
-    )?;
-    let ask_for_ada = say(
-        cast.turn("Priya").await?,
-        &general,
-        &format!(
-            "{} could you look over the {} before Friday?",
-            mention(cast, ADMIN),
-            page_link("Launch plan", &pages.launch_plan)
-        ),
-    )?;
-    let coffee = say(
-        cast.turn("Sam").await?,
-        &general,
-        "The coffee machine on the third floor is fixed, finally ☕",
-    )?;
-    react(cast.turn("Priya").await?, &coffee, "🎉")?;
-    react(cast.turn("Maya").await?, &coffee, "☕")?;
-
-    let design = channel_id(ada, "design")?;
-    let icons = say(
-        cast.turn("Maya").await?,
-        &design,
-        &format!(
-            "First pass at the new icons is in {}. Feedback welcome!",
-            page_link("Brand guidelines", &pages.brand)
-        ),
-    )?;
-    reply(
-        cast.turn("Theo").await?,
-        &design,
-        &icons,
-        "Love the rounded ends. Much friendlier.",
-    )?;
-    reply(
-        cast.turn("Maya").await?,
-        &design,
-        &icons,
-        &format!(
-            "Thanks! {} can you check them in dark mode?",
-            mention(cast, ADMIN)
-        ),
-    )?;
-    react(cast.turn("Priya").await?, &icons, "😍")?;
-
-    let engineering = channel_id(ada, "engineering")?;
-    let faster = say(
-        cast.turn("Theo").await?,
-        &engineering,
-        "Sync is about 30% faster after yesterday's change 🚀",
-    )?;
-    react(cast.turn("Sam").await?, &faster, "🚀")?;
-    let beta_question = say(
-        cast.turn("Sam").await?,
-        &engineering,
-        "Nice. Are we still on track for the release candidate?",
-    )?;
-    say(
-        cast.turn("Scout").await?,
-        &engineering,
-        &format!(
-            "Open issues this week: **3 bugs**, 2 in review. The oldest is the export crash \
-             on large pages. Setup steps are in the {}.",
-            page_link("Engineering handbook", &pages.handbook)
-        ),
-    )?;
-    say(
-        cast.turn("Priya").await?,
-        &engineering,
-        "To reproduce the export crash:\n```sh\nlumen export --all big-page.md\n```",
-    )?;
-
-    let random = channel_id(ada, "random")?;
-    let lunch = say(
-        cast.turn("Sam").await?,
-        &random,
-        "Who's up for lunch at the new ramen place? 🍜",
-    )?;
-    react(cast.turn("Maya").await?, &lunch, "🙋")?;
-    react(cast.turn("Theo").await?, &lunch, "🙋")?;
-    let random_last = say(cast.turn("Maya").await?, &random, "Count me in, 12:30?")?;
-
+    let (general_first, ask_for_ada) = chat_in_general(cast, pages).await?;
+    chat_in_design(cast, pages).await?;
+    let beta_question = chat_in_engineering(cast, pages).await?;
+    let random_last = chat_in_random(cast).await?;
     Ok(Chat {
         general_first,
         ask_for_ada,
         beta_question,
         random_last,
     })
+}
+
+async fn chat_in_general(cast: &Cast, pages: &Pages) -> Result<(EntityId, EntityId)> {
+    let general = channel_id(cast.get(ADMIN), "general")?;
+    let ask = format!(
+        "{} could you look over the {} before Friday?",
+        mention(cast, ADMIN),
+        page_link("Launch plan", &pages.launch_plan)
+    );
+    let sent = converse(
+        cast,
+        &general,
+        None,
+        &[
+            (
+                "Maya",
+                "Morning all ☀️ The design review moves to **Thursday at 2pm**.",
+            ),
+            ("Theo", "Thanks! I'll bring the new onboarding flow."),
+            ("Priya", &ask),
+            (
+                "Sam",
+                "The coffee machine on the third floor is fixed, finally ☕",
+            ),
+            (
+                "Priya",
+                "Please welcome our newest design partner, **Fernhill Labs** 🎉",
+            ),
+        ],
+    )
+    .await?;
+    react(cast, &sent[0], &[("Theo", "👍"), ("Sam", "👍")]).await?;
+    react(cast, &sent[3], &[("Priya", "🎉"), ("Maya", "☕")]).await?;
+    react(cast, &sent[4], &[("Maya", "🎉"), ("Theo", "🎉"), ("Sam", "🙌")]).await?;
+    converse(
+        cast,
+        &general,
+        Some(&sent[4]),
+        &[
+            ("Maya", "Their team was lovely to work with in the beta."),
+            ("Sam", "They found the export bug too 😅"),
+            ("Priya", "They did! Their first feedback call is on Monday."),
+        ],
+    )
+    .await?;
+    converse(
+        cast,
+        &general,
+        None,
+        &[
+            (
+                "Theo",
+                "Reminder: the release freeze starts **Wednesday**. Please merge what you can by Tuesday evening.",
+            ),
+            (
+                "Scout",
+                "Weekly summary: 14 pull requests merged, 3 bugs fixed.\n\n\
+                 | Area | Merged | Still open |\n| --- | ---: | ---: |\n| Sync | 6 | 1 |\n\
+                 | Pages | 5 | 0 |\n| Desktop | 3 | 1 |",
+            ),
+        ],
+    )
+    .await?;
+    Ok((sent[0].clone(), sent[2].clone()))
+}
+
+async fn chat_in_design(cast: &Cast, pages: &Pages) -> Result<()> {
+    let design = channel_id(cast.get(ADMIN), "design")?;
+    let icons_text = format!(
+        "First pass at the new icons is in {}. Feedback welcome!",
+        page_link("Brand guidelines", &pages.brand)
+    );
+    let icons = converse(cast, &design, None, &[("Maya", &icons_text)]).await?;
+    let dark_mode = format!(
+        "Thanks! {} can you check them in dark mode?",
+        mention(cast, ADMIN)
+    );
+    converse(
+        cast,
+        &design,
+        Some(&icons[0]),
+        &[
+            ("Theo", "Love the rounded ends. Much friendlier."),
+            ("Maya", &dark_mode),
+        ],
+    )
+    .await?;
+    react(cast, &icons[0], &[("Priya", "😍"), ("Sam", "👏")]).await?;
+    let rest = converse(
+        cast,
+        &design,
+        None,
+        &[
+            (
+                "Maya",
+                "One rule I'd like us all to keep for the marketing site:\n\n\
+                 > [!TIP]\n> Use the violet only for the main call to action.",
+            ),
+            ("Theo", "Could the empty states use the same illustration style?"),
+            ("Maya", "Yes! Drafts by Friday."),
+            ("Sam", "The onboarding screens feel much calmer now 👏"),
+        ],
+    )
+    .await?;
+    react(cast, &rest[0], &[("Theo", "💯")]).await
+}
+
+/// Returns Sam's question about the release candidate, which Ada saves.
+async fn chat_in_engineering(cast: &Cast, pages: &Pages) -> Result<EntityId> {
+    let engineering = channel_id(cast.get(ADMIN), "engineering")?;
+    let issues = format!(
+        "Open issues this week: **3 bugs**, 2 in review. The oldest is the export crash \
+         on large pages. Setup steps are in the {}.",
+        page_link("Engineering handbook", &pages.handbook)
+    );
+    let sent = converse(
+        cast,
+        &engineering,
+        None,
+        &[
+            ("Theo", "Sync is about 30% faster after yesterday's change 🚀"),
+            ("Sam", "Nice. Are we still on track for the release candidate?"),
+            ("Scout", &issues),
+            (
+                "Priya",
+                "To reproduce the export crash:\n```sh\nlumen export --all big-page.md\n```",
+            ),
+        ],
+    )
+    .await?;
+    react(cast, &sent[0], &[("Sam", "🚀"), ("Maya", "🚀")]).await?;
+    converse(
+        cast,
+        &engineering,
+        Some(&sent[3]),
+        &[
+            (
+                "Theo",
+                "Found it: we read the whole page into memory. Writing it in chunks fixes it:\n\
+                 ```rust\nfor chunk in page.chunks(64 * 1024) {\n    writer.write_all(chunk)?;\n}\n```",
+            ),
+            ("Priya", "Confirmed, fixed on my machine ✅"),
+        ],
+    )
+    .await?;
+    let rest = converse(
+        cast,
+        &engineering,
+        None,
+        &[
+            (
+                "Sam",
+                "Can someone review #412? It's the retry logic for uploads.",
+            ),
+            ("Theo", "On it after lunch."),
+            (
+                "Scout",
+                "The flaky upload test was waiting on a real timer. A fake one fixes it:\n\
+                 ```ts\nvi.useFakeTimers();\nawait vi.advanceTimersByTimeAsync(1_000);\n\
+                 expect(retries).toBe(1);\n```",
+            ),
+        ],
+    )
+    .await?;
+    react(cast, &rest[2], &[("Sam", "🙏")]).await?;
+    Ok(sent[1].clone())
+}
+
+/// Returns the last message, up to which Ada has read.
+async fn chat_in_random(cast: &Cast) -> Result<EntityId> {
+    let random = channel_id(cast.get(ADMIN), "random")?;
+    let sent = converse(
+        cast,
+        &random,
+        None,
+        &[
+            ("Sam", "Who's up for lunch at the new ramen place? 🍜"),
+            ("Maya", "Count me in, 12:30?"),
+            (
+                "Theo",
+                "Anyone reading something good? I just finished *The Mythical Man-Month* again 📚",
+            ),
+            ("Priya", "Project Hail Mary! Couldn't put it down."),
+            ("Maya", "Photo walk on Saturday morning if the weather holds 📷"),
+            ("Sam", "I'm in!"),
+        ],
+    )
+    .await?;
+    react(cast, &sent[0], &[("Maya", "🙋"), ("Theo", "🙋")]).await?;
+    react(cast, &sent[4], &[("Priya", "📷")]).await?;
+    sent.last().cloned().context("random has messages")
 }
 
 /// A private channel for Ada, Maya and Theo; the others can't read it.
@@ -244,25 +322,28 @@ async fn plan_in_private(cast: &Cast, pages: &Pages) -> Result<EntityId> {
         .create_private_channel("launch-plan", &[cast.id("Maya"), cast.id("Theo")])
         .context("creating the private channel")?;
     wait_until_in(cast, &channel, &["Maya", "Theo"]).await?;
-    say(
-        cast.turn(ADMIN).await?,
+    let timeline = format!(
+        "The draft timeline is in the {}.",
+        page_link("Launch plan", &pages.launch_plan)
+    );
+    let sent = converse(
+        cast,
         &channel,
-        &format!(
-            "The draft timeline is in the {}.",
-            page_link("Launch plan", &pages.launch_plan)
-        ),
-    )?;
-    let settled = say(
-        cast.turn("Maya").await?,
-        &channel,
-        "Looks good. Can we keep the date quiet until the website is ready?",
-    )?;
-    say(
-        cast.turn("Theo").await?,
-        &channel,
-        "Agreed. Release candidate on the 2nd, launch on the 9th.",
-    )?;
-    Ok(settled)
+        None,
+        &[
+            (ADMIN, &timeline),
+            (
+                "Maya",
+                "Looks good. Can we keep the date quiet until the website is ready?",
+            ),
+            ("Theo", "Agreed. Release candidate on the 2nd, launch on the 9th."),
+            (ADMIN, "Who wants the press kit?"),
+            ("Maya", "I'll take it."),
+            ("Theo", "And I'll write the release notes."),
+        ],
+    )
+    .await?;
+    Ok(sent[1].clone())
 }
 
 /// Syncs until each of `names` can read `channel`, which takes a few rounds
@@ -285,38 +366,82 @@ async fn wait_until_in(cast: &Cast, channel: &str, names: &[&str]) -> Result<()>
     bail!("{} never got into the private channel", names.join(" and "))
 }
 
-async fn talk_directly(cast: &Cast) -> Result<()> {
-    let ada = cast.id(ADMIN);
-    let with_priya = cast
-        .turn("Priya")
+async fn open_dm(cast: &Cast, opener: &'static str, with: &[&str]) -> Result<EntityId> {
+    let members: Vec<String> = with.iter().map(|name| cast.id(name)).collect();
+    let dm = cast
+        .turn(opener)
         .await?
-        .open_dm(std::slice::from_ref(&ada))
+        .open_dm(&members)
         .context("opening a DM")?;
-    say(
-        cast.turn("Priya").await?,
-        &with_priya,
-        "Hey! Have you got a minute later to go through the support budget?",
-    )?;
+    wait_until_in(cast, &dm, with).await?;
+    Ok(dm)
+}
 
-    let group = cast
-        .turn("Theo")
-        .await?
-        .open_dm(&[ada, cast.id("Sam")])
-        .context("opening a group DM")?;
-    say(
-        cast.turn("Theo").await?,
+async fn talk_directly(cast: &Cast, pages: &Pages) -> Result<()> {
+    let with_priya = open_dm(cast, "Priya", &[ADMIN]).await?;
+    let playbook = format!(
+        "Also, I wrote up the {}. Does it look right to you?",
+        page_link("Support playbook", &pages.playbook)
+    );
+    converse(
+        cast,
+        &with_priya,
+        None,
+        &[
+            (
+                "Priya",
+                "Hey! Have you got a minute later to go through the support budget?",
+            ),
+            ("Priya", &playbook),
+        ],
+    )
+    .await?;
+
+    let group = open_dm(cast, "Theo", &[ADMIN, "Sam"]).await?;
+    converse(
+        cast,
         &group,
-        "Pairing on the release script tomorrow morning?",
-    )?;
-    wait_until_in(cast, &group, &["Sam"]).await?;
-    say(cast.turn("Sam").await?, &group, "I'm in. 10am?")?;
+        None,
+        &[
+            ("Theo", "Pairing on the release script tomorrow morning?"),
+            ("Sam", "I'm in. 10am?"),
+            ("Theo", "10 works. I'll book the small room."),
+        ],
+    )
+    .await?;
+
+    let with_maya = open_dm(cast, "Maya", &[ADMIN]).await?;
+    converse(
+        cast,
+        &with_maya,
+        None,
+        &[("Maya", "Quick one: are you OK with violet for the launch banner?")],
+    )
+    .await?;
+
+    let with_scout = open_dm(cast, "Scout", &[ADMIN]).await?;
+    converse(
+        cast,
+        &with_scout,
+        None,
+        &[(
+            "Scout",
+            "Morning digest: 2 mentions and 1 review request are waiting for you.",
+        )],
+    )
+    .await?;
 
     let notes = cast.get(ADMIN).open_notes().context("opening notes")?;
-    say(
-        cast.turn(ADMIN).await?,
+    converse(
+        cast,
         &notes,
-        "Ideas for after launch:\n- dark mode for pages\n- a weekly digest\n- keyboard shortcuts cheat sheet",
-    )?;
+        None,
+        &[(
+            ADMIN,
+            "Ideas for after launch:\n- dark mode for pages\n- a weekly digest\n- keyboard shortcuts cheat sheet",
+        )],
+    )
+    .await?;
     Ok(())
 }
 

@@ -4,6 +4,7 @@
 //! (`SHY_DIR=<root>/ada`) or the CLI can open any of them afterwards.
 
 mod cast;
+mod pages;
 mod story;
 
 use std::path::{Path, PathBuf};

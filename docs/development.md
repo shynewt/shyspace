@@ -37,7 +37,7 @@ Note: one identity can only be online once. Don't run the CLI and the app on the
 
 ## A demo workspace
 
-`pnpm dev:demo` (in `apps/desktop`) builds a fresh workspace on the local bucket and opens the app in it as Ada, the admin. It has five more members (one an agent), public channels with threads, reactions and mentions, a private channel, DMs, notes, pages, statuses, a sidebar section, unread messages and two reminders (one due). Each run replaces the last; it refuses to delete a folder that isn't an earlier demo.
+`pnpm dev:demo` (in `apps/desktop`) builds a fresh workspace on the local bucket and opens the app in it as Ada, the admin. It has five more members (one an agent), public channels with threads, reactions, mentions, tables, callouts and code, a private channel, DMs, notes, pages, statuses, a sidebar section, unread messages and two reminders (one due). Building it takes about a minute. Each run replaces the last; it refuses to delete a folder that isn't an earlier demo.
 
 Every member has a data directory in `/var/tmp/shyspace-demo/<name>` (or `$SHY_DEMO_DIR`), with its key in the system keychain, so you can open another one alongside to watch live updates: `SHY_DIR=/var/tmp/shyspace-demo/maya pnpm tauri dev`, or `shy --dir /var/tmp/shyspace-demo/maya mcp`. The tool itself is `crates/shy-demo` (`cargo run -p shy-demo -- <dir>` prints the admin's directory); it uses the `SHY_S3_*` variables when set. All demo messages are written within a few seconds, so they share a time.
 
