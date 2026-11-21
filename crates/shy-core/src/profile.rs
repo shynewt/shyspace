@@ -12,7 +12,7 @@
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::ops::{cut_to, is_invisible_format_char, is_visible_in_name};
+use crate::ops::{cut_to, is_visible_in_name};
 
 pub const MAX_TITLE_CHARS: usize = 80;
 pub const MAX_PRONOUNS_CHARS: usize = 40;
@@ -165,8 +165,10 @@ fn kept_if(raw: &str, is_valid: fn(&str) -> bool) -> String {
     }
 }
 
+/// A character an address may hold: visible by the rule for names, and
+/// without the joiner names keep for emoji, which is invisible on its own.
 fn is_plain_token_char(c: char) -> bool {
-    !c.is_whitespace() && !c.is_control() && !is_invisible_format_char(c)
+    !c.is_whitespace() && c != '\u{200D}' && is_visible_in_name(c)
 }
 
 /// Loose on purpose: `name@domain.tld`, nothing that could add to the
@@ -192,7 +194,10 @@ fn is_valid_phone(phone: &str) -> bool {
 }
 
 /// Only web addresses: `javascript:`, `data:`, `file:` and anything else
-/// that isn't http(s) is cleared, so the link can only open a browser.
+/// that isn't http(s) is cleared, so the link can only open a browser. A
+/// user name before an `@` (or a `\\`, which browsers read as `/`) in the
+/// address's host part is refused too: `https://bank.example@evil.example`
+/// reads as one site and opens another.
 fn is_valid_website(website: &str) -> bool {
     if website.is_empty() {
         return true;
@@ -204,9 +209,10 @@ fn is_valid_website(website: &str) -> bool {
     else {
         return false;
     };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     website.chars().count() <= MAX_WEBSITE_CHARS
-        && !host.is_empty()
+        && !authority.is_empty()
+        && !authority.contains(['@', '\\'])
         && website.chars().all(is_plain_token_char)
 }
 
@@ -312,11 +318,21 @@ mod tests {
             "https://exa mple.com",
             "https://example.com/\u{202E}",
             " https://example.com",
+            "https://accounts.google.com@evil.example/login",
+            "https://user:pass@example.com",
+            "https://evil.example\\@google.com",
+            "https://evil.example\\google.com",
+            "https://example.com\u{E0041}/",
         ] {
             let details = with(|details| details.website = bad.into());
             assert_eq!(details.cleaned().website, "", "{bad}");
         }
-        for good in ["http://example.com", "HTTPS://Example.com/a?b#c"] {
+        for good in [
+            "http://example.com",
+            "HTTPS://Example.com/a?b#c",
+            "https://example.com/@ada",
+            "https://example.com/?from=a@b.c",
+        ] {
             let details = with(|details| details.website = good.into());
             assert_eq!(details.cleaned().website, good);
         }
@@ -336,6 +352,8 @@ mod tests {
             "a%3F@example.com",
             "ada smith@example.com",
             "\"ada\"@example.com",
+            "ceo\u{E0041}@corp.com",
+            "ceo\u{200D}@corp.com",
         ] {
             let details = with(|details| details.email = bad.into());
             assert_eq!(details.cleaned().email, "", "{bad}");

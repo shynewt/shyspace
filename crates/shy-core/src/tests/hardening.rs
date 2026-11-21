@@ -1473,3 +1473,36 @@ async fn your_own_profile_details_are_refused_when_malformed() {
     admin.set_profile_details(&titled("  Founder ")).unwrap();
     assert_eq!(details_of(&admin, &admin.my_id()).title, "Founder");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn profile_contacts_that_hide_where_they_go_are_cleared() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let mut forger = Forger::new(&bob);
+    for (email, website) in [
+        (
+            "ceo\u{E0041}@corp.example",
+            "https://accounts.google.com@evil.example/login",
+        ),
+        ("ceo\u{200B}@corp.example", "https://evil.example\\@google.com"),
+        (
+            "ceo@corp.example\u{E007F}",
+            "https://google.com\u{E0041}.evil.example/",
+        ),
+    ] {
+        let details = crate::profile::ProfileDetails {
+            email: email.into(),
+            website: website.into(),
+            ..titled("Engineer")
+        };
+        admin
+            .receive(forger.seal(Op::ProfileDetails { details }))
+            .unwrap();
+        let kept = details_of(&admin, &bob.my_id());
+        assert_eq!(
+            (kept.email.as_str(), kept.website.as_str()),
+            ("", ""),
+            "{email} {website}"
+        );
+        assert_eq!(kept.title, "Engineer");
+    }
+}
