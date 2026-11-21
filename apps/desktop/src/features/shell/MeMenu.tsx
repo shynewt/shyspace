@@ -1,5 +1,4 @@
 import { Eye, EyeOff, Settings, Smile, TriangleAlert, X } from "lucide-react";
-import { useState } from "react";
 import { api, type Member } from "../../lib/api";
 import { displayName, presenceLabel } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
@@ -7,14 +6,12 @@ import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, Menu, type MenuItem } from "../../ui";
 import { StorageAttentionSign, useStorageNeedsAttention } from "../settings/StorageProtection";
-import { StatusDialog } from "./StatusDialog";
 
 /** You, at the foot of the sidebar: your status, appearing offline, and Settings. */
 export function MeMenu() {
-  const { session, openSettings } = useWorkspace();
+  const { session, openSettings, openStatus } = useWorkspace();
   const members = useLive(api.members, (change) => change.kind === "members");
   const isOffline = useLive(api.appearOffline, (change) => change.kind === "members");
-  const [isStatusOpen, setStatusOpen] = useState(false);
   const storageNeedsAttention = useStorageNeedsAttention();
   const me = members?.find((member) => member.id === session.me);
   if (!me || isOffline === undefined) return <div className="h-11" />;
@@ -31,7 +28,7 @@ export function MeMenu() {
   items.push({
     label: me.status ? "Edit status" : "Set status",
     icon: <Smile size={14} />,
-    onSelect: () => setStatusOpen(true),
+    onSelect: openStatus,
   });
   if (me.status) {
     items.push({
@@ -50,25 +47,22 @@ export function MeMenu() {
   );
 
   return (
-    <>
-      <Menu
-        items={items}
-        trigger={
-          <button
-            type="button"
-            className="focus-ring-inset flex h-11 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-surface-2 data-[state=open]:bg-surface-2"
-          >
-            <Avatar id={me.id} name={name} size={28} presence={isOffline ? undefined : me.presence} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">{name}</span>
-              <span className="block truncate text-xs text-muted">{statusLine(me, isOffline)}</span>
-            </span>
-            <StorageAttentionSign />
-          </button>
-        }
-      />
-      <StatusDialog open={isStatusOpen} onOpenChange={setStatusOpen} current={me.status} />
-    </>
+    <Menu
+      items={items}
+      trigger={
+        <button
+          type="button"
+          className="focus-ring-inset flex h-11 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-surface-2 data-[state=open]:bg-surface-2"
+        >
+          <Avatar id={me.id} name={name} size={28} presence={isOffline ? undefined : me.presence} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{name}</span>
+            <span className="block truncate text-xs text-muted">{statusLine(me, isOffline)}</span>
+          </span>
+          <StorageAttentionSign />
+        </button>
+      }
+    />
   );
 }
 

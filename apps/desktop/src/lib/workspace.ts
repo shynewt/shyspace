@@ -23,6 +23,12 @@ export type WorkspaceContextValue = {
   navigate: (view: View) => void;
   /** Opens Settings, at Profile unless a section is given. */
   openSettings: (target?: SettingsTarget) => void;
+  /** Opens the search palette, with `query` typed in. */
+  openSearch: (query?: string) => void;
+  /** Opens the dialog for setting your status. */
+  openStatus: () => void;
+  /** Shows everything a member shares; focus goes to `returnFocusTo` when it closes. */
+  openProfile: (memberId: string, returnFocusTo?: HTMLElement | null) => void;
 };
 
 export const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);

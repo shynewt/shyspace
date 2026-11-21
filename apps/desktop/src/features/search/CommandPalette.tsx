@@ -36,7 +36,16 @@ type Item = {
   shortcut?: string[];
 };
 
-export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function CommandPalette({
+  open,
+  initialQuery,
+  onOpenChange,
+}: {
+  open: boolean;
+  /** Typed in as it opens, like `from:"Grace"`. */
+  initialQuery: string;
+  onOpenChange: (open: boolean) => void;
+}) {
   const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
   return (
     <>
@@ -49,17 +58,29 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         width={600}
         padding="none"
       >
-        <PaletteBody onClose={() => onOpenChange(false)} onMarkAllRead={() => setConfirmingMarkAll(true)} />
+        <PaletteBody
+          initialQuery={initialQuery}
+          onClose={() => onOpenChange(false)}
+          onMarkAllRead={() => setConfirmingMarkAll(true)}
+        />
       </Dialog>
       <MarkAllReadDialog open={isConfirmingMarkAll} onOpenChange={setConfirmingMarkAll} />
     </>
   );
 }
 
-function PaletteBody({ onClose, onMarkAllRead }: { onClose: () => void; onMarkAllRead: () => void }) {
+function PaletteBody({
+  initialQuery,
+  onClose,
+  onMarkAllRead,
+}: {
+  initialQuery: string;
+  onClose: () => void;
+  onMarkAllRead: () => void;
+}) {
   const { channels, pages, navigate, session, openSettings } = useWorkspace();
   const names = useChannelNames();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [selected, setSelected] = useState(0);
   const list = useRef<HTMLDivElement>(null);

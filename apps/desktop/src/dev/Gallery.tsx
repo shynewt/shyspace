@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   ConfirmDialog,
+  CopyButton,
   CopyField,
   CountBadge,
   Dialog,
@@ -26,6 +27,7 @@ import {
   RelativeTime,
   SectionLabel,
   SegmentedControl,
+  Select,
   Spinner,
   TextArea,
   Tooltip,
@@ -78,6 +80,17 @@ export default function Gallery() {
               {(id) => <Input id={id} placeholder="Ada Lovelace" />}
             </Field>
             <Field label="Notes">{(id) => <TextArea id={id} rows={2} placeholder="Write something…" />}</Field>
+            <Field label="Email" hint="Checked once you leave the field." error="Use an address like name@example.com.">
+              {(id, description) => <Input id={id} {...description} defaultValue="ada@example" />}
+            </Field>
+            <Field label="Start">
+              {(id) => (
+                <Select id={id} defaultValue="540">
+                  <option value="540">9:00 AM</option>
+                  <option value="570">9:30 AM</option>
+                </Select>
+              )}
+            </Field>
             <FormError message="The bucket refused these keys: 403 Forbidden" />
           </div>
         </Example>
@@ -186,6 +199,10 @@ export default function Gallery() {
             <Card>
               <SectionLabel>Plain card</SectionLabel>
               <CopyField value="shy2_example-invite-code" />
+              <div className="mt-2 flex items-center gap-2 text-sm">
+                ada@example.com
+                <CopyButton value="ada@example.com" label="Copy email address" />
+              </div>
             </Card>
             <Card highlighted>
               <SectionLabel>Highlighted card</SectionLabel>

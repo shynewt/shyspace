@@ -1,10 +1,8 @@
 import { motion } from "motion/react";
 import { Popover as RadixPopover } from "radix-ui";
 import { useRef } from "react";
-import { api } from "../../lib/api";
 import { useMember } from "../../lib/members";
 import { displayName } from "../../lib/people";
-import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { pop, springs } from "../../ui";
 import { CARD_SURFACE, CardBody, focusInside } from "./ProfileCard";
@@ -32,7 +30,7 @@ export function ProfileCardAt({
   onLeave: () => void;
 }) {
   const member = useMember(memberId);
-  const { openSettings, navigate } = useWorkspace();
+  const { openProfile } = useWorkspace();
   const card = useRef<HTMLDivElement>(null);
   if (!member) return null;
   return (
@@ -55,14 +53,11 @@ export function ProfileCardAt({
           <motion.div ref={card} tabIndex={-1} {...pop} transition={springs.snappy} className={CARD_SURFACE}>
             <CardBody
               member={member}
+              onLeave={onLeave}
               onMention={undefined}
-              onMessage={() => {
+              onViewFullProfile={() => {
                 onLeave();
-                api.openDm([member.id]).then((id) => navigate({ kind: "channel", id }), reportError);
-              }}
-              onViewInMembers={() => {
-                onLeave();
-                openSettings({ section: "members", membersTab: "members" });
+                openProfile(member.id);
               }}
             />
           </motion.div>

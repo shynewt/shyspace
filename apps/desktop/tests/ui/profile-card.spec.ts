@@ -173,7 +173,8 @@ test("an agent can be messaged too, but not yourself", async ({ page }) => {
 
 test("view in members opens the member list in settings", async ({ page }) => {
   await nameButton(page, "Grace").click();
-  await card(page, "Grace").getByRole("button", { name: "View in members" }).click();
+  await card(page, "Grace").getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "View in members" }).click();
 
   const settings = page.getByRole("dialog", { name: "Settings" });
   await expect(settings.getByRole("list", { name: "Members" })).toContainText("Grace");
@@ -217,7 +218,7 @@ test("a card opened with the mouse shows no focus ring; from the keyboard it doe
   await expect(card(page, "Ada")).toBeFocused();
   expect(await card(page, "Ada").evaluate(outlineOf)).toBe("none");
   await page.keyboard.press("Tab");
-  await expect(card(page, "Ada").getByRole("button", { name: "View in members" })).toBeFocused();
+  await expect(card(page, "Ada").getByRole("button", { name: "Set status" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(card(page, "Ada")).toHaveCount(0);
   await nameButton(page, "Ada").click();

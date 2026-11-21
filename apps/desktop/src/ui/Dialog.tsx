@@ -20,6 +20,8 @@ type DialogProps = {
   hasCloseButton?: boolean;
   /** "none" for content that lays itself out edge to edge, like the search palette. */
   padding?: "standard" | "none";
+  /** Where focus goes when it closes, when what opened it is gone (like a card). */
+  returnFocusTo?: HTMLElement | null;
   children: ReactNode;
 };
 
@@ -37,6 +39,7 @@ export function Dialog({
   width = 440,
   hasCloseButton = false,
   padding = "standard",
+  returnFocusTo,
   children,
 }: DialogProps) {
   return (
@@ -53,7 +56,14 @@ export function Dialog({
                 placement === "top" ? "items-start pt-[14vh]" : "items-center",
               )}
             >
-              <RadixDialog.Content asChild>
+              <RadixDialog.Content
+                asChild
+                onCloseAutoFocus={(event) => {
+                  if (!returnFocusTo?.isConnected) return;
+                  event.preventDefault();
+                  returnFocusTo.focus();
+                }}
+              >
                 <motion.div
                   {...pop}
                   transition={springs.smooth}

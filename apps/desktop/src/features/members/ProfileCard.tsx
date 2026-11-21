@@ -1,14 +1,13 @@
-import { AtSign, MessageCircle, Users } from "lucide-react";
 import { motion } from "motion/react";
 import { Popover as RadixPopover } from "radix-ui";
 import { createContext, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { api, type Member } from "../../lib/api";
+import type { Member } from "../../lib/api";
 import { useMember } from "../../lib/members";
-import { displayName, formatStatusEnd, presenceLabel } from "../../lib/people";
-import { reportError } from "../../lib/toast";
+import { displayName } from "../../lib/people";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Badge, Button, pop, springs } from "../../ui";
-import { alertsLabel, shownStatus } from "./StatusEmoji";
+import { pop, springs } from "../../ui";
+import { ProfileActions } from "./ProfileActions";
+import { Bio, DetailRows, ProfileHeader, StatusBox } from "./ProfileParts";
 
 /** WCAG 1.4.13: a hover card waits for intent, and lingers so the pointer can move onto it. */
 const HOVER_OPEN_MS = 600;
@@ -32,7 +31,7 @@ type CardControl = {
 
 const CardContext = createContext<CardControl | null>(null);
 
-export const CARD_SURFACE = "z-50 w-[280px] rounded-xl border border-line bg-surface p-4 shadow-float outline-none";
+export const CARD_SURFACE = "z-50 w-[320px] rounded-xl border border-line bg-surface p-4 shadow-float outline-none";
 
 /**
  * A member's profile card: who they are, their status and presence, and
@@ -52,7 +51,7 @@ export function ProfileCard({
   children: ReactNode;
 }) {
   const member = useMember(memberId);
-  const { openSettings, navigate } = useWorkspace();
+  const { openProfile } = useWorkspace();
   const [isOpen, setOpen] = useState(false);
   const openedBy = useRef<OpenedBy>("pointer");
   const isFocusHandedOn = useRef(false);
@@ -154,11 +153,18 @@ export function ProfileCard({
               if (event.target instanceof Node && extraTarget.current?.contains(event.target)) event.preventDefault();
             }}
             onPointerEnter={() => clearTimeout(timers.current.close)}
+            onPointerDownCapture={() => {
+              // Using a card that opened on hover keeps it open, like one opened by a click.
+              if (openedBy.current !== "hover") return;
+              clearTimeout(timers.current.close);
+              openedBy.current = "pointer";
+            }}
             onPointerLeave={() => openedBy.current === "hover" && control.hoverProps.onPointerLeave()}
           >
             <motion.div ref={card} tabIndex={-1} {...pop} transition={springs.snappy} className={CARD_SURFACE}>
               <CardBody
                 member={member}
+                onLeave={closeHandingFocusOn}
                 onMention={
                   onMention &&
                   (() => {
@@ -166,13 +172,9 @@ export function ProfileCard({
                     onMention(member.name, member.id);
                   })
                 }
-                onMessage={() => {
+                onViewFullProfile={() => {
                   closeHandingFocusOn();
-                  api.openDm([member.id]).then((id) => navigate({ kind: "channel", id }), reportError);
-                }}
-                onViewInMembers={() => {
-                  closeHandingFocusOn();
-                  openSettings({ section: "members", membersTab: "members" });
+                  openProfile(member.id, opener.current);
                 }}
               />
             </motion.div>
@@ -236,75 +238,40 @@ export function ProfileCardAvatar({ children }: { children: ReactNode }) {
 
 export function CardBody({
   member,
+  onLeave,
   onMention,
-  onMessage,
-  onViewInMembers,
+  onViewFullProfile,
 }: {
   member: Member;
+  /** Closes the card as an action takes you elsewhere, focus moving on with it. */
+  onLeave: () => void;
   /** Absent where there's no message box to mention them in. */
   onMention: (() => void) | undefined;
-  /** Opens your DM with them. */
-  onMessage: () => void;
-  onViewInMembers: () => void;
+  onViewFullProfile: () => void;
 }) {
   const { session } = useWorkspace();
-  const name = displayName(member.name, member.id);
-  const isMe = member.id === session.me;
-  const status = shownStatus(member);
-  const alerts = status && alertsLabel(status);
-  const canMention = member.active && !isMe && member.name !== "";
-
+  const [isBioCut, setBioCut] = useState(false);
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-3">
-        <Avatar
-          id={member.id}
-          name={name}
-          isBot={member.is_bot}
-          size={48}
-          presence={member.active && !member.is_bot ? member.presence : undefined}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1.5">
-            <h2 className="truncate text-lg font-semibold">{name}</h2>
-            {isMe && <span className="shrink-0 text-xs text-muted">(you)</span>}
-          </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-            {member.is_admin && <Badge>Admin</Badge>}
-            {member.is_bot && <Badge tone="accent">Agent</Badge>}
-            {!member.active && <span>No longer in this workspace</span>}
-            {member.active && !member.is_bot && <span>{presenceLabel(member.presence)}</span>}
-          </div>
-        </div>
-      </div>
-      {status && (
-        <div className="rounded-lg bg-surface-2 px-3 py-2 text-sm">
-          {(status.emoji || status.text) && (
-            <p className="selectable">{[status.emoji, status.text].filter(Boolean).join(" ")}</p>
-          )}
-          {(status.until_ms !== null || alerts) && (
-            <p className="mt-0.5 text-xs text-muted">
-              {status.until_ms !== null && `Until ${formatStatusEnd(status.until_ms)}`}
-              {status.until_ms !== null && alerts && " · "}
-              {alerts && <span className="text-warning-text">{alerts}</span>}
-            </p>
+      <ProfileHeader member={member} isMe={member.id === session.me} />
+      <StatusBox member={member} />
+      <DetailRows member={member} />
+      {member.details.bio && (
+        <div className="flex flex-col items-start gap-1">
+          <Bio text={member.details.bio} className="line-clamp-3" onCut={setBioCut} />
+          {isBioCut && (
+            <button
+              type="button"
+              onClick={onViewFullProfile}
+              className="rounded text-sm font-medium text-accent-text hover:underline"
+            >
+              View full profile
+            </button>
           )}
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
-        {member.active && !isMe && (
-          <Button size="sm" variant="primary" icon={<MessageCircle size={13} />} onClick={onMessage}>
-            Message
-          </Button>
-        )}
-        {canMention && onMention && (
-          <Button size="sm" icon={<AtSign size={13} />} onClick={onMention}>
-            Mention
-          </Button>
-        )}
-        <Button size="sm" variant="ghost" icon={<Users size={13} />} onClick={onViewInMembers}>
-          View in members
-        </Button>
+      <div className="border-t border-line pt-3">
+        <ProfileActions member={member} onLeave={onLeave} onMention={onMention} onViewFullProfile={onViewFullProfile} />
       </div>
     </div>
   );

@@ -17,11 +17,13 @@ import { Dialog } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { InboxView } from "../inbox/InboxView";
 import { LaterView } from "../later/LaterView";
+import { FullProfileDialog } from "../members/FullProfileDialog";
 import { PageView } from "../pages/PageView";
 import { CommandPalette } from "../search/CommandPalette";
 import { SettingsDialog } from "../settings/SettingsDialog";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
+import { StatusDialog } from "./StatusDialog";
 import { useAttentionBadge } from "./useAttentionBadge";
 
 export function Shell({ session }: { session: Session }) {
@@ -40,7 +42,12 @@ export function Shell({ session }: { session: Session }) {
     loadedPages,
   );
   const view = entry?.view ?? null;
-  const [isPaletteOpen, setPaletteOpen] = useState(false);
+  /** What the search palette opens with; null while it's closed. */
+  const [paletteQuery, setPaletteQuery] = useState<string | null>(null);
+  const [isStatusOpen, setStatusOpen] = useState(false);
+  const [shownProfile, setShownProfile] = useState<{ memberId: string; returnFocusTo: HTMLElement | null } | null>(
+    null,
+  );
   const [isShortcutsOpen, setShortcutsOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(null);
 
@@ -75,7 +82,7 @@ export function Shell({ session }: { session: Session }) {
       };
       switch (shortcut.id) {
         case "search":
-          return setPaletteOpen((open) => !open);
+          return setPaletteQuery((query) => (query === null ? "" : null));
         case "inbox":
           return navigate({ kind: "inbox" });
         case "back":
@@ -116,10 +123,17 @@ export function Shell({ session }: { session: Session }) {
   usePresence();
 
   const openSettings = useCallback((target: SettingsTarget = { section: "profile" }) => setSettingsTarget(target), []);
-  const context = useMemo(
-    () => ({ session, channels, pages, members, view, navigate, openSettings }),
-    [session, channels, pages, members, view, navigate, openSettings],
+  const openSearch = useCallback((query = "") => setPaletteQuery(query), []);
+  const openStatus = useCallback(() => setStatusOpen(true), []);
+  const openProfile = useCallback(
+    (memberId: string, returnFocusTo: HTMLElement | null = null) => setShownProfile({ memberId, returnFocusTo }),
+    [],
   );
+  const context = useMemo(
+    () => ({ session, channels, pages, members, view, navigate, openSettings, openSearch, openStatus, openProfile }),
+    [session, channels, pages, members, view, navigate, openSettings, openSearch, openStatus, openProfile],
+  );
+  const me = members?.find((member) => member.id === session.me);
 
   return (
     <WorkspaceContext.Provider value={context}>
@@ -130,7 +144,7 @@ export function Shell({ session }: { session: Session }) {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
       >
-        <Sidebar status={status} onOpenSearch={() => setPaletteOpen(true)} />
+        <Sidebar status={status} onOpenSearch={() => setPaletteQuery("")} />
         <main className="relative min-w-0 flex-1 bg-surface">
           {/* No exit animation: switching while a view fades in could leave AnimatePresence waiting forever on an exit, with nothing shown. */}
           {view && (
@@ -153,7 +167,17 @@ export function Shell({ session }: { session: Session }) {
           )}
         </main>
       </motion.div>
-      <CommandPalette open={isPaletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette
+        open={paletteQuery !== null}
+        initialQuery={paletteQuery ?? ""}
+        onOpenChange={(open) => setPaletteQuery(open ? (paletteQuery ?? "") : null)}
+      />
+      <StatusDialog open={isStatusOpen} onOpenChange={setStatusOpen} current={me?.status ?? null} />
+      <FullProfileDialog
+        memberId={shownProfile?.memberId ?? null}
+        returnFocusTo={shownProfile?.returnFocusTo ?? null}
+        onClose={() => setShownProfile(null)}
+      />
       <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setShortcutsOpen} />
       <SettingsDialog target={settingsTarget} onNavigate={setSettingsTarget} onClose={() => setSettingsTarget(null)} />
       <RemovedNotice isRemoved={status?.removed ?? false} />
