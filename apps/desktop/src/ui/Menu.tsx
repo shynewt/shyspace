@@ -42,7 +42,16 @@ export function Menu({
 }) {
   return (
     <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
-      <DropdownMenu.Trigger asChild>{trigger}</DropdownMenu.Trigger>
+      <DropdownMenu.Trigger
+        asChild
+        onPointerDown={(event) => {
+          // Motion's tap gesture answers Enter with a pointerdown of its own; Radix would
+          // toggle on it right after opening on the key, closing the menu again.
+          if (!event.isTrusted) event.preventDefault();
+        }}
+      >
+        {trigger}
+      </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} asChild>
           <motion.div {...pop} transition={springs.snappy} className={SURFACE}>

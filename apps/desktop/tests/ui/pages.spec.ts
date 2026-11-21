@@ -122,6 +122,18 @@ test("rare page actions wait in the more menu", async ({ page }) => {
   await expect(page.getByRole("menuitem")).toHaveText(["New sub-page", "Delete page"]);
 });
 
+test("Enter on a menu's button opens the menu and keeps it open", async ({ page }) => {
+  await page.goto("");
+  await page.evaluate(() => window.fake.seedPage("Spec", ""));
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Spec", exact: true }).click();
+  await page.getByRole("button", { name: "More page actions" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menu")).toBeFocused();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "New sub-page" })).toBeFocused();
+});
+
 test("a new page starts in its empty title, and Enter moves on to the body", async ({ page }) => {
   await page.goto("");
   await page.getByRole("button", { name: "New page" }).click();
