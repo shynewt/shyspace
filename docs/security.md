@@ -63,6 +63,8 @@ Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issu
 
 - A restored admin can reuse sequence numbers of ops that reached peers only live before the old device died (#26).
 - In a group DM, a participant can show their own messages to only some members, by writing them with a key only those members got. Members on versions before #72 can still be led to write with such a key (#111).
+- An author can write two different ops under one sequence number, one live and one in the bucket, and each device keeps the first it gets (#109).
+- A private channel's owner can list a member without ever giving them the key (#110).
 - A private channel key that leaks stays useful until the next removal or rotation. Bots read only the private channels someone adds them to; public channels are readable by every member, bots included.
 - A sealed op of a kind a newer version added waits silently in its channel until this app is updated.
 - A hostile member can make others' devices do extra work with junk grants and sealed ops that never apply (the denial-of-service gap above).
