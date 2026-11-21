@@ -2,6 +2,7 @@
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { codeHighlighter } from "../../../lib/codeHighlight";
 
 const MONO = { fontFamily: "var(--font-mono)", fontSize: "0.88em" };
 
@@ -13,11 +14,6 @@ const highlightStyle = HighlightStyle.define([
   { tag: tags.url, color: "var(--text-muted)" },
   // Marks shown on the line being edited.
   { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator, tags.labelName], color: "var(--text-faint)" },
-  // Code inside fenced blocks.
-  { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: "var(--accent-text)" },
-  { tag: [tags.string, tags.regexp], color: "var(--success-text)" },
-  { tag: [tags.number, tags.bool, tags.atom], color: "var(--warning-text)" },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: "var(--text-muted)", fontStyle: "italic" },
 ]);
 
 const editorTheme = EditorView.theme({
@@ -49,9 +45,38 @@ const editorTheme = EditorView.theme({
   ".cm-md-h3": { fontSize: "1.18em", fontWeight: "620", lineHeight: "1.4", paddingTop: "0.5em" },
   ".cm-md-h4, .cm-md-h5, .cm-md-h6": { fontWeight: "600", paddingTop: "0.4em" },
   ".cm-md-quote": { borderLeft: "3px solid var(--surface-3)", paddingLeft: "0.85em", color: "var(--text-muted)" },
+  // Colours come from the `callout-<kind>` class on the same line (styles.css).
+  ".cm-md-callout": {
+    borderLeft: "3px solid var(--callout)",
+    backgroundColor: "color-mix(in srgb, var(--callout) 8%, transparent)",
+    paddingLeft: "0.85em",
+    paddingRight: "0.85em",
+  },
+  ".cm-md-callout-first": { borderTopRightRadius: "8px", paddingTop: "0.3em" },
+  ".cm-md-callout-last": { borderBottomRightRadius: "8px", paddingBottom: "0.3em" },
+  ".cm-md-callout-title": {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.35em",
+    marginRight: "0.4em",
+    fontWeight: "600",
+    color: "var(--callout-text)",
+  },
   ".cm-md-codeblock": { ...MONO, backgroundColor: "var(--surface-2)", paddingLeft: "0.9em", paddingRight: "0.9em" },
   ".cm-md-codeblock-first": { borderTopLeftRadius: "8px", borderTopRightRadius: "8px", paddingTop: "0.35em" },
+  ".cm-md-code-language": { fontSize: "0.8em", color: "var(--text-faint)" },
   ".cm-md-codeblock-last": { borderBottomLeftRadius: "8px", borderBottomRightRadius: "8px", paddingBottom: "0.35em" },
+  ".cm-md-table-source": { ...MONO },
+  ".cm-md-table-wrap": { overflowX: "auto", padding: "0.4em 0" },
+  ".cm-md-table": { borderCollapse: "collapse", fontSize: "0.95em", lineHeight: "1.5" },
+  ".cm-md-table th, .cm-md-table td": {
+    border: "1px solid var(--border)",
+    padding: "0.3em 0.75em",
+    textAlign: "left",
+    verticalAlign: "top",
+    cursor: "text",
+  },
+  ".cm-md-table th": { backgroundColor: "var(--surface-2)", fontWeight: "600" },
   ".cm-md-code": {
     ...MONO,
     backgroundColor: "var(--surface-2)",
@@ -135,4 +160,5 @@ const editorTheme = EditorView.theme({
   ".cm-link-tooltip-hint": { opacity: "0.7" },
 });
 
-export const pageTheme = [editorTheme, syntaxHighlighting(highlightStyle)];
+/** Markdown styles, then code colours shared with messages. */
+export const pageTheme = [editorTheme, syntaxHighlighting(highlightStyle), syntaxHighlighting(codeHighlighter)];

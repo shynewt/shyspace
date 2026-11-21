@@ -44,6 +44,8 @@ function shownAs(item: PreviewItem): string | null {
       return `<page ${item.pageId}>`;
     case "mention":
       return item.label;
+    case "callout":
+      return `<${item.callout}>`;
     case "line":
     case "style":
       return null;
@@ -79,10 +81,18 @@ test("a checkbox is named by its item's text", () => {
   expect(box).toMatchObject({ kind: "checkbox", isChecked: true, label: "Ship the app" });
 });
 
-test("code is shown as written", () => {
+test("code is shown as written, between fences that hide until you edit them", () => {
   expect(rendered("`**not bold**`\n\n```\n# not a heading\n**raw**\n```")).toBe(
-    "**not bold**\n\n```\n# not a heading\n**raw**\n```",
+    "**not bold**\n\n\n# not a heading\n**raw**\n",
   );
+  expect(rendered("```sh\ngit pull\n```")).toBe("sh\ngit pull\n");
+  expect(rendered("```sh\ngit pull\n```", [1, 3])).toBe("```sh\ngit pull\n```");
+  expect(itemsOf("```sh\ngit pull\n```")).toContainEqual({
+    kind: "style",
+    from: 3,
+    to: 5,
+    className: "cm-md-code-language",
+  });
 });
 
 test("page links and mentions become chips, even on revealed lines", () => {
@@ -138,4 +148,24 @@ test("an empty checked item or link label styles nothing, since empty styles bre
       if (item.kind === "style") expect(item.to).toBeGreaterThan(item.from);
     }
   }
+});
+
+test("a callout's marker shows as its label, and its lines are coloured by kind", () => {
+  const text = "> [!TIP]\n> Keep pull requests small.\n> Two approvals for payments.";
+  expect(rendered(text)).toBe("<tip>\nKeep pull requests small.\nTwo approvals for payments.");
+  const lines = itemsOf(text).flatMap((item) => (item.kind === "line" ? [item.className] : []));
+  expect(lines).toEqual([
+    "cm-md-callout callout-tip cm-md-callout-first",
+    "cm-md-callout callout-tip",
+    "cm-md-callout callout-tip cm-md-callout-last",
+  ]);
+});
+
+test("a callout's marker shows as written on the line being edited, and unknown kinds stay quotes", () => {
+  expect(rendered("> [!warning] Mind the keys", [1])).toBe("> [!warning] Mind the keys");
+  expect(rendered("> [!INFO] Same as a note")).toBe("<note>Same as a note");
+  expect(rendered("> [!FOO] just a quote")).toBe("[!FOO] just a quote");
+  expect(
+    itemsOf("> [!FOO] just a quote").some((item) => item.kind === "line" && item.className === "cm-md-quote"),
+  ).toBe(true);
 });

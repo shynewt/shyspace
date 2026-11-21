@@ -27,7 +27,9 @@ test("slash opens a block menu that filters as you type and runs with the keyboa
     /Numbered list/,
     /Checklist/,
     /Quote/,
+    /Callout/,
     /Code block/,
+    /Table/,
     /Divider/,
     /Link to page/,
   ]);
@@ -57,6 +59,21 @@ test("a block turns the line's text into it", async ({ page }) => {
   await page.keyboard.press("Enter");
   await page.keyboard.type("let x = 1;");
   await expect.poll(() => pageText(page)).toBe("- [ ] Buy milk\n\n```\nlet x = 1;\n```");
+});
+
+test("callouts and tables start from a template around the line's text", async ({ page }) => {
+  await newPage(page);
+  await page.keyboard.type("Keys rotate on Friday /callout");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => pageText(page)).toBe("> [!NOTE]\n> Keys rotate on Friday");
+
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/table");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Website");
+  await expect.poll(() => pageText(page)).toContain("\n| Column 1 | Column 2 |\n| --- | --- |\n| Website |  |");
 });
 
 test("escape closes the menu and keeps what you typed", async ({ page }) => {

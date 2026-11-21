@@ -15,9 +15,12 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { MOD_LABEL } from "../../../lib/shortcuts";
+import { CalloutLabelWidget } from "./callouts";
+import { pageIcon } from "./icons";
 import { externalUrl, linkAt } from "./links";
 import { previewItems } from "./markdownPreview";
 import { type MemberOpener, memberOpener, openLink, openMember, openPage, pageOpener } from "./openLinks";
+import { tablePreview } from "./tables";
 import { toggleTaskAt } from "./tasks";
 
 /** The workspace's page titles, for drawing page links by their current title. */
@@ -57,6 +60,7 @@ export function livePreview({
     pageOpener.of(onOpenPage),
     memberOpener.of(onOpenMember),
     previewPlugin,
+    tablePreview,
     EditorView.atomicRanges.of((view) => view.plugin(previewPlugin)?.chips ?? Decoration.none),
     linkTooltip,
     linkClicks,
@@ -139,6 +143,11 @@ const previewPlugin = ViewPlugin.fromClass(
             break;
           case "divider":
             decorations.push(Decoration.replace({ widget: new DividerWidget() }).range(item.from, item.to));
+            break;
+          case "callout":
+            decorations.push(
+              Decoration.replace({ widget: new CalloutLabelWidget(item.callout) }).range(item.from, item.to),
+            );
             break;
           case "page": {
             const chip = Decoration.replace({ widget: new PageChipWidget(item.pageId, titles.get(item.pageId)) });
@@ -307,37 +316,6 @@ class MentionWidget extends WidgetType {
     });
     return mention;
   }
-}
-
-/** Lucide's "file-text", drawn without React since widgets are plain DOM. */
-function pageIcon(): SVGSVGElement {
-  const namespace = "http://www.w3.org/2000/svg";
-  const icon = document.createElementNS(namespace, "svg");
-  for (const [name, value] of Object.entries({
-    viewBox: "0 0 24 24",
-    width: "0.95em",
-    height: "0.95em",
-    fill: "none",
-    stroke: "currentColor",
-    "stroke-width": "2",
-    "stroke-linecap": "round",
-    "stroke-linejoin": "round",
-    "aria-hidden": "true",
-  })) {
-    icon.setAttribute(name, value);
-  }
-  for (const path of [
-    "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
-    "M14 2v4a2 2 0 0 0 2 2h4",
-    "M10 9H8",
-    "M16 13H8",
-    "M16 17H8",
-  ]) {
-    const line = document.createElementNS(namespace, "path");
-    line.setAttribute("d", path);
-    icon.append(line);
-  }
-  return icon;
 }
 
 /** Hovering a web or mail link shows where it goes. */

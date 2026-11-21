@@ -35,6 +35,9 @@
   --success-text: #247951;
   --warning: #c98a12;
   --warning-text: #8f620d;
+  /* Code: keywords, strings and numbers use the accent, success and warning text colours. */
+  --syntax-function: #2f63b8;
+  --syntax-type: #0e7070;
   --shadow: 0 1px 2px rgb(30 25 15 / 0.06), 0 8px 24px rgb(30 25 15 / 0.08);
   --shadow-lg: 0 2px 6px rgb(30 25 15 / 0.08), 0 24px 64px rgb(30 25 15 / 0.18);
 
@@ -55,6 +58,8 @@
     --success-text: #4cc48c;
     --warning: #e3a83a;
     --warning-text: #e3a83a;
+    --syntax-function: #7aa8ff;
+    --syntax-type: #5ccfc4;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
     --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 64px rgb(0 0 0 / 0.55);
   }
@@ -309,6 +314,88 @@
   border-left: 3px solid var(--surface-3);
   padding-left: 0.6rem;
   color: var(--text-muted);
+}
+.prose-chat .table-scroll {
+  margin-top: 0.35rem;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.prose-chat table {
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.prose-chat th,
+.prose-chat td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+}
+.prose-chat th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.prose-chat .callout {
+  display: block;
+  margin-top: 0.35rem;
+  border-left: 3px solid var(--callout);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--callout) 8%, transparent);
+  padding: 0.4rem 0.75rem;
+}
+.prose-chat .callout-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--callout-text);
+  font-weight: 600;
+}
+
+/* Code colours, for messages and pages alike (lib/codeHighlight.ts). */
+.tok-keyword {
+  color: var(--accent-text);
+}
+.tok-string {
+  color: var(--success-text);
+}
+.tok-number {
+  color: var(--warning-text);
+}
+.tok-function {
+  color: var(--syntax-function);
+}
+.tok-type {
+  color: var(--syntax-type);
+}
+.tok-comment {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.tok-meta {
+  color: var(--text-faint);
+}
+
+/* Callout colours, for messages and pages alike (lib/callouts.ts). */
+.callout-note {
+  --callout: var(--text-faint);
+  --callout-text: var(--text-muted);
+}
+.callout-tip {
+  --callout: var(--success);
+  --callout-text: var(--success-text);
+}
+.callout-important {
+  --callout: var(--accent);
+  --callout-text: var(--accent-text);
+}
+.callout-warning {
+  --callout: var(--warning);
+  --callout-text: var(--warning-text);
+}
+.callout-caution {
+  --callout: var(--danger);
+  --callout-text: var(--danger-text);
 }
 .prose-chat .page-chip {
   display: inline-flex;

@@ -6,6 +6,7 @@
  */
 import type { syntaxTree } from "@codemirror/language";
 import type { Text } from "@codemirror/state";
+import { type CalloutKind, calloutMarker } from "../../../lib/callouts";
 import { isMentionLink, mentionedMemberId } from "../../../lib/mentions";
 import { BARE_PAGE_LINK, pageIdOf } from "./links";
 
@@ -21,6 +22,8 @@ export type PreviewItem =
   | { kind: "bullet"; from: number; to: number; depth: number }
   | { kind: "checkbox"; from: number; to: number; isChecked: boolean; label: string }
   | { kind: "divider"; from: number; to: number }
+  /** A callout's `[!KIND]` marker, drawn as its label. */
+  | { kind: "callout"; from: number; to: number; callout: CalloutKind }
   | { kind: "page"; from: number; to: number; pageId: string }
   /** `memberId` is null for @channel and @here. */
   | { kind: "mention"; from: number; to: number; label: string; memberId: string | null };
@@ -96,7 +99,7 @@ class PreviewBuilder {
         this.hide(node.from, node.from + 1);
         return;
       case "Blockquote":
-        this.styleLines(node.from, node.to, range, () => "cm-md-quote");
+        this.styleQuote(node, range);
         return;
       case "QuoteMark":
         this.hide(node.from, this.afterOneSpace(node.to));
@@ -208,7 +211,36 @@ class PreviewBuilder {
     return;
   }
 
+  private styleQuote(quote: SyntaxNode, range: { from: number; to: number }) {
+    const firstLine = this.doc.lineAt(quote.from);
+    const mark = quote.getChild("QuoteMark");
+    const textFrom = mark ? this.afterOneSpace(mark.to) : quote.from;
+    const marker = calloutMarker(this.doc.sliceString(textFrom, firstLine.to));
+    if (!marker) {
+      this.styleLines(quote.from, quote.to, range, () => "cm-md-quote");
+      return;
+    }
+    const last = this.doc.lineAt(quote.to).number;
+    this.styleLines(quote.from, quote.to, range, (line) =>
+      [
+        "cm-md-callout",
+        `callout-${marker.kind}`,
+        line === firstLine.number && "cm-md-callout-first",
+        line === last && "cm-md-callout-last",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+    if (!this.isRevealed(textFrom)) {
+      this.add({ kind: "callout", from: textFrom, to: textFrom + marker.length, callout: marker.kind });
+    }
+  }
+
   private styleCodeBlock(block: SyntaxNode, range: { from: number; to: number }) {
+    // Fences read as the block's edges: the ``` marks hide and the language stays as a small label.
+    for (const mark of block.getChildren("CodeMark")) this.hide(mark.from, mark.to);
+    const info = block.getChild("CodeInfo");
+    if (info) this.add({ kind: "style", from: info.from, to: info.to, className: "cm-md-code-language" });
     const first = this.doc.lineAt(block.from).number;
     const last = this.doc.lineAt(block.to).number;
     this.styleLines(block.from, block.to, range, (line) =>

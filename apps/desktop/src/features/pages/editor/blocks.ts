@@ -2,7 +2,7 @@
 import type { EditorView } from "@codemirror/view";
 
 export type LineBlock = "text" | "heading1" | "heading2" | "heading3" | "bullet" | "numbered" | "checklist" | "quote";
-export type BlockKind = LineBlock | "code" | "divider";
+export type BlockKind = LineBlock | "callout" | "code" | "table" | "divider";
 
 export type Block = { kind: BlockKind; label: string; hint: string; keywords: string };
 
@@ -15,7 +15,9 @@ export const BLOCKS: readonly Block[] = [
   { kind: "numbered", label: "Numbered list", hint: "1.", keywords: "ol ordered numbers" },
   { kind: "checklist", label: "Checklist", hint: "[ ]", keywords: "todo task checkbox" },
   { kind: "quote", label: "Quote", hint: ">", keywords: "blockquote citation" },
+  { kind: "callout", label: "Callout", hint: "> [!NOTE]", keywords: "note info tip important warning caution alert" },
   { kind: "code", label: "Code block", hint: "```", keywords: "snippet pre" },
+  { kind: "table", label: "Table", hint: "| |", keywords: "grid columns rows" },
   { kind: "divider", label: "Divider", hint: "---", keywords: "hr rule line separator" },
 ];
 
@@ -40,9 +42,12 @@ export function lineAsBlock(line: string, kind: LineBlock): string {
   return (NESTABLE.includes(kind) ? indent : "") + PREFIXES[kind] + text;
 }
 
+const TABLE_HEADER = "| Column 1 | Column 2 |\n| --- | --- |\n| ";
+
 /**
  * Removes the `/query` typed between `from` and `to`, then makes its line a
- * `kind` block. Code blocks and dividers go on their own lines.
+ * `kind` block. Callouts, code blocks, tables and dividers span lines of their own;
+ * the line's text goes in the first one you'd type in.
  */
 export function insertBlock(view: EditorView, from: number, to: number, kind: BlockKind): void {
   const { doc } = view.state;
@@ -54,6 +59,12 @@ export function insertBlock(view: EditorView, from: number, to: number, kind: Bl
   if (kind === "code") {
     insert = `\`\`\`\n${text}\n\`\`\``;
     cursor = line.from + 4 + text.length;
+  } else if (kind === "callout") {
+    insert = `> [!NOTE]\n> ${text}`;
+    cursor = line.from + insert.length;
+  } else if (kind === "table") {
+    insert = `${TABLE_HEADER}${text} |  |`;
+    cursor = line.from + TABLE_HEADER.length + text.length;
   } else if (kind === "divider") {
     // `---` right under text would make that text a heading instead.
     const isAfterText = line.number > 1 && doc.line(line.number - 1).text.trim() !== "";

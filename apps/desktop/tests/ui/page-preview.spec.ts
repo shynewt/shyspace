@@ -171,3 +171,41 @@ test("checking an empty item keeps the preview working", async ({ page }) => {
   await expect(lines(page).nth(2)).toHaveText("after");
   expect(errors).toEqual([]);
 });
+
+test("a table shows as a table until you click into it", async ({ page }) => {
+  await seedAndOpen(
+    page,
+    "Owners",
+    "## Owners\n\n| Area | Who |\n| --- | ---: |\n| Website | **Maya** |\n| Pipe \\| sign | `Theo` |\n\nAfter",
+  );
+  const table = page.locator(".cm-content").getByRole("table");
+  await expect(table.getByRole("columnheader")).toHaveText(["Area", "Who"]);
+  await expect(table.getByRole("row")).toHaveText(["AreaWho", "WebsiteMaya", "Pipe | signTheo"]);
+  await expect(table.getByRole("cell", { name: "Maya" }).locator("strong")).toHaveText("Maya");
+  await expect(table.getByRole("cell", { name: "Maya" })).toHaveCSS("text-align", "right");
+
+  await table.getByRole("cell", { name: "Website" }).click();
+  await expect(table).toHaveCount(0);
+  await expect(lines(page).nth(4)).toHaveText("| Website | **Maya** |");
+  await page.keyboard.type("Our ");
+  await expect(lines(page).nth(4)).toHaveText("| Our Website | **Maya** |");
+
+  await lines(page).last().click();
+  await expect(table.getByRole("cell", { name: "Our Website" })).toBeVisible();
+});
+
+test("a callout shows its label and colour, and its marker while you edit it", async ({ page }) => {
+  await seedAndOpen(page, "Notes", "Intro\n> [!WARNING]\n> Keys rotate on Friday.");
+  await expect(lines(page)).toHaveText(["Intro", "Warning", "Keys rotate on Friday."]);
+  await expect(lines(page).nth(2)).toHaveClass(/callout-warning/);
+
+  await lines(page).nth(1).click();
+  await expect(lines(page).nth(1)).toHaveText("> [!WARNING]");
+});
+
+test("code in a page is coloured by its language, with the fences hidden", async ({ page }) => {
+  await seedAndOpen(page, "Handbook", "Setup\n```rust\nfn main() { let count = 3; }\n```\nAfter");
+  await expect(lines(page)).toHaveText(["Setup", "rust", "fn main() { let count = 3; }", "", "After"]);
+  await expect(lines(page).nth(2).locator(".tok-keyword").first()).toHaveText("fn");
+  await expect(lines(page).nth(2).locator(".tok-number")).toHaveText("3");
+});

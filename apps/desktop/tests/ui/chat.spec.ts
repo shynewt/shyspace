@@ -175,3 +175,47 @@ test("the composer's lines are as tall as a message's, and one line fits beside 
   const sendBox = await page.getByRole("button", { name: "Send" }).boundingBox();
   expect(composerBox?.height).toBe(sendBox?.height);
 });
+
+test("tables and callouts show formatted", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("| Area | Who |\n| --- | --- |\n| Website | **Maya** |\n| Release | Theo |");
+  await composer.press("Enter");
+  const table = page.getByRole("article").getByRole("table");
+  await expect(table.getByRole("columnheader")).toHaveText(["Area", "Who"]);
+  await expect(table.getByRole("row")).toHaveCount(3);
+  await expect(table.getByRole("cell", { name: "Maya" }).locator("strong")).toHaveText("Maya");
+
+  await composer.fill("> [!WARNING]\n> The bucket keys rotate on **Friday**.");
+  await composer.press("Enter");
+  const callout = page.getByRole("article").getByRole("note");
+  await expect(callout).toHaveText(/^Warning\s*The bucket keys rotate on Friday\.\s*$/);
+  await expect(callout).toHaveClass(/callout-warning/);
+
+  await composer.fill("> [!TIP] Keep pull requests small.");
+  await composer.press("Enter");
+  await expect(page.getByRole("article").getByRole("note").filter({ hasText: "Tip" })).toHaveText(
+    /^Tip\s*Keep pull requests small\.\s*$/,
+  );
+
+  await composer.fill("> [!FOO]\n> just a quote");
+  await composer.press("Enter");
+  await expect(page.getByRole("article").locator("blockquote")).toContainText("[!FOO]");
+});
+
+test("code in a named language is coloured, and unknown languages stay plain", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  await composer.fill('```ts\nconst answer = 42; // why\nlet name = "Ada";\n```');
+  await composer.press("Enter");
+  const code = page.getByRole("article").filter({ hasText: "const answer" }).locator("pre code");
+  await expect(code.locator(".tok-keyword").first()).toHaveText("const");
+  await expect(code.locator(".tok-number")).toHaveText("42");
+  await expect(code.locator(".tok-comment")).toHaveText("// why");
+  await expect(code.locator(".tok-string")).toHaveText('"Ada"');
+  await expect(code).toHaveText('const answer = 42; // why\nlet name = "Ada";\n');
+
+  await composer.fill("```nonsense\nconst stays plain\n```");
+  await composer.press("Enter");
+  const plain = page.getByRole("article").filter({ hasText: "stays plain" }).locator("pre code");
+  await expect(plain).toHaveText("const stays plain\n");
+  await expect(plain.locator("[class^=tok-]")).toHaveCount(0);
+});

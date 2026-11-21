@@ -8,8 +8,10 @@ import {
   List,
   ListChecks,
   ListOrdered,
+  MessageSquareWarning,
   Minus,
   Quote,
+  Table,
   Type,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -34,7 +36,9 @@ const BLOCK_ICONS: Record<BlockKind, ReactNode> = {
   numbered: <ListOrdered size={15} />,
   checklist: <ListChecks size={15} />,
   quote: <Quote size={15} />,
+  callout: <MessageSquareWarning size={15} />,
   code: <Code size={15} />,
+  table: <Table size={15} />,
   divider: <Minus size={15} />,
 };
 

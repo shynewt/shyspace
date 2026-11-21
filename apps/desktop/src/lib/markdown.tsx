@@ -6,6 +6,8 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { ConfirmDialog, cx, IconButton, Tooltip } from "../ui";
 import { PAGE_LINK_PREFIX } from "./api";
+import { CALLOUTS, type CalloutKind, isCalloutKind, rehypeCallouts } from "./callouts";
+import { type CodeSegment, highlight } from "./codeHighlight";
 import { isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
 import { reportError } from "./toast";
 
@@ -92,11 +94,25 @@ export function ChatMarkdown({
         </ExternalLink>
       );
     },
-    pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+    pre: ({ children, node }) => (
+      <CodeBlock language={node ? languageOf(node) : ""} code={node ? textOf(node) : ""}>
+        {children}
+      </CodeBlock>
+    ),
+    table: ({ children }) => (
+      <div className="table-scroll">
+        <table>{children}</table>
+      </div>
+    ),
+    aside: ({ children, node }) => {
+      const kind = node?.properties.dataCallout;
+      return isCalloutKind(kind) ? <Callout kind={kind}>{children}</Callout> : <aside>{children}</aside>;
+    },
   };
   return (
     <Markdown
       remarkPlugins={[remarkGfm, remarkBreaks]}
+      rehypePlugins={[rehypeCallouts]}
       skipHtml
       urlTransform={(url) =>
         SAFE_EXTERNAL.test(url) || PAGE_LINK.test(url) || MESSAGE_LINK.test(url) || isMentionLink(url) ? url : ""
@@ -107,6 +123,14 @@ export function ChatMarkdown({
       {withTitles}
     </Markdown>
   );
+}
+
+/** The language a fenced block names (```ts), from its `language-ts` class. */
+function languageOf(pre: MarkdownNode): string {
+  const code = pre.children.find((child) => child.type === "element" && child.tagName === "code");
+  const classes = code?.type === "element" ? code.properties.className : undefined;
+  const name = Array.isArray(classes) ? classes.find((name) => String(name).startsWith("language-")) : undefined;
+  return name === undefined ? "" : String(name).slice("language-".length);
 }
 
 function textOf(node: MarkdownNode | MarkdownNode["children"][number]): string {
@@ -174,9 +198,37 @@ function ExternalLink({ href, text, children }: { href: string; text: string; ch
   );
 }
 
-/** A code block with a copy button; a tall one folds to a few lines until opened. */
-function CodeBlock({ children }: { children: ReactNode }) {
+function Callout({ kind, children }: { kind: CalloutKind; children: ReactNode }) {
+  const { label, iconPaths } = CALLOUTS[kind];
+  return (
+    <div role="note" className={`callout callout-${kind}`}>
+      <span className="callout-title">
+        <svg
+          viewBox="0 0 24 24"
+          width="1em"
+          height="1em"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          {iconPaths.map((path) => (
+            <path key={path} d={path} />
+          ))}
+        </svg>
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/** A code block with a copy button and syntax colours; a tall one folds to a few lines until opened. */
+function CodeBlock({ language, code, children }: { language: string; code: string; children: ReactNode }) {
   const pre = useRef<HTMLPreElement>(null);
+  const segments = useHighlighted(code, language);
   const [isTall, setTall] = useState(false);
   const [isExpanded, setExpanded] = useState(false);
   const [isCopied, setCopied] = useState(false);
@@ -207,7 +259,21 @@ function CodeBlock({ children }: { children: ReactNode }) {
           style={isFolded ? { maxHeight: CODE_MAX_HEIGHT_PX } : undefined}
           className={cx(isFolded && "overflow-y-hidden")}
         >
-          {children}
+          {segments ? (
+            <code>
+              {segments.map((segment) =>
+                segment.className ? (
+                  <span key={segment.from} className={segment.className}>
+                    {segment.text}
+                  </span>
+                ) : (
+                  segment.text
+                ),
+              )}
+            </code>
+          ) : (
+            children
+          )}
         </pre>
         {isFolded && (
           <div className="pointer-events-none absolute inset-x-px bottom-px h-14 rounded-b-lg bg-linear-to-t from-surface-2 to-transparent" />
@@ -235,6 +301,21 @@ function CodeBlock({ children }: { children: ReactNode }) {
       )}
     </>
   );
+}
+
+/** Coloured runs of `code` once its language has loaded; null before, or for unknown languages. */
+function useHighlighted(code: string, language: string): CodeSegment[] | null {
+  const [highlighted, setHighlighted] = useState<{ code: string; segments: CodeSegment[] | null } | null>(null);
+  useEffect(() => {
+    let isCurrent = true;
+    highlight(code, language).then((segments) => {
+      if (isCurrent) setHighlighted({ code, segments });
+    }, reportError);
+    return () => {
+      isCurrent = false;
+    };
+  }, [code, language]);
+  return highlighted?.code === code ? highlighted.segments : null;
 }
 
 export function pageIdsIn(text: string): string[] {
@@ -270,6 +351,7 @@ export function plainPreview(text: string, pageTitle: (id: string) => string | u
 function plainLine(line: string): string {
   return line
     .replace(/^\s*(?:#{1,6}\s+|>\s?|```.*$)/, "")
+    .replace(/^\[!(?:note|info|tip|important|warning|caution)\]\s*/i, "")
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "")
     .replace(/\*\*|__|~~|`/g, "")
     .replace(/(^|\W)[*_](\S(?:.*?\S)?)[*_](?=\W|$)/g, "$1$2")

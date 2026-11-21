@@ -56,7 +56,9 @@ Dialogs, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primi
 
 Pages are markdown in a CodeMirror editor (`features/pages/`), under a title field that grows to fit; a new page starts in its title, and Enter moves on to the body. The text people and agents share is always plain markdown; the editor only changes how it looks (live preview, like Obsidian):
 
-- Lines nobody is editing read as formatted text: marks (`#`, `**`, `_`, backticks, link brackets and addresses, `>`) are hidden, list dashes become bullets, `- [ ]` becomes a checkbox, `---` a divider. Lines touched by your cursor or selection show their markdown, so you edit what is really there. While a mouse button is down nothing changes, so text doesn't jump under the pointer.
+- Lines nobody is editing read as formatted text: marks (`#`, `**`, `_`, backticks, link brackets and addresses, `>`) are hidden, list dashes become bullets, `- [ ]` becomes a checkbox, `---` a divider, and a quote starting `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` (GitHub's callouts; `[!INFO]` is a note) a coloured callout with that label. Lines touched by your cursor or selection show their markdown, so you edit what is really there. While a mouse button is down nothing changes, so text doesn't jump under the pointer.
+- Code blocks hide their ``` fences until you edit those lines, keep the language name as a small label, and colour the code by that language. Messages colour code the same way: one highlighter and the `tok-*` classes in `styles.css` (`lib/codeHighlight.ts`, CodeMirror's parsers loaded per language on first use).
+- A table shows as a real table until the cursor enters it; clicking a cell puts the cursor in that cell's text, and while you edit, the table's markdown shows in monospace so the columns line up. Messages render tables and callouts too, with the same callout colours (`lib/callouts.ts`, `callout-<kind>` in `styles.css`).
 - Page links (`shy://page/<id>`) and mentions are chips, also on the line being edited; the cursor steps over a chip as one unit. Page chips show the page's current title and open it on click. Mention chips open the person's profile card (click, or Ctrl/Cmd+Enter beside one), placed at the chip, without moving the cursor; Esc goes back to the editor. A mention of someone who isn't a member opens nothing.
 - Web links show their address on hover and open with Ctrl/Cmd+click.
 - Menus under the cursor: `/` (at the start of a line or after a space) for blocks, `@` for people, `[[` for pages. They open only when you type the trigger, never for another member's edit; arrows, Enter or Tab and Esc drive them while the editor keeps focus and points at the chosen option with `aria-activedescendant`. Each choice inserts the markdown you could type yourself.
@@ -65,7 +67,7 @@ Pages are markdown in a CodeMirror editor (`features/pages/`), under a title fie
 Rules for changing it:
 
 - Decorations never change the document. A widget that acts (a checkbox) makes an ordinary edit, computed from the document as it is at that moment, never from a remembered position, so it stays right while others edit.
-- `editor/markdownPreview.ts` decides what to hide or draw and is pure (tested in `tests/ui/markdown-preview.spec.ts`); `editor/livePreview.ts` turns that into decorations. Only the visible part of the page is decorated, so long pages stay fast.
+- `editor/markdownPreview.ts` decides what to hide or draw and is pure (tested in `tests/ui/markdown-preview.spec.ts`); `editor/livePreview.ts` turns that into decorations. Only the visible part of the page is decorated, so long pages stay fast. Tables are block widgets, which CodeMirror takes only from a state field, so `editor/tables.ts` draws them separately.
 - Plugins may not hide a line break; keep each hidden range on one line.
 - Styles live in `editor/theme.ts` and use the tokens; color only list markers, never whole list lines.
 
