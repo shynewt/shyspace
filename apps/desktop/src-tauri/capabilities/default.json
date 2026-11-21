@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "The main window",
   "windows": ["main"],
-  "permissions": ["core:default", "opener:allow-open-url", "opener:allow-default-urls", "notification:allow-is-permission-granted"]
+  "permissions": [
+    "core:default",
+    { "identifier": "opener:allow-open-url", "deny": [{ "url": "mailto:*[?]*" }] },
+    "opener:allow-default-urls",
+    "notification:allow-is-permission-granted"
+  ]
 }

@@ -1,4 +1,3 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
@@ -8,6 +7,7 @@ import { ConfirmDialog, cx, IconButton, Tooltip } from "../ui";
 import { PAGE_LINK_PREFIX } from "./api";
 import { CALLOUTS, type CalloutKind, isCalloutKind, rehypeCallouts } from "./callouts";
 import { type CodeSegment, highlight } from "./codeHighlight";
+import { openExternalUrl } from "./contact";
 import { isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
 import { reportError } from "./toast";
 
@@ -171,7 +171,7 @@ function isMisleading(text: string, href: string): boolean {
 /** A web or mail link: shows where it goes on hover, and asks first when its text shows somewhere else. */
 function ExternalLink({ href, text, children }: { href: string; text: string; children: ReactNode }) {
   const [isConfirming, setConfirming] = useState(false);
-  const open = () => openUrl(href);
+  const open = () => openExternalUrl(href);
   return (
     <>
       <Tooltip label={<span className="block max-w-[360px] break-all whitespace-normal">{href}</span>}>

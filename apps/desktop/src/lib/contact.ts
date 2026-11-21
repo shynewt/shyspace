@@ -1,7 +1,7 @@
 /**
- * Opening the ways to reach someone with the system's own handlers: mail for
- * an email address, the phone app for a number, the browser for a website.
- * Only these schemes are ever built here.
+ * Opening addresses with the system's own handlers: mail for an email
+ * address, the phone app for a number, the browser for a website. Every
+ * external link in the app opens through here.
  */
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { reportError } from "./toast";
@@ -26,6 +26,22 @@ export function shownWebsite(url: string): string {
   return url.replace(WEB_ADDRESS, "").replace(/\/$/, "");
 }
 
+const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/**
+ * `url` as it may be handed to the system: the scheme lowercased (the
+ * window's allowed schemes match case by case), and a mail link without its
+ * query, which could ask the mail app to attach files (`?attach=…`).
+ */
+export function openableUrl(url: string): string {
+  const lowered = url.replace(SCHEME, (scheme) => scheme.toLowerCase());
+  return lowered.startsWith("mailto:") ? lowered.split("?")[0] : lowered;
+}
+
+export function openExternalUrl(url: string): Promise<void> {
+  return openUrl(openableUrl(url));
+}
+
 export function openExternal(url: string): void {
-  openUrl(url).catch(reportError);
+  openExternalUrl(url).catch(reportError);
 }

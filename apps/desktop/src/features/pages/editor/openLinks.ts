@@ -1,7 +1,7 @@
 /** Opening a page's links: web and mail links in their apps, page links in shyspace, mentions as profile cards. */
 import { Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openExternal } from "../../../lib/contact";
 import { reportError } from "../../../lib/toast";
 import { externalUrl, type LinkTarget } from "./links";
 
@@ -36,7 +36,7 @@ export function openLink(view: EditorView, link: LinkTarget): void {
     reportError(new Error(`only web and email links open from a page, not "${link.url}"`));
     return;
   }
-  openUrl(url).catch(reportError);
+  openExternal(url);
 }
 
 export function openPage(view: EditorView, pageId: string): void {

