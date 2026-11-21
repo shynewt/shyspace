@@ -24,14 +24,12 @@ import {
   Avatar,
   Badge,
   ConfirmDialog,
-  CountBadge,
   cx,
   EmojiPicker,
   IconButton,
   Menu,
   type MenuItem,
   Popover,
-  RelativeTime,
   springs,
   Tooltip,
 } from "../../ui";
@@ -42,6 +40,7 @@ import { StatusEmoji } from "../members/StatusEmoji";
 import { MessageCard } from "./MessageCard";
 import { PageCard } from "./PageCard";
 import { describeSaved, SavedLabel } from "./SavedLabel";
+import { ThreadSummary } from "./ThreadSummary";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
 
@@ -197,7 +196,9 @@ export const MessageItem = memo(function MessageItem({
               </AnimatePresence>
             </motion.div>
           )}
-          {onOpenThread && message.reply_count > 0 && <ThreadSummary message={message} onOpen={onOpenThread} />}
+          {onOpenThread && message.reply_count > 0 && (
+            <ThreadSummary message={message} pageTitle={(id) => titles.get(id)} onOpen={onOpenThread} />
+          )}
         </div>
 
         <div
@@ -345,26 +346,5 @@ function MessageTime({ ms, className }: { ms: number; className: string }) {
         {formatTime(ms)}
       </time>
     </Tooltip>
-  );
-}
-
-function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
-  const count = message.reply_count;
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="mt-1 flex items-center gap-2 rounded-md px-1.5 py-0.5 -ml-1.5 text-sm hover:bg-surface-2"
-    >
-      <span className="font-medium text-accent-text">
-        {count} {count === 1 ? "reply" : "replies"}
-      </span>
-      {message.last_reply_ms && (
-        <span className="text-faint">
-          Last reply <RelativeTime ms={message.last_reply_ms} />
-        </span>
-      )}
-      {message.unread_replies > 0 && <CountBadge>{message.unread_replies} new</CountBadge>}
-    </button>
   );
 }

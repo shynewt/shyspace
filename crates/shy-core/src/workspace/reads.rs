@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 
 use super::{State, Workspace};
 use crate::{
-    mentions::mentions,
+    mentions::{mentions, with_plain_mentions},
     ops::{Op, now_ms},
     pages, search,
     storage::{Reply, SearchFilters},
@@ -108,6 +108,9 @@ impl Workspace {
             let thread: Vec<&Reply> = replies.iter().filter(|reply| reply.root == message.id).collect();
             message.reply_count = count(thread.len());
             message.last_reply_ms = thread.iter().map(|reply| reply.created_ms).max();
+            message.recent_reply_authors = recent_authors(&thread);
+            message.last_reply_author = thread.last().map(|reply| reply.author.clone());
+            message.last_reply_preview = thread.last().map(|reply| reply_preview(&reply.text));
             message.is_following = match state.store.following_choice(&message.id)? {
                 Some(choice) => choice,
                 None => follows_by_default(
@@ -226,4 +229,36 @@ pub(crate) fn follows_by_default<'a>(
 
 fn count(length: usize) -> u32 {
     u32::try_from(length).unwrap_or(u32::MAX)
+}
+
+const RECENT_REPLY_AUTHORS: usize = 3;
+const REPLY_PREVIEW_CHARS: usize = 100;
+
+/// The last few distinct authors in `thread` (which runs oldest first), newest first.
+fn recent_authors(thread: &[&Reply]) -> Vec<String> {
+    let mut authors: Vec<String> = Vec::new();
+    for reply in thread.iter().rev() {
+        if authors.len() == RECENT_REPLY_AUTHORS {
+            break;
+        }
+        if !authors.contains(&reply.author) {
+            authors.push(reply.author.clone());
+        }
+    }
+    authors
+}
+
+/// `text` on one line with mentions as @name, cut on a character boundary.
+fn reply_preview(text: &str) -> String {
+    let line = with_plain_mentions(text)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if line.chars().count() <= REPLY_PREVIEW_CHARS {
+        return line;
+    }
+    let mut preview: String = line.chars().take(REPLY_PREVIEW_CHARS - 1).collect();
+    preview.truncate(preview.trim_end().len());
+    preview.push('…');
+    preview
 }

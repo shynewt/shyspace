@@ -43,10 +43,34 @@ type StoredMessage = Omit<
   | "saved"
   | "reply_count"
   | "last_reply_ms"
+  | "recent_reply_authors"
+  | "last_reply_author"
+  | "last_reply_preview"
   | "is_following"
   | "unread_replies"
 >;
 type StoredReaction = { message: string; author: string; emoji: string };
+
+const REPLY_PREVIEW_CHARS = 100;
+
+/** Like the core: mentions shown as @name. */
+function withPlainMentions(text: string): string {
+  return text.replace(/\[(@[^\]]*)\]\(shy:\/\/(?:member|mention)\/[0-9a-z]+\)/g, "$1");
+}
+
+/** Like the core: one line, mentions as @name, cut on a character boundary. */
+function replyPreview(text: string): string {
+  const characters = Array.from(withPlainMentions(text).split(/\s+/).filter(Boolean).join(" "));
+  if (characters.length <= REPLY_PREVIEW_CHARS) return characters.join("");
+  return `${characters
+    .slice(0, REPLY_PREVIEW_CHARS - 1)
+    .join("")
+    .trimEnd()}…`;
+}
+
+function recentAuthors(replies: readonly StoredMessage[]): string[] {
+  return [...new Set(replies.map((reply) => reply.author).reverse())].slice(0, 3);
+}
 
 function compareMessages(left: StoredMessage, right: StoredMessage): number {
   return left.lamport - right.lamport || left.author.localeCompare(right.author);
@@ -166,8 +190,7 @@ export class FakeChat {
         message: id,
         author,
         author_name: member?.name ?? "",
-        // Like the core: mentions shown as @name.
-        preview: text.replace(/\[(@[^\]]*)\]\(shy:\/\/(?:member|mention)\/[0-9a-z]+\)/g, "$1"),
+        preview: withPlainMentions(text),
       });
     }
     return id;
@@ -286,9 +309,13 @@ export class FakeChat {
     const replies = repliesOf(this.messages, message.id).sort(compareMessages);
     const isFollowing = this.followChoices.get(message.id) ?? followsByDefault(this.context.me(), message, replies);
     const read = this.readMarkers.get(message.id);
+    const last = replies.at(-1);
     return {
       reply_count: replies.length,
-      last_reply_ms: replies.at(-1)?.created_ms ?? null,
+      last_reply_ms: last?.created_ms ?? null,
+      recent_reply_authors: recentAuthors(replies),
+      last_reply_author: last?.author ?? null,
+      last_reply_preview: last === undefined ? null : replyPreview(last.text),
       is_following: isFollowing,
       unread_replies: isFollowing
         ? replies.filter((reply) => reply.author !== this.context.me() && (!read || isAfter(reply, read))).length

@@ -202,3 +202,108 @@ async fn the_latest_message_includes_thread_replies() {
     assert_eq!(latest.message.text, "friday");
     assert_eq!(latest.thread_root.as_deref(), Some(question.as_str()));
 }
+
+fn root_in(workspace: &crate::Workspace, channel: &str, root: &str) -> crate::views::Message {
+    workspace
+        .messages(channel, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.id == root)
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_summary_shows_the_three_latest_distinct_repliers_newest_first() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    let everyone = [&admin, &bob, &carol, &dave];
+    let general = channel_id(&admin, "general");
+    sync_all(&everyone).await;
+    let question = admin.send_message(&general, "lunch where?", None).unwrap();
+    sync_all(&everyone).await;
+    for (member, text) in [
+        (&carol, "pizza"),
+        (&bob, "tacos"),
+        (&admin, "hmm"),
+        (&bob, "tacos!"),
+    ] {
+        member
+            .send_message(&general, text, Some(question.clone()))
+            .unwrap();
+        sync_all(&everyone).await;
+    }
+
+    let summary = root_in(&carol, &general, &question);
+    assert_eq!(
+        summary.recent_reply_authors,
+        vec![bob.my_id(), admin.my_id(), carol.my_id()]
+    );
+    assert_eq!(summary.last_reply_author, Some(bob.my_id()));
+    assert_eq!(summary.last_reply_preview.as_deref(), Some("tacos!"));
+
+    dave.send_message(&general, "sushi", Some(question.clone()))
+        .unwrap();
+    sync_all(&everyone).await;
+    let summary = root_in(&carol, &general, &question);
+    assert_eq!(
+        summary.recent_reply_authors,
+        vec![dave.my_id(), bob.my_id(), admin.my_id()],
+        "at most three, the oldest replier drops off"
+    );
+    assert_eq!(summary.last_reply_author, Some(dave.my_id()));
+    assert_eq!(summary.last_reply_preview.as_deref(), Some("sushi"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_reply_preview_is_one_short_line_with_mentions_as_names() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let question = admin.send_message(&general, "status?", None).unwrap();
+    let mention = mentions::member_link("Ada", &admin.my_id());
+    let long_text = format!("{mention}  done\n\nnext: {}", "日本語🎉".repeat(100));
+    bob.send_message(&general, &long_text, Some(question.clone()))
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let preview = root_in(&admin, &general, &question).last_reply_preview.unwrap();
+    assert!(preview.starts_with("@Ada done next: 日本語🎉"), "{preview}");
+    assert!(
+        preview.chars().count() <= 100,
+        "bounded: {} chars",
+        preview.chars().count()
+    );
+    assert!(preview.ends_with('…'), "a cut preview says so");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleted_replies_leave_the_summary() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let everyone = [&admin, &bob, &carol];
+    let general = channel_id(&admin, "general");
+    sync_all(&everyone).await;
+    let question = admin.send_message(&general, "who's in?", None).unwrap();
+    sync_all(&everyone).await;
+    let bobs = bob.send_message(&general, "me", Some(question.clone())).unwrap();
+    sync_all(&everyone).await;
+    let carols = carol
+        .send_message(&general, "me too", Some(question.clone()))
+        .unwrap();
+    sync_all(&everyone).await;
+
+    carol.delete_message(&carols).unwrap();
+    sync_all(&everyone).await;
+    let summary = root_in(&admin, &general, &question);
+    assert_eq!(summary.recent_reply_authors, vec![bob.my_id()]);
+    assert_eq!(summary.last_reply_author, Some(bob.my_id()));
+    assert_eq!(summary.last_reply_preview.as_deref(), Some("me"));
+
+    bob.delete_message(&bobs).unwrap();
+    sync_all(&everyone).await;
+    let summary = root_in(&admin, &general, &question);
+    assert_eq!(summary.reply_count, 0);
+    assert!(summary.recent_reply_authors.is_empty());
+    assert_eq!(summary.last_reply_author, None);
+    assert_eq!(summary.last_reply_preview, None);
+}

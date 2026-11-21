@@ -40,6 +40,9 @@ export type Message = {
   saved: SavedMark | null;
   reply_count: number;
   last_reply_ms: number | null;
+  recent_reply_authors: string[];
+  last_reply_author: string | null;
+  last_reply_preview: string | null;
   is_following: boolean;
   unread_replies: number;
   reactions: Reaction[];

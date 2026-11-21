@@ -1,0 +1,83 @@
+import { ChevronRight } from "lucide-react";
+import type { Message } from "../../lib/api";
+import { plainPreview } from "../../lib/markdown";
+import { useMembers } from "../../lib/members";
+import { displayName, formatWhen } from "../../lib/people";
+import { Avatar, CountBadge, cx, RelativeTime } from "../../ui";
+
+/**
+ * One line under a thread's first message: the latest repliers, the reply
+ * count, and who said what last. The whole line is one button that opens
+ * the thread.
+ */
+export function ThreadSummary({
+  message,
+  pageTitle,
+  onOpen,
+}: {
+  message: Message;
+  pageTitle: (id: string) => string | undefined;
+  onOpen: () => void;
+}) {
+  const members = useMembers();
+  const memberFor = (id: string) => members?.find((member) => member.id === id);
+  const nameOf = (id: string) => displayName(memberFor(id)?.name ?? "", id);
+
+  const count = message.reply_count;
+  const countText = `${count} ${count === 1 ? "reply" : "replies"}`;
+  const unread = message.unread_replies;
+  const lastAuthor = message.last_reply_author === null ? null : nameOf(message.last_reply_author);
+  const preview = message.last_reply_preview === null ? "" : plainPreview(message.last_reply_preview, pageTitle);
+  const label = [
+    countText,
+    lastAuthor !== null && message.last_reply_ms !== null
+      ? `last from ${lastAuthor} at ${formatWhen(message.last_reply_ms, new Date())}`
+      : null,
+    unread > 0 ? `${unread} new` : null,
+  ]
+    .filter((part) => part !== null)
+    .join(", ");
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`${label}. Open thread`}
+      className="group/thread mt-1 -ml-1.5 flex w-fit max-w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-0.5 text-sm transition-colors hover:bg-surface-2"
+    >
+      {message.recent_reply_authors.length > 0 && (
+        <span className="flex shrink-0 -space-x-1">
+          {message.recent_reply_authors.map((id, index) => (
+            <span
+              key={id}
+              // The newest replier sits on top.
+              style={{ zIndex: message.recent_reply_authors.length - index }}
+              className="relative rounded-[30%] ring-2 ring-surface transition-colors group-hover/thread:ring-surface-2"
+            >
+              <Avatar id={id} name={nameOf(id)} isBot={memberFor(id)?.is_bot ?? false} size={16} />
+            </span>
+          ))}
+        </span>
+      )}
+      <span className={cx("shrink-0 whitespace-nowrap text-accent-text", unread > 0 ? "font-semibold" : "font-medium")}>
+        {countText}
+      </span>
+      {unread > 0 && <CountBadge>{unread} new</CountBadge>}
+      {lastAuthor !== null && preview !== "" && (
+        <span className="min-w-0 truncate text-faint group-hover/thread:text-muted">
+          {lastAuthor}: {preview}
+        </span>
+      )}
+      {message.last_reply_ms !== null && (
+        <RelativeTime
+          ms={message.last_reply_ms}
+          className="shrink-0 whitespace-nowrap text-faint group-hover/thread:text-muted"
+        />
+      )}
+      <ChevronRight
+        size={14}
+        className="-ml-1 shrink-0 text-decorative opacity-0 transition-opacity group-hover/thread:opacity-100 group-focus-visible/thread:opacity-100"
+      />
+    </button>
+  );
+}

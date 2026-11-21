@@ -164,6 +164,14 @@ pub struct Message {
     /// latest came.
     pub reply_count: u32,
     pub last_reply_ms: Option<i64>,
+    /// The latest replies' distinct authors (member ids, hex), newest first,
+    /// at most three.
+    pub recent_reply_authors: Vec<String>,
+    /// The latest reply's author (member id, hex).
+    pub last_reply_author: Option<String>,
+    /// The latest reply's text on one line, mentions shown as @name, cut to
+    /// at most 100 characters (ending in "…" when cut). Still markdown.
+    pub last_reply_preview: Option<String>,
     /// Whether this member follows the thread: new replies alert them.
     pub is_following: bool,
     /// Replies by others since this member last read the thread (counted

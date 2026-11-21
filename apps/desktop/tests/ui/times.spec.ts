@@ -28,7 +28,9 @@ test("older times say which day", async ({ page }) => {
     .getByRole("navigation", { name: "Workspace" })
     .getByRole("button", { name: /^general/ })
     .click();
-  await expect(page.getByRole("button", { name: /1 reply/ })).toContainText("Last reply Yesterday 4:41 PM");
+  const summary = page.getByRole("button", { name: /1 reply/ });
+  await expect(summary).toContainText("Yesterday 4:41 PM");
+  await expect(summary).toHaveAccessibleName(/last from Grace at Yesterday 4:41 PM/);
 });
 
 test("message times drop the leading zero and show the full date on hover", async ({ page }) => {
