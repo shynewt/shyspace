@@ -20,10 +20,21 @@ function whyReadOnly(channel: Channel | undefined, members: Member[] | undefined
 export function WriteGate({ channelId, children }: { channelId: string; children: ReactNode }) {
   const { channels } = useWorkspace();
   const members = useLive(api.members, (change) => change.kind === "members");
-  const notice = whyReadOnly(
-    channels.find((channel) => channel.id === channelId),
-    members,
-  );
+  const channel = channels.find((candidate) => candidate.id === channelId);
+  const notice = whyReadOnly(channel, members);
+  if (!notice && channel?.is_missing_key) {
+    return (
+      <>
+        <Notice className="mx-5 mb-2">
+          <p>
+            You can't read new messages here: the owner started a new key and your device didn't get it. Ask them to
+            remove you and add you again.
+          </p>
+        </Notice>
+        {children}
+      </>
+    );
+  }
   if (!notice) return children;
   return (
     <Notice className="mx-5 mb-4">

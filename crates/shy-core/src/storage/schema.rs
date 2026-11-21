@@ -157,6 +157,8 @@ CREATE TABLE profile_details (
     time_zone TEXT NOT NULL, work_days INTEGER, work_start INTEGER, work_end INTEGER,
     lamport INTEGER NOT NULL);
 ",
+    // The key each counted private op was sealed with; a rebuild fills it in.
+    "ALTER TABLE private_applied ADD COLUMN generation INTEGER;",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

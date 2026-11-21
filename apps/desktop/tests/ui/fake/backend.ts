@@ -190,6 +190,16 @@ export class FakeBackend {
     this.private.receiveChange(this.chat.channelNamed(name).id, { removed: this.me() });
   }
 
+  /** `member` opened the private channel `name`, so their device wrote that they joined. */
+  privateMemberJoined(name: string, member: string): void {
+    this.private.receiveChange(this.chat.channelNamed(name).id, { joined: member });
+  }
+
+  /** The owner of the private channel `name` started a new key your device didn't get. */
+  missNewKeyIn(name: string): void {
+    this.private.receiveChange(this.chat.channelNamed(name).id, { isMissingKey: true });
+  }
+
   /** The owner of the private channel `name` made you its owner. */
   makeMeOwnerOf(name: string): void {
     this.private.receiveChange(this.chat.channelNamed(name).id, { owner: this.me() });

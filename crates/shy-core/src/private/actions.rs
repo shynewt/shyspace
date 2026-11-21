@@ -214,6 +214,7 @@ impl Workspace {
             if private_kind(&channel) != Some(PrivateKind::Channel) {
                 continue;
             }
+            self.confirm_joined(&channel)?;
             self.claim_if_successor(&channel)?;
             if self.ensure_owner(&channel).is_err() || self.pass_on_if_left(&channel, &workspace_members)? {
                 continue;
@@ -232,6 +233,34 @@ impl Workspace {
             for member in to_remove {
                 self.rotate(&channel, Some(member))?;
             }
+        }
+        Ok(())
+    }
+
+    /// Writes that we joined `channel` once we hold the key for our time in
+    /// it and have read a message there since we were added, unless an op of
+    /// ours there already shows it. Only our own reading triggers it: an add,
+    /// or a re-add after a removal, alone never does.
+    fn confirm_joined(&self, channel: &str) -> Result<()> {
+        let me = self.me();
+        let should_write = {
+            let store = &self.state().store;
+            match (
+                store.owner_membership(channel, &me)?,
+                sending_key(store, channel).ok(),
+            ) {
+                (Some(membership), Some(key)) => {
+                    key.generation >= membership.from_generation
+                        && store.private_members(channel, Ending::Left)?.contains(&me)
+                        && !store.has_joined(channel, &me)?
+                        && store.is_covered(channel, &me, store.next_seq(&me)?, key.generation)?
+                        && store.has_read_since_added(channel, &me)?
+                }
+                _ => false,
+            }
+        };
+        if should_write {
+            self.write_private(channel, PrivateOp::Joined)?;
         }
         Ok(())
     }

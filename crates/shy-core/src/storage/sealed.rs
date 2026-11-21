@@ -89,12 +89,37 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) fn record_private_applied(&self, channel: &str, author: &PublicKey, seq: u64) -> Result<()> {
+    /// Records that `author`'s op `seq`, sealed with key `generation`,
+    /// counted in `channel`.
+    pub(crate) fn record_private_applied(
+        &self,
+        channel: &str,
+        author: &PublicKey,
+        seq: u64,
+        generation: u64,
+    ) -> Result<()> {
         self.db.execute(
-            "INSERT OR IGNORE INTO private_applied (channel, author, seq) VALUES (?, ?, ?)",
-            params![channel, author.as_bytes(), seq],
+            "INSERT OR IGNORE INTO private_applied (channel, author, seq, generation) VALUES (?, ?, ?, ?)",
+            params![channel, author.as_bytes(), seq, generation],
         )?;
         Ok(())
+    }
+
+    /// Whether `member` has shown they read `channel` since they were last
+    /// added: an op of theirs counted there, sealed with a key from then on.
+    pub fn has_joined(&self, channel: &str, member: &PublicKey) -> Result<bool> {
+        let Some(membership) = self.owner_membership(channel, member)? else {
+            return Ok(false);
+        };
+        Ok(self
+            .db
+            .query_row(
+                "SELECT 1 FROM private_applied WHERE channel = ? AND author = ? AND generation >= ?",
+                params![channel, member.as_bytes(), membership.from_generation],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 
     pub fn is_private_applied(&self, author: &PublicKey, seq: u64) -> Result<bool> {

@@ -149,7 +149,7 @@ impl Store {
                     }
                 }
             }
-            PrivateOp::Leave => self.judge_membership(verified, channel, key.generation),
+            PrivateOp::Leave | PrivateOp::Joined => self.judge_membership(verified, channel, key.generation),
             PrivateOp::Content(op) => match self.judge_membership(verified, channel, key.generation)? {
                 Verdict::Apply => Ok(judge_content(channel, &verified.author, op, PrivateKind::Channel)),
                 other => Ok(other),

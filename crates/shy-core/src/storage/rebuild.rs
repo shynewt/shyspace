@@ -42,9 +42,10 @@ struct PageReplay {
 
 const VIEWS_VERSION_META: &str = "views_version";
 /// Raised when the rules for showing ops change (like the limits on names in
-/// #67, then on op sizes, then owner succession), so a store built under
-/// older rules rebuilds its views once.
-const VIEWS_VERSION: u8 = 3;
+/// #67, then on op sizes, then owner succession, then who has joined a
+/// private channel), so a store built under older rules rebuilds its views
+/// once.
+const VIEWS_VERSION: u8 = 4;
 
 impl Store {
     /// Rebuilds the views if they were built under older rules. Returns

@@ -9,8 +9,9 @@ import { argument, ownedId, randomHex, requireString } from "./helpers";
 export const NOT_PRIVATE = Symbol("not a private channel command");
 
 type Kind = "private" | "dm" | "notes";
-type StoredPrivate = { kind: Kind; members: string[]; owner: string | null };
-export type PrivateView = Pick<Channel, "kind" | "dm_members" | "is_member" | "can_delete">;
+/** `joined` are members whose own op showed they read it; `isMissingKey`, that you missed a newer key. */
+type StoredPrivate = { kind: Kind; members: string[]; owner: string | null; joined: string[]; isMissingKey: boolean };
+export type PrivateView = Pick<Channel, "kind" | "dm_members" | "is_member" | "is_missing_key" | "can_delete">;
 
 export type PrivateContext = ChatContext & {
   /** Lists a channel in chat under `name`. */
@@ -68,6 +69,7 @@ export class FakePrivate {
       kind: found.kind,
       dm_members: found.kind === "dm" ? found.members.filter((member) => member !== me) : [],
       is_member: found.members.includes(me),
+      is_missing_key: found.isMissingKey && found.members.includes(me),
       can_delete: found.owner === me,
     };
   }
@@ -80,23 +82,36 @@ export class FakePrivate {
   /** Someone else made a private channel with you (and `others`) in it, as their ops would. */
   receive(owner: string, name: string, others: readonly string[]): string {
     const id = `p:${ownedId(owner)}${randomHex(8)}`;
-    this.channels.set(id, { kind: "private", members: [owner, this.context.me(), ...others], owner });
+    // Showing it to you opens it, so your device has joined too.
+    const members = [owner, this.context.me(), ...others];
+    this.channels.set(id, { kind: "private", members, owner, joined: [owner, this.context.me()], isMissingKey: false });
     this.context.listChannel(id, name);
     return id;
   }
 
   /** Someone else's change to a channel you're in, as their ops would bring it. */
-  receiveChange(channel: string, change: { removed?: string; owner?: string }): void {
+  receiveChange(
+    channel: string,
+    change: { removed?: string; owner?: string; joined?: string; isMissingKey?: boolean },
+  ): void {
     const found = this.require(channel);
     if (change.removed) found.members = found.members.filter((member) => member !== change.removed);
     if (change.owner) found.owner = change.owner;
+    if (change.joined) found.joined.push(change.joined);
+    if (change.isMissingKey !== undefined) found.isMissingKey = change.isMissingKey;
     this.changed();
   }
 
   private create(name: string, members: string[]): string {
     const me = this.context.me();
     const id = `p:${ownedId(me)}${randomHex(8)}`;
-    this.channels.set(id, { kind: "private", members: [me, ...this.others(members)], owner: me });
+    this.channels.set(id, {
+      kind: "private",
+      members: [me, ...this.others(members)],
+      owner: me,
+      joined: [me],
+      isMissingKey: false,
+    });
     this.context.listChannel(id, name.trim().toLowerCase().replace(/\s+/g, "-"));
     return id;
   }
@@ -108,7 +123,7 @@ export class FakePrivate {
       if (found.kind === "dm" && found.members.join() === everyone.join()) return id;
     }
     const id = `dm:${randomHex(16)}`;
-    this.channels.set(id, { kind: "dm", members: everyone, owner: null });
+    this.channels.set(id, { kind: "dm", members: everyone, owner: null, joined: everyone, isMissingKey: false });
     this.context.listChannel(id, "");
     return id;
   }
@@ -119,7 +134,7 @@ export class FakePrivate {
       if (found.kind === "notes") return id;
     }
     const id = `dm:${randomHex(16)}`;
-    this.channels.set(id, { kind: "notes", members: [me], owner: null });
+    this.channels.set(id, { kind: "notes", members: [me], owner: null, joined: [me], isMissingKey: false });
     this.context.listChannel(id, "");
     return id;
   }
@@ -128,6 +143,7 @@ export class FakePrivate {
     const found = this.require(channel);
     return {
       members: [...found.members],
+      invited: found.members.filter((member) => !found.joined.includes(member)),
       owner: found.owner,
       is_owner: found.owner === this.context.me(),
     };

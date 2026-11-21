@@ -58,6 +58,7 @@ function PrivateMembers({ channel, onLeft }: { channel: Channel; onLeft: () => v
   }
 
   const ids = new Set(inChannel.members);
+  const invited = new Set(inChannel.invited);
   const members = everyone.filter((member) => ids.has(member.id));
   const isOwner = inChannel.is_owner && channel.is_member;
   const isAlone = inChannel.members.length <= 1;
@@ -86,6 +87,7 @@ function PrivateMembers({ channel, onLeft }: { channel: Channel; onLeft: () => v
           actions={(member) => (
             <>
               {member.id === inChannel.owner && <Badge tone="accent">Owner</Badge>}
+              {invited.has(member.id) && <Badge>Invited</Badge>}
               {isOwner && member.id !== session.me && (
                 <Menu
                   trigger={
@@ -109,6 +111,11 @@ function PrivateMembers({ channel, onLeft }: { channel: Channel; onLeft: () => v
             </>
           )}
         />
+      )}
+      {!addable && invited.size > 0 && (
+        <p className="text-xs text-muted">
+          Invited people haven't read anything here yet, so they may not have its key.
+        </p>
       )}
       {channel.is_member && (
         <div className="flex items-center justify-between gap-2">

@@ -78,6 +78,10 @@ pub enum PrivateOp {
     Succeed {
         position: u64,
     },
+    /// A member's device has the key and they opened the channel: written
+    /// once per membership, so others can tell who really reads it (#110).
+    /// The key it's sealed with is the proof.
+    Joined,
 }
 
 impl PrivateOp {
@@ -91,7 +95,7 @@ impl PrivateOp {
             | Self::HandOver { position, .. }
             | Self::OwnerDelete { position, .. }
             | Self::Succeed { position } => Some(*position),
-            Self::Leave | Self::Content(_) => None,
+            Self::Leave | Self::Content(_) | Self::Joined => None,
         }
     }
 }

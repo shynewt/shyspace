@@ -246,7 +246,7 @@ impl Store {
     fn apply_judged(&self, verified: &VerifiedOp, body: &PrivateBody) -> Result<Settled> {
         match self.with_savepoint(|store| store.apply_private(verified, body)) {
             Ok(applied) => {
-                self.record_private_applied(&body.channel, &verified.author, verified.seq)?;
+                self.record_private_applied(&body.channel, &verified.author, verified.seq, body.generation)?;
                 Ok(Settled::Applied(applied))
             }
             Err(error) if error.downcast_ref::<RuleViolation>().is_some() => {
@@ -368,6 +368,7 @@ impl Store {
                 applied.changes.push(Change::Channels);
             }
             PrivateOp::Content(op) => applied.extend(self.apply_content(verified, op.clone())?),
+            PrivateOp::Joined => applied.changes.push(Change::Channels),
         }
         Ok(applied)
     }
@@ -399,8 +400,8 @@ impl Store {
 fn may_settle_now(settling: Settling, op: &PrivateOp) -> bool {
     match settling {
         Settling::Nothing => false,
-        Settling::OwnerOps => !matches!(op, PrivateOp::Leave | PrivateOp::Content(_)),
-        Settling::Leaves => !matches!(op, PrivateOp::Content(_)),
+        Settling::OwnerOps => !matches!(op, PrivateOp::Leave | PrivateOp::Content(_) | PrivateOp::Joined),
+        Settling::Leaves => !matches!(op, PrivateOp::Content(_) | PrivateOp::Joined),
         Settling::Everything => true,
     }
 }

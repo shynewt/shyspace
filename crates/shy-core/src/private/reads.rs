@@ -6,7 +6,7 @@ use super::ids::{PrivateKind, is_message_in, private_channel_of, private_kind};
 use crate::{
     ops::{Op, is_owned_by},
     storage::{Ending, Store},
-    views::{Channel, ChannelKind, PrivateMembers},
+    views::{Channel, ChannelKind, PrivateMembers, member_id},
     workspace::Workspace,
 };
 
@@ -15,13 +15,16 @@ impl Workspace {
     pub fn private_members(&self, channel: &str) -> Result<PrivateMembers> {
         let state = self.state();
         let owner = state.store.current_owner(channel)?;
+        let members = state.store.private_members(channel, Ending::Left)?;
+        let mut invited = Vec::new();
+        for member in &members {
+            if !state.store.has_joined(channel, member)? {
+                invited.push(member_id(member));
+            }
+        }
         Ok(PrivateMembers {
-            members: state
-                .store
-                .private_members(channel, Ending::Left)?
-                .iter()
-                .map(|member| hex::encode(member.as_bytes()))
-                .collect(),
+            members: members.iter().map(member_id).collect(),
+            invited,
             owner: owner.map(|owner| hex::encode(owner.as_bytes())),
             is_owner: owner == Some(self.me()),
         })
@@ -35,6 +38,7 @@ impl Workspace {
             Some(PrivateKind::Channel) => {
                 channel.kind = ChannelKind::Private;
                 channel.is_member = store.private_members(&channel.id, Ending::Left)?.contains(&me);
+                channel.is_missing_key = channel.is_member && !store.holds_newest_key(&channel.id)?;
                 channel.can_delete = store.current_owner(&channel.id)? == Some(me);
             }
             Some(PrivateKind::Dm) => {

@@ -310,6 +310,19 @@ impl Store {
         .transpose()
     }
 
+    /// Whether we hold the key the owner announced for `channel`'s newest
+    /// generation (not just any key granted under that number).
+    pub fn holds_newest_key(&self, channel: &str) -> Result<bool> {
+        let newest = self.latest_generation(channel)?;
+        let Some(announced) = self.commitment_of(channel, newest)? else {
+            return Ok(false);
+        };
+        Ok(self
+            .channel_keys(Some(channel))?
+            .iter()
+            .any(|key| key.generation == newest && commitment(&key.key) == announced))
+    }
+
     pub(crate) fn put_dm_members(&self, channel: &str, members: &[PublicKey]) -> Result<()> {
         for member in members {
             self.db.execute(

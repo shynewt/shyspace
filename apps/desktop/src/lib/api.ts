@@ -5,8 +5,11 @@ import { reportError } from "./toast";
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
 export type NotifyLevel = "all" | "mentions" | "nothing";
 export type ChannelKind = "public" | "private" | "dm" | "notes";
-/** Who is in a private channel (member ids, earliest added first), and who owns it. */
-export type PrivateMembers = { members: string[]; owner: string | null; is_owner: boolean };
+/**
+ * Who is in a private channel (member ids, earliest added first), and who owns it. `invited` are
+ * members who haven't shown yet that they can read it: they never opened it, or never got its key.
+ */
+export type PrivateMembers = { members: string[]; invited: string[]; owner: string | null; is_owner: boolean };
 export type Channel = {
   id: string;
   kind: ChannelKind;
@@ -16,6 +19,8 @@ export type Channel = {
   dm_members: string[];
   /** False once you left or were removed from a private channel. */
   is_member: boolean;
+  /** You're in this private channel, but its owner started a newer key your device never got. */
+  is_missing_key: boolean;
   can_delete: boolean;
   unread: number;
   unread_mentions: number;

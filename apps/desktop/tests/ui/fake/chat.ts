@@ -411,6 +411,7 @@ export class FakeChat {
       kind: "public" as const,
       dm_members: [],
       is_member: true,
+      is_missing_key: false,
       can_delete: this.mayDelete(channel.id),
       ...this.context.privateView(channel.id),
       unread: this.unreadIn(channel.id).filter((message) => isInChannel(this.messages, message)).length,

@@ -196,3 +196,35 @@ test("a DM with someone who left the workspace becomes read-only", async ({ page
   await expect(page.getByText("Grace left the workspace, so this conversation is read-only.")).toBeVisible();
   await expect(page.getByLabel("Message Grace")).toBeHidden();
 });
+
+test("someone who hasn't opened a channel yet shows as invited", async ({ page }) => {
+  const alan = await page.evaluate(() => {
+    const id = window.fake.addMember("Alan");
+    window.fake.receivePrivateChannel(window.fake.addMember("Grace"), "ops", [id]);
+    return id;
+  });
+  await workspaceNav(page)
+    .getByRole("button", { name: /^ops, private channel/ })
+    .click();
+  await page.getByRole("button", { name: "People in #ops" }).click();
+  const people = page.getByRole("dialog", { name: "People in #ops" });
+  await expect(people.getByText("Invited", { exact: true })).toHaveCount(1);
+  await expect(people.getByRole("listitem").filter({ hasText: "Alan" })).toContainText("Invited");
+  await expect(people.getByText("Invited people haven't read anything here yet")).toBeVisible();
+
+  await page.evaluate((id) => window.fake.privateMemberJoined("ops", id), alan);
+  await expect(people.getByText("Invited", { exact: true })).toHaveCount(0);
+  await expect(people.getByText("Invited people haven't read anything here yet")).toBeHidden();
+});
+
+test("missing a new key says so above the composer", async ({ page }) => {
+  await page.evaluate(() => window.fake.receivePrivateChannel(window.fake.addMember("Grace"), "ops"));
+  await workspaceNav(page)
+    .getByRole("button", { name: /^ops, private channel/ })
+    .click();
+  await expect(page.getByText("your device didn't get it")).toBeHidden();
+
+  await page.evaluate(() => window.fake.missNewKeyIn("ops"));
+  await expect(page.getByText("You can't read new messages here")).toHaveCount(1);
+  await expect(page.getByLabel("Message #ops")).toBeVisible();
+});

@@ -86,6 +86,7 @@ impl Store {
                 name: row.get(1)?,
                 dm_members: Vec::new(),
                 is_member: true,
+                is_missing_key: false,
                 can_delete: false,
                 unread: 0,
                 unread_mentions: 0,

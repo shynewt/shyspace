@@ -104,6 +104,22 @@ impl Store {
             .optional()?)
     }
 
+    /// Whether our read position in `channel` is at a message sealed with a
+    /// key from `member`'s latest add on. Every removal starts a new key, so
+    /// a position left from before a re-add never counts.
+    pub fn has_read_since_added(&self, channel: &str, member: &PublicKey) -> Result<bool> {
+        let Some(membership) = self.owner_membership(channel, member)? else {
+            return Ok(false);
+        };
+        self.exists(
+            "SELECT 1 FROM read_markers r
+             JOIN messages m ON m.channel = r.channel AND m.lamport = r.lamport AND m.author = r.author
+             JOIN private_applied p ON p.channel = m.channel AND p.author = m.author AND p.seq = m.seq
+             WHERE r.channel = ? AND p.generation >= ?",
+            params![channel, membership.from_generation],
+        )
+    }
+
     /// Whether `member`'s op `seq`, sealed with key `generation`, falls in a
     /// time they belonged: added before it, from that generation or earlier,
     /// and not removed (or gone) between.

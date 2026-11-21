@@ -771,3 +771,232 @@ async fn a_key_handed_to_one_member_never_carries_what_they_write() {
     deliver(&bob, bob_before, &carol);
     assert_eq!(texts(&carol, &dm), ["first", "second"]);
 }
+
+fn invited(member: &Workspace, channel: &str) -> Vec<String> {
+    member.private_members(channel).unwrap().invited
+}
+
+fn message_id(op: &Op) -> String {
+    let Op::Message { id, .. } = op else {
+        panic!("not a message");
+    };
+    id.clone()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_listed_without_the_key_shows_as_invited() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    // Bob lists Carol and Dave but gives the key to Dave alone.
+    let key = new_channel_key();
+    let invitees: Vec<Invitee> = [&carol, &dave]
+        .iter()
+        .map(|member| Invitee {
+            member: member.me(),
+            after_seq: own_last_seq(member),
+        })
+        .collect();
+    let channel = private_channel_id(&bob.me(), &commitment(&key), "plans", &invitees).unwrap();
+    let first = StoredKey {
+        channel: channel.clone(),
+        generation: 1,
+        key,
+    };
+    let hello = message(&bob, &channel, "hello");
+    let mut forger = Forger::new(&bob);
+    let ops = [
+        forger.seal(forged_grant(&bob, &dave, &channel, 1, key)),
+        forged_create(&mut forger, &first, "plans", &[&carol, &dave]),
+        forger.seal_private(&first, PrivateOp::Content(hello.clone())),
+    ];
+    for envelope in ops {
+        carol.receive(envelope.clone()).unwrap();
+        dave.receive(envelope).unwrap();
+    }
+
+    dave.mark_read(&channel, &message_id(&hello)).unwrap();
+    sync_all(&[&admin, &carol, &dave]).await;
+    assert_eq!(members_of(&dave, &channel).len(), 3);
+    assert_eq!(invited(&dave, &channel), [carol.my_id()]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_joins_by_writing_or_by_opening_the_channel() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    assert_eq!(invited(&bob, &channel), [carol.my_id(), dave.my_id()]);
+
+    let hello = carol.send_message(&channel, "hello", None).unwrap();
+    sync_all(&[&bob, &carol, &dave]).await;
+    assert_eq!(invited(&bob, &channel), [dave.my_id()], "writing counts");
+    let dave_before = own_last_seq(&dave);
+    sync_all(&[&dave]).await;
+    assert_eq!(own_last_seq(&dave), dave_before, "being listed writes nothing");
+
+    dave.mark_read(&channel, &hello).unwrap();
+    sync_all(&[&bob, &dave]).await;
+    assert!(invited(&bob, &channel).is_empty(), "opening it counts");
+    let dave_joined = own_last_seq(&dave);
+    sync_all(&[&dave]).await;
+    let context = dave.apply_context();
+    dave.state()
+        .store
+        .atomically(|store| store.rebuild_views(context))
+        .unwrap();
+    sync_all(&[&bob, &dave]).await;
+    assert_eq!(own_last_seq(&dave), dave_joined, "the join is written once");
+    assert!(invited(&dave, &channel).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn old_ops_never_prove_a_later_membership() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    carol.send_message(&channel, "before", None).unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    assert!(!invited(&dave, &channel).contains(&carol.my_id()));
+    bob.remove_from_private_channel(&channel, &carol.my_id()).unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    // Bob lists Carol again as if from before her old ops, without a key.
+    let newest = newest_key(&bob, &channel);
+    let position = bob.state().store.next_position(&channel).unwrap();
+    let add = Forger::new(&bob).seal_private(
+        &newest,
+        PrivateOp::Add {
+            invitee: Invitee {
+                member: carol.me(),
+                after_seq: 0,
+            },
+            from_generation: newest.generation,
+            position,
+        },
+    );
+    dave.receive(add).unwrap();
+    assert!(members_of(&dave, &channel).contains(&carol.my_id()));
+    assert!(invited(&dave, &channel).contains(&carol.my_id()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_left_out_of_a_new_key_is_told() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    assert!(!listed(&carol, &channel).unwrap().is_missing_key);
+
+    // Bob starts generation 2 and gives it to Dave alone.
+    let current = newest_key(&bob, &channel);
+    let next = new_channel_key();
+    let position = bob.state().store.next_position(&channel).unwrap();
+    let mut forger = Forger::new(&bob);
+    let ops = [
+        forger.seal(forged_grant(&bob, &dave, &channel, 2, next)),
+        forger.seal_private(
+            &current,
+            PrivateOp::Rotate {
+                generation: 2,
+                commitment: commitment(&next),
+                position,
+            },
+        ),
+    ];
+    for envelope in ops {
+        carol.receive(envelope.clone()).unwrap();
+        dave.receive(envelope).unwrap();
+    }
+    assert!(listed(&carol, &channel).unwrap().is_missing_key);
+    assert!(!listed(&dave, &channel).unwrap().is_missing_key);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_junk_key_under_the_new_number_doesnt_hide_a_missed_key() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+
+    // Bob hands Carol a made-up key labelled generation 2, then starts the
+    // real generation 2 for Dave alone.
+    let current = newest_key(&bob, &channel);
+    let real = new_channel_key();
+    let position = bob.state().store.next_position(&channel).unwrap();
+    let mut forger = Forger::new(&bob);
+    let ops = [
+        forger.seal(forged_grant(&bob, &carol, &channel, 2, new_channel_key())),
+        forger.seal(forged_grant(&bob, &dave, &channel, 2, real)),
+        forger.seal_private(
+            &current,
+            PrivateOp::Rotate {
+                generation: 2,
+                commitment: commitment(&real),
+                position,
+            },
+        ),
+    ];
+    for envelope in ops {
+        carol.receive(envelope).unwrap();
+    }
+    assert!(listed(&carol, &channel).unwrap().is_missing_key);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_re_add_alone_never_makes_a_device_write() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    let first = bob.send_message(&channel, "first", None).unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    carol.mark_read(&channel, &first).unwrap();
+    sync_all(&[&bob, &carol]).await;
+    assert!(!invited(&bob, &channel).contains(&carol.my_id()));
+
+    bob.remove_from_private_channel(&channel, &carol.my_id()).unwrap();
+    sync_all(&[&bob, &carol]).await;
+    bob.add_to_private_channel(&channel, &carol.my_id()).unwrap();
+    let carol_before = own_last_seq(&carol);
+    sync_all(&[&bob, &carol]).await;
+    assert_eq!(
+        own_last_seq(&carol),
+        carol_before,
+        "her old read position doesn't count"
+    );
+    assert!(invited(&bob, &channel).contains(&carol.my_id()));
+
+    let second = bob.send_message(&channel, "second", None).unwrap();
+    sync_all(&[&bob, &carol]).await;
+    carol.mark_read(&channel, &second).unwrap();
+    sync_all(&[&bob, &carol]).await;
+    assert!(!invited(&bob, &channel).contains(&carol.my_id()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_join_counts_the_same_in_any_order_and_twice() {
+    let (_root, _bucket, _admin, bob, carol, dave) = four_members().await;
+    let (bob_before, carol_before) = (own_last_seq(&bob), own_last_seq(&carol));
+    let channel = bob
+        .create_private_channel("plans", &[carol.my_id(), dave.my_id()])
+        .unwrap();
+    let hello = bob.send_message(&channel, "hello", None).unwrap();
+    deliver(&bob, bob_before, &carol);
+    carol.mark_read(&channel, &hello).unwrap();
+    sync_all(&[&carol]).await;
+    assert!(
+        own_last_seq(&carol) > carol_before,
+        "Carol's device wrote that she joined"
+    );
+
+    // Dave hears Carol's join before the channel exists, then all of it again.
+    deliver(&carol, carol_before, &dave);
+    deliver(&bob, bob_before, &dave);
+    deliver(&carol, carol_before, &dave);
+    assert_eq!(invited(&dave, &channel), [dave.my_id()]);
+}

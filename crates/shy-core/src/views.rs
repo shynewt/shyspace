@@ -61,6 +61,9 @@ pub struct Channel {
     /// False once you left or were removed from a private channel; what you
     /// read before stays.
     pub is_member: bool,
+    /// A member of a private channel whose owner started a newer key this
+    /// device never got: they can't read what's written with it.
+    pub is_missing_key: bool,
     /// Whether this member may delete it (its owner or the admin).
     pub can_delete: bool,
     /// Messages by others since this member's read position.
@@ -89,6 +92,8 @@ pub enum ChannelKind {
 pub struct PrivateMembers {
     /// Member ids, earliest added first.
     pub members: Vec<String>,
+    /// Members who haven't shown yet that they can read it (#110).
+    pub invited: Vec<String>,
     pub owner: Option<String>,
     pub is_owner: bool,
 }
