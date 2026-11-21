@@ -21,6 +21,8 @@ type Preferences = {
   alertsShowText: boolean;
   /** Newest first, at most RECENT_EMOJI_LIMIT. */
   recentEmoji: RecentEmoji[];
+  /** Hides the line in Settings › Profile suggesting what to add. */
+  isProfileNudgeDismissed: boolean;
 };
 
 const DEFAULTS: Preferences = {
@@ -29,6 +31,7 @@ const DEFAULTS: Preferences = {
   reduceMotion: "system",
   alertsShowText: true,
   recentEmoji: [],
+  isProfileNudgeDismissed: false,
 };
 const RECENT_EMOJI_LIMIT = 16;
 const KEY = "shyspace.preferences";

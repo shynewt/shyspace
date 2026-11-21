@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { cx } from "./cx";
 
 const FIELD =
-  "w-full rounded-lg border border-line bg-bg text-sm text-ink outline-none transition placeholder:text-faint focus:border-accent focus:ring-3 focus:ring-accent/15 disabled:opacity-50";
+  "w-full rounded-lg border border-line bg-bg text-sm text-ink outline-none transition placeholder:text-faint focus:border-accent focus:ring-3 focus:ring-accent/15 disabled:opacity-50 aria-invalid:border-danger aria-invalid:focus:border-danger aria-invalid:focus:ring-danger/15";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input spellCheck={false} className={cx(FIELD, "h-9 px-3", className)} {...props} />;
@@ -10,4 +10,8 @@ export function Input({ className, ...props }: ComponentProps<"input">) {
 
 export function TextArea({ className, ...props }: ComponentProps<"textarea">) {
   return <textarea className={cx(FIELD, "resize-none px-3 py-2 leading-relaxed", className)} {...props} />;
+}
+
+export function Select({ className, ...props }: ComponentProps<"select">) {
+  return <select className={cx(FIELD, "h-9 px-2.5", className)} {...props} />;
 }

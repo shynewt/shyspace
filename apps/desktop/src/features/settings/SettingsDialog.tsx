@@ -16,12 +16,12 @@ import { RecoverySettings } from "./RecoverySettings";
 import { StorageAttentionSign } from "./StorageProtection";
 import { StorageSettings } from "./StorageSettings";
 
-/** Members takes its tab from the target, so it's rendered apart from these. */
+/** Profile and Members take a field or tab from the target, so they're rendered apart from these. */
 const SECTION_VIEWS: Record<SettingsSection, { icon: ReactNode; description: string; content: ReactNode }> = {
   profile: {
     icon: <UserRound size={15} />,
     description: "How you appear to everyone in the workspace.",
-    content: <ProfileSettings />,
+    content: null,
   },
   appearance: {
     icon: <Palette size={15} />,
@@ -149,14 +149,14 @@ function SettingsWindow({
             <h3 className="text-lg font-semibold">{section.label}</h3>
             <p className="mt-0.5 text-sm text-muted">{SECTION_VIEWS[section.id].description}</p>
           </header>
-          {section.id === "members" ? (
+          {section.id === "members" && (
             <MembersSettings
               tab={membersTab}
               onTabChange={(tab) => onNavigate({ section: "members", membersTab: tab })}
             />
-          ) : (
-            SECTION_VIEWS[section.id].content
           )}
+          {section.id === "profile" && <ProfileSettings target={target} />}
+          {SECTION_VIEWS[section.id].content}
         </Tabs.Content>
       ))}
     </Tabs.Root>

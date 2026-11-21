@@ -11,8 +11,14 @@ export type SettingsSection =
 
 export type MembersTab = "members" | "invites" | "requests";
 
-/** Where Settings opens. `membersTab` picks a tab in Members (the admin's only). */
-export type SettingsTarget = { section: SettingsSection; membersTab?: MembersTab };
+/** Fields in Settings › Profile that can be opened straight into. */
+export type ProfileField = "name" | "title" | "pronouns" | "time_zone";
+
+/**
+ * Where Settings opens. `membersTab` picks a tab in Members (the admin's
+ * only); `field` focuses a field in Profile.
+ */
+export type SettingsTarget = { section: SettingsSection; membersTab?: MembersTab; field?: ProfileField };
 
 export type SettingsGroup = "you" | "workspace";
 

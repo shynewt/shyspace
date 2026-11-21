@@ -13,7 +13,7 @@ test("you can change the name everyone sees", async ({ page }) => {
   await settings.getByLabel("Display name").fill("Ada Lovelace");
   await settings.getByRole("button", { name: "Save profile" }).click();
 
-  await expect(page.getByText("Your name is updated for everyone.")).toBeVisible();
+  await expect(page.getByText("Your profile is updated for everyone.")).toBeVisible();
   expect(await page.evaluate(() => window.fake.handle("members", undefined))).toContainEqual(
     expect.objectContaining({ name: "Ada Lovelace", is_admin: true }),
   );
