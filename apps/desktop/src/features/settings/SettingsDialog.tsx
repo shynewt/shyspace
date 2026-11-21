@@ -143,7 +143,7 @@ function SettingsWindow({
           value={section.id}
           forceMount
           tabIndex={-1}
-          className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 outline-none data-[state=inactive]:hidden"
+          className="relative min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 outline-none data-[state=inactive]:hidden"
         >
           <header className="mb-5">
             <h3 className="text-lg font-semibold">{section.label}</h3>

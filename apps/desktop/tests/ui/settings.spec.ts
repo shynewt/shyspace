@@ -335,3 +335,13 @@ test("moving between sections with the keyboard shows where focus is", async ({ 
   await expect(settings.getByRole("tab", { name: "Appearance" })).toBeFocused();
   await expect(settings.getByRole("tab", { name: "Appearance" })).toHaveCSS("outline-style", "solid");
 });
+
+test("no section makes the whole settings window scroll past its end", async ({ page }) => {
+  const settings = await openSettings(page);
+  const sections = settings.getByRole("tablist", { name: "Settings sections" }).getByRole("tab");
+  for (const section of await sections.all()) {
+    await section.click();
+    const overflow = await settings.evaluate((dialog) => dialog.scrollHeight - dialog.clientHeight);
+    expect(overflow, `${await section.textContent()} scrolls the window`).toBeLessThanOrEqual(0);
+  }
+});
