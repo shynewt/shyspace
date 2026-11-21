@@ -170,6 +170,8 @@ export class FakeBackend {
 
   /** Desktop notifications the app asked to show. */
   readonly alertsShown: { title: string; body: string }[] = [];
+  /** Whose picture each alert in `alertsShown` came with, if it was a PNG; null for none. */
+  readonly alertPictures: (string | null)[] = [];
   /** The message each alert in `alertsShown` was about, if any. */
   private readonly alertMessages: (string | null)[] = [];
 
@@ -422,6 +424,7 @@ export class FakeBackend {
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
       case "show_alert":
         this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
+        this.alertPictures.push(alertPicture(argument(args, "picture")));
         this.alertMessages.push((argument(args, "message") as string | null) ?? null);
         return null;
       case "pages":
@@ -653,4 +656,17 @@ export class FakeBackend {
   private notify(change: Change): void {
     void emit("change", change);
   }
+}
+
+/** The member a `show_alert` picture is for, if it's PNG bytes. */
+function alertPicture(picture: unknown): string | null {
+  if (picture === null || picture === undefined) return null;
+  if (typeof picture !== "object" || !("member" in picture) || !("png" in picture)) {
+    throw new Error("fake backend: an alert picture is { member, png }");
+  }
+  const { member, png } = picture;
+  const signature = [0x89, 0x50, 0x4e, 0x47];
+  const isPng = Array.isArray(png) && signature.every((byte, index) => png[index] === byte);
+  if (typeof member !== "string" || !isPng) throw new Error("fake backend: an alert picture must be PNG bytes");
+  return member;
 }

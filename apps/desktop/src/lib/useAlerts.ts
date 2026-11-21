@@ -1,6 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
+import { avatarPng } from "./alertPicture";
 import { api, onChange } from "./api";
+import { alertTitle } from "./channels";
 import { displayName } from "./people";
 import { readPreferences } from "./preferences";
 import { reportError } from "./toast";
@@ -23,9 +25,15 @@ export function useAlerts(view: View | null, navigate: (view: View) => void) {
         const shown = currentView.current;
         const isLooking = document.hasFocus() && shown?.kind === "channel" && shown.id === change.channel;
         if (isLooking) return;
-        const title = `${displayName(change.author_name, change.author)} in #${change.channel_name}`;
+        const author = { id: change.author, name: change.author_name };
         const body = readPreferences().alertsShowText ? change.preview : "New message";
-        api.showAlert(title, body, change.message).catch(reportError);
+        Promise.all([api.channels(), api.members(), avatarPng(author.id, displayName(author.name, author.id))])
+          .then(([channels, members, png]) => {
+            const channel = channels.find((candidate) => candidate.id === change.channel);
+            const title = alertTitle(author, channel, members, change.channel_name);
+            return api.showAlert(title, body, change.message, { member: author.id, png });
+          })
+          .catch(reportError);
       }),
     [],
   );

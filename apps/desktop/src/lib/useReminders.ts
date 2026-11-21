@@ -22,7 +22,7 @@ export function useReminders(onOpen: (item: LaterItem) => void) {
         const what = text ? plainPreview(text, () => undefined) : item.page?.title || "something you saved";
         const body = what.length > PREVIEW_CHARS ? `${what.slice(0, PREVIEW_CHARS - 1)}…` : what;
         showReminderToast(`Reminder: ${body}`, () => onOpen(item));
-        api.showAlert("Reminder", body, item.message?.message.id ?? null).catch(reportError);
+        api.showAlert("Reminder", body, item.message?.message.id ?? null, null).catch(reportError);
       }
     };
 

@@ -244,8 +244,9 @@ export const api = {
   markThreadRead: (root: string, message: string) => invoke<void>("mark_thread_read", { root, message }),
   setNotifyLevel: (channel: string, level: NotifyLevel) => invoke<void>("set_notify_level", { channel, level }),
   /** A desktop notification; a click on it opens `message` (sent back as an "alert-opened" event). */
-  showAlert: (title: string, body: string, message: string | null) =>
-    invoke<void>("show_alert", { title, body, message }),
+  /** `picture` is PNG bytes shown with the notification, named for the member it shows. */
+  showAlert: (title: string, body: string, message: string | null, picture: { member: string; png: number[] } | null) =>
+    invoke<void>("show_alert", { title, body, message, picture }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>

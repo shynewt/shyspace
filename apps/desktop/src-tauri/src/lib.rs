@@ -417,8 +417,14 @@ async fn set_notify_level(
 
 /// Shows a desktop notification. The UI decides when one is wanted.
 #[tauri::command]
-fn show_alert(app: AppHandle, title: String, body: String, message: Option<String>) -> CommandResult<()> {
-    alerts::show(&app, title, body, message)
+fn show_alert(
+    app: AppHandle,
+    title: String,
+    body: String,
+    message: Option<String>,
+    picture: Option<alerts::AlertPicture>,
+) -> CommandResult<()> {
+    alerts::show(&app, title, body, message, picture)
 }
 
 #[tauri::command]

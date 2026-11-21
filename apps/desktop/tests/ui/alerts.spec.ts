@@ -114,3 +114,34 @@ test("resetting alerts keeps what worked undoable when one channel fails", async
   await settings.getByRole("button", { name: "Undo" }).click();
   await expect(general.getByRole("radio", { name: "Mentions only" })).toBeChecked();
 });
+
+const alertPictures = (page: Page) => page.evaluate(() => window.fake.alertPictures);
+
+test("a notification names the place: the person for a DM, the group, or the channel", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.memberNamed("Grace");
+    const alan = window.fake.addMember("Alan");
+    const dm = window.fake.handle("open_dm", { members: [grace] });
+    const group = window.fake.handle("open_dm", { members: [grace, alan] });
+    if (typeof dm !== "string" || typeof group !== "string") throw new Error("no DM");
+    window.fake.receiveMessageIn(grace, dm, "just you");
+    window.fake.receiveMessageIn(grace, group, "all of us");
+    window.fake.receivePrivateChannel(grace, "ops");
+    window.fake.receiveMessage(grace, "ops", "in private");
+  });
+
+  await expect
+    .poll(() => alertsShown(page))
+    .toEqual([
+      { title: "Grace", body: "just you" },
+      { title: "Grace in your group with Alan", body: "all of us" },
+      { title: "Grace in #ops", body: "in private" },
+    ]);
+});
+
+test("a notification shows the sender's picture", async ({ page }) => {
+  await graceSays(page, "random", "hello");
+  const grace = await page.evaluate(() => window.fake.memberNamed("Grace"));
+
+  await expect.poll(() => alertPictures(page)).toEqual([grace]);
+});
