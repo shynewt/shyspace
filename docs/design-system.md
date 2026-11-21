@@ -37,7 +37,7 @@ Keep feedback under about 250 ms. Reduced motion is decided once, globally: `Mot
 | `Input`, `TextArea`, `Field` | form controls; `Field` links its label to the control through a render function |
 | `FormError` | why a form's last save failed, under the form; announced to screen readers |
 | `Dialog` | modal surfaces (centered, or `placement="top"` like the search palette); never taller than the window, longer content scrolls inside; `hasCloseButton` for dialogs without their own Cancel or Done; pads its content and stacks it 16 px apart (`padding="none"` for edge-to-edge layouts like the palette and Settings); end with `DialogActions` for the buttons, the main one last |
-| `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger; a menu sets destructive actions apart below a line; `Popover` can hand focus back to a field (`returnFocusTo`) |
+| `Menu`, `Popover`, `Tooltip` | floating surfaces anchored to a trigger; a menu sets destructive actions apart below a line, in red with their icon in the same red (other icons are muted); `Popover` can hand focus back to a field (`returnFocusTo`) |
 | `Card`, `SectionLabel`, `EmptyState` | grouping and empty screens |
 | `Avatar`, `Badge`, `Kbd`, `Spinner`, `Logo` | small content pieces |
 | `ListRow` | a clickable row in a list (Inbox, Later): `leading` avatar or icon, a small `meta` line, a one-line preview; `trailing` actions sit outside the button; `isHighlighted` keeps the hover background (while its menu is open) |

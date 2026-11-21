@@ -75,7 +75,7 @@ function Action({ item }: { item: MenuAction }) {
       onSelect={item.onSelect}
       className={cx(ITEM, item.isDestructive ? "text-danger-text" : "text-ink")}
     >
-      {item.icon && <span className="text-muted">{item.icon}</span>}
+      {item.icon && <span className={item.isDestructive ? undefined : "text-muted"}>{item.icon}</span>}
       {item.label}
     </DropdownMenu.Item>
   );

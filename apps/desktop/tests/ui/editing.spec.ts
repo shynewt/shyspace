@@ -163,3 +163,16 @@ test("deleting a message asks with the message in view", async ({ page }) => {
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.getByRole("dialog", { name: "Delete this message?" })).toContainText("Buy cheap watches");
 });
+
+test("a destructive menu item's icon takes the item's red, not grey", async ({ page }) => {
+  await openGeneral(page);
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("Remove me later");
+  await composer.press("Enter");
+
+  await messageActions(page, "Remove me later");
+  const deleteItem = page.getByRole("menuitem", { name: "Delete" });
+  const textColour = await deleteItem.evaluate((item) => getComputedStyle(item).color);
+  const iconColour = await deleteItem.locator("svg").evaluate((icon) => getComputedStyle(icon).color);
+  expect(iconColour).toBe(textColour);
+});
