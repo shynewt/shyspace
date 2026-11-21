@@ -6565,6 +6565,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shy-demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "shy-core",
+ "tokio",
+]
+
+[[package]]
 name = "shyspace-desktop"
 version = "0.1.0"
 dependencies = [

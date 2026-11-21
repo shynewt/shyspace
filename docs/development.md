@@ -29,11 +29,17 @@ The CLI reads bucket settings from `SHY_S3_ENDPOINT`, `SHY_S3_BUCKET`, `SHY_S3_A
 
 ## Running
 
-- **Desktop:** `cd apps/desktop && pnpm tauri dev`. The tray icon needs the system's appindicator library on Linux (`libayatana-appindicator-gtk3` on Fedora, `libayatana-appindicator3-1` on Ubuntu); without it the app still runs, but closing the window quits. `SHY_DIR=<dir>` picks the data directory, so you can run several members on one machine.
+- **Desktop:** `cd apps/desktop && pnpm tauri dev`. In this debug build, Create starts with the local bucket above filled in. The tray icon needs the system's appindicator library on Linux (`libayatana-appindicator-gtk3` on Fedora, `libayatana-appindicator3-1` on Ubuntu); without it the app still runs, but closing the window quits. `SHY_DIR=<dir>` picks the data directory, so you can run several members on one machine.
 - **CLI:** `cargo run -p shy-cli -- --dir <dir> <create|join|invite|recovery-kit|restore|mcp>`. The binary is called `shy`. It keeps its device key in the system keychain; add `--key-file <path>` (outside the data directory) on machines without one, and in tests.
 - **An agent as a member:** the admin creates an invite (app or `shy invite create`), then `shy join --bot --name Claude <invite>` waits until the admin approves; then `claude mcp add shyspace -- shy mcp`. Named agents (`--agent <name>`) keep separate members in `~/.local/share/shyspace/agents/<name>`. The agent skill lives in `skills/shyspace/SKILL.md`; `shy skill` prints it, and the MCP server sends the same guidance as its instructions, so keep it in step with the tools.
 
 Note: one identity can only be online once. Don't run the CLI and the app on the same data directory at the same time.
+
+## A demo workspace
+
+`pnpm dev:demo` (in `apps/desktop`) builds a fresh workspace on the local bucket and opens the app in it as Ada, the admin. It has five more members (one an agent), public channels with threads, reactions and mentions, a private channel, DMs, notes, pages, statuses, a sidebar section, unread messages and two reminders (one due). Each run replaces the last; it refuses to delete a folder that isn't an earlier demo.
+
+Every member has a data directory in `/var/tmp/shyspace-demo/<name>` (or `$SHY_DEMO_DIR`), with its key in the system keychain, so you can open another one alongside to watch live updates: `SHY_DIR=/var/tmp/shyspace-demo/maya pnpm tauri dev`, or `shy --dir /var/tmp/shyspace-demo/maya mcp`. The tool itself is `crates/shy-demo` (`cargo run -p shy-demo -- <dir>` prints the admin's directory); it uses the `SHY_S3_*` variables when set. All demo messages are written within a few seconds, so they share a time.
 
 ## Checks
 

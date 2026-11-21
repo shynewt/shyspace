@@ -11,6 +11,7 @@ An end-to-end encrypted team workspace: chat, collaborative pages, and AI agents
 
 - `crates/shy-core`: the engine (OpenMLS keys, signed and encrypted ops, iroh gossip, S3 bucket, SQLite)
 - `crates/shy-cli`: `shy`, a headless member that serves the workspace to AI agents over MCP
+- `crates/shy-demo`: builds a demo workspace for trying the app by hand
 - `apps/desktop`: the desktop app (Tauri + React)
 
 Read [docs/](docs/README.md) for architecture, security, decisions and development. Planned work lives in [issues](https://github.com/shynewt/shyspace/issues).

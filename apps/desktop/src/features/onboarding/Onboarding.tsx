@@ -34,6 +34,17 @@ const EMPTY_BUCKET: BucketConfig = {
   secret_access_key: "",
 };
 
+/** The local test bucket from docs/development.md, filled in for debug builds only. */
+const LOCAL_BUCKET: BucketConfig = {
+  endpoint: "http://localhost:9000",
+  region: "us-east-1",
+  bucket: "shyspace",
+  access_key_id: "shyadmin",
+  secret_access_key: "shysecret123",
+};
+
+const STARTING_BUCKET = import.meta.env.TAURI_ENV_DEBUG === "true" ? LOCAL_BUCKET : EMPTY_BUCKET;
+
 export function Onboarding({ onReady }: { onReady: (session: Session) => void }) {
   const [mode, setMode] = useState<Mode>("create");
   return (
@@ -86,7 +97,7 @@ export function Onboarding({ onReady }: { onReady: (session: Session) => void })
 function CreateForm({ onReady }: { onReady: (session: Session) => void }) {
   const [workspaceName, setWorkspaceName] = useState("");
   const [name, setName] = useState("");
-  const [bucket, setBucket] = useState(EMPTY_BUCKET);
+  const [bucket, setBucket] = useState(STARTING_BUCKET);
   const [isBusy, setBusy] = useState(false);
   const firstInput = useRef<HTMLInputElement>(null);
   useFocusOnMount(firstInput);
