@@ -27,22 +27,22 @@ export function ProfileHeader({ member, isMe }: { member: Member; isMe: boolean 
   const name = displayName(member.name, member.id);
   const { title, pronouns } = member.details;
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex items-center gap-3">
       <Avatar
         id={member.id}
         name={name}
         isBot={member.is_bot}
-        size={56}
+        size={64}
         presence={member.active && !member.is_bot ? member.presence : undefined}
       />
-      <div className="min-w-0 flex-1 pt-0.5">
-        <div className="flex min-w-0 items-baseline gap-1.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-baseline gap-1.5 leading-5">
           <h2 className="selectable truncate text-lg font-semibold">{name}</h2>
           {pronouns && <span className="selectable max-w-[45%] shrink-0 truncate text-sm text-muted">{pronouns}</span>}
           {isMe && <span className="shrink-0 text-xs text-muted">(you)</span>}
         </div>
-        {title && <p className="selectable truncate text-sm text-muted">{title}</p>}
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+        {title && <p className="selectable truncate text-sm leading-[18px] text-muted">{title}</p>}
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs leading-[18px] whitespace-nowrap text-muted">
           {member.is_admin && <Badge>Admin</Badge>}
           {member.is_bot && <Badge tone="accent">Agent</Badge>}
           {!member.active && <span>No longer in this workspace</span>}
@@ -104,9 +104,11 @@ function LocalTimeRow({ zone, hours }: { zone: string; hours: WorkingHours | nul
   const isOutsideHours = hours !== null && !isWithinWorkingHours(hours, clock);
   return (
     <DetailRow icon={<Clock size={ICON_SIZE} />} label="Local time">
-      <span className="text-ink">{formatTimeIn(zone, now)} local time</span>
-      <span className="text-muted"> · {difference}</span>
-      {isOutsideHours && <span className="text-warning-text"> · outside working hours</span>}
+      <p className="truncate">
+        <span className="text-ink">{formatTimeIn(zone, now)} local time</span>
+        <span className="text-muted"> · {difference}</span>
+      </p>
+      {isOutsideHours && <p className="truncate text-xs text-warning-text">Outside working hours</p>}
     </DetailRow>
   );
 }

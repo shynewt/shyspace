@@ -69,8 +69,10 @@ test("their local time says how far ahead they are and when they're outside work
   await openApp(page);
   const grace = await openGracesCard(page, { time_zone: "Asia/Tokyo", working_hours: WEEKDAYS_NINE_TO_FIVE });
   const row = grace.getByRole("listitem").filter({ hasText: "local time" });
-  await expect(row).toHaveText("8:42 AM local time · 9 h ahead · outside working hours");
-  await expect(row.getByText("· outside working hours")).toHaveCSS("color", await tokenColor(page, "--warning-text"));
+  await expect(row).toHaveText("8:42 AM local time · 9 h ahead" + "Outside working hours");
+  const warning = row.getByText("Outside working hours", { exact: true });
+  await expect(warning).toHaveCSS("color", await tokenColor(page, "--warning-text"));
+  expect(await warning.evaluate((line) => line.scrollWidth <= line.clientWidth)).toBe(true);
 });
 
 test("within their hours, the local time carries no warning", async ({ page }) => {
@@ -100,7 +102,7 @@ test("a night outside the shifts is outside working hours", async ({ page }) => 
   await openApp(page);
   const grace = await openGracesCard(page, { time_zone: "Europe/Lisbon", working_hours: weekendNights });
   await expect(grace.getByRole("listitem").filter({ hasText: "local time" })).toHaveText(
-    "3:00 AM local time · Same time as you · outside working hours",
+    "3:00 AM local time · Same time as you" + "Outside working hours",
   );
 });
 
@@ -279,4 +281,22 @@ test("using a card that opened on hover keeps it open", async ({ page }) => {
   await page.waitForTimeout(600);
   await viewInMembers.click();
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+});
+
+test("the header's name, title and tags sit centred within the avatar's height", async ({ page }) => {
+  await openApp(page);
+  const graceCard = await openGracesCard(page, { pronouns: "she/her", title: "Rear admiral" });
+  const { avatar, text } = await graceCard.getByRole("heading", { name: "Grace" }).evaluate((heading) => {
+    const column = heading.parentElement?.parentElement;
+    const avatarBox = column?.previousElementSibling?.getBoundingClientRect();
+    const textBox = column?.getBoundingClientRect();
+    if (!avatarBox || !textBox) throw new Error("header layout not found");
+    return {
+      avatar: { top: avatarBox.top, bottom: avatarBox.bottom },
+      text: { top: textBox.top, bottom: textBox.bottom },
+    };
+  });
+  expect(text.top).toBeGreaterThanOrEqual(avatar.top);
+  expect(text.bottom).toBeLessThanOrEqual(avatar.bottom);
+  expect(Math.abs((text.top + text.bottom) / 2 - (avatar.top + avatar.bottom) / 2)).toBeLessThanOrEqual(1);
 });
