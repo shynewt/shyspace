@@ -81,13 +81,26 @@ function MemberRow({ member, isMe, actions }: { member: Member; isMe: boolean; a
   );
 }
 
-/** Removed, or their status text (the emoji sits by the name) or else presence. Agents show only their tag. */
+/**
+ * Their title, then: removed, or their status text (the emoji sits by the
+ * name) or else presence. Agents show only their title and tag.
+ */
 function MemberStatusLine({ member }: { member: Member }) {
-  if (!member.active) return <p className="truncate text-xs text-muted">Removed</p>;
-  if (member.is_bot) return null;
+  const { title } = member.details;
+  const lead = title && <span>{title}</span>;
+  if (!member.active)
+    return (
+      <p className="truncate text-xs text-muted">
+        {lead}
+        {lead && " · "}Removed
+      </p>
+    );
+  if (member.is_bot) return lead ? <p className="truncate text-xs text-muted">{lead}</p> : null;
   const alerts = member.status && alertsLabel(member.status);
   return (
     <p className="truncate text-xs text-muted">
+      {lead}
+      {lead && " · "}
       {member.status?.text || presenceLabel(member.presence)}
       {alerts && <span className="ml-1 text-warning-text">· {alerts}</span>}
     </p>

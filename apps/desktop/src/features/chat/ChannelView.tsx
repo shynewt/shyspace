@@ -14,6 +14,7 @@ import { WriteGate } from "../private/WriteGate";
 import { AgentsNote } from "./AgentsNote";
 import { Composer } from "./Composer";
 import { firstUnreadId, MessageRows, toRows, UNREAD_LINE_ID } from "./channelRows";
+import { LocalTimeHint } from "./LocalTimeHint";
 import { ThreadPanel } from "./ThreadPanel";
 import { UnreadPills } from "./UnreadPills";
 import { NEAR_EDGE_PX, useHeldScroll } from "./useHeldScroll";
@@ -347,6 +348,7 @@ export function ChannelView({
         </div>
 
         <WriteGate channelId={channelId}>
+          <LocalTimeHint channel={channel} />
           <Composer
             channelId={channelId}
             label={composerLabel(channel, members)}

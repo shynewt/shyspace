@@ -292,7 +292,8 @@ function PersonRow({ person }: { person: Person }) {
         size={22}
         presence={member.is_bot ? undefined : member.presence}
       />
-      <span className="font-medium">{person.name}</span>
+      <span className="shrink-0 font-medium">{person.name}</span>
+      {member.details.pronouns && <span className="truncate text-xs text-muted">{member.details.pronouns}</span>}
       {status?.emoji && (
         <span role="img" aria-label={`Status: ${describeStatus(status)}`}>
           {status.emoji}
