@@ -36,7 +36,7 @@ export function ListRow({
       <button
         type="button"
         onClick={onClick}
-        className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-2.5 text-left"
+        className="focus-ring-inset flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-2.5 text-left"
       >
         <span className="shrink-0">{leading}</span>
         <span className="min-w-0 flex-1">

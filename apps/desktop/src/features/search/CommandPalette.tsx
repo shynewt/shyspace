@@ -15,7 +15,7 @@ import { api, type SearchHit } from "../../lib/api";
 import { useChannelNames } from "../../lib/channels";
 import { plainPreview } from "../../lib/markdown";
 import { SETTINGS_SECTIONS } from "../../lib/settings";
-import { shortcutKeys } from "../../lib/shortcuts";
+import { hasCommandModifier, shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
 import { Dialog, Kbd, springs } from "../../ui";
@@ -195,10 +195,11 @@ function PaletteBody({ onClose, onMarkAllRead }: { onClose: () => void; onMarkAl
             setSelected(0);
           }}
           onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
+            const isMove = !hasCommandModifier(event);
+            if (event.key === "ArrowDown" && isMove) {
               event.preventDefault();
               setSelected((index) => Math.min(index + 1, items.length - 1));
-            } else if (event.key === "ArrowUp") {
+            } else if (event.key === "ArrowUp" && isMove) {
               event.preventDefault();
               setSelected((index) => Math.max(index - 1, 0));
             } else if (event.key === "Enter") {

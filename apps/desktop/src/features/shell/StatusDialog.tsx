@@ -121,7 +121,7 @@ function StatusForm({ current, onDone }: { current: MemberStatus | null; onDone:
               type="button"
               onClick={() => choosePreset(preset)}
               className={cx(
-                "flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left text-sm transition-colors hover:bg-surface-2",
+                "focus-ring-inset flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left text-sm transition-colors hover:bg-surface-2",
                 text === preset.text && emoji === preset.emoji && "bg-surface-2",
               )}
             >

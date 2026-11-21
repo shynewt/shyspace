@@ -35,6 +35,8 @@ const GRAPHIC_PAIRS: [string, string][] = [
   ["--accent", "--surface"],
   ["--accent", "--bg"],
   ["--accent", "--accent-soft"],
+  // The focus ring inside a hovered row.
+  ["--accent", "--surface-2"],
 ];
 
 const ACCENTS = ["violet", "blue", "indigo", "teal", "pink", "graphite"];

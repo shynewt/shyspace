@@ -56,7 +56,7 @@ export function MeMenu() {
         trigger={
           <button
             type="button"
-            className="flex h-11 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-surface-2 data-[state=open]:bg-surface-2"
+            className="focus-ring-inset flex h-11 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-surface-2 data-[state=open]:bg-surface-2"
           >
             <Avatar id={me.id} name={name} size={28} presence={isOffline ? undefined : me.presence} />
             <span className="min-w-0 flex-1">

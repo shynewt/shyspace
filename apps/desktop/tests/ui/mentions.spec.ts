@@ -95,3 +95,15 @@ test("dragging a page from the sidebar onto the message box mentions it", async 
   const message = page.getByRole("article").filter({ hasText: "Have a look at" });
   await expect(message.locator(".page-chip", { hasText: "Launch plan" })).toBeVisible();
 });
+
+test("arrows held with Ctrl or Super don't move through the suggestions", async ({ page }) => {
+  const composer = page.getByLabel("Message #general");
+  await composer.pressSequentially("Thanks @Gr");
+  const options = page.getByRole("listbox", { name: "People and pages to mention" }).getByRole("option");
+  await expect(options).toHaveCount(2);
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+
+  for (const key of ["Meta+ArrowDown", "Control+ArrowDown", "Meta+ArrowUp"]) await composer.press(key);
+
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+});

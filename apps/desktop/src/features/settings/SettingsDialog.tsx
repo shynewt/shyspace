@@ -142,7 +142,8 @@ function SettingsWindow({
           key={section.id}
           value={section.id}
           forceMount
-          className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 -outline-offset-2 data-[state=inactive]:hidden"
+          tabIndex={-1}
+          className="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-6 outline-none data-[state=inactive]:hidden"
         >
           <header className="mb-5">
             <h3 className="text-lg font-semibold">{section.label}</h3>
@@ -177,7 +178,7 @@ function SectionTab({
     <Tabs.Trigger
       value={section}
       className={cx(
-        "relative flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-sm -outline-offset-2 transition-colors",
+        "relative flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-sm transition-colors focus-ring-inset",
         isActive ? "font-medium text-ink" : "text-muted hover:bg-surface-2 hover:text-ink",
       )}
     >

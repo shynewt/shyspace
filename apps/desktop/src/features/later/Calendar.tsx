@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { hasCommandModifier } from "../../lib/shortcuts";
 import { cx, IconButton, springs } from "../../ui";
 
 const WEEK = 7;
@@ -86,7 +87,7 @@ export function Calendar({ value, min, onChange }: { value: Date; min: Date; onC
   };
   const onKeyDown = (event: KeyboardEvent) => {
     const step = KEY_STEPS[event.key];
-    if (!step) return;
+    if (!step || hasCommandModifier(event)) return;
     event.preventDefault();
     const next = step(startOfDay(value));
     if (next < earliest) return;

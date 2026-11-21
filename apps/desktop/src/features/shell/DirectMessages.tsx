@@ -38,7 +38,7 @@ export function DirectMessages() {
           <button
             type="button"
             onClick={() => setStarting(true)}
-            className="flex h-8 items-center rounded-lg px-2.5 text-left text-sm text-faint hover:bg-surface-2 hover:text-muted"
+            className="focus-ring-inset flex h-8 items-center rounded-lg px-2.5 text-left text-sm text-faint hover:bg-surface-2 hover:text-muted"
           >
             Message someone privately
           </button>

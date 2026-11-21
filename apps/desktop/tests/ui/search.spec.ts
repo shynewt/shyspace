@@ -53,3 +53,17 @@ test("marking all as read from the palette asks first", async ({ page }) => {
 
   await expect(page.getByRole("dialog", { name: "Mark everything as read?" })).toBeVisible();
 });
+
+test("arrows held with Ctrl or Super don't move through the results", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await expect(page.getByLabel("Search messages and pages")).toBeFocused();
+  const options = page.locator("#palette-results").getByRole("option");
+  await expect(options.nth(1)).toBeVisible();
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+
+  for (const key of ["Meta+ArrowDown", "Control+ArrowDown"]) await page.keyboard.press(key);
+
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+});

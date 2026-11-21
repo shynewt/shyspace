@@ -7,6 +7,15 @@
 const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 export const MOD_LABEL = isMac ? "⌘" : "Ctrl";
 
+/**
+ * Whether Ctrl, Alt or Meta is held, which makes a key a shortcut rather than
+ * movement. Super+arrows belong to the window manager, which on Wayland can
+ * also hand the app the keys still held when its window gains focus.
+ */
+export function hasCommandModifier(event: { ctrlKey: boolean; altKey: boolean; metaKey: boolean }): boolean {
+  return event.ctrlKey || event.altKey || event.metaKey;
+}
+
 const hasMod = (event: KeyboardEvent) => (isMac ? event.metaKey : event.ctrlKey);
 
 /** Option+arrows move by word on a Mac, so back and forward use ⌘[ and ⌘] there, like a browser. */

@@ -317,7 +317,7 @@ export function ChannelView({
             aria-label={`Messages in ${channelReference(channel, members)}`}
             tabIndex={-1}
             onScroll={(event) => onScroll(event.currentTarget)}
-            className="relative flex-1 overflow-y-auto py-3 [overflow-anchor:none]"
+            className="relative flex-1 overflow-y-auto py-3 outline-none [overflow-anchor:none]"
           >
             <div ref={content}>
               <MessageRows

@@ -7,6 +7,7 @@ import { emojiQueryAt } from "../../lib/emojiQuery";
 import { useMembers } from "../../lib/members";
 import { mentionQueryAt, withMentionLinks } from "../../lib/mentions";
 import { usePreferences, validRecentEmoji, withRecentEmoji } from "../../lib/preferences";
+import { hasCommandModifier } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { Avatar, cx, pop, springs } from "../../ui";
@@ -154,7 +155,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
   /** Handles the keys the list owns; returns whether it used the key. */
   const onKeyDown = (event: React.KeyboardEvent): boolean => {
     if (!isOpen) return false;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !hasCommandModifier(event)) {
       const step = event.key === "ArrowDown" ? 1 : -1;
       setSelected((index) => (index + step + suggestions.length) % suggestions.length);
     } else if (event.key === "Enter" || event.key === "Tab") {

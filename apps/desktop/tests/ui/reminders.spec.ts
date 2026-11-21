@@ -189,3 +189,15 @@ test("a reminder can be changed or dropped from Later", async ({ page }) => {
   await expect(row).toContainText("Read the spec");
   await expect(row).not.toContainText("Tomorrow");
 });
+
+test("arrows held with Super or Ctrl leave the calendar's day alone", async ({ page }) => {
+  await openApp(page, MONDAY_MORNING);
+  const picker = await openPicker(page);
+  const today = picker.getByRole("button", { name: "Monday, November 23", exact: true });
+  await today.focus();
+
+  for (const key of ["Meta+ArrowRight", "Control+ArrowDown"]) await page.keyboard.press(key);
+
+  await expect(today).toBeFocused();
+  await expect(today).toHaveAttribute("aria-pressed", "true");
+});

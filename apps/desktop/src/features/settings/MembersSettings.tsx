@@ -34,14 +34,14 @@ export function MembersSettings({ tab, onTabChange }: { tab: MembersTab; onTabCh
           Requests <WaitingRequestsBadge />
         </TabTrigger>
       </Tabs.List>
-      <Tabs.Content value="members">
+      <Tabs.Content value="members" tabIndex={-1} className="outline-none">
         <MemberDirectory />
       </Tabs.Content>
-      <Tabs.Content value="invites" className="flex flex-col gap-5">
+      <Tabs.Content value="invites" tabIndex={-1} className="flex flex-col gap-5 outline-none">
         <CreateInvite />
         <OpenInvites />
       </Tabs.Content>
-      <Tabs.Content value="requests">
+      <Tabs.Content value="requests" tabIndex={-1} className="outline-none">
         <JoinRequestList />
       </Tabs.Content>
     </Tabs.Root>
