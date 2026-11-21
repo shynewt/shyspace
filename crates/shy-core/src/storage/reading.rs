@@ -56,10 +56,12 @@ impl Store {
 
     /// Messages by others after the read position, oldest first: id,
     /// current text, and whether it shows in the channel (not a thread reply).
+    /// A thread reply also counts as read once its thread is read past it.
     pub fn unread_messages(&self, channel: &str, me: &PublicKey) -> Result<Vec<UnreadMessage>> {
         let mut statement = self.db.prepare(
             "SELECT m.id, COALESCE(e.text, m.text),
-                    m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to)
+                    m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to),
+                    m.lamport, m.author
              FROM messages m
              LEFT JOIN message_edits e ON e.message = m.id
              LEFT JOIN read_markers r ON r.channel = m.channel
@@ -68,13 +70,34 @@ impl Store {
              ORDER BY m.lamport, m.author",
         )?;
         let rows = statement.query_map(params![channel, me.as_bytes()], |row| {
-            Ok(UnreadMessage {
+            let message = UnreadMessage {
                 id: row.get(0)?,
                 text: row.get(1)?,
                 is_in_channel: row.get(2)?,
-            })
+            };
+            let position = MessageCursor {
+                lamport: row.get(3)?,
+                author: hex::encode(row.get::<_, Vec<u8>>(4)?),
+            };
+            Ok((message, position))
         })?;
-        Ok(rows.collect::<Result<_, _>>()?)
+        let mut unread = Vec::new();
+        for row in rows {
+            let (message, position) = row?;
+            if message.is_in_channel || !self.is_read_in_thread(&message.id, &position)? {
+                unread.push(message);
+            }
+        }
+        Ok(unread)
+    }
+
+    fn is_read_in_thread(&self, reply: &str, position: &MessageCursor) -> Result<bool> {
+        let Some(root) = self.thread_root(reply)? else {
+            return Ok(false);
+        };
+        Ok(self.read_marker(&root)?.is_some_and(|read| {
+            (position.lamport, position.author.as_str()) <= (read.lamport, read.author.as_str())
+        }))
     }
 
     /// Moves your read position in the thread starting at `root` forward to

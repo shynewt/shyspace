@@ -15,7 +15,7 @@ The emoji picker is frimousse, on Emojibase data. By default it downloads that d
 The app never fetches a link to show a preview. Fetching would tell the linked site who is reading what, outside the encryption, and previews are a known way to leak data out of AI agents' context (Slack's MCP server did). Links stay plain.
 
 ## Replies are threads, built on reply_to (2026-11)
-One reply model: a reply lives in a side-panel thread instead of the channel, like Slack, with Zulip's attention tools (follow and unfollow, following threads you join). Threads are optional, never forced like Zulip topics. Thread replies don't add to a channel's unread count, but a mention in one still does. No new op was needed; a title and a "resolved" mark would need one (#58).
+One reply model: a reply lives in a side-panel thread instead of the channel, like Slack, with Zulip's attention tools (follow and unfollow, following threads you join). Threads are optional, never forced like Zulip topics. Thread replies don't add to a channel's unread count, but a mention in one still does, until you've read it in the channel or the thread. No new op was needed; a title and a "resolved" mark would need one (#58).
 
 ## Mentions are markdown links; @here means @channel for now (2026-11)
 A mention is a link in the message text, not a separate op: nothing new to sync or secure, agents read and write them as plain markdown, and copying a message keeps them. Each device decides what mentions it, exactly, even though everything is encrypted. Until presence exists (#42), @here reaches everyone like @channel.

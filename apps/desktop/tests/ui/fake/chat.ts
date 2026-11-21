@@ -316,12 +316,23 @@ export class FakeChat {
     if (channel) this.context.notify({ kind: "messages", channel });
   }
 
+  /** Like the core: a thread reply is also read once its thread is read past it. */
   private unreadIn(channel: string): StoredMessage[] {
     const marker = this.readMarkers.get(channel);
     return this.messages.filter(
       (message) =>
-        message.channel === channel && message.author !== this.context.me() && (!marker || isAfter(message, marker)),
+        message.channel === channel &&
+        message.author !== this.context.me() &&
+        (!marker || isAfter(message, marker)) &&
+        !this.isReadInThread(message),
     );
+  }
+
+  private isReadInThread(message: StoredMessage): boolean {
+    const root = rootOf(this.messages, message.id);
+    if (isInChannel(this.messages, message) || root === null) return false;
+    const threadMarker = this.readMarkers.get(root);
+    return threadMarker !== undefined && !isAfter(message, threadMarker);
   }
 
   /** Forward only, like the core. */

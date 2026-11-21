@@ -127,6 +127,44 @@ async fn replies_in_followed_threads_alert_and_do_not_count_as_channel_unread() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_mention_in_a_thread_is_read_once_the_thread_is_read() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let icons = bob.send_message(&general, "new icons", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    admin.mark_read(&general, &icons).unwrap();
+    let mention = mentions::member_link("Ada", &admin.my_id());
+    let ask = bob
+        .send_message(&general, &format!("{mention} dark mode?"), Some(icons.clone()))
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let mentions_for_admin = || {
+        let channel = admin
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == general)
+            .unwrap();
+        let in_inbox = admin
+            .inbox()
+            .unwrap()
+            .attention
+            .iter()
+            .filter(|item| item.message.id == ask)
+            .count();
+        (channel.unread_mentions, in_inbox)
+    };
+    assert_eq!(mentions_for_admin(), (1, 1));
+
+    admin.mark_thread_read(&icons, &ask).unwrap();
+    assert_eq!(
+        mentions_for_admin(),
+        (0, 0),
+        "reading the thread reads the mention, with the channel's position unmoved"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_message_link_finds_the_message_and_its_thread() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");

@@ -35,6 +35,21 @@ test("the inbox gathers mentions and thread replies and opens them in place", as
   await expect(page.getByRole("button", { name: "Inbox, 1 unread" })).toBeVisible();
 });
 
+test("a mention in a thread is read once you've seen it in the thread", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.memberNamed("Grace");
+    const mention = `[@Ada](shy://member/${window.fake.session?.me}) can you check it?`;
+    window.fake.receiveReply(grace, window.fake.messageWithText("Who reviews?"), mention);
+  });
+
+  await page.getByRole("button", { name: "Inbox, 1 unread" }).click();
+  await page.getByRole("button", { name: /mentioned you in general/ }).click();
+  const thread = page.getByRole("complementary", { name: "Thread" });
+  await expect(thread.getByRole("article").filter({ hasText: "can you check it?" })).toBeVisible();
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  await expect(page.getByText("You're all caught up")).toBeVisible();
+});
+
 test("mark all as read asks first, then leaves you caught up", async ({ page }) => {
   await page.evaluate(() => window.fake.receiveMessage(window.fake.memberNamed("Grace"), "random", "plain news"));
   await page.getByRole("button", { name: "Inbox", exact: true }).click();
