@@ -45,6 +45,7 @@ Keep feedback under about 250 ms. Reduced motion is decided once, globally: `Mot
 | `Notice` | a callout inside a screen: `info` (read-only and other things to know), `warning` or `danger` (something to fix), with an optional title |
 | `RelativeTime` | a past moment as short as stays clear ("Yesterday 4:41 PM"), the full date on hover |
 | `SegmentedControl` | picking one of a few options: a radio group (arrow keys move the choice) named by `label`, sized to its options or `width="full"` |
+| `CopyButton` | copies a value; its icon turns into a check for 1.5 s and a polite live region says "Copied" (the one micro-animation for copying, also inside `CopyField`) |
 | `CopyField` | codes and commands with a copy button |
 | `EmojiPicker` | a searchable emoji grid (names and keywords), recently used first, inside a `Popover`; it and its data load on first open, ship with the app and are never fetched from the network |
 | `ConfirmDialog` | asks before something that can't be undone (deletes), showing what it applies to; stays open showing the error if it fails |

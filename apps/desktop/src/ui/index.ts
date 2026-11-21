@@ -3,6 +3,7 @@ export { Badge } from "./Badge";
 export { Button } from "./Button";
 export { Card } from "./Card";
 export { ConfirmDialog } from "./ConfirmDialog";
+export { CopyButton } from "./CopyButton";
 export { CopyField } from "./CopyField";
 export { CountBadge } from "./CountBadge";
 export { cx } from "./cx";
