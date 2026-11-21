@@ -1,4 +1,5 @@
 import type { Transition } from "motion/react";
+import { wasLastInputAKey } from "../lib/useInputModality";
 
 /*
  * Motion tokens: every animation in the app uses these (see Motion in
@@ -31,6 +32,11 @@ export const springs = {
   /** Small playful pops: a reaction added, a count changing. */
   pop: { type: "spring", visualDuration: 0.2, bounce: 0.25 },
 } satisfies Record<string, Transition>;
+
+/** `transition`, or at once when a key caused the change: keyboard use is never kept waiting. */
+export function instantAfterAKey(transition: Transition): Transition {
+  return wasLastInputAKey() ? tweens.instant : transition;
+}
 
 /** Fade and lift in, fade out: for content that appears in place. */
 export const rise = {

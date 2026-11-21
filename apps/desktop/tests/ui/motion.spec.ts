@@ -216,3 +216,70 @@ test("with reduced motion, a menu fades without growing", async ({ page }) => {
   const frames = await sampledFrames(page);
   expect(frames.filter((frame) => frame.isPresent).every((frame) => IDENTITY.includes(frame.transform))).toBe(true);
 });
+
+/** Whether `highlight` sits exactly on `target`, with no move in flight. */
+async function isHighlightOn(page: Page, highlightSelector: string, targetSelector: string): Promise<boolean> {
+  return page.evaluate(
+    ({ highlightSelector, targetSelector }) => {
+      const highlight = document.querySelector(highlightSelector)?.getBoundingClientRect();
+      const target = document.querySelector(targetSelector)?.getBoundingClientRect();
+      if (!highlight || !target) throw new Error("no highlight or target");
+      return Math.abs(highlight.top - target.top) < 0.5 && Math.abs(highlight.left - target.left) < 0.5;
+    },
+    { highlightSelector, targetSelector },
+  );
+}
+
+test.describe("selection highlights", () => {
+  test.beforeEach(async ({ page }) => openApp(page));
+
+  test("arrow keys move the palette's highlight at once", async ({ page }) => {
+    await page.keyboard.press("Control+k");
+    await expect(page.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
+
+    await pressAndWaitFrames(page, { key: "ArrowDown" });
+    expect(await isHighlightOn(page, '[aria-selected="true"] > div.absolute', '[aria-selected="true"]')).toBe(true);
+  });
+
+  test("arrow keys move the settings section's highlight at once", async ({ page }) => {
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await expect(settings.getByRole("tab", { name: "Profile" })).toBeFocused();
+
+    await pressAndWaitFrames(page, { key: "ArrowDown" });
+    await expect(settings.getByRole("tab", { name: "Appearance" })).toHaveAttribute("aria-selected", "true");
+    expect(
+      await isHighlightOn(page, '[role="tab"][aria-selected="true"] > .absolute', '[role="tab"][aria-selected="true"]'),
+    ).toBe(true);
+  });
+
+  test("a click slides the settings section's highlight briefly", async ({ page }) => {
+    await page.keyboard.press("Control+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await expect(settings.getByRole("tab", { name: "Profile" })).toBeFocused();
+    await startSampling(page, '[role="tab"][aria-selected="true"] > .absolute');
+
+    await settings.getByRole("tab", { name: "Notifications" }).click();
+    const frames = (await sampledFrames(page)).filter((frame) => frame.isPresent);
+    const started = frames.findIndex((frame) => !IDENTITY.includes(frame.transform));
+    expect(started).toBeGreaterThan(-1);
+    // Within two pixels of where it ends is arrived: a spring's last steps are too small to see.
+    const final = frames[frames.length - 1];
+    const arrived = frames.findIndex((frame, index) => index > started && Math.abs(frame.top - final.top) < 2);
+    expect(timeBetween(frames, started, arrived)).toBeLessThanOrEqual(ENTRANCE_BUDGET_MS);
+  });
+
+  test("alt and the arrows move the sidebar's highlight at once", async ({ page }) => {
+    await page.getByRole("button", { name: "New channel" }).click();
+    await page.getByLabel("Channel name").fill("random");
+    await page.getByLabel("Channel name").press("Enter");
+    await expect(page.getByLabel("Message #random")).toBeVisible();
+    await page.getByRole("button", { name: "general", exact: true }).click();
+    await expect(page.getByLabel("Message #general")).toBeVisible();
+
+    await pressAndWaitFrames(page, { key: "ArrowDown", altKey: true });
+    await expect(page.getByRole("button", { name: "random", exact: true })).toHaveAttribute("aria-current", "page");
+    const pill = '[data-sidebar] div:has(> [aria-current="page"]) > div.absolute';
+    expect(await isHighlightOn(page, pill, '[data-sidebar] div:has(> [aria-current="page"])')).toBe(true);
+  });
+});

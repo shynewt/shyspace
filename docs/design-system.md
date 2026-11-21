@@ -21,6 +21,7 @@ Motion should feel quick and never get in the way of work. The app runs in WebKi
 
 - **How often decides how much.** Things done many times a day (switching channels, moving with the keyboard, the command palette, hover) don't animate, or take at most 100 ms. Occasional things (dialogs, menus, the drawer, toasts) take 150 to 200 ms. Only rare moments (onboarding) may be playful.
 - **Exits are faster than entrances**, and nothing blocks input while it animates.
+- **What a key changes changes at once.** A selection highlight moved by the arrows, Alt+↑/↓ or typing jumps; moved by a click, it slides briefly. `instantAfterAKey(transition)` picks, from the last input `useInputModality` saw.
 - **Only transform and opacity animate**, never width, height, filters or `backdrop-filter`. The one exception is a row leaving a list (Inbox, Later, join requests), which collapses so the rows below close the gap.
 - **Fades and pop-ins are tweens** with one strong ease-out. **Springs** are for things that move in space and may be interrupted (panels, selection highlights), and are short and bounce-free; only `springs.pop` bounces a little.
 - **Reduced motion** is decided once, globally: `MotionConfig` in `main.tsx` follows the system unless Settings › Appearance › Reduce motion says On or Off. Motion then drops movement and keeps fades. Don't override it in components.

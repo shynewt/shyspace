@@ -10,7 +10,7 @@ import {
   parseTimeOfDay,
   reminderReadings,
 } from "../../lib/reminders";
-import { Button, cx, Dialog, durations, fade, Input, springs } from "../../ui";
+import { Button, cx, Dialog, durations, fade, Input, instantAfterAKey, springs } from "../../ui";
 import { Calendar } from "./Calendar";
 
 const EXAMPLES = "“in 5 min”, “tomorrow 9” or “fri 3pm”";
@@ -191,7 +191,7 @@ function OptionRow({
       {isSelected && (
         <motion.span
           layoutId="reminder-option"
-          transition={springs.snappy}
+          transition={instantAfterAKey(springs.snappy)}
           className="absolute inset-0 rounded-lg bg-surface-2"
         />
       )}

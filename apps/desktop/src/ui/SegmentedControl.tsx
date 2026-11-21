@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 import { useId } from "react";
 import { cx } from "./cx";
-import { springs } from "./motion";
+import { instantAfterAKey, springs } from "./motion";
 
 /**
  * Picks one of a few options. Native radio buttons underneath: Tab reaches
@@ -54,7 +54,7 @@ export function SegmentedControl<Value extends string>({
             {isSelected && (
               <motion.span
                 layoutId={groupName}
-                transition={springs.snappy}
+                transition={instantAfterAKey(springs.snappy)}
                 className="absolute inset-0 -z-10 rounded-[10px] bg-accent-soft shadow-card ring-1 ring-accent/35 ring-inset"
               />
             )}

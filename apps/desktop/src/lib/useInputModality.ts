@@ -25,19 +25,28 @@ const KEYBOARD_USE_KEYS = new Set([
  */
 const WINDOW_FOCUS_GRACE_MS = 150;
 
+let isLastInputAKey = false;
+
+/** Whether the last input was a key (shortcuts and typing too) rather than a pointer press. */
+export function wasLastInputAKey(): boolean {
+  return isLastInputAKey;
+}
+
 /**
  * Marks <html> with how the app was last used: `data-modality="pointer"` or
  * `"keyboard"`. Focus that a script moves after a click (Radix handing focus
  * back to a menu's trigger) still matches :focus-visible when it came from a
  * text field, and browsers show a ring on a clicked button once any key is
  * pressed, so the stylesheet uses this to keep focus rings for moving with
- * the keyboard.
+ * the keyboard. It also remembers whether the last input of any kind was a
+ * key, for `wasLastInputAKey`.
  */
 export function useInputModality() {
   useEffect(() => {
     const root = document.documentElement;
     const rememberPointer = () => {
       root.dataset.modality = "pointer";
+      isLastInputAKey = false;
     };
     let windowFocusedAt = Number.NEGATIVE_INFINITY;
     const keysHeldAtWindowFocus = new Set<string>();
@@ -50,6 +59,7 @@ export function useInputModality() {
         return;
       }
       if (event.repeat && keysHeldAtWindowFocus.has(event.code)) return;
+      isLastInputAKey = true;
       if (KEYBOARD_USE_KEYS.has(event.key) && !hasCommandModifier(event)) root.dataset.modality = "keyboard";
     };
     const forgetReleasedKey = (event: KeyboardEvent) => {

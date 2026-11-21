@@ -18,7 +18,7 @@ import { SETTINGS_SECTIONS } from "../../lib/settings";
 import { hasCommandModifier, shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
-import { Dialog, Kbd, springs } from "../../ui";
+import { Dialog, instantAfterAKey, Kbd, springs } from "../../ui";
 import { MarkAllReadDialog } from "../inbox/MarkAllReadDialog";
 import { ChannelGlyph } from "../private/ChannelGlyph";
 import { ChannelName } from "../private/ChannelName";
@@ -261,7 +261,7 @@ function PaletteBody({
                 <motion.div
                   layoutId="palette-selection"
                   className="absolute inset-0 rounded-lg bg-surface-2"
-                  transition={springs.snappy}
+                  transition={instantAfterAKey(springs.snappy)}
                 />
               )}
               <span className={`relative mt-0.5 ${selected === index ? "text-accent" : "text-decorative"}`}>

@@ -4,7 +4,7 @@ import { Tabs } from "radix-ui";
 import { Fragment, type ReactNode } from "react";
 import { SETTINGS_SECTIONS, type SettingsGroup, type SettingsSection, type SettingsTarget } from "../../lib/settings";
 import { useWorkspace } from "../../lib/workspace";
-import { cx, Dialog, springs } from "../../ui";
+import { cx, Dialog, instantAfterAKey, springs } from "../../ui";
 import { WaitingRequestsBadge } from "../members/JoinRequests";
 import { AgentsSettings } from "./AgentsSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
@@ -185,7 +185,7 @@ function SectionTab({
       {isActive && (
         <motion.span
           layoutId="settings-section"
-          transition={springs.snappy}
+          transition={instantAfterAKey(springs.snappy)}
           className="absolute inset-0 rounded-lg bg-surface-3"
         >
           <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-accent" />

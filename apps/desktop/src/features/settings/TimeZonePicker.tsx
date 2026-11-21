@@ -9,7 +9,7 @@ import {
   offsetMinutes,
   timeZoneNames,
 } from "../../lib/localTime";
-import { cx, type FieldDescription, Popover, springs } from "../../ui";
+import { cx, type FieldDescription, instantAfterAKey, Popover, springs } from "../../ui";
 
 type Zone = { name: string; city: string; offset: string; offsetMinutes: number; searchText: string };
 
@@ -233,7 +233,7 @@ function ZoneRow({
         {isActive && (
           <motion.span
             layoutId="time-zone-option"
-            transition={springs.snappy}
+            transition={instantAfterAKey(springs.snappy)}
             className="absolute inset-0 rounded-lg bg-surface-2"
           />
         )}

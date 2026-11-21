@@ -1,7 +1,7 @@
 import { motion } from "motion/react";
 import type { DragEvent, ReactNode } from "react";
 import { sameView, useWorkspace, type View } from "../../lib/workspace";
-import { CountBadge, cx, springs } from "../../ui";
+import { CountBadge, cx, instantAfterAKey, springs } from "../../ui";
 
 export const INDENT_PX = 14;
 
@@ -56,7 +56,7 @@ export function NavItem({
       {isActive && (
         <motion.div
           layoutId="nav-active"
-          transition={springs.snappy}
+          transition={instantAfterAKey(springs.snappy)}
           className="absolute inset-y-0 right-0 rounded-lg bg-surface shadow-card"
           style={{ left: depth * INDENT_PX }}
         />

@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { hasCommandModifier } from "../../lib/shortcuts";
-import { cx, IconButton, springs } from "../../ui";
+import { cx, IconButton, instantAfterAKey, springs } from "../../ui";
 
 const WEEK = 7;
 
@@ -170,7 +170,7 @@ function MonthGrid({
       initial={{ opacity: 0, x: direction * 24 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: direction * -24 }}
-      transition={springs.snappy}
+      transition={instantAfterAKey(springs.snappy)}
     >
       <table aria-label={label} className="w-full table-fixed border-collapse">
         <thead>
@@ -215,7 +215,7 @@ function MonthGrid({
                       {isSelected && (
                         <motion.span
                           layoutId="calendar-selected"
-                          transition={springs.snappy}
+                          transition={instantAfterAKey(springs.snappy)}
                           className="absolute inset-0.5 rounded-lg bg-accent"
                         />
                       )}
