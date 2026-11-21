@@ -280,6 +280,26 @@ export function ChannelView({
     if (hasOlder && !isGrowing && !pendingRestore) growWindow();
   };
 
+  // A click away closes a thread over the channel on pointer-down; the click that follows, on the line or
+  // button that opens that same thread, mustn't reopen it. Forgotten at the next click or pointer-down.
+  const threadClosedByClickAway = useRef<string | null>(null);
+  const closeThreadByClickAway = () => {
+    threadClosedByClickAway.current = openThread;
+    const forget = () => {
+      threadClosedByClickAway.current = null;
+      window.removeEventListener("click", forget);
+      window.removeEventListener("pointerdown", forget, { capture: true });
+    };
+    // On the window, so it runs after React's handlers for this click; capture, so not for this pointer-down.
+    window.addEventListener("click", forget);
+    window.addEventListener("pointerdown", forget, { capture: true });
+    navigate({ kind: "channel", id: channelId });
+  };
+  const openThreadOf = (message: Message) => {
+    if (threadClosedByClickAway.current === message.id) return;
+    navigate({ kind: "channel", id: channelId, thread: message.id });
+  };
+
   /** After a pill, keyboard focus goes to the messages rather than being lost with the pill. */
   const focusMessages = () => scroller.current?.focus({ preventScroll: true });
 
@@ -327,7 +347,7 @@ export function ChannelView({
                 isHighlighted={(message) =>
                   openThread === message.id || highlighted === message.id || editing?.id === message.id
                 }
-                onOpenThread={(message) => navigate({ kind: "channel", id: channelId, thread: message.id })}
+                onOpenThread={openThreadOf}
                 onEdit={setEditing}
                 onMention={mention}
               />
@@ -366,6 +386,7 @@ export function ChannelView({
             focus={focus}
             channelId={channelId}
             onClose={() => navigate({ kind: "channel", id: channelId })}
+            onClickAway={closeThreadByClickAway}
             returnFocusTo={scroller}
           />
         )}

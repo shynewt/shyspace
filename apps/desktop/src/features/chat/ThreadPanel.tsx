@@ -21,6 +21,7 @@ export function ThreadPanel({
   focus,
   channelId,
   onClose,
+  onClickAway,
   returnFocusTo,
 }: {
   root: string;
@@ -28,6 +29,8 @@ export function ThreadPanel({
   focus?: string;
   channelId: string;
   onClose: () => void;
+  /** A click outside closed it while it was over the channel. */
+  onClickAway: () => void;
   /** Where focus goes on closing when what opened the thread is gone. */
   returnFocusTo: RefObject<HTMLElement | null>;
 }) {
@@ -77,7 +80,7 @@ export function ThreadPanel({
   };
 
   return (
-    <SidePanel label="Thread" onClose={onClose} returnFocusTo={returnFocusTo}>
+    <SidePanel label="Thread" onClose={onClose} onClickAway={onClickAway} returnFocusTo={returnFocusTo}>
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-4">
         <h2 className="text-base font-semibold">Thread</h2>
         {first && (
