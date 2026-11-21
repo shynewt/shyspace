@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
 test("typing @ suggests people, and the picked name becomes a mention", async ({ page }) => {
   const composer = page.getByLabel("Message #general");
   await composer.pressSequentially("Thanks @Gr");
-  const suggestions = page.getByRole("listbox", { name: "People to mention" });
+  const suggestions = page.getByRole("listbox", { name: "People and pages to mention" });
   await expect(suggestions.getByRole("option")).toHaveCount(2);
   await composer.press("ArrowDown");
   await composer.press("ArrowUp");
@@ -50,4 +50,48 @@ test("a mention of you in another channel shows a red badge and stands out", asy
   await expect(random).toBeVisible();
   await random.click();
   await expect(page.locator(".mention-me", { hasText: "@Ada" })).toBeVisible();
+});
+
+test("@ finds pages by any word of their title, and sends a page link", async ({ page }) => {
+  const planId = await page.evaluate(() => {
+    window.fake.seedPage("Growth ideas", "");
+    return window.fake.seedPage("Launch plan", "");
+  });
+  const composer = page.getByLabel("Message #general");
+  const suggestions = page.getByRole("listbox", { name: "People and pages to mention" });
+  await composer.pressSequentially("See @");
+  await expect(suggestions.getByRole("option", { name: /Launch plan|Growth ideas/ })).toHaveCount(0);
+
+  await composer.pressSequentially("g");
+  await expect(suggestions.getByRole("option")).toHaveText([/Grace/, /Gregor/, /Growth ideas/]);
+  await expect(suggestions.getByText("Pages", { exact: true })).toBeVisible();
+
+  await composer.press("Backspace");
+  await composer.pressSequentially("pla");
+  await expect(suggestions.getByRole("option")).toHaveText(["Launch plan"]);
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("See @Launch plan ");
+  await composer.pressSequentially("before Friday");
+  await composer.press("Enter");
+
+  const message = page.getByRole("article").filter({ hasText: "before Friday" });
+  await expect(message.locator(".page-chip", { hasText: "Launch plan" })).toBeVisible();
+  const sent = `See shy://page/${planId} before Friday`;
+  expect(await page.evaluate((text) => window.fake.messageWithText(text), sent)).toBeTruthy();
+});
+
+test("dragging a page from the sidebar onto the message box mentions it", async ({ page }) => {
+  await page.evaluate(() => window.fake.seedPage("Launch plan", ""));
+  const composer = page.getByLabel("Message #general");
+  await composer.fill("Have a look at");
+  const row = page
+    .getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: "Launch plan", exact: true });
+  await row.dragTo(composer);
+  await expect(composer).toHaveValue("Have a look at @Launch plan ");
+  await expect(composer).toBeFocused();
+  await composer.press("Enter");
+
+  const message = page.getByRole("article").filter({ hasText: "Have a look at" });
+  await expect(message.locator(".page-chip", { hasText: "Launch plan" })).toBeVisible();
 });

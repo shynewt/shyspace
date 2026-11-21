@@ -2,6 +2,7 @@ import { ChevronRight, Ellipsis, FileText, Link2, Plus, Trash2 } from "lucide-re
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
+import { startPageDrag } from "../../lib/pageDrag";
 import { reportError, showToast } from "../../lib/toast";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs } from "../../ui";
 import { NavItem } from "./NavItem";
@@ -67,6 +68,7 @@ function PageNode({
         label={title}
         icon={<FileText size={15} />}
         onContextMenu={() => setMenuOpen(true)}
+        onDragStart={(event) => startPageDrag(event, page.id)}
         leading={
           // Pages without sub-pages keep the toggle's space, so nesting lines up.
           hasChildren ? (

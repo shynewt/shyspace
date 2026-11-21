@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import type { ReactNode } from "react";
+import type { DragEvent, ReactNode } from "react";
 import { sameView, useWorkspace, type View } from "../../lib/workspace";
 import { CountBadge, cx, springs } from "../../ui";
 
@@ -17,6 +17,7 @@ export function NavItem({
   status,
   onContextMenu,
   onOpen,
+  onDragStart,
   depth = 0,
   leading,
   trailing,
@@ -40,6 +41,8 @@ export function NavItem({
   onContextMenu?: () => void;
   /** What a click does instead of opening `view`, for a place made on first open. */
   onOpen?: () => void;
+  /** Makes the item draggable, with what it carries. */
+  onDragStart?: (event: DragEvent) => void;
   depth?: number;
   /** Rendered before the item, outside its button (like a fold toggle). */
   leading?: ReactNode;
@@ -68,6 +71,8 @@ export function NavItem({
             : undefined
         }
         onClick={onOpen ?? (() => navigate(view))}
+        draggable={onDragStart !== undefined}
+        onDragStart={onDragStart}
         onContextMenu={
           onContextMenu &&
           ((event) => {

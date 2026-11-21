@@ -120,7 +120,9 @@ test("the mention suggestions show the status emoji", async ({ page }) => {
   await graceSays(page, "Hi", HOLIDAY);
   await page.getByLabel("Message #general").fill("@Gr");
 
-  const option = page.getByRole("listbox", { name: "People to mention" }).getByRole("option", { name: /Grace/ });
+  const option = page
+    .getByRole("listbox", { name: "People and pages to mention" })
+    .getByRole("option", { name: /Grace/ });
   await expect(option.getByLabel("Status: 🌴 On holiday", { exact: true })).toBeVisible();
 });
 

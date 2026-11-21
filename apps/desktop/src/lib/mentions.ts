@@ -4,6 +4,8 @@
  * helpers mirror `crates/shy-core/src/mentions.rs`.
  */
 
+import { PAGE_LINK_PREFIX } from "./api";
+
 const MEMBER_LINK = /^shy:\/\/member\/([0-9a-f]+)$/;
 const EVERYONE_LINK = /^shy:\/\/mention\/(channel|here)$/;
 const EVERYONE = ["channel", "here"] as const;
@@ -44,12 +46,19 @@ function escapeForRegex(text: string): string {
 }
 
 /**
- * Turns `@Name` for names picked from suggestions, plus `@channel` and
- * `@here`, into mention links. One pass, longest names first, so "@Ada
- * Lovelace" never becomes a link to "Ada" followed by "Lovelace".
+ * Turns `@Name` for people picked from suggestions, plus `@channel` and
+ * `@here`, into mention links, and `@Title` for picked pages into page links.
+ * One pass, longest names first, so "@Ada Lovelace" never becomes a link to
+ * "Ada" followed by "Lovelace".
  */
-export function withMentionLinks(text: string, picked: ReadonlyMap<string, string>): string {
-  const names = [...picked.keys(), ...EVERYONE].sort((left, right) => right.length - left.length);
+export function withMentionLinks(
+  text: string,
+  picked: ReadonlyMap<string, string>,
+  pickedPages: ReadonlyMap<string, string> = new Map(),
+): string {
+  const names = [...new Set([...picked.keys(), ...pickedPages.keys(), ...EVERYONE])].sort(
+    (left, right) => right.length - left.length,
+  );
   const pattern = new RegExp(
     `(?<![\\[\\p{L}\\p{N}_])@(${names.map(escapeForRegex).join("|")})(?![\\p{L}\\p{N}_])`,
     "gu",
@@ -57,6 +66,8 @@ export function withMentionLinks(text: string, picked: ReadonlyMap<string, strin
   return text.replace(pattern, (whole, name: string) => {
     if (name === "channel" || name === "here") return `[@${name}](shy://mention/${name})`;
     const id = picked.get(name);
-    return id ? memberLink(name, id) : whole;
+    if (id) return memberLink(name, id);
+    const page = pickedPages.get(name);
+    return page ? `${PAGE_LINK_PREFIX}${page}` : whole;
   });
 }

@@ -4,6 +4,7 @@ import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom";
 import { api, type Message } from "../../lib/api";
 import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../lib/limits";
+import { droppedPageId, isPageDrag } from "../../lib/pageDrag";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { Button, cx, EmojiPicker, IconButton, Kbd, Popover, springs } from "../../ui";
@@ -165,6 +166,17 @@ export function Composer({
               {...picker.inputProps}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
+              onDragOver={(event) => {
+                if (!isPageDrag(event)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={(event) => {
+                const pageId = droppedPageId(event);
+                if (!pageId) return;
+                event.preventDefault();
+                picker.insertPage(pageId);
+              }}
               onChange={(event) => {
                 updateText(event.target.value);
                 picker.onTextChange(event.target.value, event.target.selectionStart);

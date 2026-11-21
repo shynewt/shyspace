@@ -1,8 +1,8 @@
-import { AtSign, Bot } from "lucide-react";
+import { AtSign, Bot, FileText } from "lucide-react";
 import { motion } from "motion/react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { Member } from "../../lib/api";
+import { type Member, PAGE_LINK_PREFIX, type Page } from "../../lib/api";
 import { emojiQueryAt } from "../../lib/emojiQuery";
 import { useMembers } from "../../lib/members";
 import { mentionQueryAt, withMentionLinks } from "../../lib/mentions";
@@ -14,15 +14,18 @@ import { type CatalogEmoji, type EmojiCatalog, loadEmojiCatalog, searchEmoji } f
 import { describeStatus, shownStatus } from "../members/StatusEmoji";
 
 const MAX_SUGGESTIONS = 6;
+/** Pages show under the people once you type a letter, so a bare `@` stays about people. */
+const MAX_PAGE_SUGGESTIONS = 3;
 
 /** Puts a mention of this member where the message box's cursor is. */
 export type InsertMention = (name: string, memberId: string) => void;
 
 type Person = { kind: "person"; name: string; member: Member | null; detail: string };
+type PageSuggestion = { kind: "page"; page: Page };
 type EmojiSuggestion = { kind: "emoji"; emoji: CatalogEmoji };
-type Suggestion = Person | EmojiSuggestion;
+type Suggestion = Person | PageSuggestion | EmojiSuggestion;
 
-/** What's being typed before the caret: `@name` for people or `:name` for emoji. */
+/** What's being typed before the caret: `@name` for people and pages, or `:name` for emoji. */
 type Query = { kind: "person" | "emoji"; start: number; query: string };
 
 const EVERYONE: Person[] = [
@@ -31,12 +34,13 @@ const EVERYONE: Person[] = [
 ];
 
 /**
- * Suggestions while typing in a textarea: people after `@`, emoji after `:`.
- * Picked names show as plain `@Name` while you write; `toSend` turns them into
- * mention links. Picked emoji go in as the emoji itself, from the app's set.
+ * Suggestions while typing in a textarea: people and pages after `@`, emoji
+ * after `:`. Picked names show as plain `@Name` while you write; `toSend`
+ * turns them into mention and page links. Picked emoji go in as the emoji
+ * itself, from the app's set.
  */
 export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null>, setText: (text: string) => void) {
-  const { session } = useWorkspace();
+  const { session, pages } = useWorkspace();
   const members = useMembers() ?? [];
   const [preferences, updatePreferences] = usePreferences();
   const [query, setQuery] = useState<Query | null>(null);
@@ -44,6 +48,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
   // Loaded on the first `:` query, not before: the emoji data is large.
   const [catalog, setCatalog] = useState<EmojiCatalog | null>(null);
   const picked = useRef(new Map<string, string>());
+  const pickedPages = useRef(new Map<string, string>());
   // A channel and its open thread each have a composer.
   const listId = useId();
 
@@ -68,10 +73,17 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     const people: Person[] = members
       .filter((member) => member.active && member.id !== session.me && member.name)
       .map((member) => ({ kind: "person", name: member.name, member, detail: "" }));
-    return [...people, ...EVERYONE]
+    const matchingPeople = [...people, ...EVERYONE]
       .filter((suggestion) => suggestion.name.toLowerCase().startsWith(wanted))
       .slice(0, MAX_SUGGESTIONS);
-  }, [query, members, session.me, catalog, recentKey]);
+    const matchingPages: PageSuggestion[] = wanted
+      ? pages
+          .filter((page) => page.title && titleMatches(page.title, wanted))
+          .slice(0, MAX_PAGE_SUGGESTIONS)
+          .map((page) => ({ kind: "page", page }))
+      : [];
+    return [...matchingPeople, ...matchingPages];
+  }, [query, members, session.me, pages, catalog, recentKey]);
 
   const isOpen = suggestions.length > 0;
 
@@ -92,6 +104,9 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
       updatePreferences({
         recentEmoji: withRecentEmoji(recentEmoji, { emoji: inserted, label: suggestion.emoji.label }),
       });
+    } else if (suggestion.kind === "page") {
+      inserted = `@${suggestion.page.title} `;
+      pickedPages.current.set(suggestion.page.title, suggestion.page.id);
     } else {
       inserted = `@${suggestion.name} `;
       if (suggestion.member) picked.current.set(suggestion.name, suggestion.member.id);
@@ -105,18 +120,35 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     element.setSelectionRange(before.length, before.length);
   };
 
-  const insertMention: InsertMention = (name, memberId) => {
+  /** Puts `word` at the cursor, on its own between spaces. */
+  const insertAtCursor = (word: string) => {
     const element = input.current;
     if (!element) return;
     const before = element.value.slice(0, element.selectionStart);
-    const head = `${before}${before === "" || /\s$/.test(before) ? "" : " "}@${name} `;
-    picked.current.set(name, memberId);
+    const head = `${before}${before === "" || /\s$/.test(before) ? "" : " "}${word} `;
     flushSync(() => {
       setText(head + element.value.slice(element.selectionEnd));
       setQuery(null);
     });
     element.focus();
     element.setSelectionRange(head.length, head.length);
+  };
+
+  const insertMention: InsertMention = (name, memberId) => {
+    picked.current.set(name, memberId);
+    insertAtCursor(`@${name}`);
+  };
+
+  /** Mentions a page dropped on the message box; a page without a title can't be named, so it goes in as its link. */
+  const insertPage = (pageId: string) => {
+    const title = pages.find((page) => page.id === pageId)?.title;
+    if (title === undefined) return;
+    if (!title) {
+      insertAtCursor(`${PAGE_LINK_PREFIX}${pageId}`);
+      return;
+    }
+    pickedPages.current.set(title, pageId);
+    insertAtCursor(`@${title}`);
   };
 
   /** Handles the keys the list owns; returns whether it used the key. */
@@ -136,7 +168,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     return true;
   };
 
-  const toSend = (text: string) => withMentionLinks(text, picked.current);
+  const toSend = (text: string) => withMentionLinks(text, picked.current, pickedPages.current);
   /** Shows a sent message's mention links as plain `@Name` again, remembering who they are. */
   const adopt = useCallback(
     (text: string) =>
@@ -149,7 +181,10 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
       ),
     [],
   );
-  const forgetPicked = () => picked.current.clear();
+  const forgetPicked = () => {
+    picked.current.clear();
+    pickedPages.current.clear();
+  };
 
   const list = isOpen ? (
     <motion.div
@@ -157,28 +192,43 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
       transition={springs.snappy}
       id={listId}
       role="listbox"
-      aria-label={query?.kind === "emoji" ? "Emoji" : "People to mention"}
+      aria-label={query?.kind === "emoji" ? "Emoji" : "People and pages to mention"}
       className="absolute right-0 bottom-full left-0 mb-2 rounded-xl border border-line bg-surface p-1 shadow-float"
     >
       {suggestions.map((suggestion, index) => (
-        <button
-          key={suggestion.kind === "emoji" ? suggestion.emoji.emoji : (suggestion.member?.id ?? suggestion.name)}
-          type="button"
-          role="option"
-          id={`${listId}-${index}`}
-          aria-selected={index === selected}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            choose(suggestion);
-          }}
-          onMouseMove={() => setSelected(index)}
-          className={cx(
-            "flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm",
-            index === selected && "bg-surface-2",
+        <Fragment key={keyOf(suggestion)}>
+          {suggestion.kind === "page" && index > 0 && suggestions[index - 1].kind !== "page" && (
+            <div
+              role="presentation"
+              className="px-2.5 pt-2 pb-1 text-2xs font-semibold tracking-wide text-faint uppercase"
+            >
+              Pages
+            </div>
           )}
-        >
-          {suggestion.kind === "emoji" ? <EmojiRow emoji={suggestion.emoji} /> : <PersonRow person={suggestion} />}
-        </button>
+          <button
+            type="button"
+            role="option"
+            id={`${listId}-${index}`}
+            aria-selected={index === selected}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              choose(suggestion);
+            }}
+            onMouseMove={() => setSelected(index)}
+            className={cx(
+              "flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm",
+              index === selected && "bg-surface-2",
+            )}
+          >
+            {suggestion.kind === "emoji" ? (
+              <EmojiRow emoji={suggestion.emoji} />
+            ) : suggestion.kind === "page" ? (
+              <PageRow page={suggestion.page} />
+            ) : (
+              <PersonRow person={suggestion} />
+            )}
+          </button>
+        </Fragment>
       ))}
     </motion.div>
   ) : null;
@@ -190,7 +240,32 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     "aria-activedescendant": isOpen ? `${listId}-${selected}` : undefined,
   };
 
-  return { list, inputProps, onTextChange, onKeyDown, toSend, adopt, forgetPicked, insertMention };
+  return { list, inputProps, onTextChange, onKeyDown, toSend, adopt, forgetPicked, insertMention, insertPage };
+}
+
+/** A title word starts with what's typed: "@plan" finds "Launch plan". */
+function titleMatches(title: string, wanted: string): boolean {
+  return title
+    .toLowerCase()
+    .split(/\s+/)
+    .some((word) => word.startsWith(wanted));
+}
+
+function keyOf(suggestion: Suggestion): string {
+  if (suggestion.kind === "emoji") return suggestion.emoji.emoji;
+  if (suggestion.kind === "page") return `page:${suggestion.page.id}`;
+  return suggestion.member?.id ?? suggestion.name;
+}
+
+function PageRow({ page }: { page: Page }) {
+  return (
+    <>
+      <span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-surface-2 text-muted">
+        <FileText size={13} />
+      </span>
+      <span className="truncate font-medium">{page.title}</span>
+    </>
+  );
 }
 
 function PersonRow({ person }: { person: Person }) {
