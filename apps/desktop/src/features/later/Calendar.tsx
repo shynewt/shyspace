@@ -99,7 +99,7 @@ export function Calendar({ value, min, onChange }: { value: Date; min: Date; onC
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-1">
-        <span aria-live="polite" className="flex-1 pl-1 text-[13px] font-medium">
+        <span aria-live="polite" className="flex-1 pl-1 text-sm font-medium">
           {monthLabel}
         </span>
         <IconButton
@@ -179,7 +179,7 @@ function MonthGrid({
                 key={name.long}
                 scope="col"
                 abbr={name.long}
-                className="h-6 text-center text-[11px] font-normal text-faint"
+                className="h-6 text-center text-2xs font-normal text-faint"
               >
                 {name.short}
               </th>
@@ -205,9 +205,9 @@ function MonthGrid({
                       aria-current={isSameDay(day, earliest) ? "date" : undefined}
                       onClick={() => onPick(day)}
                       className={cx(
-                        "relative grid h-8 w-full place-items-center rounded-lg text-[12.5px] tabular-nums transition-colors",
+                        "relative grid h-8 w-full place-items-center rounded-lg text-sm tabular-nums transition-colors",
                         isSelected
-                          ? "font-semibold text-white"
+                          ? "font-semibold text-on-accent"
                           : "text-ink hover:bg-surface-2 disabled:text-decorative disabled:hover:bg-transparent",
                       )}
                     >

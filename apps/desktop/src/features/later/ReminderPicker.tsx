@@ -109,7 +109,7 @@ function PickerForm({
           />
         )}
       </Field>
-      <div aria-live="polite" className="min-h-5 text-[12.5px]">
+      <div aria-live="polite" className="min-h-5 text-xs">
         <AnimatePresence mode="wait" initial={false}>
           <motion.p
             key={problem ?? at?.getTime() ?? "none"}

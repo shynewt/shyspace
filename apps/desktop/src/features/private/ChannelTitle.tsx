@@ -22,8 +22,8 @@ export function ChannelTitle({ channel, members }: { channel: Channel; members: 
     return (
       <>
         <NotebookPen size={16} className="text-decorative" />
-        <h1 className="truncate text-[15px] font-semibold">{title}</h1>
-        <span className="shrink-0 text-[12px] text-faint">Only you can see them</span>
+        <h1 className="truncate text-lg font-semibold">{title}</h1>
+        <span className="shrink-0 text-xs text-faint">Only you can see them</span>
       </>
     );
   }
