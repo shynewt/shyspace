@@ -9,7 +9,18 @@ import { reportError, showUndoToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
 import { savedItemView, useWorkspace } from "../../lib/workspace";
-import { Avatar, cx, EmptyState, IconButton, ListRow, Menu, type MenuItem, SectionLabel, springs } from "../../ui";
+import {
+  Avatar,
+  cx,
+  EmptyState,
+  IconButton,
+  ListRow,
+  Menu,
+  type MenuItem,
+  SectionLabel,
+  springs,
+  tweens,
+} from "../../ui";
 import { ChannelName } from "../private/ChannelName";
 import { ViewHeader } from "../shell/ViewHeader";
 import { ReminderPicker } from "./ReminderPicker";
@@ -63,10 +74,9 @@ export function LaterView() {
                 {isCompletedOpen && (
                   <motion.ul
                     aria-label="Completed"
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="flex flex-col gap-1 overflow-hidden"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex flex-col gap-1"
                   >
                     {done.map((item) => (
                       <LaterRow key={item.id} item={item} />
@@ -128,11 +138,9 @@ function LaterRow({ item }: { item: LaterItem }) {
   return (
     <motion.li
       ref={row}
-      layout
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: 24, height: 0, transition: { duration: 0.22, ease: "easeIn" } }}
-      transition={springs.move}
+      exit={{ opacity: 0, x: 24, height: 0, transition: tweens.base }}
     >
       <ListRow
         onClick={openItem}

@@ -1,5 +1,4 @@
 import { Bookmark, BookmarkCheck, ChevronRight, Ellipsis, FilePlus2, Link2, Trash2 } from "lucide-react";
-import { motion } from "motion/react";
 import { useRef, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
 import { reportError, showToast } from "../../lib/toast";
@@ -110,17 +109,12 @@ export function PageView({ pageId }: { pageId: string }) {
         onConfirm={() => api.deletePage(pageId)}
       />
       <div className="flex-1 overflow-y-auto">
-        <motion.article
-          className="mx-auto max-w-reading px-6 pt-8 @2xl/main:px-12 @2xl/main:pt-14"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.04 }}
-        >
+        <article className="mx-auto max-w-reading px-6 pt-8 @2xl/main:px-12 @2xl/main:pt-14">
           <PageTitle ref={title} pageId={pageId} title={page?.title ?? ""} />
           <div className="mt-5">
             <Editor key={pageId} pageId={pageId} />
           </div>
-        </motion.article>
+        </article>
       </div>
     </div>
   );

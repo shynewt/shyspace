@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
-import { IconButton, springs } from "../../ui";
+import { IconButton, springs, tweens } from "../../ui";
 import { PageTree } from "./PageTree";
 
 /** The sidebar's pages, as a tree under a header that folds like a channel section. */
@@ -47,11 +47,10 @@ export function PagesSection() {
       <AnimatePresence initial={false}>
         {isOpen && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex flex-col gap-px overflow-hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={tweens.fast}
+            className="flex flex-col gap-px"
           >
             <PageTree pages={pages} parent={null} depth={0} onCreateChild={createPage} />
           </motion.div>

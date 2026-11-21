@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api, type Invite } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
-import { Button, Card, CountBadge, springs } from "../../ui";
+import { Button, Card, CountBadge, springs, tweens } from "../../ui";
 
 /** Join requests waiting for a decision. Only the admin may load them. */
 export function useJoinRequests(): Invite[] | undefined {
@@ -72,11 +72,9 @@ function JoinRequest({ invite }: { invite: Invite }) {
   };
   return (
     <motion.div
-      layout
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, height: 0 }}
-      transition={springs.move}
+      exit={{ opacity: 0, height: 0, transition: tweens.base }}
     >
       <Card highlighted>
         <div className="flex items-center gap-1.5 text-sm font-semibold">

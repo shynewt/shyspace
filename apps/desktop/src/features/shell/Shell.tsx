@@ -13,7 +13,7 @@ import { ScrollMemoryContext, useNavigation } from "../../lib/useNavigation";
 import { usePresence } from "../../lib/usePresence";
 import { useReminders } from "../../lib/useReminders";
 import { sameView, savedItemView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
-import { Dialog } from "../../ui";
+import { Dialog, tweens } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { InboxView } from "../inbox/InboxView";
 import { LaterView } from "../later/LaterView";
@@ -171,9 +171,9 @@ export function Shell({ session }: { session: Session }) {
           <motion.div
             key={viewKey(view)}
             className="absolute inset-0"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={tweens.fast}
           >
             {view.kind === "channel" && (
               <ScrollMemoryContext.Provider value={scrollMemory}>

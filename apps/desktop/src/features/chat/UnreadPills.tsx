@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { Button, rise, springs } from "../../ui";
+import { Button, rise } from "../../ui";
 
 /**
  * Floating buttons over the message list: up to the first unread message,
@@ -24,7 +24,7 @@ export function UnreadPills({
       <div aria-live="polite" className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center">
         <AnimatePresence>
           {isJumpToUnreadShown && (
-            <motion.div key="unread" {...rise} transition={springs.snappy} className="pointer-events-auto">
+            <motion.div key="unread" {...rise} className="pointer-events-auto">
               <Button size="sm" variant="primary" icon={<ArrowUp size={13} />} onClick={onJumpToUnread}>
                 Jump to unread
               </Button>
@@ -35,7 +35,7 @@ export function UnreadPills({
       <div aria-live="polite" className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
         <AnimatePresence>
           {newCount > 0 && (
-            <motion.div key="new" {...rise} transition={springs.snappy} className="pointer-events-auto">
+            <motion.div key="new" {...rise} className="pointer-events-auto">
               <Button size="sm" variant="primary" icon={<ArrowDown size={13} />} onClick={onJumpToNewest}>
                 {newCount === 1 ? "1 new message" : `${newCount} new messages`}
               </Button>

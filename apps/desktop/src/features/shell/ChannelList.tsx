@@ -6,7 +6,7 @@ import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace, type View } from "../../lib/workspace";
-import { ConfirmDialog, cx, IconButton, Menu, type MenuItem } from "../../ui";
+import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, tweens } from "../../ui";
 import { NavItem } from "./NavItem";
 
 const NOTIFY_CHOICES: { level: NotifyLevel; label: string; icon: ReactNode }[] = [
@@ -149,7 +149,7 @@ function ChannelItem({
           // Takes room only while shown, so a long name ends before it instead of under it.
           <span
             className={cx(
-              "relative grid shrink-0 justify-items-start overflow-hidden transition-[width,opacity]",
+              "relative grid shrink-0 justify-items-start overflow-hidden transition-opacity",
               isMenuOpen
                 ? "w-7.5 opacity-100"
                 : "w-0 opacity-0 group-hover:w-7.5 group-hover:opacity-100 keyboard-focus-within:w-7.5 keyboard-focus-within:opacity-100",
@@ -206,11 +206,7 @@ function ChannelNameInput({
     onDone();
   };
   return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto" }}
-      exit={{ opacity: 0, height: 0 }}
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={tweens.fast}>
       <div className="flex h-8 items-center gap-2 rounded-lg bg-surface px-2.5 ring-2 ring-accent/30">
         <Hash size={15} className="text-accent" />
         <input

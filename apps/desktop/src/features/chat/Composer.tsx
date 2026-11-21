@@ -7,7 +7,7 @@ import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../
 import { droppedPageId, isPageDrag } from "../../lib/pageDrag";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
-import { Button, cx, EmojiPicker, IconButton, Kbd, Popover, springs } from "../../ui";
+import { Button, cx, EmojiPicker, fade, IconButton, Kbd, Popover, tweens } from "../../ui";
 import { useDraft } from "./useDraft";
 import { type InsertMention, useSuggestions } from "./useSuggestions";
 
@@ -131,18 +131,10 @@ export function Composer({
     <div className="@container/composer relative shrink-0 px-5 pt-1 pb-7">
       <div className="relative">
         <AnimatePresence>{picker.list}</AnimatePresence>
-        <motion.div
-          layout
-          className="overflow-hidden rounded-xl border border-line bg-surface shadow-card transition-colors focus-within:border-accent/50 focus-within:ring-3 focus-within:ring-accent/10"
-        >
+        <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-card transition-colors focus-within:border-accent/50 focus-within:ring-3 focus-within:ring-accent/10">
           <AnimatePresence initial={false}>
             {editing && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.16 }}
-              >
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={tweens.fast}>
                 <div className="flex items-center gap-2 border-b border-line bg-accent-soft/50 px-3 py-1 text-xs text-accent-text">
                   <Pencil size={13} />
                   <span className="font-medium">Editing message</span>
@@ -214,7 +206,7 @@ export function Composer({
               className="w-8 px-0"
             />
           </div>
-        </motion.div>
+        </div>
       </div>
       {/* In the space under the box, so showing it never moves the box. */}
       <div className="absolute inset-x-6 bottom-1.5 flex h-[18px] items-center gap-3 overflow-hidden text-2xs text-faint">
@@ -223,10 +215,7 @@ export function Composer({
           {isHintShown && (
             <motion.p
               key={editing ? "editing" : "writing"}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.12 }}
+              {...fade}
               className="flex items-center gap-3 @max-composer-hints/composer:hidden"
             >
               {editing ? (
@@ -268,8 +257,7 @@ function LengthCount({ length, isTooLong }: { length: number; isTooLong: boolean
         <motion.span
           initial={{ opacity: 0, y: 2 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0 }}
-          transition={springs.snappy}
+          exit={{ opacity: 0, transition: tweens.exit }}
           className={cx(
             "order-last ml-auto tabular-nums",
             isTooLong ? "font-medium text-danger-text" : "text-warning-text",

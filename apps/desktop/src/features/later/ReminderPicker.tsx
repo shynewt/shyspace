@@ -10,18 +10,10 @@ import {
   parseTimeOfDay,
   reminderReadings,
 } from "../../lib/reminders";
-import { Button, cx, Dialog, durations, fade, Input, instantAfterAKey, springs } from "../../ui";
+import { Button, cx, Dialog, fade, Input, instantAfterAKey, springs } from "../../ui";
 import { Calendar } from "./Calendar";
 
 const EXAMPLES = "“in 5 min”, “tomorrow 9” or “fri 3pm”";
-
-/** Grows or shrinks to fit as it comes and goes, so the dialog's size changes smoothly. */
-const unfold = {
-  initial: { opacity: 0, height: 0 },
-  animate: { opacity: 1, height: "auto" },
-  exit: { opacity: 0, height: 0 },
-  transition: { ...springs.move, opacity: { duration: durations.base } },
-} as const;
 
 /**
  * Remind me at a time you type ("5min", "fri 3pm") and choose from what it
@@ -124,9 +116,9 @@ function Picker({ initialMs, onPick }: { initialMs: number | null; onPick: (remi
           className="h-13 min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-faint"
         />
       </div>
-      <AnimatePresence initial={false} mode="wait">
+      <AnimatePresence initial={false}>
         {calendarStart === null ? (
-          <motion.div key="typed" {...unfold} className="overflow-hidden">
+          <motion.div key="typed" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <div className="border-t border-line p-2">
               <AnimatePresence initial={false} mode="popLayout">
                 {message && (
@@ -141,23 +133,20 @@ function Picker({ initialMs, onPick }: { initialMs: number | null; onPick: (remi
                 )}
               </AnimatePresence>
               <div id={listId} role="listbox" aria-label="Suggested times">
-                <AnimatePresence initial={false}>
-                  {options.map((option, index) => (
-                    <motion.div key={option.key} {...unfold} className="overflow-hidden">
-                      <OptionRow
-                        id={`${listId}-${index}`}
-                        option={option}
-                        isSelected={index === active}
-                        onHover={() => setSelected(index)}
-                      />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
+                {options.map((option, index) => (
+                  <OptionRow
+                    key={option.key}
+                    id={`${listId}-${index}`}
+                    option={option}
+                    isSelected={index === active}
+                    onHover={() => setSelected(index)}
+                  />
+                ))}
               </div>
             </div>
           </motion.div>
         ) : (
-          <motion.div key="calendar" {...unfold} className="overflow-hidden">
+          <motion.div key="calendar" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <CalendarChoice start={calendarStart} now={now} onPick={onPick} />
           </motion.div>
         )}

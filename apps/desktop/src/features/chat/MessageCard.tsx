@@ -8,7 +8,7 @@ import { useMembers } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { useLive } from "../../lib/useLive";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
-import { springs } from "../../ui";
+import { tweens } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
 
 /** A message shared by link: who said it and where; opens it in place. */
@@ -44,9 +44,8 @@ export function MessageCard({ messageId }: { messageId: string }) {
   return (
     <motion.button
       type="button"
-      layout
       whileHover={{ y: -2 }}
-      transition={springs.snappy}
+      transition={tweens.fast}
       aria-label={`Message from ${author} in ${where}`}
       onClick={() => navigate(linkedMessageView(linked))}
       className="mt-1.5 flex w-full max-w-[440px] items-start gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-card transition-colors hover:border-accent/40"

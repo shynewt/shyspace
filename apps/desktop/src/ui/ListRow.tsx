@@ -27,7 +27,7 @@ export function ListRow({
   return (
     <div
       className={cx(
-        "group flex items-center gap-1 rounded-xl transition-colors hover:bg-surface-2",
+        "group flex items-center gap-1 rounded-xl hover:bg-surface-2",
         isHighlighted && "bg-surface-2",
         trailing !== undefined && "pr-2",
         className,

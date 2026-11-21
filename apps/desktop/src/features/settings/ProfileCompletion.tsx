@@ -16,13 +16,7 @@ export function ProfileCompletion({ details }: { details: ProfileDetails | undef
   return (
     <AnimatePresence initial={false}>
       {isShown && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          exit={{ opacity: 0, height: 0 }}
-          transition={springs.move}
-          className="overflow-hidden"
-        >
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           <div className="mb-5 flex items-start gap-3 rounded-xl bg-surface-2 py-2.5 pr-2 pl-3.5">
             <div className="flex min-w-0 flex-1 flex-col gap-2 pt-0.5">
               <p className="text-sm text-muted">
@@ -38,9 +32,9 @@ export function ProfileCompletion({ details }: { details: ProfileDetails | undef
                 className="h-1 w-40 overflow-hidden rounded-full bg-surface-3"
               >
                 <motion.div
-                  className="h-full rounded-full bg-accent"
+                  className="h-full origin-left rounded-full bg-accent"
                   initial={false}
-                  animate={{ width: `${(done / PROFILE_STEPS) * 100}%` }}
+                  animate={{ scaleX: done / PROFILE_STEPS }}
                   transition={springs.move}
                 />
               </div>

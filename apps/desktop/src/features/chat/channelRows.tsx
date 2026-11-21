@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import type { Channel, Member, Message, MessageCursor } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
 import { formatDay } from "../../lib/people";
-import { EmptyState, Spinner, springs } from "../../ui";
+import { EmptyState, Spinner } from "../../ui";
 import { MessageItem } from "./MessageItem";
 import { isAfter } from "./useReadPosition";
 
@@ -105,12 +105,7 @@ export function MessageRows({
           ) : row.kind === "unread" ? (
             <UnreadLine key={row.key} />
           ) : (
-            <motion.div
-              key={row.key}
-              initial={{ opacity: 0, y: 10, scale: 0.99 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={springs.move}
-            >
+            <motion.div key={row.key} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
               <MessageItem
                 message={row.message}
                 isContinuation={row.isContinuation}

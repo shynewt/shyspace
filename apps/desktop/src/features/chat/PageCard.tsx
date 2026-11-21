@@ -4,7 +4,7 @@ import { useCallback, useMemo } from "react";
 import { api } from "../../lib/api";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { springs } from "../../ui";
+import { tweens } from "../../ui";
 import { pagePreview } from "../pages/pageText";
 
 /** A page shared in chat. It stays live: edits to the page show up here. */
@@ -21,9 +21,8 @@ export function PageCard({ pageId }: { pageId: string }) {
   return (
     <motion.button
       type="button"
-      layout
       whileHover={{ y: -2 }}
-      transition={springs.snappy}
+      transition={tweens.fast}
       onClick={() => navigate({ kind: "page", id: pageId })}
       className="group/card mt-1.5 flex w-full max-w-[440px] items-start gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-card transition-colors hover:border-accent/40"
     >

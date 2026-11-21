@@ -81,7 +81,7 @@ export function NavItem({
           })
         }
         className={cx(
-          "focus-ring-inset relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-base transition-colors",
+          "focus-ring-inset relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-base",
           isActive ? "font-medium text-ink" : "text-muted hover:bg-surface-2/70 hover:text-ink",
           hasUnread && "font-semibold text-ink",
           isMuted && !hasUnread && !isActive && "opacity-60",

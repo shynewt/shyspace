@@ -7,7 +7,7 @@ import { displayName } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Button, CountBadge, EmptyState, ListRow, RelativeTime, SectionLabel, springs } from "../../ui";
+import { Avatar, Button, CountBadge, EmptyState, ListRow, RelativeTime, SectionLabel, tweens } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
 import { HeaderAction, ViewHeader } from "../shell/ViewHeader";
 import { MarkAllReadDialog } from "./MarkAllReadDialog";
@@ -93,11 +93,9 @@ function AttentionRow({ item }: { item: InboxItem }) {
   const where = item.reason === "mention" ? "mentioned you in" : "replied in a thread in";
   return (
     <motion.li
-      layout
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, height: 0 }}
-      transition={springs.move}
+      exit={{ opacity: 0, height: 0, transition: tweens.base }}
     >
       <ListRow
         onClick={() =>
@@ -125,11 +123,9 @@ function DraftRow({ draft }: { draft: Draft }) {
   const isThread = draft.target !== draft.channel;
   return (
     <motion.li
-      layout
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, height: 0 }}
-      transition={springs.move}
+      exit={{ opacity: 0, height: 0, transition: tweens.base }}
     >
       <ListRow
         onClick={() => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined })}

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
 import { startPageDrag } from "../../lib/pageDrag";
 import { reportError, showToast } from "../../lib/toast";
-import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs } from "../../ui";
+import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs, tweens } from "../../ui";
 import { NavItem } from "./NavItem";
 
 export function PageTree({
@@ -122,13 +122,7 @@ function PageNode({
       />
       <AnimatePresence initial={false}>
         {hasChildren && isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="overflow-hidden"
-          >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={tweens.fast}>
             <PageTree pages={pages} parent={page.id} depth={depth + 1} onCreateChild={onCreateChild} />
           </motion.div>
         )}

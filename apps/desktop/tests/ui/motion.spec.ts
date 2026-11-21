@@ -351,3 +351,19 @@ test("a docked thread appears without sliding", async ({ page }) => {
   expect(frames.filter((frame) => frame.isPresent).every((frame) => IDENTITY.includes(frame.transform))).toBe(true);
   expect(entranceTime(frames)).toBeLessThanOrEqual(ENTRANCE_BUDGET_MS);
 });
+
+test.describe("lists and hover", () => {
+  test.beforeEach(async ({ page }) => openApp(page));
+
+  test("a message's hover background shows at once", async ({ page }) => {
+    const message = await sendMessage(page, "Hello");
+    await message.hover();
+    const backgrounds = await message.evaluate(async (element) => {
+      const now = getComputedStyle(element).backgroundColor;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return [now, getComputedStyle(element).backgroundColor];
+    });
+    expect(backgrounds[0]).toBe(backgrounds[1]);
+    expect(backgrounds[0]).not.toBe("rgba(0, 0, 0, 0)");
+  });
+});

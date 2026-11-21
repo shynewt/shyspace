@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { Session } from "../../lib/api";
-import { Logo, SegmentedControl } from "../../ui";
+import { Logo, SegmentedControl, tweens } from "../../ui";
 import { CreateForm } from "./CreateForm";
 import { JoinForm } from "./JoinForm";
 import { RestoreForm } from "./RestoreForm";
@@ -21,7 +21,7 @@ export function Onboarding({ onReady }: { onReady: (session: Session) => void })
       className="relative grid h-full place-items-center overflow-auto px-6 py-10"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: { duration: 0.2 } }}
+      exit={{ opacity: 0, transition: tweens.base }}
     >
       <Backdrop />
       <div className="relative w-full max-w-[460px]">
@@ -49,7 +49,7 @@ export function Onboarding({ onReady }: { onReady: (session: Session) => void })
                 initial={{ opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -12 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
+                transition={tweens.base}
               >
                 {mode === "create" && <CreateForm onReady={onReady} />}
                 {mode === "join" && <JoinForm onReady={onReady} />}

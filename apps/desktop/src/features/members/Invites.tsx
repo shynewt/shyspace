@@ -37,8 +37,8 @@ export function CreateInvite() {
         {created && (
           <motion.div
             key={created.code}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
             className="flex flex-col gap-1.5"
           >
             <CopyField value={created.code} label="Copy invite code" />

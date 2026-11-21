@@ -32,6 +32,7 @@ import {
   Popover,
   springs,
   Tooltip,
+  tweens,
 } from "../../ui";
 import { ReminderPicker } from "../later/ReminderPicker";
 import { remindMeItem } from "../later/remindMeItem";
@@ -97,13 +98,20 @@ export const MessageItem = memo(function MessageItem({
         id={`message-${message.id}`}
         aria-label={`${name}, ${formatFullDate(message.created_ms)}${savedDescription ? `, ${savedDescription}` : ""}`}
         className={cx(
-          "group relative flex gap-3 px-5 transition-colors duration-500 hover:bg-surface-2/50 keyboard-focus-within:bg-surface-2/50",
+          "group relative isolate flex gap-3 px-5 hover:bg-surface-2/50 keyboard-focus-within:bg-surface-2/50",
           isContinuation ? "py-0.5" : "pt-2 pb-0.5",
-          isHighlighted && "bg-accent-soft/70",
           message.mentions_me && !isHighlighted && "bg-warning/8 shadow-[inset_2px_0_0_var(--warning)]",
           savedDescription && !message.mentions_me && !isHighlighted && "bg-accent-soft/35",
         )}
       >
+        {/* Its own layer, so the highlight fades slowly while hover shows at once. */}
+        <span
+          aria-hidden
+          className={cx(
+            "pointer-events-none absolute inset-0 -z-10 bg-accent-soft/70 transition-opacity duration-highlight",
+            !isHighlighted && "opacity-0",
+          )}
+        />
         <div className="w-9 shrink-0">
           {isContinuation ? (
             <span className="flex justify-end pt-[3px]">
@@ -160,18 +168,16 @@ export const MessageItem = memo(function MessageItem({
             <MessageCard key={id} messageId={id} />
           ))}
           {message.reactions.length > 0 && (
-            <motion.div layout className="mt-1 flex flex-wrap gap-1">
+            <div className="mt-1 flex flex-wrap gap-1">
               <AnimatePresence initial={false}>
                 {message.reactions.map((reaction) => (
                   <motion.button
                     key={reaction.emoji}
                     type="button"
-                    layout
                     aria-pressed={reaction.mine}
                     aria-label={`${reaction.emoji} ${reaction.count}`}
                     initial={{ scale: 0.4, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.4, opacity: 0 }}
                     whileTap={{ scale: 0.88 }}
                     transition={springs.pop}
                     onClick={() => toggleReaction(reaction.emoji)}
@@ -194,7 +200,7 @@ export const MessageItem = memo(function MessageItem({
                   </motion.button>
                 ))}
               </AnimatePresence>
-            </motion.div>
+            </div>
           )}
           {onOpenThread && message.reply_count > 0 && (
             <ThreadSummary message={message} pageTitle={(id) => titles.get(id)} onOpen={onOpenThread} />
@@ -221,14 +227,13 @@ export const MessageItem = memo(function MessageItem({
               <EmojiPicker onSelect={toggleReaction} />
             ) : (
               <div className="flex items-center gap-0.5">
-                {QUICK_REACTIONS.map((emoji, index) => (
+                {QUICK_REACTIONS.map((emoji) => (
                   <motion.button
                     key={emoji}
                     type="button"
                     aria-label={`React with ${emoji}`}
-                    initial={{ opacity: 0, scale: 0.5 }}
-                    animate={{ opacity: 1, scale: 1, transition: { ...springs.pop, delay: index * 0.025 } }}
                     whileHover={{ scale: 1.25 }}
+                    transition={tweens.fast}
                     onClick={() => toggleReaction(emoji)}
                     className="grid h-8 w-8 place-items-center rounded-md text-xl hover:bg-surface-2"
                   >

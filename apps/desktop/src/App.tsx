@@ -7,7 +7,7 @@ import { useAccent, useTheme } from "./lib/preferences";
 import { reportError } from "./lib/toast";
 import { useNoBrowserMenu } from "./lib/useContextMenu";
 import { useInputModality } from "./lib/useInputModality";
-import { Logo, Toasts } from "./ui";
+import { Logo, Toasts, tweens } from "./ui";
 
 /** The component gallery, only in development builds (open with #gallery). */
 const Gallery = import.meta.env.DEV ? lazy(() => import("./dev/Gallery")) : null;
@@ -46,8 +46,7 @@ export function App() {
           <motion.div
             key="loading"
             className="grid h-full place-items-center"
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.2 }}
+            exit={{ opacity: 0, transition: tweens.exit }}
           >
             <motion.div
               animate={{ scale: [1, 1.06, 1], opacity: [0.7, 1, 0.7] }}

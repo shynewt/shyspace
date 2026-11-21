@@ -2,6 +2,7 @@ import { AlarmClock, AlertCircle, ArrowUpRight, Check, Info, Undo2 } from "lucid
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
 import { dismissToast, reportError, type Toast, useToasts } from "../lib/toast";
+import { tweens } from "./motion";
 
 const ICONS: Record<Toast["tone"], ReactNode> = {
   success: <Check size={16} className="shrink-0 text-success" />,
@@ -24,11 +25,10 @@ export function Toasts() {
         {toasts.map((toast) => (
           <motion.div
             key={toast.id}
-            layout
             role={toast.tone === "error" ? "alert" : "status"}
             initial={{ opacity: 0, y: 16, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95, transition: { duration: 0.15 } }}
+            exit={{ opacity: 0, y: 8, scale: 0.95, transition: tweens.exit }}
             className="pointer-events-auto flex max-w-[520px] items-center rounded-xl border border-line bg-surface text-sm shadow-float"
           >
             <button

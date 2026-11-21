@@ -17,7 +17,7 @@ import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs } from "../../ui";
+import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs, tweens } from "../../ui";
 import { NewPrivateChannelDialog } from "../private/NewPrivateDialogs";
 import { ChannelList, listedChannels } from "./ChannelList";
 
@@ -180,11 +180,10 @@ function Section({
       <AnimatePresence initial={false}>
         {isOpen && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex flex-col gap-px overflow-clip"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={tweens.fast}
+            className="flex flex-col gap-px"
           >
             <ChannelList
               channelIds={section.channels}
@@ -231,11 +230,7 @@ function SectionNameInput({
     onDone();
   };
   return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto" }}
-      exit={{ opacity: 0, height: 0 }}
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={tweens.fast}>
       <input
         ref={input}
         aria-label={label}
