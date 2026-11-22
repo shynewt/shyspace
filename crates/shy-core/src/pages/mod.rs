@@ -1,8 +1,12 @@
 //! Pages are markdown held in a single Yjs text, so the desktop editor (Yjs)
 //! and agents (yrs) edit the same structure natively.
 
+mod update_check;
+
 use anyhow::{Context, Result, ensure};
 use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update, updates::decoder::Decode};
+
+use update_check::{ClientEnds, check_update};
 
 const CONTENT: &str = "content";
 
@@ -22,8 +26,14 @@ fn text(doc: &Doc) -> String {
     doc.get_or_insert_text(CONTENT).get_string(&doc.transact())
 }
 
-/// Applies a Yjs update to a page's state and returns the new state.
+/// Applies a Yjs update from anyone to a page's state and returns the new
+/// state.
 pub fn merge(state: Option<&[u8]>, update: &[u8]) -> Result<Vec<u8>> {
+    let ends = match state {
+        Some(state) => ClientEnds::of_state(state).context("reading the page state")?,
+        None => ClientEnds::default(),
+    };
+    check_update(update, &ends)?;
     let doc = load(state)?;
     doc.transact_mut().apply_update(Update::decode_v1(update)?)?;
     Ok(encode(&doc))
@@ -34,12 +44,15 @@ pub fn merge(state: Option<&[u8]>, update: &[u8]) -> Result<Vec<u8>> {
 #[derive(Default)]
 pub struct PageMerge {
     doc: Doc,
+    ends: ClientEnds,
     accepted: Vec<Vec<u8>>,
 }
 
 impl PageMerge {
-    /// A damaged update fails and leaves the page as it was, as [`merge`] does.
+    /// Takes and refuses the same updates as [`merge`] would, one after
+    /// another; a refused one leaves the page as it was.
     pub fn add(&mut self, update: &[u8]) -> Result<()> {
+        let new_ends = check_update(update, &self.ends)?;
         let decoded = Update::decode_v1(update)?;
         let applied = self.doc.transact_mut().apply_update(decoded);
         if let Err(error) = applied {
@@ -51,6 +64,7 @@ impl PageMerge {
             }
             return Err(error.into());
         }
+        self.ends.extend(new_ends);
         self.accepted.push(update.to_vec());
         Ok(())
     }

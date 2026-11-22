@@ -85,7 +85,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 
 ## Pages
 
-A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop editor (CodeMirror + `y-codemirror.next`) and agents (Rust `yrs`) edit the same structure. Agent edits change only the part that differs, so they don't clash with people typing nearby. A page shared in chat (`shy://page/<id>`) shows as a live card. The editor shows the markdown as live preview (`features/pages/editor/`, rules in `design-system.md`); what is stored stays plain markdown.
+A page is markdown in one Yjs text named `content` (`pages/`). The desktop editor (CodeMirror + `y-codemirror.next`) and agents (Rust `yrs`) edit the same structure. Agent edits change only the part that differs, so they don't clash with people typing nearby. A page shared in chat (`shy://page/<id>`) shows as a live card. The editor shows the markdown as live preview (`features/pages/editor/`, rules in `design-system.md`); what is stored stays plain markdown.
 
 ## Files and profile pictures
 
@@ -107,7 +107,7 @@ Deleting a file, its message or its channel removes it everywhere and queues its
 | `crypto.rs` | sign-then-encrypt ops |
 | `ops.rs` | op types, owned ids, timestamps |
 | `profile.rs` | profile details (role, contact, time zone, working hours) and how others' are cleaned |
-| `pages.rs` | Yjs page helpers |
+| `pages/` | Yjs page helpers, and `update_check` (refusing updates from others unless they are an editor's next pieces of page text) |
 | `views.rs` | read models sent to the UI and agents |
 | `keys.rs` | the device key and where it's kept (keychain or file) |
 | `config.rs`, `identity.rs` | workspace settings (including the current bucket settings) and the identity key |

@@ -369,6 +369,81 @@ async fn a_damaged_page_update_cannot_stop_a_device_following_a_removal() {
     assert!(!texts_in(&carol, &general).contains(&"SENT-AFTER-REMOVAL".to_string()));
 }
 
+/// A page is one Yjs text, and an editor only appends its own new pieces:
+/// updates shaped otherwise are refused before yrs sees them, so these
+/// don't overflow the stack (nested values; clients with no pieces) on every
+/// device that pulls them.
+#[tokio::test(flavor = "multi_thread")]
+async fn crafted_page_updates_cannot_crash_or_exhaust_a_device() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = admin.pages().unwrap()[0].id.clone();
+    let before = admin.page_text(&page).unwrap();
+    let mut nested_arrays = vec![1, 1, 1, 0, 8, 1, 7];
+    nested_arrays.extend_from_slice(b"content");
+    nested_arrays.push(1);
+    for _ in 0..400_000 {
+        nested_arrays.extend_from_slice(&[117, 1]);
+    }
+    nested_arrays.extend_from_slice(&[126, 0]);
+    let mut clients_with_no_pieces = vec![0xa0, 0x8d, 0x06];
+    for client in 0..100_000_u32 {
+        clients_with_no_pieces.push(0);
+        let mut value = client;
+        while value >= 0x80 {
+            clients_with_no_pieces.push((value as u8 & 0x7f) | 0x80);
+            value >>= 7;
+        }
+        clients_with_no_pieces.extend_from_slice(&[value as u8, 0]);
+    }
+    clients_with_no_pieces.push(0);
+    let mut forger = Forger::new(&bob);
+
+    for update in [nested_arrays, clients_with_no_pieces] {
+        admin
+            .receive(forger.seal(Op::DocUpdate {
+                page: page.clone(),
+                update,
+            }))
+            .unwrap();
+    }
+    assert_eq!(admin.page_text(&page).unwrap(), before);
+
+    let state = admin.page_state(&page).unwrap();
+    let honest = crate::pages::edit(state.as_deref(), crate::pages::Edit::Append("still editable")).unwrap();
+    admin
+        .receive(forger.seal(Op::DocUpdate {
+            page: page.clone(),
+            update: honest,
+        }))
+        .unwrap();
+    assert!(admin.page_text(&page).unwrap().ends_with("still editable"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn page_updates_kept_before_the_page_rules_are_dropped_once() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = admin.pages().unwrap()[0].id.clone();
+    let state = admin.page_state(&page).unwrap();
+    let mut with_trailing_bytes =
+        crate::pages::edit(state.as_deref(), crate::pages::Edit::Append("PLANTED")).unwrap();
+    with_trailing_bytes.push(0);
+    let kept = Forger::new(&bob).seal(Op::DocUpdate {
+        page: page.clone(),
+        update: with_trailing_bytes,
+    });
+    admin.state().store.insert_applied(&kept, true).unwrap();
+    admin.state().store.set_meta("views_version", &[4]).unwrap();
+
+    let rebuilt = admin
+        .state()
+        .store
+        .rebuild_if_rules_changed(admin.apply_context())
+        .unwrap();
+
+    assert!(rebuilt);
+    assert!(!admin.page_text(&page).unwrap().contains("PLANTED"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn malformed_sealing_keys_from_others_are_skipped() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
