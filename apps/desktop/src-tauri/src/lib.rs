@@ -466,6 +466,19 @@ async fn linked_message(state: State<'_, AppState>, id: String) -> CommandResult
 }
 
 #[tauri::command]
+async fn sent_messages(
+    state: State<'_, AppState>,
+    text: String,
+    before: Option<MessageCursor>,
+    limit: u32,
+) -> CommandResult<Vec<LinkedMessage>> {
+    current(&state)
+        .await?
+        .sent_messages(&text, before.as_ref(), limit)
+        .map_err(failed)
+}
+
+#[tauri::command]
 async fn set_draft(state: State<'_, AppState>, target: String, text: String) -> CommandResult<()> {
     current(&state).await?.set_draft(&target, &text).map_err(failed)
 }
@@ -836,6 +849,7 @@ pub fn run() {
             take_due_reminders,
             set_draft,
             drafts,
+            sent_messages,
             linked_message,
             inbox,
             mark_all_read,

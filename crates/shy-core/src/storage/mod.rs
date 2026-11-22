@@ -19,6 +19,7 @@ mod schema;
 mod sealed;
 mod sealing;
 mod sections;
+mod sent;
 mod snapshot;
 mod threads;
 

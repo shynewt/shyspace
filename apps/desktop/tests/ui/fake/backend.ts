@@ -14,6 +14,7 @@ import type {
   LaterItem,
   Member,
   MemberStatus,
+  MessageCursor,
   Page,
   ProfileDetails,
   ProtectionCheck,
@@ -40,6 +41,7 @@ import { FakeLater } from "./later";
 import { FakePrivate, NOT_PRIVATE } from "./private";
 import { search } from "./search";
 import { FakeSections } from "./sections";
+import { sentMessages } from "./sent";
 
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
@@ -406,6 +408,14 @@ export class FakeBackend {
         return this.notify({ kind: "drafts" });
       case "drafts":
         return this.drafts.list((target) => this.chat.channelOf(target));
+      case "sent_messages":
+        return sentMessages(this.chat, {
+          me: this.me(),
+          isReadable: (channel) => this.private.mayPost(channel),
+          text: requireString(args, "text"),
+          before: (argument(args, "before") as MessageCursor | null) ?? null,
+          limit: argument(args, "limit") as number,
+        });
       case "session":
         return this.session;
       case "create_workspace":

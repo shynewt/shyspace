@@ -246,6 +246,9 @@ export const api = {
   thread: (root: string) => invoke<Message[]>("thread", { root }),
   inbox: () => invoke<Inbox>("inbox"),
   drafts: () => invoke<Draft[]>("drafts"),
+  /** Your own messages, newest first; `text` narrows them, `before` pages back from the oldest shown. */
+  sentMessages: (text: string, before: MessageCursor | null, limit: number) =>
+    invoke<LinkedMessage[]>("sent_messages", { text, before, limit }),
   later: () => invoke<LaterItem[]>("later"),
   sidebarSections: () => invoke<SidebarSection[]>("sidebar_sections"),
   createSection: (name: string) => invoke<string>("create_section", { name }),

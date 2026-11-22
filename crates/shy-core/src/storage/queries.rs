@@ -219,11 +219,7 @@ impl Store {
     /// `filters`, only messages that also pass them; with no text, the
     /// newest messages that pass them.
     pub fn search(&self, text: &str, filters: &SearchFilters, limit: u32) -> Result<Vec<SearchHit>> {
-        let match_expression = text
-            .split_whitespace()
-            .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let match_expression = match_expression(text);
         if match_expression.is_empty() && filters.is_empty() {
             return Ok(Vec::new());
         }
@@ -320,4 +316,12 @@ impl Store {
             alerts,
         }))
     }
+}
+
+/// `text` as an FTS5 query: each word matches as a prefix, quotes are plain text.
+pub(super) fn match_expression(text: &str) -> String {
+    text.split_whitespace()
+        .map(|term| format!("\"{}\"*", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }

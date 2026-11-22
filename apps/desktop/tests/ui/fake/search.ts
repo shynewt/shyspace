@@ -13,15 +13,9 @@ type Searchable = {
 
 /** Like the core: every term must start a word; matches are marked. */
 export function search(query: string, { messages, channels, pages }: Searchable): SearchHit[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const terms = searchTerms(query);
   if (terms.length === 0) return [];
-  const matches = (text: string) =>
-    terms.every((term) =>
-      text
-        .toLowerCase()
-        .split(/\W+/)
-        .some((word) => word.startsWith(term)),
-    );
+  const matches = (text: string) => matchesTerms(terms, text);
   const hits: SearchHit[] = [];
   for (const message of messages) {
     if (!matches(message.text)) continue;
@@ -48,6 +42,20 @@ export function search(query: string, { messages, channels, pages }: Searchable)
     });
   }
   return hits;
+}
+
+export function searchTerms(query: string): string[] {
+  return query.toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** Whether every term starts a word of `text`. */
+export function matchesTerms(terms: string[], text: string): boolean {
+  return terms.every((term) =>
+    text
+      .toLowerCase()
+      .split(/\W+/)
+      .some((word) => word.startsWith(term)),
+  );
 }
 
 function highlight(text: string, terms: string[]): string {

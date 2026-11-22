@@ -9,6 +9,7 @@ mod presence;
 mod protection;
 mod reads;
 mod sections;
+mod sent;
 mod storage;
 
 pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
