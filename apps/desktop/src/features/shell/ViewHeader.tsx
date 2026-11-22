@@ -9,11 +9,14 @@ import { SidebarToggle, useShellLayout } from "./ShellLayout";
  * `header` container, so what's in it can fold labels away as it narrows;
  * the title should be the only thing that shrinks.
  */
+/** The bar at the top of a view or panel: one line, with a rule below. */
+export const HEADER_BAR = "flex h-13 shrink-0 items-center gap-2 border-b border-line";
+
 export function ViewHeader({ children, className }: { children?: ReactNode; className?: string }) {
   const { sidebar } = useShellLayout();
   return (
     <header
-      className={cx("@container/header flex h-13 shrink-0 items-center gap-2 border-b border-line px-5", className)}
+      className={cx("@container/header px-5", HEADER_BAR, className)}
     >
       <AnimatePresence initial={false}>
         {!sidebar.isDocked && <HeaderSidebarToggle key="sidebar-toggle" />}

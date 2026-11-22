@@ -1,11 +1,11 @@
-import { Bell, BellOff, X } from "lucide-react";
+import { Bell, BellOff } from "lucide-react";
 import { useIsPresent } from "motion/react";
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWindowAttention } from "../../lib/useWindowAttention";
-import { Button, IconButton, Spinner } from "../../ui";
+import { Button, Spinner } from "../../ui";
 import { WriteGate } from "../private/WriteGate";
 import { SidePanel } from "../shell/SidePanel";
 import { Composer } from "./Composer";
@@ -80,23 +80,25 @@ export function ThreadPanel({
   };
 
   return (
-    <SidePanel label="Thread" onClose={onClose} onClickAway={onClickAway} returnFocusTo={returnFocusTo}>
-      <header className="flex h-13 shrink-0 items-center gap-2 border-b border-line px-4">
-        <h2 className="text-base font-semibold">Thread</h2>
-        {first && (
+    <SidePanel
+      title="Thread"
+      actions={
+        first && (
           <Button
             variant="ghost"
             size="sm"
             aria-pressed={first.is_following}
             icon={first.is_following ? <Bell size={13} /> : <BellOff size={13} />}
             onClick={toggleFollowing}
-            className="ml-auto"
           >
             {first.is_following ? "Following" : "Follow"}
           </Button>
-        )}
-        <IconButton label="Close thread" icon={<X size={15} />} onClick={onClose} className={first ? "" : "ml-auto"} />
-      </header>
+        )
+      }
+      onClose={onClose}
+      onClickAway={onClickAway}
+      returnFocusTo={returnFocusTo}
+    >
       <div
         ref={scroller}
         onScroll={(event) => {

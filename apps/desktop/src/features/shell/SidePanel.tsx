@@ -1,10 +1,13 @@
+import { X } from "lucide-react";
 import { motion, useIsPresent } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
-import { cx, instantAfterAKey, springs, tweens } from "../../ui";
+import { cx, IconButton, instantAfterAKey, springs, tweens } from "../../ui";
 import { useShellLayout } from "./ShellLayout";
+import { HEADER_BAR } from "./ViewHeader";
 
 /**
- * A panel at the right of a view (a thread), inside a `relative` parent:
+ * A panel at the right of a view (a thread), inside a `relative` parent,
+ * with a header bar of its title, `actions` and a close button:
  * docked beside the content while it keeps `--width-channel-min`, otherwise
  * sliding over it with a shadow and no scrim, so the content stays readable
  * at the edge. While it's over the content, Esc closes it, and so does a
@@ -14,13 +17,15 @@ import { useShellLayout } from "./ShellLayout";
  * where it wanted.
  */
 export function SidePanel({
-  label,
+  title,
+  actions,
   onClose,
   onClickAway,
   returnFocusTo,
   children,
 }: {
-  label: string;
+  title: string;
+  actions?: ReactNode;
   onClose: () => void;
   onClickAway: () => void;
   /** Where focus goes on closing when what opened the panel is gone. */
@@ -84,7 +89,7 @@ export function SidePanel({
   return (
     <motion.aside
       ref={panel}
-      aria-label={label}
+      aria-label={title}
       onPointerDownCapture={() => {
         isPointerDownInside.current = true;
       }}
@@ -94,6 +99,13 @@ export function SidePanel({
         isOverlay && "absolute inset-y-0 right-0 z-20 shadow-float",
       )}
     >
+      <header className={cx(HEADER_BAR, "px-4")}>
+        <h2 className="text-base font-semibold">{title}</h2>
+        <div className="ml-auto flex items-center gap-2">
+          {actions}
+          <IconButton label={`Close ${title.toLowerCase()}`} icon={<X size={15} />} onClick={onClose} />
+        </div>
+      </header>
       {children}
     </motion.aside>
   );

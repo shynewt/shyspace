@@ -18,7 +18,7 @@ import { SETTINGS_SECTIONS } from "../../lib/settings";
 import { hasCommandModifier, shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
-import { Dialog, instantAfterAKey, Kbd, springs } from "../../ui";
+import { cx, Dialog, instantAfterAKey, Kbd, springs } from "../../ui";
 import { MarkAllReadDialog } from "../inbox/MarkAllReadDialog";
 import { ChannelGlyph } from "../private/ChannelGlyph";
 import { ChannelName } from "../private/ChannelName";
@@ -264,7 +264,7 @@ function PaletteBody({
                   transition={instantAfterAKey(springs.snappy)}
                 />
               )}
-              <span className={`relative mt-0.5 ${selected === index ? "text-accent" : "text-decorative"}`}>
+              <span className={cx("relative mt-0.5", selected === index ? "text-accent" : "text-decorative")}>
                 {item.icon}
               </span>
               <span className="relative min-w-0 flex-1">
