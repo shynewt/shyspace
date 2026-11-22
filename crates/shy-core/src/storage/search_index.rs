@@ -43,11 +43,6 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    };
-
     use super::*;
     use crate::storage::{SearchFilters, TEST_DB_KEY};
 
@@ -62,23 +57,6 @@ mod tests {
             .into_iter()
             .map(|hit| (hit.kind, hit.id))
             .collect()
-    }
-
-    /// SQLite steps run by `work`, a measure of its cost that doesn't depend
-    /// on the machine.
-    fn steps_of(store: &Store, work: impl FnOnce()) -> u64 {
-        let steps = Arc::new(AtomicU64::new(0));
-        let counter = Arc::clone(&steps);
-        store.db.progress_handler(
-            1,
-            Some(move || {
-                counter.fetch_add(1, Ordering::Relaxed);
-                false
-            }),
-        );
-        work();
-        store.db.progress_handler(1, None::<fn() -> bool>);
-        steps.load(Ordering::Relaxed)
     }
 
     #[test]
@@ -120,11 +98,11 @@ mod tests {
             }
         };
         index_messages(0..20);
-        let with_few = steps_of(&store, || {
+        let with_few = store.steps_of(|| {
             store.index_for_search("message", "m5", "", "changed").unwrap();
         });
         index_messages(20..5_000);
-        let with_many = steps_of(&store, || {
+        let with_many = store.steps_of(|| {
             store.index_for_search("message", "m6", "", "changed").unwrap();
         });
 

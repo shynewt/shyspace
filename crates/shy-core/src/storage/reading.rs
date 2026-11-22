@@ -1,18 +1,33 @@
 //! Personal state, kept on this device only and never sent to others: read
 //! positions (the last message read in each channel) and alert levels.
 
+use std::collections::HashMap;
+
 use anyhow::{Context, Result, bail};
 use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
 use super::Store;
-use crate::views::{MessageCursor, NotifyLevel};
+use crate::{
+    mentions::{GROUP_MENTION_PREFIX, MEMBER_LINK_PREFIX, mentions},
+    views::{MessageCursor, NotifyLevel, member_id},
+};
 
-pub struct UnreadMessage {
+/// Messages in channel `?1` by others than `?2`, after the read position
+/// (`?3`, `?4`). Comparing as a pair lets SQLite start reading the channel's
+/// index there instead of at the beginning.
+const UNREAD_BY_OTHERS: &str = "m.channel = ?1 AND m.author != ?2 AND (m.lamport, m.author) > (?3, ?4)";
+/// Whether message `m` shows in its channel: it isn't a reply, or its
+/// parent hasn't arrived.
+const IS_SHOWN_IN_CHANNEL: &str =
+    "(m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to))";
+
+/// An unread message that mentions you.
+pub struct UnreadMention {
     pub id: String,
-    pub text: String,
-    /// False for a thread reply, which shows in its thread instead.
-    pub is_in_channel: bool,
+    pub lamport: u64,
+    /// The author's member id (hex).
+    pub author: String,
 }
 
 impl Store {
@@ -54,49 +69,107 @@ impl Store {
         }))
     }
 
-    /// Messages by others after the read position, oldest first: id,
-    /// current text, and whether it shows in the channel (not a thread reply).
-    /// A thread reply also counts as read once its thread is read past it.
-    pub fn unread_messages(&self, channel: &str, me: &PublicKey) -> Result<Vec<UnreadMessage>> {
-        let mut statement = self.db.prepare(
-            "SELECT m.id, COALESCE(e.text, m.text),
-                    m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to),
-                    m.lamport, m.author
-             FROM messages m
-             LEFT JOIN message_edits e ON e.message = m.id
-             LEFT JOIN read_markers r ON r.channel = m.channel
-             WHERE m.channel = ?1 AND m.author != ?2
-               AND (r.channel IS NULL OR m.lamport > r.lamport OR (m.lamport = r.lamport AND m.author > r.author))
-             ORDER BY m.lamport, m.author",
-        )?;
-        let rows = statement.query_map(params![channel, me.as_bytes()], |row| {
-            let message = UnreadMessage {
-                id: row.get(0)?,
-                text: row.get(1)?,
-                is_in_channel: row.get(2)?,
-            };
-            let position = MessageCursor {
-                lamport: row.get(3)?,
-                author: hex::encode(row.get::<_, Vec<u8>>(4)?),
-            };
-            Ok((message, position))
-        })?;
-        let mut unread = Vec::new();
-        for row in rows {
-            let (message, position) = row?;
-            if message.is_in_channel || !self.is_read_in_thread(&message.id, &position)? {
-                unread.push(message);
-            }
-        }
-        Ok(unread)
+    /// How many messages by others shown in the channel (not thread
+    /// replies) come after the read position.
+    pub fn unread_count(&self, channel: &str, me: &PublicKey) -> Result<u64> {
+        let (lamport, author) = self.read_position(channel)?;
+        Ok(self.db.query_row(
+            &format!("SELECT COUNT(*) FROM messages m WHERE {UNREAD_BY_OTHERS} AND {IS_SHOWN_IN_CHANNEL}"),
+            params![channel, me.as_bytes(), lamport, author],
+            |row| row.get(0),
+        )?)
     }
 
-    fn is_read_in_thread(&self, reply: &str, position: &MessageCursor) -> Result<bool> {
-        let Some(root) = self.thread_root(reply)? else {
-            return Ok(false);
+    /// Unread messages by others that mention you, oldest first. A thread
+    /// reply counts until its thread is read past it.
+    pub fn unread_mentions(&self, channel: &str, me: &PublicKey) -> Result<Vec<UnreadMention>> {
+        let my_id = member_id(me);
+        let (lamport, author) = self.read_position(channel)?;
+        // Only messages holding a mention link can mention anyone.
+        let mut statement = self.db.prepare(&format!(
+            "SELECT m.id, COALESCE(e.text, m.text), {IS_SHOWN_IN_CHANNEL}, m.lamport, m.author
+             FROM messages m
+             LEFT JOIN message_edits e ON e.message = m.id
+             WHERE {UNREAD_BY_OTHERS}
+               AND (instr(COALESCE(e.text, m.text), ?5) > 0 OR instr(COALESCE(e.text, m.text), ?6) > 0)
+             ORDER BY m.lamport, m.author"
+        ))?;
+        let rows = statement.query_map(
+            params![
+                channel,
+                me.as_bytes(),
+                lamport,
+                author,
+                format!("{MEMBER_LINK_PREFIX}{my_id}"),
+                GROUP_MENTION_PREFIX
+            ],
+            |row| {
+                let text: String = row.get(1)?;
+                let is_in_channel: bool = row.get(2)?;
+                let mention = UnreadMention {
+                    id: row.get(0)?,
+                    lamport: row.get(3)?,
+                    author: hex::encode(row.get::<_, Vec<u8>>(4)?),
+                };
+                Ok((mention, text, is_in_channel))
+            },
+        )?;
+        let mut found = Vec::new();
+        let mut thread_roots: Option<HashMap<String, String>> = None;
+        for row in rows {
+            let (mention, text, is_in_channel) = row?;
+            if !mentions(&text, &my_id) {
+                continue;
+            }
+            if !is_in_channel {
+                let roots = match &mut thread_roots {
+                    Some(roots) => roots,
+                    None => thread_roots.insert(self.thread_roots_of_replies(channel)?),
+                };
+                if self.is_read_in_thread(&mention, roots)? {
+                    continue;
+                }
+            }
+            found.push(mention);
+        }
+        Ok(found)
+    }
+
+    /// The read position in `channel` as stored, or one before every
+    /// message if there is none.
+    fn read_position(&self, channel: &str) -> Result<(i64, Vec<u8>)> {
+        let position = self
+            .db
+            .query_row(
+                "SELECT lamport, author FROM read_markers WHERE channel = ?",
+                [channel],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        Ok(position.unwrap_or((-1, Vec::new())))
+    }
+
+    /// Each reply in `channel` mapped to its thread's first message, found
+    /// in one pass rather than by walking up from every reply.
+    fn thread_roots_of_replies(&self, channel: &str) -> Result<HashMap<String, String>> {
+        Ok(self
+            .thread_replies(channel)?
+            .into_iter()
+            .map(|reply| (reply.id, reply.root))
+            .collect())
+    }
+
+    fn is_read_in_thread(&self, reply: &UnreadMention, roots: &HashMap<String, String>) -> Result<bool> {
+        // A reply whose parent sits in another channel isn't in any thread here.
+        let root = match roots.get(&reply.id) {
+            Some(root) => root.clone(),
+            None => match self.thread_root(&reply.id)? {
+                Some(root) => root,
+                None => return Ok(false),
+            },
         };
         Ok(self.read_marker(&root)?.is_some_and(|read| {
-            (position.lamport, position.author.as_str()) <= (read.lamport, read.author.as_str())
+            (reply.lamport, reply.author.as_str()) <= (read.lamport, read.author.as_str())
         }))
     }
 
@@ -167,5 +240,115 @@ impl Store {
             .prepare("SELECT target, text, updated_ms FROM drafts ORDER BY updated_ms DESC")?;
         let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iroh::SecretKey;
+
+    use crate::{mentions::member_link, storage::test_channel::TestChannel};
+
+    #[test]
+    fn unread_counts_leave_out_thread_replies_and_what_is_read() {
+        let mut channel = TestChannel::new();
+        let me = SecretKey::generate().public();
+        let read = channel.post("already read", None);
+        channel.store.mark_read(&channel.id, &read).unwrap();
+        let root = channel.post("new", None);
+        channel.post("a reply, shown in its thread", Some(&root));
+        channel.post("its parent never arrived, so it shows here", Some("missing"));
+
+        assert_eq!(channel.store.unread_count(&channel.id, &me).unwrap(), 2);
+        assert_eq!(
+            channel.store.unread_count(&channel.id, &channel.author).unwrap(),
+            0,
+            "your own messages"
+        );
+    }
+
+    #[test]
+    fn unread_mentions_count_replies_until_their_thread_is_read() {
+        let mut channel = TestChannel::new();
+        let me = SecretKey::generate().public();
+        let mention = member_link("Me", &hex::encode(me.as_bytes()));
+        let someone_else = member_link("Other", &hex::encode(channel.author.as_bytes()));
+        let root = channel.post(&format!("hi {mention}"), None);
+        let reply = channel.post(&format!("again {mention}"), Some(&root));
+        channel.post(&format!("hi {someone_else}"), None);
+        let everyone = channel.post("[@channel](shy://mention/channel) news", None);
+
+        let found = |channel: &TestChannel| -> Vec<String> {
+            channel
+                .store
+                .unread_mentions(&channel.id, &me)
+                .unwrap()
+                .into_iter()
+                .map(|mention| mention.id)
+                .collect()
+        };
+        assert_eq!(found(&channel), [root.clone(), reply.clone(), everyone.clone()]);
+        channel.store.mark_thread_read(&root, &reply).unwrap();
+        assert_eq!(found(&channel), [root, everyone]);
+    }
+
+    #[test]
+    fn counting_unread_costs_what_is_unread_not_the_whole_channel() {
+        let mut channel = TestChannel::new();
+        let me = SecretKey::generate().public();
+        let read_up_to = |channel: &mut TestChannel, count: usize| {
+            let mut last = String::new();
+            for _ in 0..count {
+                last = channel.post("old news", None);
+            }
+            channel.store.mark_read(&channel.id, &last).unwrap();
+            for _ in 0..10 {
+                channel.post("new", None);
+            }
+        };
+        let cost = |channel: &TestChannel| {
+            channel.store.steps_of(|| {
+                channel.store.unread_count(&channel.id, &me).unwrap();
+                channel.store.unread_mentions(&channel.id, &me).unwrap();
+            })
+        };
+        read_up_to(&mut channel, 20);
+        let with_little_read = cost(&channel);
+        read_up_to(&mut channel, 2_000);
+        let with_much_read = cost(&channel);
+
+        assert_eq!(channel.store.unread_count(&channel.id, &me).unwrap(), 10);
+        assert!(
+            with_much_read < with_little_read * 2,
+            "{with_little_read} steps with 30 messages, {with_much_read} with 2,040"
+        );
+    }
+
+    #[test]
+    fn counting_unread_in_a_long_thread_grows_with_its_length_not_its_square() {
+        let mut channel = TestChannel::new();
+        let me = SecretKey::generate().public();
+        let mention = member_link("Me", &hex::encode(me.as_bytes()));
+        let mut last = channel.post("first", None);
+        let mut extend_thread = |channel: &mut TestChannel, count: usize| {
+            for _ in 0..count {
+                last = channel.post(&format!("and {mention}"), Some(&last));
+            }
+        };
+        let cost = |channel: &TestChannel| {
+            channel.store.steps_of(|| {
+                channel.store.unread_count(&channel.id, &me).unwrap();
+                channel.store.unread_mentions(&channel.id, &me).unwrap();
+            })
+        };
+        extend_thread(&mut channel, 100);
+        let with_short = cost(&channel);
+        extend_thread(&mut channel, 300);
+        let with_four_times = cost(&channel);
+
+        assert!(
+            with_four_times < with_short * 6,
+            "{with_short} steps for 100 replies, {with_four_times} for 400"
+        );
     }
 }

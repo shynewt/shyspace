@@ -1,31 +1,46 @@
 //! The inbox: unread mentions and new replies in threads you follow, across
 //! every channel, plus the channels with unread messages.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result};
 
 use super::{State, Workspace, follows_by_default};
 use crate::{
-    mentions::mentions,
     storage::Reply,
     views::{Change, Channel, Inbox, InboxItem, InboxReason},
 };
 
 const MAX_ATTENTION: usize = 100;
 
+/// A message the inbox may show, before loading it.
+struct Wanted {
+    id: String,
+    thread_root: Option<String>,
+    reason: InboxReason,
+    lamport: u64,
+    /// The author's member id (hex), which breaks ties in order.
+    author: String,
+    channel: String,
+    channel_name: String,
+}
+
 impl Workspace {
     pub fn inbox(&self) -> Result<Inbox> {
         let channels = self.channels()?;
         let state = self.state();
-        let mut attention = Vec::new();
+        let mut wanted = Vec::new();
         for channel in &channels {
-            attention.extend(self.attention_in(&state, channel)?);
+            wanted.extend(self.attention_in(&state, channel)?);
         }
-        attention.sort_by(|left: &InboxItem, right: &InboxItem| {
-            (right.message.lamport, &right.message.author).cmp(&(left.message.lamport, &left.message.author))
+        wanted.sort_by(|left: &Wanted, right: &Wanted| {
+            (right.lamport, &right.author).cmp(&(left.lamport, &left.author))
         });
-        attention.truncate(MAX_ATTENTION);
+        wanted.truncate(MAX_ATTENTION);
+        let attention = wanted
+            .into_iter()
+            .map(|wanted| self.inbox_item(&state, wanted))
+            .collect::<Result<_>>()?;
         Ok(Inbox {
             attention,
             channels: channels
@@ -59,18 +74,27 @@ impl Workspace {
         Ok(())
     }
 
-    fn attention_in(&self, state: &State, channel: &Channel) -> Result<Vec<InboxItem>> {
+    /// What in `channel` needs attention, not yet loaded: the inbox shows
+    /// only the newest of it across every channel.
+    fn attention_in(&self, state: &State, channel: &Channel) -> Result<Vec<Wanted>> {
         let my_id = self.my_id();
-        let mut wanted: Vec<(String, Option<String>, InboxReason)> = Vec::new();
-        for unread in state.store.unread_messages(&channel.id, &self.me())? {
-            if mentions(&unread.text, &my_id) {
-                let root = state
-                    .store
-                    .thread_root(&unread.id)?
-                    .filter(|root| *root != unread.id);
-                wanted.push((unread.id, root, InboxReason::Mention));
-            }
+        let mut wanted = Vec::new();
+        for mention in state.store.unread_mentions(&channel.id, &self.me())? {
+            let thread_root = state
+                .store
+                .thread_root(&mention.id)?
+                .filter(|root| *root != mention.id);
+            wanted.push(Wanted {
+                id: mention.id,
+                thread_root,
+                reason: InboxReason::Mention,
+                lamport: mention.lamport,
+                author: mention.author,
+                channel: channel.id.clone(),
+                channel_name: channel.name.clone(),
+            });
         }
+        let mentioned: HashSet<String> = wanted.iter().map(|wanted| wanted.id.clone()).collect();
         for (root, replies) in by_thread(state.store.thread_replies(&channel.id)?) {
             if !self.follows(state, &root, &replies)? {
                 continue;
@@ -80,27 +104,36 @@ impl Workspace {
                 let is_new = read.as_ref().is_none_or(|read| {
                     (read.lamport, read.author.as_str()) < (reply.lamport, reply.author.as_str())
                 });
-                let is_listed = wanted.iter().any(|(id, ..)| *id == reply.id);
-                if is_new && reply.author != my_id && !is_listed {
-                    wanted.push((reply.id, Some(root.clone()), InboxReason::ThreadReply));
+                if is_new && reply.author != my_id && !mentioned.contains(&reply.id) {
+                    wanted.push(Wanted {
+                        id: reply.id,
+                        thread_root: Some(root.clone()),
+                        reason: InboxReason::ThreadReply,
+                        lamport: reply.lamport,
+                        author: reply.author,
+                        channel: channel.id.clone(),
+                        channel_name: channel.name.clone(),
+                    });
                 }
             }
         }
-        let mut items = Vec::new();
-        for (id, thread_root, reason) in wanted {
-            let message = state
-                .store
-                .message(&id, &self.me())?
-                .context("inbox message vanished")?;
-            let message = self.as_seen_by_me(state, &channel.id, vec![message])?.remove(0);
-            items.push(InboxItem {
-                message,
-                channel_name: channel.name.clone(),
-                thread_root,
-                reason,
-            });
-        }
-        Ok(items)
+        Ok(wanted)
+    }
+
+    fn inbox_item(&self, state: &State, wanted: Wanted) -> Result<InboxItem> {
+        let message = state
+            .store
+            .message(&wanted.id, &self.me())?
+            .context("inbox message vanished")?;
+        let message = self
+            .as_seen_by_me(state, &wanted.channel, vec![message])?
+            .remove(0);
+        Ok(InboxItem {
+            message,
+            channel_name: wanted.channel_name,
+            thread_root: wanted.thread_root,
+            reason: wanted.reason,
+        })
     }
 
     fn follows(&self, state: &State, root: &str, replies: &[Reply]) -> Result<bool> {

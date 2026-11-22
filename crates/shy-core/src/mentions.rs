@@ -3,7 +3,9 @@
 //! `[@Ada](shy://member/<id>)`, `[@channel](shy://mention/channel)` and
 //! `[@here](shy://mention/here)`.
 
-const MEMBER_LINK_PREFIX: &str = "shy://member/";
+pub(crate) const MEMBER_LINK_PREFIX: &str = "shy://member/";
+/// What every mention of a group (@channel, @here) starts with.
+pub(crate) const GROUP_MENTION_PREFIX: &str = "shy://mention/";
 const CHANNEL_LINK: &str = "shy://mention/channel";
 const HERE_LINK: &str = "shy://mention/here";
 pub const CHANNEL_LINK_MARKDOWN: &str = "[@channel](shy://mention/channel)";

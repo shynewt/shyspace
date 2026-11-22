@@ -22,6 +22,8 @@ mod search_index;
 mod sections;
 mod sent;
 mod snapshot;
+#[cfg(test)]
+mod test_channel;
 mod threads;
 
 pub use apply::{Applied, ApplyContext};
@@ -31,7 +33,7 @@ pub use invites::PendingRequest;
 pub use private::{Origin, StoredKey};
 pub use private_members::{Ending, Membership};
 pub use queries::SearchFilters;
-pub use reading::UnreadMessage;
+pub use reading::UnreadMention;
 pub use revisions::ItemKind;
 pub use sealed::WaitingSealed;
 pub use sections::BUILTIN_SECTION;
@@ -61,6 +63,27 @@ impl Store {
                 |row| row.get(0),
             )
             .expect("counting rows")
+    }
+
+    /// SQLite steps run by `work`, a measure of its cost that doesn't depend
+    /// on the machine.
+    pub(crate) fn steps_of(&self, work: impl FnOnce()) -> u64 {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
+        let steps = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&steps);
+        self.db.progress_handler(
+            1,
+            Some(move || {
+                counter.fetch_add(1, Ordering::Relaxed);
+                false
+            }),
+        );
+        work();
+        self.db.progress_handler(1, None::<fn() -> bool>);
+        steps.load(Ordering::Relaxed)
     }
 }
 

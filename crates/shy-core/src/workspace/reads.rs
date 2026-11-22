@@ -1,6 +1,8 @@
 //! Read models, straight from the local database, marked with what this
 //! member may do to each item.
 
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 
 use super::{State, Workspace};
@@ -15,18 +17,12 @@ use crate::{
 impl Workspace {
     pub fn channels(&self) -> Result<Vec<Channel>> {
         let state = self.state();
-        let my_id = self.my_id();
         let mut channels = state.store.channels()?;
         for channel in &mut channels {
-            let unread = state.store.unread_messages(&channel.id, &self.me())?;
             // Thread replies count in their thread, but a mention counts anywhere.
-            channel.unread = count(unread.iter().filter(|message| message.is_in_channel).count());
-            channel.unread_mentions = count(
-                unread
-                    .iter()
-                    .filter(|message| mentions(&message.text, &my_id))
-                    .count(),
-            );
+            let unread = state.store.unread_count(&channel.id, &self.me())?;
+            channel.unread = u32::try_from(unread).unwrap_or(u32::MAX);
+            channel.unread_mentions = count(state.store.unread_mentions(&channel.id, &self.me())?.len());
             channel.last_read = state.store.read_marker(&channel.id)?;
             channel.notify = state.store.notify_level(&channel.id)?;
             channel.can_delete = self.may(&Op::Delete {
@@ -96,7 +92,15 @@ impl Workspace {
         mut messages: Vec<Message>,
     ) -> Result<Vec<Message>> {
         let my_id = self.my_id();
-        let replies = state.store.thread_replies(channel)?;
+        let roots: Vec<String> = messages.iter().map(|message| message.id.clone()).collect();
+        let replies = state.store.replies_in_threads(channel, &roots)?;
+        let mut replies_by_root: HashMap<&str, Vec<&Reply>> = HashMap::new();
+        for reply in &replies {
+            replies_by_root
+                .entry(reply.root.as_str())
+                .or_default()
+                .push(reply);
+        }
         for message in &mut messages {
             message.mentions_me = message.author != my_id && mentions(&message.text, &my_id);
             message.saved = state.store.saved_mark(&message.id)?;
@@ -111,7 +115,7 @@ impl Workspace {
                 .into_iter()
                 .map(|file| self.file_info(&state.store, file))
                 .collect::<Result<_>>()?;
-            let thread: Vec<&Reply> = replies.iter().filter(|reply| reply.root == message.id).collect();
+            let thread = replies_by_root.remove(message.id.as_str()).unwrap_or_default();
             message.reply_count = count(thread.len());
             message.last_reply_ms = thread.iter().map(|reply| reply.created_ms).max();
             message.recent_reply_authors = recent_authors(&thread);

@@ -66,3 +66,30 @@ async fn marking_everything_read_empties_the_inbox() {
     let inbox = admin.inbox().unwrap();
     assert!(inbox.attention.is_empty() && inbox.channels.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_inbox_shows_only_the_newest_hundred() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let random = bob.create_channel("random").unwrap();
+    let mention = mentions::member_link("Ada", &admin.my_id());
+    for number in 0..105 {
+        let channel = if number % 2 == 0 { &general } else { &random };
+        bob.send_message(channel, &format!("{mention} number {number}"), None)
+            .unwrap();
+    }
+    sync_all(&[&admin, &bob]).await;
+
+    let texts: Vec<String> = admin
+        .inbox()
+        .unwrap()
+        .attention
+        .into_iter()
+        .map(|item| item.message.text)
+        .collect();
+    let newest_first: Vec<String> = (5..105)
+        .rev()
+        .map(|number| format!("{mention} number {number}"))
+        .collect();
+    assert_eq!(texts, newest_first);
+}

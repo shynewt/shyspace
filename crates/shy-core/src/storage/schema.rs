@@ -186,6 +186,8 @@ CREATE TABLE search_rows (
 INSERT INTO search_rows (kind, ref, search_rowid) SELECT kind, ref, MAX(rowid) FROM search GROUP BY kind, ref;
 DELETE FROM search WHERE rowid NOT IN (SELECT search_rowid FROM search_rows);
 ",
+    // Finding a message's replies walked the whole channel at every step.
+    "CREATE INDEX messages_by_reply_to ON messages (reply_to, channel);",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
@@ -222,7 +224,10 @@ mod tests {
     #[test]
     fn a_database_from_before_profile_details_upgrades() {
         let mut db = Connection::open_in_memory().unwrap();
-        let before = MIGRATIONS.len() - 1;
+        let before = MIGRATIONS
+            .iter()
+            .position(|migration| migration.contains("CREATE TABLE profile_details"))
+            .unwrap();
         for migration in &MIGRATIONS[..before] {
             db.execute_batch(migration).unwrap();
         }
