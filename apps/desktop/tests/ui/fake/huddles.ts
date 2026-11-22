@@ -35,7 +35,7 @@ export type HuddlesContext = {
 
 type Someone = { camera: boolean; screen: boolean; needsUpdate: boolean };
 
-const DEVICES: AudioDevices = {
+const DEVICES: Omit<AudioDevices, "chosen"> = {
   inputs: [
     { id: "built-in-mic", name: "Built-in Microphone", is_default: true, is_bluetooth: false },
     { id: "usb-mic", name: "USB Microphone", is_default: false, is_bluetooth: false },
@@ -61,7 +61,7 @@ export class FakeHuddles {
   failNextJoin: string | null = null;
   /** The `muted` argument of each `join_huddle`, in order. */
   readonly joinedMuted: boolean[] = [];
-  /** The last `set_huddle_devices` choice. */
+  /** The device choice, as `set_huddle_devices` last left it; null is the system's default. */
   chosenDevices: AudioDeviceChoice = { input: null, output: null };
   /** Whether join and leave sounds are on, as `set_huddle_sounds` left it. */
   soundsOn = true;
@@ -191,11 +191,12 @@ export class FakeHuddles {
         this.setMuted(argument(args, "muted") === true);
         return null;
       case "huddle_devices":
-        return DEVICES;
+        return { ...DEVICES, chosen: this.chosenDevices };
       case "set_huddle_devices": {
         const choice = argument(args, "choice");
         if (!isDeviceChoice(choice)) throw new Error("fake backend: missing device choice");
         this.chosenDevices = choice;
+        this.context.notify({ kind: "huddle_devices" });
         return null;
       }
       case "huddle_sounds":

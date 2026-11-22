@@ -25,6 +25,8 @@ type Preferences = {
   isProfileNudgeDismissed: boolean;
   /** Hides the docked sidebar; a narrow window's drawer ignores it. */
   isSidebarHidden: boolean;
+  /** Join huddles with the microphone closed. */
+  joinsHuddlesMuted: boolean;
 };
 
 const DEFAULTS: Preferences = {
@@ -35,6 +37,7 @@ const DEFAULTS: Preferences = {
   recentEmoji: [],
   isProfileNudgeDismissed: false,
   isSidebarHidden: false,
+  joinsHuddlesMuted: false,
 };
 const RECENT_EMOJI_LIMIT = 16;
 const KEY = "shyspace.preferences";

@@ -3,6 +3,7 @@ export type SettingsSection =
   | "profile"
   | "appearance"
   | "notifications"
+  | "huddles"
   | "privacy"
   | "members"
   | "agents"
@@ -26,6 +27,7 @@ export const SETTINGS_SECTIONS: { id: SettingsSection; label: string; group: Set
   { id: "profile", label: "Profile", group: "you" },
   { id: "appearance", label: "Appearance", group: "you" },
   { id: "notifications", label: "Notifications", group: "you" },
+  { id: "huddles", label: "Huddles", group: "you" },
   { id: "privacy", label: "Privacy & security", group: "you" },
   { id: "members", label: "Members", group: "workspace" },
   { id: "agents", label: "Agents", group: "workspace" },

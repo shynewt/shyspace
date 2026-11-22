@@ -2,6 +2,7 @@ import { motion } from "motion/react";
 import type { DragEvent, ReactNode } from "react";
 import { sameView, useWorkspace, type View } from "../../lib/workspace";
 import { CountBadge, cx, instantAfterAKey, springs } from "../../ui";
+import { HuddleMarker, type HuddleSummary } from "../huddles/HuddleMarker";
 
 export const INDENT_PX = 14;
 
@@ -16,6 +17,7 @@ export function NavItem({
   waiting,
   isMuted = false,
   status,
+  huddle = null,
   onContextMenu,
   onOpen,
   onDragStart,
@@ -40,6 +42,8 @@ export function NavItem({
   isMuted?: boolean;
   /** A small icon after the label, like a channel's alert level. */
   status?: { icon: ReactNode; label: string } | null;
+  /** A huddle going on here: a quiet mark before any count. */
+  huddle?: HuddleSummary | null;
   /** A right-click (or the keyboard's menu key) on the item. */
   onContextMenu?: () => void;
   /** What a click does instead of opening `view`, for a place made on first open. */
@@ -70,8 +74,13 @@ export function NavItem({
         type="button"
         aria-current={isActive ? "page" : undefined}
         aria-label={
-          hasUnread || status || kind || waitingLabel
-            ? accessibleName([label, kind, status?.label, waitingLabel], hasUnread ? unread : 0, mentions, countNoun)
+          hasUnread || status || kind || waitingLabel || huddle
+            ? accessibleName(
+                [label, kind, status?.label, huddle?.label, waitingLabel],
+                hasUnread ? unread : 0,
+                mentions,
+                countNoun,
+              )
             : undefined
         }
         onClick={onOpen ?? (() => navigate(view))}
@@ -98,6 +107,11 @@ export function NavItem({
             {status.icon}
           </span>
         )}
+        {huddle && (
+          <span className="ml-auto flex">
+            <HuddleMarker summary={huddle} />
+          </span>
+        )}
         {hasUnread && (
           <CountBadge
             aria-hidden
@@ -106,13 +120,13 @@ export function NavItem({
             animate={{ scale: 1, opacity: 1 }}
             transition={springs.pop}
             tone={mentions > 0 ? "danger" : "accent"}
-            className="ml-auto group-hover:opacity-0"
+            className={cx(huddle ? "ml-1" : "ml-auto", "group-hover:opacity-0")}
           >
             {mentions > 0 ? `@${mentions}` : unread}
           </CountBadge>
         )}
         {!hasUnread && waiting && waiting.count > 0 && (
-          <CountBadge aria-hidden tone="quiet" className="ml-auto">
+          <CountBadge aria-hidden tone="quiet" className={huddle ? "ml-1" : "ml-auto"}>
             {waiting.count}
           </CountBadge>
         )}

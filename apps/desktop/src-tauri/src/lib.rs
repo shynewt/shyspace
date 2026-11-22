@@ -436,10 +436,10 @@ fn show_alert(
     app: AppHandle,
     title: String,
     body: String,
-    message: Option<String>,
+    target: Option<alerts::AlertTarget>,
     picture: Option<alerts::AlertPicture>,
 ) -> CommandResult<()> {
-    alerts::show(&app, title, body, message, picture)
+    alerts::show(&app, title, body, target, picture)
 }
 
 #[tauri::command]

@@ -1,5 +1,5 @@
-//! Desktop alerts. A click on one about a message brings the window forward
-//! and tells the frontend to open that message.
+//! Desktop alerts. A click on one brings the window forward and tells the
+//! frontend to open what it was about: a message, or a channel (a huddle).
 
 use std::{
     collections::VecDeque,
@@ -9,42 +9,51 @@ use std::{
     },
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::tray;
 
-/// Sent to the frontend with the id of the message a clicked alert was about.
+/// Sent to the frontend with the target of a clicked alert.
 const OPENED_EVENT: &str = "alert-opened";
-/// Alerts older than this many can't be followed to their message any more.
+/// Alerts older than this many can't be followed to their target any more.
 const REMEMBERED: usize = 100;
 
-/// Which message each recent alert was about, by the alert's id.
+/// What a click on an alert opens, as `{ "kind": "message" | "channel", "id": … }`.
+/// The frontend checks the id when it opens it; here it's only carried.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum AlertTarget {
+    Message(String),
+    Channel(String),
+}
+
+/// What each recent alert was about, by the alert's id.
 #[derive(Default)]
 pub struct AlertTargets {
     next_id: AtomicI32,
-    recent: Mutex<VecDeque<(i32, String)>>,
+    recent: Mutex<VecDeque<(i32, AlertTarget)>>,
 }
 
 impl AlertTargets {
-    fn remember(&self, message: String) -> i32 {
+    fn remember(&self, target: AlertTarget) -> i32 {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         // The list only ever holds whole entries, so a panic elsewhere can't leave it broken.
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         if recent.len() == REMEMBERED {
             recent.pop_front();
         }
-        recent.push_back((id, message));
+        recent.push_back((id, target));
         id
     }
 
-    fn message_of(&self, id: i32) -> Option<String> {
+    fn target_of(&self, id: i32) -> Option<AlertTarget> {
         let recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         recent
             .iter()
             .find(|(alert, _)| *alert == id)
-            .map(|(_, message)| message.clone())
+            .map(|(_, target)| target.clone())
     }
 }
 
@@ -60,12 +69,12 @@ pub fn follow_clicks(app: &AppHandle) -> tauri::Result<()> {
             let Some(id) = performed.notification().map(|notification| notification.id()) else {
                 return;
             };
-            let Some(message) = handle.state::<AlertTargets>().message_of(id) else {
+            let Some(target) = handle.state::<AlertTargets>().target_of(id) else {
                 return;
             };
             tray::show_main_window(&handle);
-            if let Err(error) = handle.emit(OPENED_EVENT, message) {
-                tracing::warn!("could not open the alert's message: {error}");
+            if let Err(error) = handle.emit(OPENED_EVENT, target) {
+                tracing::warn!("could not open what the alert was about: {error}");
             }
         })
         .map_err(|error| tauri::Error::Anyhow(error.into()))
@@ -78,17 +87,17 @@ pub struct AlertPicture {
     png: Vec<u8>,
 }
 
-/// Shows an alert; a click on it opens `message` if there is one.
+/// Shows an alert; a click on it opens `target` if there is one.
 pub fn show(
     app: &AppHandle,
     title: String,
     body: String,
-    message: Option<String>,
+    target: Option<AlertTarget>,
     picture: Option<AlertPicture>,
 ) -> Result<(), String> {
     let mut builder = app.notification().builder().title(title).body(body);
-    if let Some(message) = message {
-        builder = builder.id(app.state::<AlertTargets>().remember(message));
+    if let Some(target) = target {
+        builder = builder.id(app.state::<AlertTargets>().remember(target));
     }
     if let Some(picture) = picture {
         builder = builder.icon(save_picture(app, &picture)?);

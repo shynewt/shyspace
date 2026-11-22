@@ -7,6 +7,7 @@ import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace, type View } from "../../lib/workspace";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, tweens } from "../../ui";
+import { useHuddleSummary } from "../huddles/HuddleMarker";
 import { NavItem } from "./NavItem";
 
 const NOTIFY_CHOICES: { level: NotifyLevel; label: string; icon: ReactNode }[] = [
@@ -92,6 +93,7 @@ function ChannelItem({
   const [isRenaming, setRenaming] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const [isMenuOpen, setMenuOpen] = useState(false);
+  const huddle = useHuddleSummary(channel.id);
   if (isRenaming) {
     return (
       <ChannelNameInput
@@ -144,6 +146,7 @@ function ChannelItem({
         mentions={channel.unread_mentions}
         isMuted={channel.notify === "nothing"}
         status={hasDraft ? DRAFT_STATUS : LEVEL_STATUS[channel.notify]}
+        huddle={huddle}
         onContextMenu={() => setMenuOpen(true)}
         trailing={
           // Takes room only while shown, so a long name ends before it instead of under it.

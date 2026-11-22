@@ -17,6 +17,7 @@ import { Dialog, tweens } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { DraftsAndSentView } from "../drafts/DraftsAndSentView";
 import { DriveView } from "../drive/DriveView";
+import { HuddleProvider } from "../huddles/HuddleContext";
 import { InboxView } from "../inbox/InboxView";
 import { LaterView } from "../later/LaterView";
 import { FullProfileDialog } from "../members/FullProfileDialog";
@@ -75,7 +76,8 @@ export function Shell({ session }: { session: Session }) {
       // Keys something focused already used, like the page editor's Alt+↓, stay theirs.
       if (event.defaultPrevented) return;
       const shortcut = SHORTCUTS.find((candidate) => candidate.matches(event));
-      if (!shortcut) return;
+      // The huddle's keys belong to HuddleProvider, which knows your call.
+      if (!shortcut || shortcut.id === "huddle" || shortcut.id === "huddleMute") return;
       event.preventDefault();
       const channelOrder = sections?.flatMap((section) => section.channels) ?? channels.map((channel) => channel.id);
       const views = sidebarViews(channelOrder, pages);
@@ -168,45 +170,51 @@ export function Shell({ session }: { session: Session }) {
 
   return (
     <WorkspaceContext.Provider value={context}>
-      <AttentionBadge />
-      <ShellLayout sidebar={sidebar} sidebarContent={<Sidebar status={status} onOpenSearch={() => openSearch()} />}>
-        {/* No exit animation: switching while a view fades in could leave AnimatePresence waiting forever on an exit, with nothing shown. */}
-        {view && (
-          <motion.div
-            key={viewKey(view)}
-            className="absolute inset-0"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={tweens.fast}
-          >
-            {view.kind === "channel" && (
-              <ScrollMemoryContext.Provider value={scrollMemory}>
-                <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} restore={restore} />
-              </ScrollMemoryContext.Provider>
-            )}
-            {view.kind === "page" && <PageView pageId={view.id} />}
-            {view.kind === "inbox" && <InboxView />}
-            {view.kind === "later" && <LaterView />}
-            {view.kind === "files" && <DriveView />}
-            {view.kind === "drafts" && <DraftsAndSentView />}
-          </motion.div>
-        )}
-        {!view && !sidebar.isDocked && <ViewHeader />}
-      </ShellLayout>
-      <CommandPalette
-        open={paletteQuery !== null}
-        initialQuery={paletteQuery ?? ""}
-        onOpenChange={(open) => setPaletteQuery(open ? (paletteQuery ?? "") : null)}
-      />
-      <StatusDialog open={isStatusOpen} onOpenChange={setStatusOpen} current={me?.status ?? null} />
-      <FullProfileDialog
-        memberId={shownProfile?.memberId ?? null}
-        returnFocusTo={shownProfile?.returnFocusTo ?? null}
-        onClose={() => setShownProfile(null)}
-      />
-      <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setShortcutsOpen} />
-      <SettingsDialog target={settingsTarget} onNavigate={setSettingsTarget} onClose={() => setSettingsTarget(null)} />
-      <RemovedNotice isRemoved={status?.removed ?? false} />
+      <HuddleProvider>
+        <AttentionBadge />
+        <ShellLayout sidebar={sidebar} sidebarContent={<Sidebar status={status} onOpenSearch={() => openSearch()} />}>
+          {/* No exit animation: switching while a view fades in could leave AnimatePresence waiting forever on an exit, with nothing shown. */}
+          {view && (
+            <motion.div
+              key={viewKey(view)}
+              className="absolute inset-0"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={tweens.fast}
+            >
+              {view.kind === "channel" && (
+                <ScrollMemoryContext.Provider value={scrollMemory}>
+                  <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} restore={restore} />
+                </ScrollMemoryContext.Provider>
+              )}
+              {view.kind === "page" && <PageView pageId={view.id} />}
+              {view.kind === "inbox" && <InboxView />}
+              {view.kind === "later" && <LaterView />}
+              {view.kind === "files" && <DriveView />}
+              {view.kind === "drafts" && <DraftsAndSentView />}
+            </motion.div>
+          )}
+          {!view && !sidebar.isDocked && <ViewHeader />}
+        </ShellLayout>
+        <CommandPalette
+          open={paletteQuery !== null}
+          initialQuery={paletteQuery ?? ""}
+          onOpenChange={(open) => setPaletteQuery(open ? (paletteQuery ?? "") : null)}
+        />
+        <StatusDialog open={isStatusOpen} onOpenChange={setStatusOpen} current={me?.status ?? null} />
+        <FullProfileDialog
+          memberId={shownProfile?.memberId ?? null}
+          returnFocusTo={shownProfile?.returnFocusTo ?? null}
+          onClose={() => setShownProfile(null)}
+        />
+        <ShortcutsDialog open={isShortcutsOpen} onOpenChange={setShortcutsOpen} />
+        <SettingsDialog
+          target={settingsTarget}
+          onNavigate={setSettingsTarget}
+          onClose={() => setSettingsTarget(null)}
+        />
+        <RemovedNotice isRemoved={status?.removed ?? false} />
+      </HuddleProvider>
     </WorkspaceContext.Provider>
   );
 }

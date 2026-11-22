@@ -1,9 +1,12 @@
 import { Bookmark, HardDrive, Inbox as InboxIcon, Search, Send } from "lucide-react";
+import { AnimatePresence } from "motion/react";
 import { useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
 import { useLive } from "../../lib/useLive";
 import { Kbd, Logo } from "../../ui";
+import { HuddleBar } from "../huddles/HuddleBar";
+import { useMyHuddle } from "../huddles/HuddleContext";
 import { ChannelSections } from "./ChannelSections";
 import { DirectMessages } from "./DirectMessages";
 import { MeMenu } from "./MeMenu";
@@ -15,6 +18,7 @@ import { WorkspaceMenu } from "./WorkspaceMenu";
 
 /** The sidebar's content; `ShellLayout` places it, docked or as a drawer. */
 export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefined; onOpenSearch: () => void }) {
+  const { mine } = useMyHuddle();
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 pt-4 pr-2.5 pb-3 pl-4">
@@ -49,6 +53,7 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
         <PagesSection />
       </nav>
 
+      <AnimatePresence initial={false}>{mine && <HuddleBar key="huddle" huddle={mine} />}</AnimatePresence>
       <div className="border-t border-line p-2">
         <MeMenu />
       </div>

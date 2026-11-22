@@ -6,6 +6,7 @@ import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { IconButton } from "../../ui";
+import { useHuddleSummary } from "../huddles/HuddleMarker";
 import { MemberAvatar } from "../members/MemberAvatar";
 import { NewDmDialog } from "../private/NewPrivateDialogs";
 import { NavItem } from "./NavItem";
@@ -72,6 +73,7 @@ function NotesItem({ notes }: { notes: Channel | undefined }) {
 
 function DmItem({ dm, title }: { dm: Channel; title: string }) {
   const [first] = dm.dm_members;
+  const huddle = useHuddleSummary(dm.id);
   return (
     <NavItem
       view={{ kind: "channel", id: dm.id }}
@@ -82,6 +84,7 @@ function DmItem({ dm, title }: { dm: Channel; title: string }) {
       // Every message in a DM is for you, unless you muted it.
       mentions={dm.notify === "nothing" ? 0 : dm.unread}
       isMuted={dm.notify === "nothing"}
+      huddle={huddle}
     />
   );
 }

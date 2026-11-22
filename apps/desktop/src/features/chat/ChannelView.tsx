@@ -9,6 +9,7 @@ import { useLive } from "../../lib/useLive";
 import { useScrollMemory } from "../../lib/useNavigation";
 import { useWindowAttention } from "../../lib/useWindowAttention";
 import { useWorkspace } from "../../lib/workspace";
+import { HuddleButton } from "../huddles/HuddleButton";
 import { ChannelTitle } from "../private/ChannelTitle";
 import { WriteGate } from "../private/WriteGate";
 import { ViewHeader } from "../shell/ViewHeader";
@@ -326,7 +327,10 @@ export function ChannelView({
       <div className="flex min-w-0 flex-1 flex-col">
         <ViewHeader>
           {channel ? <ChannelTitle channel={channel} members={members} /> : <h1 className="text-lg">…</h1>}
-          <ChannelInfo />
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            {channel && channel.kind !== "notes" && <HuddleButton channel={channel} />}
+            <ChannelInfo />
+          </div>
         </ViewHeader>
 
         <div className="relative flex min-h-0 flex-1 flex-col">

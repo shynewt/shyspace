@@ -228,6 +228,9 @@ export type Change =
   /** Whether huddles play join and leave sounds on this device changed. */
   | { kind: "huddle_sounds" };
 
+/** What a click on a desktop notification opens. */
+export type AlertTarget = { kind: "message" | "channel"; id: string };
+
 /** Who is in a channel's huddle; you first when you're in it. */
 export type Huddle = { channel: string; participants: HuddleParticipant[]; is_full: boolean };
 export type HuddleParticipant = {
@@ -263,7 +266,8 @@ export type AudioDevice = {
   /** Using its microphone drops it to call quality. */
   is_bluetooth: boolean;
 };
-export type AudioDevices = { inputs: AudioDevice[]; outputs: AudioDevice[] };
+/** `chosen` is null for the system's default, which is also what a chosen device that's gone shows as. */
+export type AudioDevices = { inputs: AudioDevice[]; outputs: AudioDevice[]; chosen: AudioDeviceChoice };
 /** null means the system's default. */
 export type AudioDeviceChoice = { input: string | null; output: string | null };
 
@@ -332,10 +336,14 @@ export const api = {
   setFollowing: (root: string, following: boolean) => invoke<void>("set_following", { root, following }),
   markThreadRead: (root: string, message: string) => invoke<void>("mark_thread_read", { root, message }),
   setNotifyLevel: (channel: string, level: NotifyLevel) => invoke<void>("set_notify_level", { channel, level }),
-  /** A desktop notification; a click on it opens `message` (sent back as an "alert-opened" event). */
+  /** A desktop notification; a click on it opens `target` (sent back as an "alert-opened" event). */
   /** `picture` is PNG bytes shown with the notification, named for the member it shows. */
-  showAlert: (title: string, body: string, message: string | null, picture: { member: string; png: number[] } | null) =>
-    invoke<void>("show_alert", { title, body, message, picture }),
+  showAlert: (
+    title: string,
+    body: string,
+    target: AlertTarget | null,
+    picture: { member: string; png: number[] } | null,
+  ) => invoke<void>("show_alert", { title, body, target, picture }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>

@@ -1,4 +1,4 @@
-import { Bell, Bot, HardDrive, LifeBuoy, Palette, ShieldCheck, UserRound, Users } from "lucide-react";
+import { Bell, Bot, HardDrive, Headphones, LifeBuoy, Palette, ShieldCheck, UserRound, Users } from "lucide-react";
 import { motion } from "motion/react";
 import { Tabs } from "radix-ui";
 import { Fragment, type ReactNode } from "react";
@@ -8,6 +8,7 @@ import { cx, Dialog, instantAfterAKey, springs } from "../../ui";
 import { WaitingRequestsBadge } from "../members/JoinRequests";
 import { AgentsSettings } from "./AgentsSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { HuddleSettings } from "./HuddleSettings";
 import { MembersSettings } from "./MembersSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { PrivacySettings } from "./PrivacySettings";
@@ -32,6 +33,11 @@ const SECTION_VIEWS: Record<SettingsSection, { icon: ReactNode; description: str
     icon: <Bell size={15} />,
     description: "When this device alerts you.",
     content: <NotificationSettings />,
+  },
+  huddles: {
+    icon: <Headphones size={15} />,
+    description: "Your microphone and speakers for voice huddles.",
+    content: <HuddleSettings />,
   },
   privacy: {
     icon: <ShieldCheck size={15} />,
