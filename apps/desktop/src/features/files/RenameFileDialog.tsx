@@ -20,9 +20,11 @@ export function RenameFileDialog({
     if (name.trim() !== file.name) await api.renameFile(file.id, name);
     onOpenChange(false);
   });
-  // After the dialog has placed focus, so its own focusing doesn't undo the selection.
+  // Each opening starts from the current name (it may have changed elsewhere),
+  // selected after the dialog has placed focus, so its focusing doesn't undo it.
   useEffect(() => {
     if (!open) return;
+    setName(file.name);
     const frame = requestAnimationFrame(() => {
       const extension = extensionOf(file.name);
       const end = extension ? file.name.length - extension.length - 1 : file.name.length;
@@ -34,10 +36,7 @@ export function RenameFileDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={(isOpen) => {
-        if (isOpen) setName(file.name);
-        onOpenChange(isOpen);
-      }}
+      onOpenChange={onOpenChange}
       title="Rename file"
       description="Everyone who can see it sees the new name. The file itself doesn't change."
     >

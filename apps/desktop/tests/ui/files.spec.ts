@@ -405,7 +405,7 @@ test("someone else's file has no rename", async ({ page }) => {
 });
 
 /** A small, valid PDF with `pages` pages, each saying its number. */
-function pdfWithPages(pages: number): number[] {
+function pdfWithPages(pages: number, mediaBox = "0 0 612 792"): number[] {
   const objects: string[] = [];
   const pageIds = Array.from({ length: pages }, (_, index) => 4 + index * 2);
   objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
@@ -414,7 +414,7 @@ function pdfWithPages(pages: number): number[] {
   for (const [index, id] of pageIds.entries()) {
     const content = `BT /F1 48 Tf 72 700 Td (Page ${index + 1}) Tj ET`;
     objects[id] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${id + 1} 0 R >>`;
+      `<< /Type /Page /Parent 2 0 R /MediaBox [${mediaBox}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${id + 1} 0 R >>`;
     objects[id + 1] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
   }
   let pdf = "%PDF-1.4\n";
@@ -465,4 +465,44 @@ test("a file named like a PDF that isn't one says so", async ({ page }) => {
   });
   await page.getByRole("button", { name: "View fake.pdf" }).click();
   await expect(page.getByText("This isn't a PDF.")).toBeVisible();
+});
+
+test("a page too large to draw says so in its place", async ({ page }) => {
+  await page.evaluate(
+    (bytes) => {
+      const grace = window.fake.addMember("Grace");
+      const message = window.fake.receiveMessage(grace, "general", "A banner");
+      window.fake.files.receive(grace, message, { name: "banner.pdf", type: "application/pdf", bytes });
+    },
+    pdfWithPages(1, "0 0 612 100000"),
+  );
+  await page.getByRole("button", { name: "View banner.pdf" }).click();
+  await expect(page.getByText("Page 1 is too large to preview.")).toBeVisible();
+});
+
+test("the keyboard scrolls a long PDF", async ({ page }) => {
+  await page.evaluate((bytes) => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "The manual");
+    window.fake.files.receive(grace, message, { name: "manual.pdf", type: "application/pdf", bytes });
+  }, pdfWithPages(4));
+  await page.getByRole("button", { name: "View manual.pdf" }).click();
+  const viewer = page.getByRole("dialog", { name: "manual.pdf" });
+  await expect(viewer.getByRole("img", { name: "Page 4 of manual.pdf" })).toBeAttached();
+  await page.keyboard.press("PageDown");
+  await expect.poll(() => viewer.evaluate((dialog) => dialog.scrollTop)).toBeGreaterThan(0);
+});
+
+test("reopening rename starts from the file's current name", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.files.pickNext = [{ name: "notes.txt", type: "text/plain", bytes: [1] }];
+  });
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Rename notes.txt" }).click();
+  const dialog = page.getByRole("dialog", { name: "Rename file" });
+  await page.keyboard.type("half typed");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Rename notes.txt" }).click();
+  await expect(dialog.getByLabel("Name")).toHaveValue("notes.txt");
 });

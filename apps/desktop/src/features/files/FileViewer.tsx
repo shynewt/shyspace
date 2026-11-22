@@ -35,7 +35,9 @@ function FileViewer({
       hasCloseButton
       initialFocus="dialog"
     >
-      <div className="flex items-center gap-2 border-b border-line py-2.5 pr-14 pl-4">
+      {/* The dialog itself scrolls (and has focus on opening, so the keys
+          scroll it); the bar stays on top. */}
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface py-2.5 pr-14 pl-4">
         <p className="selectable min-w-0 flex-1 truncate text-sm font-medium">{file.name}</p>
         <span className="shrink-0 text-xs text-faint">{formatSize(file.size)}</span>
         <FileActions file={file} />
@@ -133,7 +135,7 @@ export function TextViewer({
 
   return (
     <FileViewer file={file} open={open} onOpenChange={onOpenChange}>
-      <div className="max-h-[75dvh] overflow-auto bg-bg px-5 py-4">
+      <div className="bg-bg px-5 py-4">
         {loaded.status === "loading" && <p className="text-sm text-muted">Opening…</p>}
         {loaded.status === "failed" && <p className="text-sm text-danger-text">This file couldn't be opened.</p>}
         {loaded.status === "not-text" && (
@@ -192,7 +194,7 @@ export function PdfViewer({
 
   return (
     <FileViewer file={file} open={open} onOpenChange={onOpenChange}>
-      <div className="max-h-[78dvh] overflow-auto bg-surface-2 p-4">
+      <div className="bg-surface-2 p-4">
         {loaded.status === "loading" && <p className="text-sm text-muted">Opening…</p>}
         {loaded.status === "failed" && <p className="text-sm text-danger-text">This file couldn't be opened.</p>}
         {loaded.status === "not-pdf" && (
