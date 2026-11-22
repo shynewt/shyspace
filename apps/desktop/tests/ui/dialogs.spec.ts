@@ -61,3 +61,15 @@ test("a list dialog has the standard spacing", async ({ page }) => {
   const [top, first] = await Promise.all([box(title), box(firstShortcut)]);
   expect(Math.round(first.y - (top.y + top.height))).toBe(BELOW_HEADER);
 });
+
+test("the shortcuts list renders without warnings, even for a repeated key", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await openApp(page);
+  await page.keyboard.press("Control+/");
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(dialog.getByRole("listitem").filter({ hasText: "Link to another page" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
