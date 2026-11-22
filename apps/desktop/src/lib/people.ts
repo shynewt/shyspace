@@ -53,3 +53,17 @@ export function formatDay(ms: number) {
   if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
   return date.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
 }
+
+export type DayGroup<Item> = { label: string; items: Item[] };
+
+/** Splits items already in time order into runs that share a day ("Today", "Monday, April 27"). */
+export function groupByDay<Item>(items: Item[], timeOf: (item: Item) => number): DayGroup<Item>[] {
+  const days: DayGroup<Item>[] = [];
+  for (const item of items) {
+    const label = formatDay(timeOf(item));
+    const last = days.at(-1);
+    if (last?.label === label) last.items.push(item);
+    else days.push({ label, items: [item] });
+  }
+  return days;
+}

@@ -1,7 +1,7 @@
 import { Check, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { DropdownMenu } from "radix-ui";
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, useRef } from "react";
 import { cx } from "./cx";
 import { pop } from "./motion";
 
@@ -40,9 +40,23 @@ export function Menu({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const chosenAction = useRef<(() => void) | null>(null);
+  // The chosen item runs once the menu has closed and focus is back on the
+  // trigger. A dialog it opens then returns focus there when it closes, and
+  // nothing pulls focus away from what the dialog chose to focus or select.
+  const runChosenAction = (event: Event) => {
+    const action = chosenAction.current;
+    chosenAction.current = null;
+    if (!action) return;
+    event.preventDefault();
+    triggerRef.current?.focus();
+    action();
+  };
   return (
     <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger
+        ref={triggerRef}
         asChild
         onPointerDown={(event) => {
           // Motion's tap gesture answers Enter with a pointerdown of its own; Radix would
@@ -53,7 +67,7 @@ export function Menu({
         {trigger}
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={4} asChild>
+        <DropdownMenu.Content align="end" sideOffset={4} onCloseAutoFocus={runChosenAction} asChild>
           <motion.div {...pop} className={cx(MENU_SURFACE, "origin-(--radix-dropdown-menu-content-transform-origin)")}>
             {items.map((item, index) =>
               "choices" in item ? (
@@ -61,7 +75,7 @@ export function Menu({
               ) : (
                 <Fragment key={item.label}>
                   {isFirstDestructive(items, index) && <DropdownMenu.Separator className="my-1 h-px bg-line" />}
-                  <Action item={item} />
+                  <Action item={item} onChoose={(action) => (chosenAction.current = action)} />
                 </Fragment>
               ),
             )}
@@ -78,10 +92,10 @@ function isFirstDestructive(items: MenuItem[], index: number): boolean {
   return index > 0 && isDestructive(items[index]) && !isDestructive(items[index - 1]);
 }
 
-function Action({ item }: { item: MenuAction }) {
+function Action({ item, onChoose }: { item: MenuAction; onChoose: (action: () => void) => void }) {
   return (
     <DropdownMenu.Item
-      onSelect={item.onSelect}
+      onSelect={() => onChoose(item.onSelect)}
       className={cx(MENU_ITEM, item.isDestructive ? "text-danger-text" : "text-ink")}
     >
       {item.icon && <span className={item.isDestructive ? undefined : "text-muted"}>{item.icon}</span>}

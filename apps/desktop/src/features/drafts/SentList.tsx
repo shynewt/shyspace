@@ -11,7 +11,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LinkedMessage, type Message, messageLink } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
-import { formatDay, formatTime } from "../../lib/people";
+import { formatTime, groupByDay } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
@@ -23,8 +23,6 @@ import { isAwaitingReply } from "./responses";
 
 const PAGE_SIZE = 50;
 const FILTER_DELAY_MS = 150;
-
-type Day = { label: string; items: LinkedMessage[] };
 
 /** Your messages, newest first, grouped by day, with how people responded. */
 export function SentList() {
@@ -41,7 +39,7 @@ export function SentList() {
   // Everything shown reloads on a change, so replies and reactions stay current further down too.
   const load = useCallback(() => api.sentMessages(filter, null, limit), [filter, limit]);
   const sent = useLive(load, (change) => change.kind === "messages");
-  const days = useMemo(() => byDay(sent ?? []), [sent]);
+  const days = useMemo(() => groupByDay(sent ?? [], (item) => item.message.created_ms), [sent]);
 
   if (!sent) return null;
   if (sent.length === 0 && filter === "" && query === "") {
@@ -84,17 +82,6 @@ export function SentList() {
       )}
     </div>
   );
-}
-
-function byDay(items: LinkedMessage[]): Day[] {
-  const days: Day[] = [];
-  for (const item of items) {
-    const label = formatDay(item.message.created_ms);
-    const last = days.at(-1);
-    if (last?.label === label) last.items.push(item);
-    else days.push({ label, items: [item] });
-  }
-  return days;
 }
 
 function SentRow({ item }: { item: LinkedMessage }) {

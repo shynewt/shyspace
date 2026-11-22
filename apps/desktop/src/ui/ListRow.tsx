@@ -14,6 +14,7 @@ export function ListRow({
   trailing,
   footer,
   isHighlighted = false,
+  leadingAlignment = "first-line",
   className,
   children,
 }: {
@@ -25,6 +26,8 @@ export function ListRow({
   footer?: ReactNode;
   /** Shows the hover background, e.g. while the row's menu is open. */
   isHighlighted?: boolean;
+  /** "first-line" lines a small icon or avatar up with the meta line; "center" centers a thumbnail on the text. */
+  leadingAlignment?: "first-line" | "center";
   className?: string;
   children: ReactNode;
 }) {
@@ -43,7 +46,7 @@ export function ListRow({
         onClick={onClick}
         className="focus-ring-inset flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-2.5 text-left"
       >
-        <span className="shrink-0">{leading}</span>
+        <span className={cx("shrink-0", leadingAlignment === "center" && "flex self-center")}>{leading}</span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-sm text-muted">{meta}</span>
           <span className="mt-0.5 block truncate text-base">{children}</span>

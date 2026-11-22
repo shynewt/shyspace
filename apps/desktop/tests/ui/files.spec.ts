@@ -127,7 +127,10 @@ test("someone else's file can be saved but not deleted; your own can be deleted"
   const theirs = page.getByRole("article").filter({ hasText: "Minutes attached" });
   await theirs.getByRole("button", { name: "Save minutes.md" }).click();
   expect(await page.evaluate(() => window.fake.files.saved.length)).toBe(1);
-  await expect(theirs.getByRole("button", { name: "Delete minutes.md" })).toHaveCount(0);
+  await theirs.getByRole("button", { name: "More actions for minutes.md" }).click();
+  await expect(page.getByRole("menuitem", { name: "Save…" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Delete…" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
 
   await page.evaluate(() => {
     window.fake.files.pickNext = [{ name: "mine.txt", type: "text/plain", bytes: [1] }];
@@ -136,7 +139,8 @@ test("someone else's file can be saved but not deleted; your own can be deleted"
   await page.getByLabel("Message #general").fill("Mine");
   await page.getByLabel("Message #general").press("Enter");
   const mine = page.getByRole("article").filter({ hasText: "Mine" });
-  await mine.getByRole("button", { name: "Delete mine.txt" }).click();
+  await mine.getByRole("button", { name: "More actions for mine.txt" }).click();
+  await page.getByRole("menuitem", { name: "Delete…" }).click();
   await page.getByRole("button", { name: "Delete file" }).click();
   await expect(mine.getByText("mine.txt")).toHaveCount(0);
   await expect(mine.getByText("Mine")).toBeVisible();
@@ -152,7 +156,7 @@ test("a member's picture replaces their initials", async ({ page }) => {
   await expect(message.locator("img[src^='blob:']")).toHaveCount(1);
 });
 
-test("the files view lists what was shared, by channel, and filters it", async ({ page }) => {
+test("the files view lists what was shared and filters it", async ({ page }) => {
   await page.evaluate((png) => {
     const grace = window.fake.addMember("Grace");
     const first = window.fake.receiveMessage(grace, "general", "Logo");
@@ -382,7 +386,8 @@ test("you can rename a file you shared; the name before the extension is selecte
   });
   await page.getByRole("button", { name: "Attach files" }).click();
   await page.getByRole("button", { name: "Send" }).click();
-  await page.getByRole("button", { name: "Rename IMG_4821.png" }).click();
+  await page.getByRole("button", { name: "More actions for IMG_4821.png" }).click();
+  await page.getByRole("menuitem", { name: "Rename…" }).click();
   const dialog = page.getByRole("dialog", { name: "Rename file" });
   const field = dialog.getByLabel("Name");
   await expect(field).toBeFocused();
@@ -400,8 +405,9 @@ test("someone else's file has no rename", async ({ page }) => {
     const message = window.fake.receiveMessage(grace, "general", "Minutes");
     window.fake.files.receive(grace, message, { name: "minutes.md", type: "text/markdown", bytes: [35] });
   });
-  await expect(page.getByRole("button", { name: "Save minutes.md" })).toBeAttached();
-  await expect(page.getByRole("button", { name: "Rename minutes.md" })).toHaveCount(0);
+  await page.getByRole("button", { name: "More actions for minutes.md" }).click();
+  await expect(page.getByRole("menuitem", { name: "Save…" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Rename…" })).toHaveCount(0);
 });
 
 /** A small, valid PDF with `pages` pages, each saying its number. */
@@ -499,10 +505,160 @@ test("reopening rename starts from the file's current name", async ({ page }) =>
   });
   await page.getByRole("button", { name: "Attach files" }).click();
   await page.getByRole("button", { name: "Send" }).click();
-  await page.getByRole("button", { name: "Rename notes.txt" }).click();
+  const rename = async () => {
+    await page.getByRole("button", { name: "More actions for notes.txt" }).click();
+    await page.getByRole("menuitem", { name: "Rename…" }).click();
+  };
+  await rename();
   const dialog = page.getByRole("dialog", { name: "Rename file" });
   await page.keyboard.type("half typed");
   await dialog.getByRole("button", { name: "Cancel" }).click();
-  await page.getByRole("button", { name: "Rename notes.txt" }).click();
+  await rename();
   await expect(dialog.getByLabel("Name")).toHaveValue("notes.txt");
+});
+
+test("the files view lists files newest first, by day, saying who shared each and where", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-11-20T10:00:00") });
+  await page.goto("");
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const old = window.fake.receiveMessage(grace, "general", "Old");
+    window.fake.files.receive(grace, old, { name: "old.txt", type: "text/plain", bytes: [1] });
+  });
+  await page.clock.setSystemTime(new Date("2026-11-22T09:00:00"));
+  await page.evaluate(() => {
+    const grace = window.fake.memberNamed("Grace");
+    const recent = window.fake.receiveMessage(grace, "general", "New");
+    window.fake.files.receive(grace, recent, { name: "new.txt", type: "text/plain", bytes: [1] });
+  });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+
+  const today = page.getByRole("region", { name: "Today" });
+  const earlier = page.getByRole("region", { name: "Friday, November 20" });
+  await expect(today.getByText("new.txt")).toBeVisible();
+  await expect(earlier.getByText("old.txt")).toBeVisible();
+  const [todayBox, earlierBox] = [await today.boundingBox(), await earlier.boundingBox()];
+  expect(todayBox?.y ?? 0).toBeLessThan(earlierBox?.y ?? 0);
+  await expect(today.getByRole("listitem")).toContainText("Grace");
+  await expect(today.getByRole("listitem")).toContainText("general");
+});
+
+test("the files view filters by who shared, and Clear filters brings everything back", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const linus = window.fake.addMember("Linus");
+    const first = window.fake.receiveMessage(grace, "general", "Plan");
+    window.fake.files.receive(grace, first, { name: "plan.txt", type: "text/plain", bytes: [1] });
+    const second = window.fake.receiveMessage(linus, "general", "Patch");
+    window.fake.files.receive(linus, second, { name: "patch.diff", type: "text/plain", bytes: [1] });
+  });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const sharedBy = page.getByRole("combobox", { name: "Shared by" });
+  await expect(sharedBy).toHaveText("Shared by anyone");
+
+  // From the keyboard: open the list, type to jump to a name, choose it.
+  await sharedBy.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("option", { name: "Shared by anyone" })).toBeVisible();
+  await page.keyboard.type("Lin");
+  await expect(page.getByRole("option", { name: /Linus/ })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(sharedBy).toHaveText(/Linus/);
+  await expect(page.getByText("patch.diff")).toBeVisible();
+  await expect(page.getByText("plan.txt")).toHaveCount(0);
+
+  await page.getByLabel("Search files by name").fill("nothing like this");
+  await expect(page.getByText("No files match.")).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(sharedBy).toHaveText("Shared by anyone");
+  await expect(page.getByLabel("Search files by name")).toHaveValue("");
+  await expect(page.getByText("plan.txt")).toBeVisible();
+  await expect(page.getByText("patch.diff")).toBeVisible();
+});
+
+test("a file the app can't show opens a page that offers to save it", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "Backup");
+    window.fake.files.receive(grace, message, { name: "backup.zip", type: "application/zip", bytes: [80, 75] });
+  });
+  await page.getByRole("button", { name: "View backup.zip" }).click();
+  const viewer = page.getByRole("dialog", { name: "backup.zip" });
+  await expect(viewer.getByText("There's no preview for this kind of file.")).toBeVisible();
+  await viewer.getByRole("button", { name: "Save", exact: true }).click();
+  expect(await page.evaluate(() => window.fake.files.saved.length)).toBe(1);
+});
+
+test("the viewer says who shared the file and where, closes with its button, and leads to the message", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "Notes for today");
+    window.fake.files.receive(grace, message, { name: "notes.txt", type: "text/plain", bytes: [104, 105] });
+  });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByText("notes.txt").click();
+  const viewer = page.getByRole("dialog", { name: "notes.txt" });
+  await expect(viewer).toContainText("Grace");
+  await expect(viewer).toContainText("general");
+  // Opening focuses the viewer itself, not its first button, so the first Esc closes it.
+  await expect(viewer).toBeFocused();
+
+  const close = viewer.getByRole("button", { name: "Close", exact: true });
+  await expect(close).toBeInViewport();
+  await close.click();
+  await expect(viewer).toHaveCount(0);
+
+  await page.getByText("notes.txt").click();
+  await viewer.getByRole("button", { name: "Show notes.txt in chat" }).click();
+  await expect(viewer).toHaveCount(0);
+  await expect(page.getByRole("article").filter({ hasText: "Notes for today" })).toBeVisible();
+});
+
+test("right-clicking a file opens its menu, in the files view and in chat", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "The minutes");
+    window.fake.files.receive(grace, message, { name: "minutes.md", type: "text/markdown", bytes: [35] });
+  });
+  await page.getByRole("button", { name: "View minutes.md" }).click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Save…" })).toBeVisible();
+  // The file's menu, not the message's.
+  await expect(page.getByRole("menuitem", { name: "Copy link" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByText("minutes.md").click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Show in chat" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Save…" })).toBeVisible();
+});
+
+test("after a dialog opened from a file's menu closes, focus is back on the menu button", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.files.pickNext = [{ name: "notes.txt", type: "text/plain", bytes: [1] }];
+  });
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Send" }).click();
+  const more = page.getByRole("button", { name: "More actions for notes.txt" });
+  await more.click();
+  await page.getByRole("menuitem", { name: "Rename…" }).click();
+  await page.getByRole("dialog", { name: "Rename file" }).getByRole("button", { name: "Cancel" }).click();
+  await expect(more).toBeFocused();
+});
+
+test("a file row centers its thumbnail on the two lines of text", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "Contract");
+    window.fake.files.receive(grace, message, { name: "contract.md", type: "text/markdown", bytes: [35] });
+  });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const row = page.getByRole("listitem").filter({ hasText: "contract.md" });
+  const thumbnail = await row.getByText("MD", { exact: true }).locator("..").boundingBox();
+  const name = await row.getByText("contract.md", { exact: true }).boundingBox();
+  const meta = await row.getByText("Grace", { exact: true }).boundingBox();
+  if (!thumbnail || !name || !meta) throw new Error("row parts not laid out");
+  const textMiddle = (meta.y + name.y + name.height) / 2;
+  expect(Math.abs(thumbnail.y + thumbnail.height / 2 - textMiddle)).toBeLessThanOrEqual(2);
 });
