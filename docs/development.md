@@ -68,6 +68,10 @@ The app runs in WebKitGTK, so the tests run in WebKit too. `pnpm test:ui` runs C
 
 To see every shared component, open the app with `#gallery` in development. To check a change by hand, run the app on a pre-filled workspace and drive a second member through the CLI or MCP so you can watch live updates arrive.
 
+## Releasing
+
+Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft, pre-release GitHub release to look over and publish. The Actions tab's "Run workflow" button builds them as workflow artifacts only. macOS builds aren't signed yet, so testers open the app the first time with right-click › Open. One release costs roughly 250–300 Actions minutes, because macOS minutes count ten times on a private repository.
+
 ## Conventions
 
 Coding rules, testing and commit conventions are in [AGENTS.md](../AGENTS.md). Clippy (`[workspace.lints]` in `Cargo.toml`) and Biome (`apps/desktop/biome.json`; `pnpm format` fixes formatting) enforce some of them. UI conventions are in [design-system.md](design-system.md).

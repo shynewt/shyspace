@@ -9,6 +9,8 @@ on:
   schedule:
     - cron: "0 4 * * 1"
   workflow_dispatch:
+  # The release workflow runs these same checks first.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -75,7 +77,8 @@ jobs:
   app:
     name: Desktop app (real UI, real bucket)
     # The slowest job: it builds the whole app. Only when asked for.
-    if: github.event_name == 'workflow_dispatch'
+    # Not when a release calls these checks: there it would only add time.
+    if: github.workflow == 'CI' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

@@ -3,6 +3,12 @@ name = "shy-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Builds OpenSSL into the app for SQLCipher, so release builds don't depend on
+# a system copy (macOS and Windows have none). Needs Perl to build; local
+# development uses the system's OpenSSL.
+vendored-openssl = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
+
 [dependencies]
 aead-stream = { version = "0.6", features = ["alloc"] }
 anyhow = "1.0.104"

@@ -7,6 +7,9 @@ edition = "2024"
 name = "shy"
 path = "src/main.rs"
 
+[features]
+vendored-openssl = ["shy-core/vendored-openssl"]
+
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4", features = ["derive", "env"] }
