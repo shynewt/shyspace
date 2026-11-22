@@ -20,6 +20,10 @@ use crate::{
 
 const MAX_MENTION_SCAN: u32 = 500;
 
+/// Makes an op once its sequence number is known (sealed content is bound
+/// to it), inside the transaction that stores it.
+pub(crate) type OpMaker<'a> = Box<dyn FnOnce(&Store, u64) -> Result<Op> + 'a>;
+
 impl Workspace {
     /// Seals, stores and applies a local change, then sends it live. The
     /// bucket upload happens on the next sync pass.
@@ -36,10 +40,33 @@ impl Workspace {
         }
     }
 
+    /// The op maker for a change to content (a message, a file): sealed for
+    /// its members in a private channel or DM, where making the key for a
+    /// DM may write a grant first. Owner deletes go through
+    /// [`Workspace::write`].
+    pub(crate) fn content_maker(&self, op: Op) -> Result<OpMaker<'static>> {
+        let private_channel = op
+            .named_ids()
+            .into_iter()
+            .find_map(private_channel_of)
+            .map(str::to_owned);
+        match private_channel {
+            Some(channel) => self.private_content_maker(&channel, op),
+            None => Ok(Box::new(move |_, _| Ok(op))),
+        }
+    }
+
     /// Like [`Workspace::write`], for an op that needs its own sequence number
     /// (sealed content is bound to it).
     pub(crate) fn write_with(&self, make_op: impl FnOnce(&Store, u64) -> Result<Op>) -> Result<()> {
-        let (envelope, changes) = {
+        self.write_together(vec![Box::new(make_op)])
+    }
+
+    /// Seals, stores and applies changes that belong together, each with the
+    /// next sequence number: all of them or none. They go out live only once
+    /// they are all stored.
+    pub(crate) fn write_together(&self, makers: Vec<OpMaker<'_>>) -> Result<()> {
+        let (envelopes, changes) = {
             let state = self.state();
             if !state.mls.is_active() {
                 bail!("you are no longer a member of this workspace");
@@ -52,46 +79,53 @@ impl Workspace {
             let author = self.me();
             let context = self.apply_context();
             state.store.atomically(|store| {
-                let seq = store.next_seq(&author)?;
-                let op = make_op(store, seq)?;
-                if !self.may(&op) {
-                    bail!("only its owner or the admin can do that");
+                let mut envelopes = Vec::new();
+                let mut changes = Vec::new();
+                for make_op in makers {
+                    let seq = store.next_seq(&author)?;
+                    let op = make_op(store, seq)?;
+                    if !self.may(&op) {
+                        bail!("only its owner or the admin can do that");
+                    }
+                    let is_sealed = matches!(op, Op::Sealed { .. });
+                    let body = OpBody {
+                        lamport: store.next_lamport()?,
+                        timestamp_ms: now_ms()?,
+                        op,
+                    };
+                    let envelope = crypto::seal(&self.inner.identity, &key, epoch, seq, &body)?;
+                    ensure!(envelope.fits_size_limit(&body.op), too_large(&body.op));
+                    let applied = store.apply_any(
+                        &VerifiedOp {
+                            author,
+                            seq,
+                            epoch,
+                            body,
+                        },
+                        context,
+                    )?;
+                    // Our own private op must count, or nobody else would see it.
+                    ensure!(
+                        !is_sealed || store.is_private_applied(&author, seq)?,
+                        "that isn't allowed in this channel"
+                    );
+                    store.insert_applied(&envelope, false)?;
+                    changes.extend(applied.changes);
+                    if applied.needs_rebuild {
+                        store.rebuild_views(context)?;
+                        changes.extend(store.all_view_changes()?);
+                    }
+                    envelopes.push(envelope);
                 }
-                let is_sealed = matches!(op, Op::Sealed { .. });
-                let body = OpBody {
-                    lamport: store.next_lamport()?,
-                    timestamp_ms: now_ms()?,
-                    op,
-                };
-                let envelope = crypto::seal(&self.inner.identity, &key, epoch, seq, &body)?;
-                ensure!(envelope.fits_size_limit(&body.op), too_large(&body.op));
-                let applied = store.apply_any(
-                    &VerifiedOp {
-                        author,
-                        seq,
-                        epoch,
-                        body,
-                    },
-                    context,
-                )?;
-                // Our own private op must count, or nobody else would see it.
-                ensure!(
-                    !is_sealed || store.is_private_applied(&author, seq)?,
-                    "that isn't allowed in this channel"
-                );
-                store.insert_applied(&envelope, false)?;
-                let mut changes = applied.changes;
-                if applied.needs_rebuild {
-                    store.rebuild_views(context)?;
-                    changes.extend(store.all_view_changes()?);
-                }
-                Ok((envelope, changes))
+                Ok((envelopes, changes))
             })?
         };
         for change in changes {
             self.emit(change);
         }
-        self.send_live(envelope);
+        for envelope in envelopes {
+            self.send_live(envelope);
+        }
         self.inner.wake.notify_one();
         Ok(())
     }
@@ -165,7 +199,12 @@ impl Workspace {
             text: text.to_owned(),
             reply_to,
         })?;
-        // Replying means you've read what came before, and the draft is done.
+        self.after_posting(channel, id)
+    }
+
+    /// What posting message `id` means for you: you've read what came
+    /// before, and the draft it came from is done.
+    pub(crate) fn after_posting(&self, channel: &str, id: &str) -> Result<()> {
         {
             let state = self.state();
             state.store.mark_read(channel, id)?;

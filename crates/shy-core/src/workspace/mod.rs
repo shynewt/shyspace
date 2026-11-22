@@ -12,6 +12,7 @@ mod sections;
 mod sent;
 mod storage;
 
+pub(crate) use actions::OpMaker;
 pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
 pub use lifecycle::{DataDir, JoinCancel};
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};

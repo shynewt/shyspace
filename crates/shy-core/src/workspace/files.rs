@@ -129,19 +129,29 @@ impl Workspace {
                 blob,
             });
         }
-        let mut unwritten = shared.into_iter();
-        while let Some(file) = unwritten.next() {
-            let blob_id = file.blob.id.clone();
-            if let Err(error) = self.write(Op::File { file }) {
-                let cache = self.file_cache();
-                self.abandon_blob(&cache, &blob_id).await;
-                for rest in unwritten {
-                    self.abandon_blob(&cache, &rest.blob.id).await;
-                }
-                return Err(error);
+        let blob_ids: Vec<String> = shared.iter().map(|file| file.blob.id.clone()).collect();
+        let message_op = Op::Message {
+            id: message.clone(),
+            channel: channel.to_owned(),
+            text: caption.to_owned(),
+            reply_to,
+        };
+        // The files and their message go out together, or not at all.
+        let written = shared
+            .into_iter()
+            .map(|file| Op::File { file })
+            .chain([message_op])
+            .map(|op| self.content_maker(op))
+            .collect::<Result<Vec<_>>>()
+            .and_then(|makers| self.write_together(makers));
+        if let Err(error) = written {
+            let cache = self.file_cache();
+            for blob_id in &blob_ids {
+                self.abandon_blob(&cache, blob_id).await;
             }
+            return Err(error);
         }
-        self.post_message(channel, &message, caption, reply_to)?;
+        self.after_posting(channel, &message)?;
         Ok(message)
     }
 
@@ -469,8 +479,11 @@ async fn read_blob_into(
         };
         output.write_all(&opened).context("writing the file")?;
     }
-    cache.touch(&cached)?;
-    cache.trim(&cached)?;
+    // Every piece was read and checked; a cache that can't be tidied right
+    // now is only worth a warning, as after an upload.
+    if let Err(error) = cache.touch(&cached).and_then(|()| cache.trim(&cached)) {
+        warn!("couldn't tidy the file cache: {error:#}");
+    }
     Ok(())
 }
 

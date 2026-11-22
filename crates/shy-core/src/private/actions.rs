@@ -14,7 +14,7 @@ use crate::{
     ops::{EntityId, Op, is_owned_by, normalize_channel_name},
     storage::{Ending, Store, StoredKey},
     views::parse_member_id,
-    workspace::Workspace,
+    workspace::{OpMaker, Workspace},
 };
 
 impl Workspace {
@@ -323,11 +323,22 @@ impl Workspace {
 
     /// Seals `op` into `channel` with the key we write there with.
     fn write_private(&self, channel: &str, op: PrivateOp) -> Result<()> {
-        let key = match private_kind(channel) {
-            Some(PrivateKind::Dm) => self.own_dm_key(channel)?,
-            _ => sending_key(&self.state().store, channel)?,
-        };
+        let key = self.writing_key(channel)?;
         self.write_sealed(key, op)
+    }
+
+    /// Makes `op`, content for `channel`, sealed with the key we write there
+    /// with once its sequence number is known.
+    pub(crate) fn private_content_maker(&self, channel: &str, op: Op) -> Result<OpMaker<'static>> {
+        let key = self.writing_key(channel)?;
+        Ok(self.sealed_maker(key, PrivateOp::Content(op)))
+    }
+
+    fn writing_key(&self, channel: &str) -> Result<StoredKey> {
+        match private_kind(channel) {
+            Some(PrivateKind::Dm) => self.own_dm_key(channel),
+            _ => sending_key(&self.state().store, channel),
+        }
     }
 
     /// The key we write a DM with: one we made ourselves, made the first
@@ -358,9 +369,13 @@ impl Workspace {
     }
 
     fn write_sealed(&self, key: StoredKey, op: PrivateOp) -> Result<()> {
+        self.write_together(vec![self.sealed_maker(key, op)])
+    }
+
+    fn sealed_maker(&self, key: StoredKey, op: PrivateOp) -> OpMaker<'static> {
         let workspace_id = self.inner.config.workspace_id.clone();
         let me = self.me();
-        self.write_with(|_, seq| {
+        Box::new(move |_, seq| {
             let body = PrivateBody {
                 channel: key.channel.clone(),
                 generation: key.generation,

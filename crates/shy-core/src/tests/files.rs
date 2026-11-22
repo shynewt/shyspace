@@ -306,3 +306,55 @@ async fn the_newest_rename_wins_in_any_order_even_before_the_file_arrives() {
     carol.sync().await;
     assert_eq!(carol.files().unwrap()[0].name, "third.txt");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_that_belong_together_are_kept_all_or_nothing() {
+    let (_root, _bucket, admin, _bob) = admin_and_bob().await;
+    let next_before = admin.state().store.next_seq(&admin.me()).unwrap();
+    let channel = crate::ops::new_owned_id(&admin.me());
+    let create = admin
+        .content_maker(crate::ops::Op::ChannelCreate {
+            id: channel.clone(),
+            name: "kept-together".into(),
+        })
+        .unwrap();
+
+    let written = admin.write_together(vec![
+        create,
+        Box::new(|_, _| anyhow::bail!("the second write fails")),
+    ]);
+
+    assert!(written.is_err());
+    assert_eq!(admin.state().store.next_seq(&admin.me()).unwrap(), next_before);
+    assert!(
+        admin
+            .channels()
+            .unwrap()
+            .iter()
+            .all(|listed| listed.id != channel)
+    );
+}
+
+/// Tidying the cache is housekeeping: a file whose every piece was read and
+/// checked opens even if some old cache folder can't be read.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_opens_even_when_the_cache_cannot_be_tidied() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_files(&general, "", None, vec![bytes_file("notes.txt", b"bob's notes")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let locked = admin.inner.data.path.join("file-cache").join("locked");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let file = admin.files().unwrap().remove(0);
+    let opened = admin.file_bytes(&file.id).await;
+
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(opened.unwrap(), b"bob's notes");
+}
