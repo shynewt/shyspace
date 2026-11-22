@@ -12,11 +12,12 @@ import {
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { ConfirmDialog, cx, IconButton, Tooltip } from "../ui";
+import { ConfirmDialog, cx, ErrorBoundary, IconButton, Tooltip } from "../ui";
 import { PAGE_LINK_PREFIX } from "./api";
 import { CALLOUTS, type CalloutKind, isCalloutKind, rehypeCallouts } from "./callouts";
 import { type CodeSegment, highlight } from "./codeHighlight";
 import { openExternalUrl } from "./contact";
+import { isCheapToFormat } from "./markdownBudget";
 import { isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
 import { reportError } from "./toast";
 
@@ -46,7 +47,8 @@ type MarkdownNode = NonNullable<ExtraProps["node"]>;
 /**
  * Renders a chat message. Messages come from other people, so this never
  * injects HTML: markdown becomes React elements, raw HTML is dropped, and
- * only web, mail, page and mention links survive.
+ * only web, mail, page and mention links survive. Text too costly to format,
+ * or that fails to draw, shows as plain text.
  */
 export function ChatMarkdown({
   text,
@@ -65,6 +67,7 @@ export function ChatMarkdown({
   /** Draws a mention of a member, like a button opening their card; plain text without it. */
   renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
 }) {
+  if (!isCheapToFormat(text)) return <PlainText text={text} />;
   const withTitles = text
     .replace(PAGE_LINK_LINE, (line: string, id: string) => (pageTitle(id) === undefined ? line : ""))
     .replace(MESSAGE_LINK_LINE, "")
@@ -74,21 +77,27 @@ export function ChatMarkdown({
     })
     .replace(BARE_MESSAGE_LINK, (link: string) => `[a message](${link})`);
   return (
-    <LinkContext.Provider value={{ myId, onOpenPage, onOpenMessage, renderMemberMention }}>
-      <Markdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        rehypePlugins={[rehypeCallouts]}
-        skipHtml
-        urlTransform={(url) =>
-          SAFE_EXTERNAL.test(url) || PAGE_LINK.test(url) || MESSAGE_LINK.test(url) || isMentionLink(url) ? url : ""
-        }
-        disallowedElements={["img"]}
-        components={COMPONENTS}
-      >
-        {withTitles}
-      </Markdown>
-    </LinkContext.Provider>
+    <ErrorBoundary key={text} fallback={<PlainText text={text} />}>
+      <LinkContext.Provider value={{ myId, onOpenPage, onOpenMessage, renderMemberMention }}>
+        <Markdown
+          remarkPlugins={[remarkGfm, remarkBreaks]}
+          rehypePlugins={[rehypeCallouts]}
+          skipHtml
+          urlTransform={(url) =>
+            SAFE_EXTERNAL.test(url) || PAGE_LINK.test(url) || MESSAGE_LINK.test(url) || isMentionLink(url) ? url : ""
+          }
+          disallowedElements={["img"]}
+          components={COMPONENTS}
+        >
+          {withTitles}
+        </Markdown>
+      </LinkContext.Provider>
+    </ErrorBoundary>
   );
+}
+
+function PlainText({ text }: { text: string }) {
+  return <p className="whitespace-pre-wrap break-words">{text}</p>;
 }
 
 type LinkHandlers = {

@@ -13,6 +13,15 @@ export type LastView = { view: View; anchor: ScrollAnchor | null };
 const KEY = "shyspace.lastView";
 let hasReportedFailure = false;
 
+/** Opens the next launch at the first channel, as after a screen failed to draw there. */
+export function forgetLastView(): void {
+  try {
+    localStorage.removeItem(KEY);
+  } catch (error) {
+    reportError(error);
+  }
+}
+
 /** The last view saved by `me`, or null if there's none or it can't be read. */
 export function readLastView(me: string): LastView | null {
   // Unreadable storage only means opening at the first channel.

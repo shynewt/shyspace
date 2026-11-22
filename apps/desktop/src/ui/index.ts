@@ -12,6 +12,7 @@ export { DayDivider } from "./DayDivider";
 export { Dialog, DialogActions } from "./Dialog";
 export { EmojiPicker } from "./EmojiPicker";
 export { EmptyState } from "./EmptyState";
+export { ErrorBoundary } from "./ErrorBoundary";
 export { Field, type FieldDescription } from "./Field";
 export { FormError } from "./FormError";
 export { IconButton } from "./IconButton";
