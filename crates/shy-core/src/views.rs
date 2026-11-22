@@ -410,6 +410,63 @@ pub enum Change {
     },
     Sync,
     Removed,
+    /// Who is in `channel`'s huddle changed.
+    Huddle {
+        channel: EntityId,
+    },
+    /// Something about this device's own huddle changed.
+    MyHuddle,
+    /// A participant in this device's huddle started or stopped speaking.
+    HuddleSpeaking {
+        /// Member id (hex); this device's own member for its own voice.
+        member: String,
+        speaking: bool,
+    },
+}
+
+/// Who is in a channel's huddle, for everyone who can see the channel.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Huddle {
+    pub channel: EntityId,
+    pub participants: Vec<HuddleParticipant>,
+    pub is_full: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct HuddleParticipant {
+    /// Member id (hex).
+    pub member: String,
+    pub camera: bool,
+    pub screen: bool,
+    pub is_me: bool,
+    /// Their app can't exchange audio with this one; one of you must update.
+    pub needs_update: bool,
+}
+
+/// This device's own huddle.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MyHuddle {
+    pub channel: EntityId,
+    pub phase: HuddlePhase,
+    pub muted: bool,
+    pub mic: crate::huddle::media::MicState,
+    pub output: crate::huddle::media::OutputState,
+    pub peers: Vec<HuddlePeer>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HuddlePhase {
+    Joining,
+    In,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct HuddlePeer {
+    /// Member id (hex).
+    pub member: String,
+    pub link: crate::huddle::media::Link,
+    pub speaking: bool,
 }
 
 /// What needs your attention, across channels and threads.

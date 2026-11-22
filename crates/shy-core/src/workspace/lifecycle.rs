@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail, ensure};
 use iroh::SecretKey;
 use tokio::sync::{Notify, broadcast, mpsc, watch};
 
-use super::{Inner, Networking, Profile, State, Workspace};
+use super::{Inner, Networking, Profile, State, Workspace, WorkspaceOptions};
 use crate::{
     config::{self, WorkspaceConfig},
     identity,
@@ -156,8 +156,8 @@ impl Workspace {
         WorkspaceConfig::exists(dir)
     }
 
-    pub async fn open(data: &DataDir, networking: Networking) -> Result<Self> {
-        Self::open_with(data, s3_connector(), networking).await
+    pub async fn open(data: &DataDir, options: impl Into<WorkspaceOptions>) -> Result<Self> {
+        Self::open_with(data, s3_connector(), options).await
     }
 
     /// Creates a workspace, after checking the bucket works with `bucket`.
@@ -166,7 +166,7 @@ impl Workspace {
         workspace_name: &str,
         profile: Profile<'_>,
         bucket: BucketConfig,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
         Self::create_with(
             data,
@@ -175,7 +175,7 @@ impl Workspace {
             profile,
             bucket,
             s3_connector(),
-            networking,
+            options,
         )
         .await
     }
@@ -186,9 +186,9 @@ impl Workspace {
         data: &DataDir,
         invite_code: &str,
         profile: Profile<'_>,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
-        Self::join_cancellable(data, invite_code, profile, networking, &JoinCancel::new()).await
+        Self::join_cancellable(data, invite_code, profile, options, &JoinCancel::new()).await
     }
 
     /// Like [`Workspace::join`], but `cancel` stops it while it waits.
@@ -196,21 +196,12 @@ impl Workspace {
         data: &DataDir,
         invite_code: &str,
         profile: Profile<'_>,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
         cancel: &JoinCancel,
     ) -> Result<Self> {
         let invite = Invite::decode(invite_code)?;
         let mailbox = PresignedMailbox::for_invite(&invite);
-        Self::join_with(
-            data,
-            invite,
-            profile,
-            &mailbox,
-            s3_connector(),
-            networking,
-            cancel,
-        )
-        .await
+        Self::join_with(data, invite, profile, &mailbox, s3_connector(), options, cancel).await
     }
 
     pub(crate) async fn create_with(
@@ -220,7 +211,7 @@ impl Workspace {
         profile: Profile<'_>,
         bucket_config: BucketConfig,
         connect: Connector,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
         let bucket = connect(&workspace_id, &bucket_config)?;
         bucket
@@ -238,7 +229,7 @@ impl Workspace {
             bucket: bucket_config,
         };
         config.save(&data.path, &local.store)?;
-        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
+        let workspace = Self::start(data, local, mls, config, connect, options).await?;
         workspace.write(Op::Profile {
             name: super::actions::checked_profile_name(profile.name)?,
             is_bot: profile.is_bot,
@@ -258,7 +249,7 @@ impl Workspace {
         profile: Profile<'_>,
         mailbox: &impl JoinMailbox,
         connect: Connector,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
         cancel: &JoinCancel,
     ) -> Result<Self> {
         ensure_not_expired(&invite, now_ms()?)?;
@@ -302,7 +293,7 @@ impl Workspace {
         };
         config.save(&data.path, &local.store)?;
         config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
-        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
+        let workspace = Self::start(data, local, mls, config, connect, options).await?;
         workspace.write(Op::Profile {
             name: super::actions::checked_profile_name(profile.name)?,
             is_bot: profile.is_bot,
@@ -313,7 +304,7 @@ impl Workspace {
     pub(crate) async fn open_with(
         data: &DataDir,
         connect: Connector,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
         ensure!(
             Self::exists(&data.path),
@@ -327,7 +318,7 @@ impl Workspace {
             "the MLS signing key reference is missing"
         );
         let mls = local.open_mls(data, Some(config.workspace_id.as_bytes()))?;
-        Self::start(data, local, mls, config, connect, networking).await
+        Self::start(data, local, mls, config, connect, options).await
     }
 
     async fn start(
@@ -336,7 +327,7 @@ impl Workspace {
         mls: Mls,
         config: WorkspaceConfig,
         connect: Connector,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
         let bucket = connect(&config.workspace_id, &config.bucket)?;
         let Local {
@@ -349,10 +340,19 @@ impl Workspace {
         state.recover_staged_commit()?;
         state.record_epoch()?;
         let (incoming_sender, incoming) = mpsc::channel(1024);
-        let net = match networking {
+        let options: WorkspaceOptions = options.into();
+        let net = match options.networking {
             Networking::Online => {
                 let topic = gossip_topic(&config.workspace_id);
-                Some(Net::start(identity.clone(), topic, incoming_sender).await?)
+                Some(
+                    Net::start(
+                        identity.clone(),
+                        topic,
+                        incoming_sender,
+                        options.protocols.as_ref(),
+                    )
+                    .await?,
+                )
             }
             Networking::Offline => None,
         };
@@ -363,6 +363,7 @@ impl Workspace {
                 _data_lock: lock,
                 device_key,
                 identity,
+                huddle_media: options.media.clone(),
                 config,
                 state: Mutex::new(state),
                 bucket: RwLock::new(bucket),
@@ -377,6 +378,9 @@ impl Workspace {
                 seen_fork_proofs: Mutex::new(std::collections::HashMap::new()),
                 last_dialed_ms: Mutex::new(std::collections::HashMap::new()),
                 presence: Mutex::new(Default::default()),
+                huddles: Mutex::new(Default::default()),
+                huddle_transition: Mutex::new(()),
+                runtime: tokio::runtime::Handle::current(),
                 own_presence: Mutex::new(super::presence::OwnPresence {
                     is_away: false,
                     appear_offline,

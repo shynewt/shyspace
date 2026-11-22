@@ -3,5 +3,6 @@
 
 pub mod blobs;
 pub mod bucket;
+pub mod direct;
 pub mod gossip;
 pub mod presigned;

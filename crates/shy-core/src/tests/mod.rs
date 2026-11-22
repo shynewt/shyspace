@@ -5,6 +5,7 @@ mod file_attacks;
 mod files;
 mod forks;
 mod hardening;
+mod huddles;
 mod inbox;
 mod invites;
 mod later;

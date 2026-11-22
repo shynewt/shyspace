@@ -22,7 +22,7 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
 
 1. **One workspace = one MLS group.** OpenMLS handles membership and key agreement. MLS is only used to agree on one secret per *epoch* (a period between membership changes). Content is encrypted with a key derived from that secret.
 2. **Everything is an op.** Any change (message, reaction, page edit, rename…) is an `Op` (`ops.rs`). The author signs it with their identity key, then it is encrypted with the epoch key (`crypto.rs`). The result is an `Envelope`.
-3. **Two ways to deliver, same envelopes.** Envelopes are sent live over iroh gossip and also uploaded to the bucket. A member that was offline catches up from the bucket. Gossip also carries signed presence heartbeats (every 25 s, and when a peer connects), which are never stored.
+3. **Two ways to deliver, same envelopes.** Envelopes are sent live over iroh gossip and also uploaded to the bucket. A member that was offline catches up from the bucket. Gossip also carries signed presence heartbeats (every 25 s, and when a peer connects), which are never stored. Huddle beacons (who is in which voice huddle) travel the same way for public channels, and straight to each member for private channels and DMs; they are never stored either.
 4. **No ordering needed.** Every op merges the same way whatever order it arrives in. That is why two unordered transports are enough:
    - names, titles, channel renames, message edits, file renames, profiles, profile details and statuses: last writer wins, by lamport clock (edits are kept apart from what they change, so an edit may arrive first);
    - deletes: permanent markers that win over everything else about their target; later ops touching a deleted item are dropped;
@@ -97,11 +97,12 @@ Deleting a file, its message or its channel removes it everywhere and queues its
 
 | Path | Job |
 |---|---|
-| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `sent` (your own messages across the channels you can still read, newest first, paged and filtered by words), `presence` (heartbeats and status), `protection` (whether the bucket keeps deleted data), `files` (sharing, opening and removing files and pictures) |
+| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `sent` (your own messages across the channels you can still read, newest first, paged and filtered by words), `presence` (heartbeats and status), `protection` (whether the bucket keeps deleted data), `files` (sharing, opening and removing files and pictures), `huddles` (joining and leaving, beacons, and whom this device's audio goes to) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `forks` (two versions of one op), `replicate` (bucket pull and push, gossip peers) |
 | `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `forks`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `profile_details`, `sent` (one member's messages, newest first), `files` (shared files, pictures, blobs waiting to leave the bucket), `rebuild` (undoing ops that turned out not to count), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
-| `transport/` | `bucket` (S3 layout and access), `blobs` (file pieces in the bucket), `gossip` (iroh) |
+| `transport/` | `bucket` (S3 layout and access), `blobs` (file pieces in the bucket), `gossip` (iroh), `direct` (small messages straight to one member) |
+| `huddle/` | voice huddles without audio: `beacon` (the signed "I'm in" or "I left"), `book` (rosters from beacons, in memory), `rules` (who may join and whom you hear), `media` (the interface the audio layer implements) |
 | `private/` | private channels and DMs: `ids`, `ops` (what's inside sealed ops and grants), `crypto` (sealed content, key wraps, commitments), `sealing` (each member's key for receiving channel keys), `apply` (grants and waiting sealed ops), `rules` (which private ops count), `actions` (create, add, remove, leave, hand over, DMs), `reads` |
 | `files/` | shared files and pictures: `blob` (the encrypted format), `cache` (sealed pieces on this device) |
 | `crypto.rs` | sign-then-encrypt ops |
