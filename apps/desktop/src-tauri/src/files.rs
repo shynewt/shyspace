@@ -28,6 +28,24 @@ use crate::{AppState, CommandResult, current, failed};
 
 /// Pasted files go through the bridge as bytes, so they stay small.
 const MAX_PASTED_BYTES: usize = 25 * 1024 * 1024;
+/// Matches `MAX_INLINE_IMAGE_BYTES` in the UI's `lib/files.ts`.
+const MAX_THUMBNAIL_SOURCE_BYTES: u64 = 5 * 1024 * 1024;
+
+/// The source's bytes, if it holds at most `limit` of them.
+fn small_copy(source: &FileSource, limit: u64) -> CommandResult<Vec<u8>> {
+    let too_large = || "too large for a thumbnail".to_owned();
+    match source {
+        FileSource::Bytes(bytes) if bytes.len() as u64 <= limit => Ok(bytes.clone()),
+        FileSource::Bytes(_) => Err(too_large()),
+        FileSource::Path(path) => {
+            let size = std::fs::metadata(path).map_err(|error| error.to_string())?.len();
+            if size > limit {
+                return Err(too_large());
+            }
+            std::fs::read(path).map_err(|error| error.to_string())
+        }
+    }
+}
 
 /// Tokens only ever name files the person chose, so guessing one gains
 /// nothing; a counter is enough.
@@ -201,6 +219,20 @@ fn unframe_pasted_file(framed: &[u8]) -> CommandResult<(String, String, &[u8])> 
     let media_type = texts.pop().ok_or_else(malformed)?;
     let name = texts.pop().ok_or_else(malformed)?;
     Ok((name, media_type, rest))
+}
+
+/// A staged image's bytes, for its thumbnail in the message box. Only small
+/// files, so a large one isn't read into memory just to show a corner of it.
+#[tauri::command]
+pub fn staged_file_bytes(staged: State<'_, StagedFiles>, token: String) -> CommandResult<Response> {
+    let source = {
+        let files = staged.lock();
+        let file = files
+            .get(&token)
+            .ok_or_else(|| "that file is no longer waiting to be sent".to_owned())?;
+        small_copy(&file.source, MAX_THUMBNAIL_SOURCE_BYTES)?
+    };
+    Ok(Response::new(source))
 }
 
 #[tauri::command]

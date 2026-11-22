@@ -2,13 +2,14 @@ import { HardDrive, MessageSquareText } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api, type FileInfo } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
-import { formatSize, mayShowInline, useFileImage } from "../../lib/files";
+import { formatSize, useFileImage } from "../../lib/files";
 import { displayName } from "../../lib/people";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { EmptyState, IconButton, Input, RelativeTime, SectionLabel, SegmentedControl, Select } from "../../ui";
-import { ImageViewer } from "../chat/ImageViewer";
-import { FileActions, FileIcon } from "../chat/MessageFiles";
+import { FileActions } from "../files/FileActions";
+import { FileThumbnail } from "../files/FileThumbnail";
+import { ImageViewer } from "../files/ImageViewer";
 import { ChannelName } from "../private/ChannelName";
 import { ViewHeader } from "../shell/ViewHeader";
 
@@ -116,45 +117,38 @@ export function DriveView() {
   );
 }
 
-/** A small look at an image, from the same decrypted bytes the chat shows. */
-function Preview({ file }: { file: FileInfo }) {
-  const image = useFileImage(file);
-  const [isViewing, setViewing] = useState(false);
-  if (image.status !== "shown") return <IconTile file={file} />;
-  return (
-    <>
-      <button
-        type="button"
-        aria-label={`View ${file.name}`}
-        onClick={() => setViewing(true)}
-        className="shrink-0 cursor-zoom-in rounded-lg"
-      >
-        <img src={image.url} alt="" className="size-8 rounded-lg border border-line object-cover" />
-      </button>
-      <ImageViewer file={file} url={image.url} open={isViewing} onOpenChange={setViewing} />
-    </>
-  );
-}
-
-function IconTile({ file }: { file: FileInfo }) {
-  return (
-    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted">
-      <FileIcon mediaType={file.media_type} />
-    </span>
-  );
-}
-
 function DriveRow({ file, sharedBy }: { file: FileInfo; sharedBy: string }) {
   const { navigate } = useWorkspace();
+  const image = useFileImage(file);
+  const [isViewing, setViewing] = useState(false);
+  const summary = (
+    <>
+      <FileThumbnail mediaType={file.media_type} image={image} size="sm" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{file.name}</span>
+        <span className="block truncate text-xs text-faint">
+          {formatSize(file.size)} · {sharedBy} · <RelativeTime ms={file.created_ms} />
+        </span>
+      </span>
+    </>
+  );
   return (
     <li className="flex items-center gap-3 rounded-lg px-2.5 py-1.5 hover:bg-surface-2">
-      {mayShowInline(file) ? <Preview file={file} /> : <IconTile file={file} />}
-      <div className="min-w-0 flex-1">
-        <p className="selectable truncate text-sm font-medium">{file.name}</p>
-        <p className="truncate text-xs text-faint">
-          {formatSize(file.size)} · {sharedBy} · <RelativeTime ms={file.created_ms} />
-        </p>
-      </div>
+      {image.status === "shown" ? (
+        <>
+          <button
+            type="button"
+            aria-label={`View ${file.name}`}
+            onClick={() => setViewing(true)}
+            className="flex min-w-0 flex-1 cursor-zoom-in items-center gap-3 rounded-md text-left"
+          >
+            {summary}
+          </button>
+          <ImageViewer file={file} url={image.url} open={isViewing} onOpenChange={setViewing} />
+        </>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-3">{summary}</div>
+      )}
       {file.message && (
         <IconButton
           label={`Show ${file.name} in chat`}

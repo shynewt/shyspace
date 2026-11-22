@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { api, type FileInfo } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, type FileInfo, type StagedFile } from "./api";
 
 /**
  * Images up to this size load and show by themselves; bigger ones are a card
@@ -86,17 +86,26 @@ export function formatSize(bytes: number): string {
 }
 
 export type LoadedImage =
-  | { status: "loading" }
+  | { status: "none" | "loading" }
   | { status: "shown"; url: string }
   | { status: "not-an-image" | "failed" };
 
-/** A shared file as an image URL, if its bytes are an image this app shows. */
-export function useFileImage(file: FileInfo): LoadedImage {
-  const [image, setImage] = useState<LoadedImage>({ status: "loading" });
+/** Where an image's bytes come from; `key` changes when they do. */
+export type ImageSource = { key: string; load: () => Promise<Uint8Array> };
+
+/** Bytes as an image URL, if they are an image this app shows. Nothing is loaded without a source. */
+export function useImage(source: ImageSource | null): LoadedImage {
+  const [image, setImage] = useState<LoadedImage>({ status: "none" });
+  const key = source?.key ?? null;
+  const load = useRef(source?.load);
+  load.current = source?.load;
   useEffect(() => {
+    const loadBytes = load.current;
+    if (key === null || !loadBytes) return setImage({ status: "none" });
+    setImage({ status: "loading" });
     let url: string | null = null;
     let isCurrent = true;
-    api.fileBytes(file.id).then(
+    loadBytes().then(
       (bytes) => {
         if (!isCurrent) return;
         const type = showableImageType(bytes);
@@ -110,8 +119,19 @@ export function useFileImage(file: FileInfo): LoadedImage {
       isCurrent = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [file.id]);
+  }, [key]);
   return image;
+}
+
+/** A shared file as an image, if it may be one small enough to load by itself. */
+export function useFileImage(file: FileInfo): LoadedImage {
+  return useImage(mayShowInline(file) ? { key: file.id, load: () => api.fileBytes(file.id) } : null);
+}
+
+/** A file waiting in the message box as an image, read through the native side. */
+export function useStagedImage(file: StagedFile): LoadedImage {
+  const isCandidate = file.media_type.startsWith("image/") && file.size <= MAX_INLINE_IMAGE_BYTES;
+  return useImage(isCandidate ? { key: file.token, load: () => api.stagedFileBytes(file.token) } : null);
 }
 
 /**

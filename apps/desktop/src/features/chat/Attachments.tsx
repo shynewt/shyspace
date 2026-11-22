@@ -1,10 +1,10 @@
 import { Upload as UploadIcon, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { StagedFile } from "../../lib/api";
-import { formatSize } from "../../lib/files";
+import { formatSize, useStagedImage } from "../../lib/files";
 import { MAX_FILE_BYTES } from "../../lib/limits";
 import { cx, fade, IconButton } from "../../ui";
-import { FileIcon } from "./MessageFiles";
+import { FileThumbnail } from "../files/FileThumbnail";
 import type { Upload } from "./useAttachments";
 
 /** Files waiting in the message box, each removable. */
@@ -25,13 +25,11 @@ export function AttachmentList({
           <li
             key={file.token}
             className={cx(
-              "flex max-w-60 items-center gap-2 rounded-lg border bg-surface-2 py-1 pr-1 pl-2",
+              "flex max-w-60 items-center gap-2 rounded-lg border bg-surface-2 py-1 pr-1 pl-1",
               file.size > MAX_FILE_BYTES ? "border-danger/60" : "border-line",
             )}
           >
-            <span className="shrink-0 text-muted">
-              <FileIcon mediaType={file.media_type} />
-            </span>
+            <StagedThumbnail file={file} />
             <span className="min-w-0">
               <span className="block truncate text-sm">{file.name}</span>
               <span className="block text-2xs text-faint">{formatSize(file.size)}</span>
@@ -52,6 +50,10 @@ export function AttachmentList({
       )}
     </div>
   );
+}
+
+function StagedThumbnail({ file }: { file: StagedFile }) {
+  return <FileThumbnail mediaType={file.media_type} image={useStagedImage(file)} size="sm" />;
 }
 
 /** How far the upload of the files being sent has got. */

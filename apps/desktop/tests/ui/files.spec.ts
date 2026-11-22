@@ -240,3 +240,27 @@ test("clicking an image opens it large, and Esc closes it", async ({ page }) => 
   await page.keyboard.press("Escape");
   await expect(viewer).toHaveCount(0);
 });
+
+test("a waiting image shows its own thumbnail in the message box", async ({ page }) => {
+  await page.evaluate((png) => {
+    window.fake.files.pickNext = [
+      { name: "photo.png", type: "image/png", bytes: png },
+      { name: "notes.txt", type: "text/plain", bytes: [1] },
+    ];
+  }, PNG);
+  await page.getByRole("button", { name: "Attach files" }).click();
+  const waiting = page.getByRole("list", { name: "Files to send" });
+  await expect(waiting.locator("img[src^='blob:']")).toHaveCount(1);
+  await expect(waiting.getByText("notes.txt")).toBeVisible();
+});
+
+test("in the files view, a whole image row opens the viewer", async ({ page }) => {
+  await page.evaluate((png) => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "Logo");
+    window.fake.files.receive(grace, message, { name: "logo.png", type: "image/png", bytes: png });
+  }, PNG);
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByText("logo.png").click();
+  await expect(page.getByRole("dialog", { name: "logo.png" }).getByRole("img", { name: "logo.png" })).toBeVisible();
+});

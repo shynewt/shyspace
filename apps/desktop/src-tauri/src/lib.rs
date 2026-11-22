@@ -782,6 +782,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             files::pick_files,
             files::stage_pasted_file,
+            files::staged_file_bytes,
             files::unstage_file,
             files::send_files,
             files::file_bytes,

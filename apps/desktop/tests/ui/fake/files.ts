@@ -59,6 +59,11 @@ export class FakeFiles {
       }
       case "stage_pasted_file":
         return this.stage(unframePastedFile(args));
+      case "staged_file_bytes": {
+        const file = this.staged.get(requireString(args, "token"));
+        if (!file) throw new Error("that file is no longer waiting to be sent");
+        return new Uint8Array(file.bytes).buffer;
+      }
       case "unstage_file":
         this.staged.delete(requireString(args, "token"));
         return null;

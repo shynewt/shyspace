@@ -308,6 +308,8 @@ export const api = {
       framePastedFile(file.name, file.type, new Uint8Array(await file.arrayBuffer())),
     ),
   unstageFile: (token: string) => invoke<void>("unstage_file", { token }),
+  /** A staged image's bytes, for its thumbnail; refused for anything over the inline image limit. */
+  stagedFileBytes: async (token: string) => new Uint8Array(await invoke<ArrayBuffer>("staged_file_bytes", { token })),
   /** Uploads the staged files, then sends one message carrying them; `text` may be empty. */
   sendFiles: (channel: string, text: string, replyTo: string | null, tokens: string[]) =>
     invoke<string>("send_files", { channel, text, replyTo, tokens }),

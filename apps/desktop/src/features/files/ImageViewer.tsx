@@ -1,7 +1,7 @@
 import type { FileInfo } from "../../lib/api";
 import { formatSize } from "../../lib/files";
 import { Dialog } from "../../ui";
-import { FileActions } from "./MessageFiles";
+import { FileActions } from "./FileActions";
 
 /** An image shown large over the app, with its name and actions. */
 export function ImageViewer({
