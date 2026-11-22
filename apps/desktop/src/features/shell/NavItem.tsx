@@ -13,6 +13,7 @@ export function NavItem({
   unread = 0,
   countNoun = "unread",
   mentions = 0,
+  waiting,
   isMuted = false,
   status,
   onContextMenu,
@@ -33,6 +34,8 @@ export function NavItem({
   countNoun?: string;
   /** How many of those mention you; shown as a red badge instead. */
   mentions?: number;
+  /** Things only waiting, like drafts: a quiet count that never makes the label bold. `label` says it ("2 drafts"). */
+  waiting?: { count: number; label: string };
   /** Muted: dimmed, and only mentions get a badge. */
   isMuted?: boolean;
   /** A small icon after the label, like a channel's alert level. */
@@ -51,6 +54,7 @@ export function NavItem({
   const { view: current, navigate } = useWorkspace();
   const isActive = sameView(current, view);
   const hasUnread = !isActive && (isMuted ? mentions > 0 : unread > 0);
+  const waitingLabel = waiting && waiting.count > 0 ? waiting.label : undefined;
   return (
     <div className="group relative flex items-center" style={{ paddingLeft: depth * INDENT_PX }}>
       {isActive && (
@@ -66,8 +70,8 @@ export function NavItem({
         type="button"
         aria-current={isActive ? "page" : undefined}
         aria-label={
-          hasUnread || status || kind
-            ? accessibleName([label, kind, status?.label], hasUnread ? unread : 0, mentions, countNoun)
+          hasUnread || status || kind || waitingLabel
+            ? accessibleName([label, kind, status?.label, waitingLabel], hasUnread ? unread : 0, mentions, countNoun)
             : undefined
         }
         onClick={onOpen ?? (() => navigate(view))}
@@ -105,6 +109,11 @@ export function NavItem({
             className="ml-auto group-hover:opacity-0"
           >
             {mentions > 0 ? `@${mentions}` : unread}
+          </CountBadge>
+        )}
+        {!hasUnread && waiting && waiting.count > 0 && (
+          <CountBadge aria-hidden tone="quiet" className="ml-auto">
+            {waiting.count}
           </CountBadge>
         )}
       </button>

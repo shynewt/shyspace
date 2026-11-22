@@ -8,12 +8,12 @@ export type View =
   | { kind: "page"; id: string }
   | { kind: "inbox" }
   | { kind: "later" }
-  | { kind: "files" };
+  | { kind: "files" }
+  /** Drafts & sent. */
+  | { kind: "drafts" };
 
 export function viewKey(view: View): string {
-  return view.kind === "inbox" || view.kind === "later" || view.kind === "files"
-    ? view.kind
-    : `${view.kind}:${view.id}`;
+  return view.kind === "channel" || view.kind === "page" ? `${view.kind}:${view.id}` : view.kind;
 }
 
 export type WorkspaceContextValue = {

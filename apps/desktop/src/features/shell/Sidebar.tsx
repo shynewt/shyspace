@@ -1,4 +1,4 @@
-import { Bookmark, HardDrive, Inbox as InboxIcon, Search } from "lucide-react";
+import { Bookmark, HardDrive, Inbox as InboxIcon, Search, Send } from "lucide-react";
 import { useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
@@ -41,6 +41,7 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto px-2 pb-3">
         <InboxLink />
         <LaterLink />
+        <DraftsLink />
         <NavItem view={{ kind: "files" }} icon={<HardDrive size={15} />} label="Files" />
         <ChannelSections />
         <DirectMessages />
@@ -77,4 +78,18 @@ function LaterLink() {
   const now = Date.now();
   const due = later?.filter((item) => !item.is_done && item.remind_ms !== null && item.remind_ms <= now).length ?? 0;
   return <NavItem view={{ kind: "later" }} icon={<Bookmark size={15} />} label="Later" unread={due} countNoun="due" />;
+}
+
+/** Drafts & sent, quietly counting drafts: they wait for you, they don't need you. */
+function DraftsLink() {
+  const drafts = useLive(api.drafts, (change) => change.kind === "drafts");
+  const count = drafts?.length ?? 0;
+  return (
+    <NavItem
+      view={{ kind: "drafts" }}
+      icon={<Send size={15} />}
+      label="Drafts & sent"
+      waiting={{ count, label: `${count} ${count === 1 ? "draft" : "drafts"}` }}
+    />
+  );
 }

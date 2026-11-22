@@ -11,6 +11,7 @@ export function ListRow({
   meta,
   onClick,
   trailing,
+  footer,
   isHighlighted = false,
   className,
   children,
@@ -19,6 +20,8 @@ export function ListRow({
   meta: ReactNode;
   onClick: () => void;
   trailing?: ReactNode;
+  /** A small line under the preview, like how people responded. */
+  footer?: ReactNode;
   /** Shows the hover background, e.g. while the row's menu is open. */
   isHighlighted?: boolean;
   className?: string;
@@ -42,6 +45,9 @@ export function ListRow({
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-sm text-muted">{meta}</span>
           <span className="mt-0.5 block truncate text-base">{children}</span>
+          {footer !== undefined && (
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">{footer}</span>
+          )}
         </span>
       </button>
       {trailing}

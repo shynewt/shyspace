@@ -243,6 +243,10 @@ export class FakeBackend {
     return this.chat.receiveReply(author, root, text);
   }
 
+  receiveReaction(author: string, message: string, emoji: string): void {
+    this.chat.receiveReaction(author, message, emoji);
+  }
+
   channelId(name: string): string {
     return this.chat.channelNamed(name).id;
   }

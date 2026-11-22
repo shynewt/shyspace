@@ -15,6 +15,7 @@ import { useReminders } from "../../lib/useReminders";
 import { sameView, savedItemView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog, tweens } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
+import { DraftsAndSentView } from "../drafts/DraftsAndSentView";
 import { DriveView } from "../drive/DriveView";
 import { InboxView } from "../inbox/InboxView";
 import { LaterView } from "../later/LaterView";
@@ -185,6 +186,7 @@ export function Shell({ session }: { session: Session }) {
             {view.kind === "inbox" && <InboxView />}
             {view.kind === "later" && <LaterView />}
             {view.kind === "files" && <DriveView />}
+            {view.kind === "drafts" && <DraftsAndSentView />}
           </motion.div>
         )}
         {!view && !sidebar.isDocked && <ViewHeader />}

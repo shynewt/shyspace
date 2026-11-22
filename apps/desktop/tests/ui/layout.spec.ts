@@ -14,12 +14,13 @@ const LONG_URL = `https://example.com/${"a-very-long-path-segment-".repeat(12)}e
 const LONG_CODE = `\`\`\`\nconst line = "${"x".repeat(400)}";\n\`\`\``;
 const MIN_TITLE_PX = 120;
 
-type ViewName = "channel" | "thread" | "inbox" | "later" | "page";
+type ViewName = "channel" | "thread" | "inbox" | "later" | "drafts" | "page";
 
 /**
  * Opens the app at `view` in a window of `size`: a private channel with a
  * long name, an agent, long links and code, a thread, a nested page with a
- * long title, a mention in the inbox and a saved message.
+ * long title, a mention in the inbox, a saved message, a draft and a
+ * message of yours.
  */
 async function openAt(page: Page, size: { width: number; height: number }, view: ViewName) {
   await page.setViewportSize(size);
@@ -35,6 +36,8 @@ async function openAt(page: Page, size: { width: number; height: number }, view:
         fake.receiveReply(grace, root, `Me, see ${names.url}`);
         fake.receiveMessage(grace, "general", `Ping [@Ada](shy://member/${fake.session?.me ?? ""})`);
         fake.handle("save_for_later", { item: root, remindMs: null });
+        fake.handle("set_draft", { target: root, text: `Draft with a long link ${names.url}` });
+        fake.handle("send_message", { channel, text: `Sent with a long link ${names.url}`, replyTo: null });
         fake.seedPage("Planning", "Parent page");
         const pageId = fake.seedPage(names.page, "Some text", "Planning");
         const target =
@@ -211,6 +214,21 @@ for (const size of SIZES) {
       await expectOneLineHeader(header);
       await expectTitleWins(header.getByRole("heading", { name: "Later" }));
       await expect(page.getByRole("list", { name: "Saved for later" }).getByRole("listitem")).toHaveCount(1);
+    });
+
+    test("Drafts & sent fits, in both tabs", async ({ page }) => {
+      await openAt(page, size, "drafts");
+      const header = viewHeader(page);
+      await expectNoSidewaysScroll(page);
+      await expectOneLineHeader(header);
+      await expectTitleWins(header.getByRole("heading", { name: "Drafts & sent" }));
+      const draft = page.getByRole("list", { name: "Drafts" }).getByRole("button", { name: /Draft with a long link/ });
+      await expect(draft).toBeVisible();
+      expect(await draft.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(72);
+
+      await page.getByRole("tab", { name: "Sent" }).click();
+      await expect(page.getByRole("tabpanel").getByRole("button", { name: /Sent with a long link/ })).toBeVisible();
+      await expectNoSidewaysScroll(page);
     });
 
     test("a page fits, its title winning over the breadcrumb", async ({ page }) => {

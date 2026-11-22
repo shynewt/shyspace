@@ -207,6 +207,14 @@ export class FakeChat {
     return this.writeMessage(author, channel, text, root);
   }
 
+  receiveReaction(author: string, message: string, emoji: string): void {
+    const channel = this.messages.find((candidate) => candidate.id === message)?.channel;
+    if (!channel) throw new Error(`fake backend: no message ${message}`);
+    this.reactions.push({ message, author, emoji });
+    this.context.tick();
+    this.context.notify({ kind: "messages", channel });
+  }
+
   /** The id of the latest message with this text. */
   messageWithText(text: string): string {
     const message = this.messages.findLast((candidate) => candidate.text === text);

@@ -164,6 +164,7 @@ export default function Gallery() {
           <Badge tone="success">success</Badge>
           <CountBadge>3</CountBadge>
           <CountBadge tone="danger">@2</CountBadge>
+          <CountBadge tone="quiet">2</CountBadge>
           <RelativeTime ms={Date.now() - 86_400_000} className="text-xs text-faint" />
           <Kbd>Ctrl K</Kbd>
           <Spinner />
@@ -182,6 +183,14 @@ export default function Gallery() {
               }
             >
               Could you look at the launch plan?
+            </ListRow>
+            <ListRow
+              onClick={() => showToast("Opened")}
+              leading={<Avatar id="b" name="Grace Hopper" size={32} />}
+              meta={<b className="font-semibold text-ink">Grace Hopper</b>}
+              footer={<span>2 replies</span>}
+            >
+              A row with a footer line under its preview.
             </ListRow>
           </div>
         </Example>

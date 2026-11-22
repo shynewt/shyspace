@@ -1,11 +1,13 @@
 import { type HTMLMotionProps, motion } from "motion/react";
 import { cx } from "./cx";
 
-type Tone = "accent" | "danger";
+type Tone = "accent" | "danger" | "quiet";
 
 const TONES: Record<Tone, string> = {
   accent: "bg-accent text-on-accent",
   danger: "bg-danger text-white",
+  /** Something only waiting, like drafts: no colour, never urgent. */
+  quiet: "bg-surface-2 text-muted",
 };
 
 /**

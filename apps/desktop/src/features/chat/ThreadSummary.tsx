@@ -4,7 +4,7 @@ import { plainPreview } from "../../lib/markdown";
 import { useMembers } from "../../lib/members";
 import { displayName, formatWhen } from "../../lib/people";
 import { CountBadge, cx, RelativeTime } from "../../ui";
-import { MemberAvatar } from "../members/MemberAvatar";
+import { ReplierAvatars } from "./ReplierAvatars";
 
 /**
  * One line under a thread's first message: the latest repliers, the reply
@@ -46,20 +46,10 @@ export function ThreadSummary({
       aria-label={`${label}. Open thread`}
       className="group/thread mt-1 -ml-1.5 flex w-fit max-w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-0.5 text-sm transition-colors hover:bg-surface-2"
     >
-      {message.recent_reply_authors.length > 0 && (
-        <span className="flex shrink-0 -space-x-1">
-          {message.recent_reply_authors.map((id, index) => (
-            <span
-              key={id}
-              // The newest replier sits on top.
-              style={{ zIndex: message.recent_reply_authors.length - index }}
-              className="relative rounded-[30%] ring-2 ring-surface transition-colors group-hover/thread:ring-surface-2"
-            >
-              <MemberAvatar id={id} name={nameOf(id)} isBot={memberFor(id)?.is_bot ?? false} size={16} />
-            </span>
-          ))}
-        </span>
-      )}
+      <ReplierAvatars
+        authorIds={message.recent_reply_authors}
+        ringClassName="ring-surface group-hover/thread:ring-surface-2"
+      />
       <span className={cx("shrink-0 whitespace-nowrap text-accent-text", unread > 0 ? "font-semibold" : "font-medium")}>
         {countText}
       </span>
