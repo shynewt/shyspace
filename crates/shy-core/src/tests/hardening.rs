@@ -1755,3 +1755,52 @@ async fn storage_settings_cannot_move_the_workspace_or_empty_the_keys() {
     .unwrap();
     assert_eq!(bob.bucket_config().unwrap(), rotated);
 }
+
+/// The rule on storage settings judges ops; it must not stop someone joining
+/// a workspace whose creator left the region empty.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_created_without_a_region_can_still_be_joined() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = Workspace::create_with(
+        &data_dir(&root.path().join("ada")),
+        "workspace-id".into(),
+        "Acme",
+        crate::Profile {
+            name: "Ada",
+            is_bot: false,
+        },
+        crate::transport::bucket::BucketConfig {
+            region: String::new(),
+            ..test_bucket_config()
+        },
+        connector(&bucket),
+        Networking::Offline,
+    )
+    .await
+    .unwrap();
+
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+
+    assert_eq!(bob.bucket_config().unwrap(), admin.bucket_config().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_update_notice_clears_once_its_source_is_removed() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let (epoch, key) = current_key(&bob);
+    let next = bob.state().store.next_seq(&bob.me()).unwrap();
+    let mut junk = postcard::to_stdvec(&(9_000u64, 0i64)).unwrap();
+    junk.push(100);
+    admin
+        .receive(crypto::seal_bytes(&bob.inner.identity, &key, epoch, next, junk).unwrap())
+        .unwrap();
+    admin.sync().await;
+    assert_eq!(admin.status().needs_update_from, [bob.my_id()]);
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    admin.sync().await;
+
+    let status = admin.status();
+    assert!(!status.needs_update && status.needs_update_from.is_empty());
+}

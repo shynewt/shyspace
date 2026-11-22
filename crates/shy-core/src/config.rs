@@ -88,10 +88,10 @@ pub(crate) fn bucket_lamport(store: &Store) -> Result<u64> {
     Ok(u64::from_be_bytes(bytes))
 }
 
-/// Applies new bucket settings unless newer ones (by lamport) are in place.
-/// Only the region and keys may change: the data stays at its endpoint and
+/// Fails, as a broken rule, unless `bucket` is a change the admin may make:
+/// only the region and keys, since the data stays at its endpoint and
 /// bucket, and settings members can't connect with would lock them out.
-pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) -> Result<bool> {
+pub(crate) fn check_settings_change(store: &Store, bucket: &BucketConfig) -> Result<()> {
     let current = current_bucket(store)?;
     if bucket.endpoint != current.endpoint || bucket.bucket != current.bucket {
         return Err(rule_violation(
@@ -105,6 +105,11 @@ pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) 
     {
         return Err(rule_violation("storage settings without a region or keys"));
     }
+    Ok(())
+}
+
+/// Applies new bucket settings unless newer ones (by lamport) are in place.
+pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) -> Result<bool> {
     if lamport <= bucket_lamport(store)? {
         return Ok(false);
     }

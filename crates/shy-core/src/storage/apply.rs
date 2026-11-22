@@ -217,6 +217,7 @@ impl Store {
                 }
             }
             Op::StorageSettings { bucket } => {
+                config::check_settings_change(self, bucket)?;
                 if !config::update_bucket(self, bucket, lamport)? {
                     return Ok(None);
                 }
