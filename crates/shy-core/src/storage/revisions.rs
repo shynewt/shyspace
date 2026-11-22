@@ -352,6 +352,36 @@ mod tests {
             expected
         }
 
+        /// Files and their names, the same for every arrival order, applied twice.
+        fn assert_files_converge(&self) -> Vec<(String, String)> {
+            let files_after = |order: &[usize]| {
+                let dir = tempfile::tempdir().unwrap();
+                let store = Store::open(&dir.path().join("db"), TEST_DB_KEY).unwrap();
+                for _ in 0..2 {
+                    for &index in order {
+                        store.apply(&self.ops[index]).unwrap();
+                    }
+                }
+                let mut files: Vec<_> = store
+                    .all_files()
+                    .unwrap()
+                    .into_iter()
+                    .map(|file| (file.id, file.name))
+                    .collect();
+                files.sort();
+                files
+            };
+            let orders: Vec<_> = permutations(&(0..self.ops.len()).collect::<Vec<_>>())
+                .into_iter()
+                .filter(|order| self.keeps_each_authors_order(order))
+                .collect();
+            let expected = files_after(&orders[0]);
+            for order in &orders[1..] {
+                assert_eq!(files_after(order), expected, "order {order:?}");
+            }
+            expected
+        }
+
         fn keeps_each_authors_order(&self, order: &[usize]) -> bool {
             order.iter().enumerate().all(|(position, &later)| {
                 order[..position].iter().all(|&earlier| {
@@ -612,5 +642,81 @@ mod tests {
         let (_, _, pages, hits) = scenario.assert_converges();
         assert_eq!(pages, vec![(child, None)]);
         assert!(hits.is_empty());
+    }
+
+    fn shared_file(id: &str, channel: &str, name: &str) -> Op {
+        let blob = crate::files::blob::seal(&mut &b"bytes"[..], 5, |_, _, _| Ok(())).unwrap();
+        Op::File {
+            file: crate::files::SharedFile {
+                id: id.to_owned(),
+                place: channel.to_owned(),
+                message: None,
+                name: name.to_owned(),
+                media_type: "text/plain".into(),
+                blob,
+            },
+        }
+    }
+
+    #[test]
+    fn the_newest_file_rename_wins_whatever_arrives_first() {
+        let [ada, bob, cat] = people();
+        let mut scenario = Scenario::new();
+        let channel = new_owned_id(&ada);
+        let file = new_owned_id(&bob);
+        scenario.add(
+            &ada,
+            1,
+            Op::ChannelCreate {
+                id: channel.clone(),
+                name: "general".into(),
+            },
+        );
+        scenario.add(&bob, 2, shared_file(&file, &channel, "IMG_1.png"));
+        scenario.add(
+            &bob,
+            3,
+            Op::FileRename {
+                id: file.clone(),
+                name: "draft.png".into(),
+            },
+        );
+        scenario.add(&cat, 4, message(&new_owned_id(&cat), &channel, "nice"));
+        scenario.add(
+            &bob,
+            5,
+            Op::FileRename {
+                id: file.clone(),
+                name: "final.png".into(),
+            },
+        );
+        assert_eq!(scenario.assert_files_converge(), [(file, "final.png".to_owned())]);
+    }
+
+    #[test]
+    fn a_deleted_file_stays_deleted_whatever_its_renames_say() {
+        let [ada, bob] = people();
+        let mut scenario = Scenario::new();
+        let channel = new_owned_id(&ada);
+        let file = new_owned_id(&bob);
+        scenario.add(
+            &ada,
+            1,
+            Op::ChannelCreate {
+                id: channel.clone(),
+                name: "general".into(),
+            },
+        );
+        scenario.add(&bob, 2, shared_file(&file, &channel, "notes.txt"));
+        scenario.add(&ada, 3, Op::Delete { id: file.clone() });
+        scenario.add(
+            &bob,
+            4,
+            Op::FileRename {
+                id: file,
+                name: "renamed.txt".into(),
+            },
+        );
+        assert!(scenario.assert_files_converge().is_empty());
     }
 }
