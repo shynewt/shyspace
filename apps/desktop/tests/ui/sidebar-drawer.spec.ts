@@ -19,14 +19,21 @@ test.describe("the sidebar", () => {
     await expect.poll(async () => (await page.getByRole("main").boundingBox())?.x).toBe(264);
   });
 
-  test("is narrower between 900 and 1100 px", async ({ page }) => {
+  test("is narrower between 760 and 1100 px", async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 800 });
     const sidebar = page.getByRole("complementary", { name: "Sidebar" });
     await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(232);
   });
 
-  test("is a drawer in a narrow window: Esc closes it and focus returns", async ({ page }) => {
+  test("stays docked in half of a laptop screen", async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 800 });
+    await expect(page.getByRole("navigation", { name: "Workspace" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Sidebar" })).toHaveCount(0);
+    await expect.poll(async () => (await page.getByRole("main").boundingBox())?.x).toBe(232);
+  });
+
+  test("is a drawer in a narrow window: Esc closes it and focus returns", async ({ page }) => {
+    await page.setViewportSize({ width: 720, height: 800 });
     await expect(page.getByRole("navigation", { name: "Workspace" })).toHaveCount(0);
     await expect.poll(async () => (await page.getByRole("main").boundingBox())?.x).toBe(0);
     const show = page.getByRole("button", { name: "Show sidebar" });
@@ -42,16 +49,16 @@ test.describe("the sidebar", () => {
   });
 
   test("closes on a click beside it", async ({ page }) => {
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 720, height: 800 });
     await page.getByRole("button", { name: "Show sidebar" }).click();
     const drawer = page.getByRole("dialog", { name: "Sidebar" });
     await expect(drawer).toBeVisible();
-    await page.mouse.click(760, 400);
+    await page.mouse.click(680, 400);
     await expect(drawer).toBeHidden();
   });
 
   test("closes once you choose where to go", async ({ page }) => {
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 720, height: 800 });
     await page.evaluate(() => window.fake.handle("create_channel", { name: "random" }));
     await page.getByRole("button", { name: "Show sidebar" }).click();
     const drawer = page.getByRole("dialog", { name: "Sidebar" });
@@ -69,7 +76,7 @@ test.describe("the sidebar", () => {
   });
 
   test("closes when you choose where you already are", async ({ page }) => {
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 720, height: 800 });
     await page.getByRole("button", { name: "Show sidebar" }).click();
     const drawer = page.getByRole("dialog", { name: "Sidebar" });
     await drawer.getByRole("button", { name: "general", exact: true }).click();
@@ -86,7 +93,7 @@ test.describe("the sidebar", () => {
   });
 
   test("an open drawer that docks as the window grows leaves focus in the content", async ({ page }) => {
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 720, height: 800 });
     await page.getByRole("button", { name: "Show sidebar" }).click();
     await expect(page.getByRole("dialog", { name: "Sidebar" })).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -95,7 +102,7 @@ test.describe("the sidebar", () => {
   });
 
   test("the shortcut opens and closes the drawer", async ({ page }) => {
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 720, height: 800 });
     await expect(page.getByRole("button", { name: "Show sidebar" })).toBeVisible();
     const drawer = page.getByRole("dialog", { name: "Sidebar" });
     await page.keyboard.press("Control+\\");
@@ -132,7 +139,7 @@ test.describe("the sidebar", () => {
   });
 
   test("an open drawer docks when the window grows", async ({ page }) => {
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 720, height: 800 });
     await page.getByRole("button", { name: "Show sidebar" }).click();
     await expect(page.getByRole("dialog", { name: "Sidebar" })).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -142,7 +149,7 @@ test.describe("the sidebar", () => {
 
   test("the drawer doesn't slide with reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 720, height: 800 });
     await expect(page.getByRole("button", { name: "Show sidebar" })).toBeVisible();
     const left = await page.evaluate(async () => {
       const show = document.querySelector<HTMLElement>('button[aria-label="Show sidebar"]');

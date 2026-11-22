@@ -241,7 +241,7 @@
   --width-channel-min: 560px;
   --max-width-reading: 760px;
   /* Window widths: the sidebar docks from the first, and is full width from the second. */
-  --breakpoint-sidebar-docks: 900px;
+  --breakpoint-sidebar-docks: 760px;
   --breakpoint-sidebar-full: 1100px;
   /* Header widths: labels show from the first; below the second, info moves into one button. */
   --container-header-labels: 720px;
