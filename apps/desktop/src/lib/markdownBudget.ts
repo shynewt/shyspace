@@ -16,13 +16,15 @@
 const MAX_CHARS = 50_000;
 /** Code blocks count too; a longer paste reads better as a file (#172). */
 const MAX_LINES = 1_000;
-/** `*`, `_`, backticks, `[` and `~`, wherever they are. */
+/** `*`, `_`, backticks, `[`, `]`, `!` and `~`, wherever they are. */
 const MAX_MARKUP_CHARS = 2_000;
 /** Quote and list levels at the start of one line. */
 const MAX_NESTING = 20;
 export const MAX_TABLE_CELLS = 3_000;
+/** All tables in one text together. */
+const MAX_TOTAL_TABLE_CELLS = 6_000;
 
-const MARKUP = /[*_`[~]/g;
+const MARKUP = /[*_`[\]!~]/g;
 const LIST_MARKER = /^(?:[-*+]|\d{1,9}[.)])(?=\s|$)/;
 
 /** The parser ends lines at `\r\n`, `\r` or `\n`; so must everything that measures them. */
@@ -36,19 +38,25 @@ export function isCheapToFormat(text: string): boolean {
   if (lines.length > MAX_LINES) return false;
   if ((text.match(MARKUP)?.length ?? 0) > MAX_MARKUP_CHARS) return false;
   if (lines.some((line) => nestingOf(line) > MAX_NESTING)) return false;
-  return largestTableCells(lines) <= MAX_TABLE_CELLS;
+  const tables = tableCells(lines);
+  return tables.largest <= MAX_TABLE_CELLS && tables.total <= MAX_TOTAL_TABLE_CELLS;
 }
 
 /**
- * Cells in the largest table, counted on the high side: every line from one
- * with a pipe to the next blank line is a row, as wide as the widest of them.
+ * Cells in the largest table and in all of them, counted on the high side:
+ * every line from one with a pipe to the next blank line is a row, as wide
+ * as the widest of them.
  */
-function largestTableCells(lines: string[]): number {
+function tableCells(lines: string[]): { largest: number; total: number } {
   let largest = 0;
+  let total = 0;
+  let current = 0;
   let rows = 0;
   let columns = 0;
   for (const line of lines) {
     if (line.trim() === "") {
+      total += current;
+      current = 0;
       rows = 0;
       columns = 0;
       continue;
@@ -57,9 +65,10 @@ function largestTableCells(lines: string[]): number {
     if (rows === 0 && pipes === 0) continue;
     rows += 1;
     columns = Math.max(columns, pipes + 1);
-    largest = Math.max(largest, rows * columns);
+    current = rows * columns;
+    largest = Math.max(largest, current);
   }
-  return largest;
+  return { largest, total: total + current };
 }
 
 /**
@@ -105,6 +114,7 @@ export class TooLargeToFormat extends Error {}
 export function remarkSizeLimits() {
   return (tree: TreeNode) => {
     let nodes = 0;
+    let tableCells = 0;
     const pending: TreeNode[] = [tree];
     for (let node = pending.pop(); node; node = pending.pop()) {
       nodes += 1;
@@ -114,6 +124,8 @@ export function remarkSizeLimits() {
         let columns = 0;
         for (const row of children) columns = Math.max(columns, row.children?.length ?? 0);
         if (columns * children.length > MAX_TABLE_CELLS) throw new TooLargeToFormat("a table too large to format");
+        tableCells += columns * children.length;
+        if (tableCells > MAX_TOTAL_TABLE_CELLS) throw new TooLargeToFormat("tables too large to format");
       }
       for (const child of children) pending.push(child);
     }

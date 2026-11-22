@@ -15,6 +15,10 @@ const TOO_COSTLY = {
   "bare carriage returns": `${wideTable("|\r").replaceAll("\n", "\r")}still here`,
   "table rows without pipes": `${wideTable("x\n")}still here`,
   "a one-pipe line above a wide table": `a|b\n${wideTable("|\n")}still here`,
+  // Closing brackets are quadratic on their own (#148, second re-check).
+  "a run of closing brackets": `${"]".repeat(39_000)} still here`,
+  "nested image openers then closers": `${"![".repeat(2_000)}${"]".repeat(30_000)} still here`,
+  "many tables just under the limit each": `${`|${"a|".repeat(60)}\n|${"-|".repeat(60)}\n${"|\n".repeat(28)}\n`.repeat(30)}still here`,
 };
 
 /** A header 1,500 columns wide, then 490 rows of `row`: about a million cells once padded. */
