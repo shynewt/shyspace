@@ -31,6 +31,8 @@ const SHARED_VIEW_TABLES: &[&str] = &[
     "deleted",
     "member_status",
     "sealing_keys",
+    "files",
+    "profile_pictures",
 ];
 
 /// A page's updates gathered during a replay, written once at the end.

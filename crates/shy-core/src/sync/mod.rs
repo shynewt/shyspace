@@ -180,6 +180,8 @@ impl Workspace {
                 pulled,
                 tended,
                 self.push().await,
+                // After the push, so a delete is out before its file goes.
+                self.remove_unused_blobs().await,
                 self.join_peers().await,
             ] {
                 if let Err(error) = result {

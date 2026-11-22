@@ -8,6 +8,7 @@ use rusqlite::{OptionalExtension, named_params, params};
 use super::Store;
 use crate::{
     config,
+    files::MAX_PICTURE_BYTES,
     ops::{
         MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, Op, VerifiedOp,
         clean_channel_name, clean_display_name, clean_emoji, cut_to, is_owned_by, is_valid_status,
@@ -92,10 +93,12 @@ impl Store {
         let author = verified.author.as_bytes().as_slice();
         let lamport = verified.body.lamport;
         let now = verified.body.timestamp_ms;
-        if let Op::ChannelCreate { id, .. } | Op::Message { id, .. } | Op::PageCreate { id, .. } =
-            &verified.body.op
-            && !is_owned_by(id, &verified.author)
-        {
+        let created = match &verified.body.op {
+            Op::ChannelCreate { id, .. } | Op::Message { id, .. } | Op::PageCreate { id, .. } => Some(id),
+            Op::File { file } => Some(&file.id),
+            _ => None,
+        };
+        if created.is_some_and(|id| !is_owned_by(id, &verified.author)) {
             return Err(rule_violation("op creates an id that belongs to someone else"));
         }
         // A reply to a far too long id shows as a plain message, as older
@@ -221,7 +224,7 @@ impl Store {
             }
             Op::MessageEdit { id, text } => return self.apply_message_edit(id, text, lamport),
             Op::ChannelRename { id, name } => self.apply_channel_rename(id, name, lamport, author)?,
-            Op::Delete { id } => return self.apply_delete(id),
+            Op::Delete { id } => return self.apply_delete(id, author),
             Op::Status {
                 emoji,
                 text,
@@ -245,6 +248,29 @@ impl Store {
             }
             Op::ProfileDetails { details } => {
                 if !self.put_profile_details(author, &details.cleaned(), lamport)? {
+                    return Ok(None);
+                }
+                Change::Members
+            }
+            Op::File { file } => {
+                file.blob
+                    .check()
+                    .map_err(|error| rule_violation(format!("malformed file: {error:#}")))?;
+                self.put_file(file, verified)?;
+                Change::Messages {
+                    channel: file.place.clone(),
+                }
+            }
+            Op::ProfilePicture { picture } => {
+                if let Some(picture) = picture {
+                    picture
+                        .check()
+                        .map_err(|error| rule_violation(format!("malformed picture: {error:#}")))?;
+                    if picture.size > MAX_PICTURE_BYTES {
+                        return Err(rule_violation("picture too large"));
+                    }
+                }
+                if !self.put_profile_picture(author, picture.as_ref(), lamport)? {
                     return Ok(None);
                 }
                 Change::Members

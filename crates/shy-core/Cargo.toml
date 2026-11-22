@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+aead-stream = { version = "0.6", features = ["alloc"] }
 anyhow = "1.0.104"
 base64 = "0.22"
 blake3 = "1.8"

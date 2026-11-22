@@ -159,6 +159,19 @@ CREATE TABLE profile_details (
 ",
     // The key each counted private op was sealed with; a rebuild fills it in.
     "ALTER TABLE private_applied ADD COLUMN generation INTEGER;",
+    // Shared files and profile pictures (a blob's key sits in `blob`), and
+    // blobs waiting to leave the bucket, which is this device's own work.
+    "
+CREATE TABLE files (
+    id TEXT PRIMARY KEY, place TEXT NOT NULL, message TEXT, author BLOB NOT NULL, name TEXT NOT NULL,
+    media_type TEXT NOT NULL, size INTEGER NOT NULL, blob BLOB NOT NULL, created_ms INTEGER NOT NULL);
+CREATE INDEX files_by_place ON files (place, created_ms);
+CREATE INDEX files_by_message ON files (message);
+CREATE TABLE profile_pictures (member BLOB PRIMARY KEY, blob BLOB, lamport INTEGER NOT NULL);
+CREATE TABLE blob_removals (
+    author BLOB NOT NULL, blob_id TEXT NOT NULL, requested_by BLOB NOT NULL,
+    PRIMARY KEY (author, blob_id, requested_by));
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

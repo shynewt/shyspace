@@ -9,6 +9,7 @@
 //!   invites/<token>/answer                the admin's answer (via presigned link)
 //!   peers/<endpoint id>                   gossip bootstrap hints
 //!   recovery/snapshot                     the admin's encrypted recovery snapshot
+//!   files/<author>/<blob id>/<piece>      a shared file's encrypted pieces (see `blobs`)
 
 use std::{sync::Arc, time::Duration};
 
@@ -244,7 +245,7 @@ impl Bucket {
         self.get_at_most(path, MAX_OBJECT_SIZE).await
     }
 
-    async fn get_at_most(&self, path: &Path, limit: u64) -> Result<Option<Bytes>> {
+    pub(super) async fn get_at_most(&self, path: &Path, limit: u64) -> Result<Option<Bytes>> {
         match self.store.get(path).await {
             Ok(result) if result.meta.size > limit => {
                 warn!("ignoring oversized object {path} ({} bytes)", result.meta.size);
@@ -256,12 +257,12 @@ impl Bucket {
         }
     }
 
-    async fn put(&self, path: &Path, bytes: Vec<u8>) -> Result<()> {
+    pub(super) async fn put(&self, path: &Path, bytes: Vec<u8>) -> Result<()> {
         self.store.put(path, PutPayload::from(bytes)).await?;
         Ok(())
     }
 
-    async fn list(&self, prefix: &str, after: Option<&str>) -> Result<Vec<Path>> {
+    pub(super) async fn list(&self, prefix: &str, after: Option<&str>) -> Result<Vec<Path>> {
         let prefix = Path::from(prefix);
         let mut stream = match after {
             Some(offset) => self.store.list_with_offset(Some(&prefix), &Path::from(offset)),
@@ -416,7 +417,7 @@ impl Bucket {
         self.put(&invite_path(token, "answer"), answer).await
     }
 
-    async fn delete(&self, path: &Path) -> Result<()> {
+    pub(super) async fn delete(&self, path: &Path) -> Result<()> {
         match self.store.delete(path).await {
             Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(error) => Err(error.into()),

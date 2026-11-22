@@ -256,6 +256,15 @@ fn judge_content(channel: &str, author: &PublicKey, op: &Op, kind: PrivateKind) 
             is_message_in(id, channel) && is_owned_by(id, author)
         }
         Op::ChannelRename { id, .. } => kind == PrivateKind::Channel && id == channel,
+        Op::File { file } => {
+            file.place == channel
+                && is_message_in(&file.id, channel)
+                && is_owned_by(&file.id, author)
+                && file
+                    .message
+                    .as_deref()
+                    .is_none_or(|message| is_message_in(message, channel))
+        }
         _ => false,
     };
     if is_inside {

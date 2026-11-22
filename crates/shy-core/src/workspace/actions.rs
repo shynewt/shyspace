@@ -137,12 +137,30 @@ impl Workspace {
 
     pub fn send_message(&self, channel: &str, text: &str, reply_to: Option<EntityId>) -> Result<EntityId> {
         let text = checked_message_text(text)?;
-        let id = match private_kind(channel) {
+        let id = self.new_item_id(channel);
+        self.post_message(channel, &id, text, reply_to)?;
+        Ok(id)
+    }
+
+    /// An id for something new in `channel`, owned by this member. Private
+    /// channels' ids name the channel, so their content can't leave it.
+    pub(crate) fn new_item_id(&self, channel: &str) -> EntityId {
+        match private_kind(channel) {
             Some(_) => new_private_message_id(channel, &self.me()),
             None => new_owned_id(&self.me()),
-        };
+        }
+    }
+
+    /// Writes message `id`, already checked, and clears the draft it came from.
+    pub(crate) fn post_message(
+        &self,
+        channel: &str,
+        id: &str,
+        text: &str,
+        reply_to: Option<EntityId>,
+    ) -> Result<()> {
         self.write(Op::Message {
-            id: id.clone(),
+            id: id.to_owned(),
             channel: channel.to_owned(),
             text: text.to_owned(),
             reply_to,
@@ -150,10 +168,10 @@ impl Workspace {
         // Replying means you've read what came before, and the draft is done.
         {
             let state = self.state();
-            state.store.mark_read(channel, &id)?;
-            let draft_target = match state.store.thread_root(&id)?.filter(|root| *root != id) {
+            state.store.mark_read(channel, id)?;
+            let draft_target = match state.store.thread_root(id)?.filter(|root| root != id) {
                 Some(root) => {
-                    state.store.mark_thread_read(&root, &id)?;
+                    state.store.mark_thread_read(&root, id)?;
                     root
                 }
                 None => channel.to_owned(),
@@ -161,7 +179,7 @@ impl Workspace {
             state.store.set_draft(&draft_target, "", now_ms()?)?;
         }
         self.emit(Change::Drafts);
-        Ok(id)
+        Ok(())
     }
 
     /// Keeps unsent text for a channel or a thread (its first message), on
@@ -329,7 +347,7 @@ impl Workspace {
 
     /// Edits and deletes name an existing item of the expected kind, so a
     /// mistaken id fails here instead of silently doing nothing.
-    fn require_item(&self, id: &str, kind: ItemKind) -> Result<()> {
+    pub(crate) fn require_item(&self, id: &str, kind: ItemKind) -> Result<()> {
         let found = self.state().store.item_kind(id)?;
         if found != Some(kind) {
             bail!("no such {} here", kind.noun());
@@ -378,7 +396,7 @@ pub(crate) fn checked_profile_name(name: &str) -> Result<String> {
     Ok(name.to_owned())
 }
 
-fn checked_message_text(text: &str) -> Result<&str> {
+pub(crate) fn checked_message_text(text: &str) -> Result<&str> {
     let text = text.trim();
     ensure!(!text.is_empty(), "message is empty");
     ensure!(

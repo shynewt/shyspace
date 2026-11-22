@@ -1,6 +1,7 @@
 //! The public entry point: one workspace, stored in one data directory.
 
 mod actions;
+mod files;
 mod inbox;
 mod later;
 mod lifecycle;
@@ -10,6 +11,7 @@ mod reads;
 mod sections;
 mod storage;
 
+pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
 pub use lifecycle::{DataDir, JoinCancel};
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
 pub use presence::Heartbeat;

@@ -62,6 +62,7 @@ pub(super) fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mess
         is_following: false,
         unread_replies: 0,
         reactions: Vec::new(),
+        files: Vec::new(),
     })
 }
 
@@ -208,6 +209,7 @@ impl Store {
                 status: None,
                 presence: PresenceState::default(),
                 details: crate::profile::ProfileDetails::default(),
+                has_picture: false,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

@@ -80,22 +80,30 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 | `invites/<token>/answer` | the admin's answer, read through a presigned link |
 | `recovery/snapshot` | the admin's recovery snapshot, encrypted with the recovery key |
 | `peers/<id>` | gossip bootstrap hints, rewritten when a member starts and every 6 hours; members silent for a day aren't dialed, and nobody is redialed more often than every 10 minutes unless they announce again (`sync/peers.rs`) |
+| `files/<author>/<blob id>/<piece>` | a shared file's or profile picture's encrypted pieces (`transport/blobs.rs`) |
 | `health/versioning-probe`, `ops/lock-probe-<member>` | small probes that prove the bucket keeps deleted data (see `workspace/protection.rs`) |
 
 ## Pages
 
 A page is markdown in one Yjs text named `content` (`docs.rs`). The desktop editor (CodeMirror + `y-codemirror.next`) and agents (Rust `yrs`) edit the same structure. Agent edits change only the part that differs, so they don't clash with people typing nearby. A page shared in chat (`shy://page/<id>`) shows as a live card. The editor shows the markdown as live preview (`features/pages/editor/`, rules in `design-system.md`); what is stored stays plain markdown.
 
+## Files and profile pictures
+
+A shared file is a `File` op (`files/`): its own id (owned by its author, like a message), the place it was shared in, the message it came with, a cleaned name and media type, and a reference to its encrypted bytes (a *blob*). The blob has a random key and is sealed in 4 MiB pieces (`files/blob.rs`); the reference holds the key and a hash of every sealed piece. The sender seals the file into its local cache, uploads the pieces, and only then writes the op, so an op always means its pieces are in the bucket (`workspace/files.rs`). In a private channel or DM the op is sealed like any content there. Others fetch pieces only when they open a file, check each against its hash, and keep them, still encrypted, in a cache of up to 2 GB that drops what was opened longest ago (`files/cache.rs`). Plaintext leaves only through "Save as" or, for showing, memory.
+
+Deleting a file, its message or its channel removes it everywhere and queues its blob for removal (`storage/files.rs`); the device of the file's author, or of whoever deleted it, takes the pieces out of the bucket on its next sync pass, and every device drops its cached copy. A profile picture is a `ProfilePicture` op pointing to a small blob (at most 512 KB, PNG, JPEG or WebP), the latest wins, and the one it replaces leaves the bucket the same way. Pictures are cached apart and never dropped.
+
 ## Files in shy-core
 
 | Path | Job |
 |---|---|
-| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `presence` (heartbeats and status), `protection` (whether the bucket keeps deleted data) |
+| `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `presence` (heartbeats and status), `protection` (whether the bucket keeps deleted data), `files` (sharing, opening and removing files and pictures) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `forks` (two versions of one op), `replicate` (bucket pull and push, gossip peers) |
-| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `forks`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `profile_details`, `rebuild` (undoing ops that turned out not to count), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
-| `transport/` | `bucket` (S3 layout and access), `gossip` (iroh) |
+| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `forks`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `profile_details`, `files` (shared files, pictures, blobs waiting to leave the bucket), `rebuild` (undoing ops that turned out not to count), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
+| `transport/` | `bucket` (S3 layout and access), `blobs` (file pieces in the bucket), `gossip` (iroh) |
 | `private/` | private channels and DMs: `ids`, `ops` (what's inside sealed ops and grants), `crypto` (sealed content, key wraps, commitments), `sealing` (each member's key for receiving channel keys), `apply` (grants and waiting sealed ops), `rules` (which private ops count), `actions` (create, add, remove, leave, hand over, DMs), `reads` |
+| `files/` | shared files and pictures: `blob` (the encrypted format), `cache` (sealed pieces on this device) |
 | `crypto.rs` | sign-then-encrypt ops |
 | `ops.rs` | op types, owned ids, timestamps |
 | `profile.rs` | profile details (role, contact, time zone, working hours) and how others' are cleaned |

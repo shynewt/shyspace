@@ -183,6 +183,26 @@ pub struct Message {
     /// only when following).
     pub unread_replies: u32,
     pub reactions: Vec<Reaction>,
+    /// Files shared with it, in the order they were sent.
+    pub files: Vec<FileInfo>,
+}
+
+/// A shared file as this member sees it. Its bytes come through
+/// `Workspace::file_bytes` or `Workspace::save_file`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FileInfo {
+    pub id: EntityId,
+    /// The channel or DM it was shared in.
+    pub place: EntityId,
+    pub message: Option<EntityId>,
+    /// The author's member id (hex).
+    pub author: String,
+    pub name: String,
+    /// As the sender's system named it; only a hint.
+    pub media_type: String,
+    pub size: u64,
+    pub created_ms: i64,
+    pub can_delete: bool,
 }
 
 /// Where to continue when loading older messages: the oldest one loaded.
@@ -225,6 +245,8 @@ pub struct Member {
     pub presence: PresenceState,
     /// What they share about themselves; every field may be empty.
     pub details: crate::profile::ProfileDetails,
+    /// Whether they shared a picture (`Workspace::profile_picture`).
+    pub has_picture: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -374,6 +396,13 @@ pub enum Change {
     Storage,
     /// A new result from checking whether the bucket keeps deleted data.
     StorageProtection,
+    /// How far this device's upload of files into `channel` has got, in
+    /// bytes of the files themselves.
+    Upload {
+        channel: EntityId,
+        sent: u64,
+        total: u64,
+    },
     Sync,
     Removed,
 }

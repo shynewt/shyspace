@@ -600,6 +600,7 @@ mod tests {
             is_following: false,
             unread_replies: 0,
             reactions: Vec::new(),
+            files: Vec::new(),
         }
     }
 

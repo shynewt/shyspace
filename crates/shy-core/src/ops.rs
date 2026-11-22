@@ -127,6 +127,15 @@ pub enum Op {
     ProfileDetails {
         details: crate::profile::ProfileDetails,
     },
+    /// A file shared in a channel or DM. Its bytes are encrypted in the
+    /// bucket; this op holds the key, so it is as private as its place.
+    File {
+        file: crate::files::SharedFile,
+    },
+    /// The author's own picture; `None` removes it. The latest one wins.
+    ProfilePicture {
+        picture: Option<crate::files::blob::BlobRef>,
+    },
 }
 
 /// An op that is validly signed but breaks a rule (someone else's id, an
@@ -174,13 +183,19 @@ impl Op {
                 .map(String::as_str)
                 .collect(),
             Op::DocUpdate { page, .. } => vec![page],
+            Op::File { file } => [Some(&file.id), Some(&file.place), file.message.as_ref()]
+                .into_iter()
+                .flatten()
+                .map(String::as_str)
+                .collect(),
             Op::Profile { .. }
             | Op::StorageSettings { .. }
             | Op::Status { .. }
             | Op::SealingKey { .. }
             | Op::KeyGrant { .. }
             | Op::Sealed { .. }
-            | Op::ProfileDetails { .. } => Vec::new(),
+            | Op::ProfileDetails { .. }
+            | Op::ProfilePicture { .. } => Vec::new(),
         }
     }
 

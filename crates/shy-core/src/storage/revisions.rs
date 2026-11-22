@@ -17,6 +17,7 @@ pub enum ItemKind {
     Message,
     Channel,
     Page,
+    File,
 }
 
 impl ItemKind {
@@ -25,6 +26,7 @@ impl ItemKind {
             ItemKind::Message => "message",
             ItemKind::Channel => "channel",
             ItemKind::Page => "page",
+            ItemKind::File => "file",
         }
     }
 }
@@ -36,7 +38,8 @@ impl Store {
             .query_row(
                 "SELECT 'message' FROM messages WHERE id = ?1
                  UNION ALL SELECT 'channel' FROM channels WHERE id = ?1
-                 UNION ALL SELECT 'page' FROM pages WHERE id = ?1 AND created_ms IS NOT NULL",
+                 UNION ALL SELECT 'page' FROM pages WHERE id = ?1 AND created_ms IS NOT NULL
+                 UNION ALL SELECT 'file' FROM files WHERE id = ?1",
                 [id],
                 |row| row.get(0),
             )
@@ -44,6 +47,7 @@ impl Store {
         Ok(kind.map(|kind| match kind.as_str() {
             "message" => ItemKind::Message,
             "channel" => ItemKind::Channel,
+            "file" => ItemKind::File,
             _ => ItemKind::Page,
         }))
     }
@@ -73,6 +77,23 @@ impl Store {
                 return Ok(true);
             }
         }
+        if let Op::File { file } = op {
+            if self.is_deleted(&file.id)? {
+                return Ok(true);
+            }
+            let is_home_deleted = self.is_deleted(&file.place)?
+                || file
+                    .message
+                    .as_deref()
+                    .map(|message| self.is_deleted(message))
+                    .transpose()?
+                    .unwrap_or(false);
+            if is_home_deleted {
+                self.mark_deleted(&file.id)?;
+                return Ok(true);
+            }
+            return Ok(false);
+        }
         let target = match op {
             Op::ChannelCreate { id, .. }
             | Op::ChannelRename { id, .. }
@@ -89,7 +110,9 @@ impl Store {
             | Op::SealingKey { .. }
             | Op::KeyGrant { .. }
             | Op::Sealed { .. }
-            | Op::ProfileDetails { .. } => {
+            | Op::ProfileDetails { .. }
+            | Op::ProfilePicture { .. }
+            | Op::File { .. } => {
                 return Ok(false);
             }
         };
@@ -139,10 +162,12 @@ impl Store {
 
     /// Removes whatever `id` names. Ids are random, so in practice it's one
     /// thing; purging every kind keeps replicas in step whatever it is.
-    pub(super) fn apply_delete(&self, id: &str) -> Result<Option<Change>> {
+    /// `deleter` may remove the deleted files' blobs from the bucket.
+    pub(super) fn apply_delete(&self, id: &str, deleter: &[u8]) -> Result<Option<Change>> {
         self.mark_deleted(id)?;
         let kind = self.item_kind(id)?;
         let message_channel = self.message_channel(id)?;
+        let places_with_files = self.purge_files_of(id, deleter)?;
         self.purge_message(id)?;
         self.purge_channel(id)?;
         self.db.execute("DELETE FROM pages WHERE id = ?", [id])?;
@@ -152,6 +177,10 @@ impl Store {
             Some(ItemKind::Channel) => Some(Change::Channels),
             Some(ItemKind::Page) => Some(Change::Pages),
             Some(ItemKind::Message) => message_channel.map(|channel| Change::Messages { channel }),
+            Some(ItemKind::File) => places_with_files
+                .into_iter()
+                .next()
+                .map(|channel| Change::Messages { channel }),
             None => None,
         })
     }
@@ -166,7 +195,7 @@ impl Store {
         self.index_for_search("message", id, "", &text)
     }
 
-    fn mark_deleted(&self, id: &str) -> Result<()> {
+    pub(super) fn mark_deleted(&self, id: &str) -> Result<()> {
         self.db
             .execute("INSERT OR IGNORE INTO deleted (id) VALUES (?)", [id])?;
         Ok(())

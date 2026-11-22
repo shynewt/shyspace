@@ -105,6 +105,12 @@ impl Workspace {
                 text: String::new(),
             });
             message.can_delete = self.may_delete(&state.store, &message.id)?;
+            message.files = state
+                .store
+                .files_of_messages(std::slice::from_ref(&message.id))?
+                .into_iter()
+                .map(|file| self.file_info(&state.store, file))
+                .collect::<Result<_>>()?;
             let thread: Vec<&Reply> = replies.iter().filter(|reply| reply.root == message.id).collect();
             message.reply_count = count(thread.len());
             message.last_reply_ms = thread.iter().map(|reply| reply.created_ms).max();
@@ -167,6 +173,7 @@ impl Workspace {
             member.status = self.state().store.member_status(key.as_bytes(), now)?;
             member.presence = self.presence_of(&key, now);
             member.details = self.state().store.profile_details(key.as_bytes())?;
+            member.has_picture = self.state().store.profile_picture(key.as_bytes())?.is_some();
         }
         Ok(members)
     }

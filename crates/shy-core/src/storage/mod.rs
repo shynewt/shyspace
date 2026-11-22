@@ -3,6 +3,7 @@
 
 mod apply;
 mod epochs;
+mod files;
 mod forks;
 mod invites;
 mod later;
@@ -22,6 +23,7 @@ mod snapshot;
 mod threads;
 
 pub use apply::{Applied, ApplyContext};
+pub use files::{BlobRemoval, StoredFile};
 pub(crate) use forks::CheckedFork;
 pub use invites::PendingRequest;
 pub use private::{Origin, StoredKey};
