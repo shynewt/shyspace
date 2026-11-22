@@ -109,6 +109,17 @@ pub enum MediaEvent {
     DevicesChanged,
 }
 
+/// A short sound for someone coming or going.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cue {
+    /// This device joined a huddle.
+    Joined,
+    PeerJoined,
+    PeerLeft,
+    /// This device left its huddle.
+    Left,
+}
+
 /// Moves a huddle's sound. One call at a time.
 ///
 /// `start` and `stop` run while the core holds its join/leave lock, so they
@@ -120,6 +131,10 @@ pub trait HuddleMedia: Send + Sync + 'static {
     fn set_muted(&self, muted: bool) -> Result<()>;
     fn set_devices(&self, choice: DeviceChoice) -> Result<()>;
     fn list_devices(&self) -> Result<DeviceList>;
+    /// Plays `cue` on the chosen speaker, whether or not a call is running.
+    /// Returns at once; a sound that can't play is logged, never an error,
+    /// so it can't hold up or break a join or a leave.
+    fn play_cue(&self, cue: Cue);
 }
 
 #[cfg(test)]
@@ -135,6 +150,7 @@ pub(crate) mod fake {
         my_path: Option<String>,
         muted: bool,
         devices: DeviceChoice,
+        cues: Vec<Cue>,
     }
 
     /// Records what the core asks of the media layer, and lets a test report
@@ -169,6 +185,11 @@ pub(crate) mod fake {
             self.live().devices.clone()
         }
 
+        /// Every sound played so far, oldest first.
+        pub(crate) fn cues(&self) -> Vec<Cue> {
+            self.live().cues.clone()
+        }
+
         pub(crate) async fn report(&self, event: MediaEvent) {
             let events = self.live().events.clone().expect("no call is running");
             events.send(event).await.expect("the call's events are gone");
@@ -189,8 +210,10 @@ pub(crate) mod fake {
         fn stop(&self) {
             let mut live = self.live();
             let devices = std::mem::take(&mut live.devices);
+            let cues = std::mem::take(&mut live.cues);
             *live = Live {
                 devices,
+                cues,
                 ..Live::default()
             };
         }
@@ -223,6 +246,10 @@ pub(crate) mod fake {
                     device("headset", false, true),
                 ],
             })
+        }
+
+        fn play_cue(&self, cue: Cue) {
+            self.live().cues.push(cue);
         }
     }
 }

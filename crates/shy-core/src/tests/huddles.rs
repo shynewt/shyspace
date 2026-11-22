@@ -29,13 +29,13 @@ fn with_media(media: &FakeMedia) -> WorkspaceOptions {
     WorkspaceOptions::from(Networking::Offline).with_media(Arc::new(media.clone()))
 }
 
-struct Member {
-    workspace: Workspace,
-    media: FakeMedia,
+pub(super) struct Member {
+    pub(super) workspace: Workspace,
+    pub(super) media: FakeMedia,
 }
 
 /// Ada (the admin), Bob and Carol, each with fake audio.
-async fn three_members() -> (tempfile::TempDir, [Member; 3]) {
+pub(super) async fn three_members() -> (tempfile::TempDir, [Member; 3]) {
     let root = tempfile::tempdir().unwrap();
     let bucket = memory_bucket();
     let ada_media = FakeMedia::default();
@@ -63,7 +63,7 @@ async fn three_members() -> (tempfile::TempDir, [Member; 3]) {
 }
 
 /// Hands everything `from` sent to each of `to`, as `via` would.
-fn carry(from: &Workspace, to: &[&Workspace], via: Via) {
+pub(super) fn carry(from: &Workspace, to: &[&Workspace], via: Via) {
     for beacon in from.take_sent_beacons() {
         for member in to {
             member.receive_beacon(&beacon, via).unwrap();

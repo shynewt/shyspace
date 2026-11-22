@@ -426,6 +426,8 @@ pub enum Change {
     },
     /// The microphones and speakers offered, or the choice among them, changed.
     HuddleDevices,
+    /// Whether huddles play join and leave sounds on this device changed.
+    HuddleSounds,
     /// A participant in this device's huddle started or stopped speaking.
     HuddleSpeaking {
         /// Member id (hex); this device's own member for its own voice.

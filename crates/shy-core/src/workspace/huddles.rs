@@ -18,7 +18,7 @@ use crate::{
     huddle::{
         beacon::{Beacon, BeaconBody, BeaconState, MEDIA_WIRE, Reach, SessionId, media_path_name},
         book::{EXPIRY_MS, HuddleBook, REFRESH_MS},
-        media::{AudioDevice, DeviceChoice, Link, MediaCall, MediaEvent, MicState, OutputState},
+        media::{AudioDevice, Cue, DeviceChoice, Link, MediaCall, MediaEvent, MicState, OutputState},
         rules::{MAX_PARTICIPANTS, Visibility, hearing_set, huddle_members},
     },
     ops::now_ms,
@@ -33,6 +33,8 @@ use crate::{
 const TICK: Duration = Duration::from_secs(5);
 /// Where this device keeps its chosen microphone and speaker.
 const DEVICES_META: &str = "huddle_devices";
+/// Whether this device plays join and leave sounds.
+const SOUNDS_META: &str = "huddle_sounds";
 /// System device ids are short; anything longer isn't one.
 const MAX_DEVICE_ID_CHARS: usize = 512;
 /// A `Left` is sent this many times, since gossip may lose one.
@@ -193,7 +195,9 @@ impl Workspace {
             .clone()
             .context("this build of shyspace can't join huddles: it has no audio")?;
         let _transition = self.transition();
-        self.leave_current()?;
+        if let Some(ended) = self.end_current() {
+            self.announce_left(ended)?;
+        }
         let members = self.current_members()?;
         let (allowed, visibility) = {
             let state = self.state();
@@ -255,6 +259,7 @@ impl Workspace {
             mine.phase = HuddlePhase::In;
         }
         self.send_beacon(beacon, visibility, &allowed);
+        self.play_cue(Cue::Joined);
         self.emit(Change::MyHuddle);
         self.emit(Change::Huddle {
             channel: channel.to_owned(),
@@ -285,14 +290,27 @@ impl Workspace {
 
     /// Only with the transition lock held.
     fn leave_current(&self) -> Result<()> {
-        let Some(ended) = self.take_my_huddle() else {
+        let Some(ended) = self.end_current() else {
             return Ok(());
         };
+        self.play_cue(Cue::Left);
+        self.announce_left(ended)
+    }
+
+    /// Ends this device's session here, if any, without telling the others.
+    /// Only with the transition lock held.
+    fn end_current(&self) -> Option<MySession> {
+        let ended = self.take_my_huddle()?;
         ended.task.abort();
         self.emit(Change::MyHuddle);
         self.emit(Change::Huddle {
             channel: ended.channel.clone(),
         });
+        Some(ended)
+    }
+
+    /// Tells the channel's members that `ended` is over.
+    fn announce_left(&self, ended: MySession) -> Result<()> {
         let members = self.current_members()?;
         let recipients = {
             let state = self.state();
@@ -382,6 +400,37 @@ impl Workspace {
             .set_meta(DEVICES_META, &serde_json::to_vec(&choice)?)?;
         self.emit(Change::HuddleDevices);
         Ok(())
+    }
+
+    /// Whether huddles play join and leave sounds on this device.
+    pub fn huddle_sounds(&self) -> Result<bool> {
+        match self.state().store.meta(SOUNDS_META)? {
+            Some(bytes) => {
+                serde_json::from_slice(&bytes).context("the saved huddle sounds setting can't be read")
+            }
+            None => Ok(true),
+        }
+    }
+
+    pub fn set_huddle_sounds(&self, is_on: bool) -> Result<()> {
+        self.state()
+            .store
+            .set_meta(SOUNDS_META, &serde_json::to_vec(&is_on)?)?;
+        self.emit(Change::HuddleSounds);
+        Ok(())
+    }
+
+    /// Plays `cue` if this device wants huddle sounds. Never fails: a sound
+    /// must not hold up or break a join or a leave.
+    fn play_cue(&self, cue: Cue) {
+        let Some(media) = &self.inner.huddle_media else {
+            return;
+        };
+        match self.huddle_sounds() {
+            Ok(true) => media.play_cue(cue),
+            Ok(false) => {}
+            Err(error) => warn!("couldn't tell whether huddle sounds are on: {error:#}"),
+        }
     }
 
     fn saved_devices(&self) -> Result<DeviceChoice> {
@@ -535,11 +584,21 @@ impl Workspace {
         let heard = hearing_set(&roster, &me, &allowed);
         mine.links.retain(|peer, _| heard.contains_key(peer));
         mine.speaking.retain(|peer| heard.contains_key(peer));
+        // The people already there when joining are covered by `Joined`.
+        let cue = if mine.phase == HuddlePhase::In {
+            arrival_cue(&mine.peers.borrow(), &heard)
+        } else {
+            None
+        };
         mine.peers.send_if_modified(|peers| {
             let is_changed = *peers != heard;
             *peers = heard;
             is_changed
         });
+        drop(huddles);
+        if let Some(cue) = cue {
+            self.play_cue(cue);
+        }
         Ok(Audience::Updated)
     }
 
@@ -694,6 +753,16 @@ impl Workspace {
         }
     }
 
+    /// Moves the huddle clock on, as if `by` passed with no refreshes.
+    #[cfg(test)]
+    pub(crate) fn age_huddles(&self, by: Duration) {
+        let mut huddles = self.huddles();
+        huddles.started = huddles
+            .started
+            .checked_sub(by)
+            .expect("the test's clock goes back further than the system's");
+    }
+
     /// Drops participants whose refreshes stopped, and says so. Runs while
     /// online, whether or not this device is in a huddle.
     pub(crate) fn expire_huddle_participants(&self) -> Result<()> {
@@ -745,6 +814,18 @@ impl Workspace {
             None => self.emit(Change::MyHuddle),
         }
     }
+}
+
+/// The one sound for how the people heard changed, if they did: anyone
+/// leaving outweighs anyone arriving. A rejoin under a new path is neither.
+fn arrival_cue(before: &BTreeMap<PublicKey, String>, after: &BTreeMap<PublicKey, String>) -> Option<Cue> {
+    if before.keys().any(|peer| !after.contains_key(peer)) {
+        return Some(Cue::PeerLeft);
+    }
+    if after.keys().any(|peer| !before.contains_key(peer)) {
+        return Some(Cue::PeerJoined);
+    }
+    None
 }
 
 fn joined() -> BeaconState {
