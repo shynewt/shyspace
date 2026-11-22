@@ -58,7 +58,7 @@ impl Workspace {
                     Incoming::Lagged => receiver.inner.wake.notify_one(),
                     Incoming::Message(Wire::Envelope(envelope)) => {
                         if let Err(error) = receiver.receive(envelope) {
-                            warn!("dropping live op: {error:#}");
+                            warn!("couldn't take a live op: {error:#}");
                         }
                     }
                     Incoming::Message(Wire::Nudge(_)) => receiver.inner.wake.notify_one(),
@@ -157,7 +157,10 @@ impl Workspace {
             errors.push(error);
         }
         match self.apply_pending() {
-            Ok(needs_update) => self.status_lock().needs_update = needs_update,
+            Ok(pending) => {
+                self.status_lock().needs_update = pending.is_waiting_for_update;
+                errors.extend(pending.local_failure);
+            }
             Err(error) => errors.push(error),
         }
         if !self.status().removed {

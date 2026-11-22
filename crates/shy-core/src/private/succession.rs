@@ -135,7 +135,10 @@ impl Store {
                 continue;
             }
             if let Ok(plaintext) = open(key.labeled(), slot, &payload) {
-                return Ok(postcard::from_bytes(&plaintext).ok());
+                // One with impossible numbers is void wherever it's judged.
+                return Ok(postcard::from_bytes::<PrivateBody>(&plaintext)
+                    .ok()
+                    .filter(PrivateBody::has_storable_numbers));
             }
         }
         Ok(None)

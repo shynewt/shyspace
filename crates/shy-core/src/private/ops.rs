@@ -4,7 +4,7 @@ use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 
 use super::crypto::{ChannelKey, Commitment};
-use crate::ops::{EntityId, Op};
+use crate::ops::{EntityId, MAX_STORED_NUMBER, Op};
 
 /// Most wraps one grant may carry, so nobody can make every device try
 /// thousands of decryptions.
@@ -82,6 +82,37 @@ pub enum PrivateOp {
     /// once per membership, so others can tell who really reads it (#110).
     /// The key it's sealed with is the proof.
     Joined,
+}
+
+impl PrivateBody {
+    /// Whether every number in it fits the store; one that doesn't makes the
+    /// op broken, not a local failure that would hold up its author.
+    pub fn has_storable_numbers(&self) -> bool {
+        let numbers: Vec<u64> = match &self.op {
+            PrivateOp::Create { members, .. } => members.iter().map(|invitee| invitee.after_seq).collect(),
+            PrivateOp::Add {
+                invitee,
+                from_generation,
+                position,
+            } => vec![invitee.after_seq, *from_generation, *position],
+            PrivateOp::Remove {
+                last_seq,
+                generation,
+                position,
+                ..
+            } => vec![*last_seq, *generation, *position],
+            PrivateOp::Rotate {
+                generation, position, ..
+            } => vec![*generation, *position],
+            PrivateOp::HandOver { position, .. }
+            | PrivateOp::OwnerDelete { position, .. }
+            | PrivateOp::Succeed { position } => vec![*position],
+            PrivateOp::Leave | PrivateOp::Content(_) | PrivateOp::Joined => Vec::new(),
+        };
+        std::iter::once(self.generation)
+            .chain(numbers)
+            .all(|number| number <= MAX_STORED_NUMBER)
+    }
 }
 
 impl PrivateOp {

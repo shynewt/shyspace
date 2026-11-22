@@ -1000,3 +1000,62 @@ async fn a_join_counts_the_same_in_any_order_and_twice() {
     deliver(&carol, carol_before, &dave);
     assert_eq!(invited(&dave, &channel), [dave.my_id()]);
 }
+
+/// After `poison` from `author`, their next public message still reaches
+/// `reader`, and the poison leaves no sync error behind.
+async fn later_ops_still_arrive(
+    author: &Workspace,
+    reader: &Workspace,
+    poison: Envelope,
+    forger: &mut Forger<'_>,
+) {
+    let general = channel_id(reader, "general");
+    let later = forger.seal(Op::Message {
+        id: crate::ops::new_owned_id(&author.me()),
+        channel: general.clone(),
+        text: "written after the odd op".into(),
+        reply_to: None,
+    });
+    reader.receive(poison).unwrap();
+    reader.receive(later).unwrap();
+    assert!(texts(reader, &general).contains(&"written after the odd op".to_string()));
+    reader.sync().await;
+    assert_eq!(reader.status().error, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_grant_with_a_huge_generation_does_not_stall_its_author() {
+    let (_root, _bucket, admin, bob, _carol, _dave) = four_members().await;
+    let channel = format!("p:{}", "ab".repeat(32));
+    let mut forger = Forger::new(&bob);
+    let poison = forger.seal(forged_grant(&bob, &admin, &channel, u64::MAX, [9; 32]));
+    later_ops_still_arrive(&bob, &admin, poison, &mut forger).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_owner_op_with_a_huge_number_does_not_stall_its_author() {
+    let (_root, _bucket, admin, bob, carol, dave) = four_members().await;
+    let channel = bob.create_private_channel("plans", &[carol.my_id()]).unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    let key = newest_key(&bob, &channel);
+    let huge_add = PrivateOp::Add {
+        invitee: Invitee {
+            member: dave.me(),
+            after_seq: u64::MAX,
+        },
+        from_generation: 1,
+        position: 2,
+    };
+    let huge_remove = PrivateOp::Remove {
+        member: carol.me(),
+        last_seq: u64::MAX,
+        generation: 2,
+        commitment: commitment(&new_channel_key()),
+        position: 2,
+    };
+    let mut forger = Forger::new(&bob);
+    for op in [huge_add, huge_remove] {
+        let poison = forger.seal_private(&key, op);
+        later_ops_still_arrive(&bob, &carol, poison, &mut forger).await;
+    }
+}

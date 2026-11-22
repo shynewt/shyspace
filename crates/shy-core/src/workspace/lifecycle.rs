@@ -384,6 +384,10 @@ impl Workspace {
                 }),
                 heartbeat_now: Notify::new(),
                 stopped: tokio::sync::watch::Sender::new(false),
+                #[cfg(test)]
+                fail_next_apply: Default::default(),
+                #[cfg(test)]
+                fail_next_park: Default::default(),
             }),
         };
         workspace

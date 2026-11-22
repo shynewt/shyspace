@@ -122,6 +122,12 @@ pub(crate) struct Inner {
     pub heartbeat_now: Notify,
     /// Set by `shutdown`; the background loops end when they see it.
     pub stopped: tokio::sync::watch::Sender<bool>,
+    /// Makes the next apply fail as a full disk would.
+    #[cfg(test)]
+    pub fail_next_apply: std::sync::atomic::AtomicBool,
+    /// Makes the next parking of an op fail as a full disk would.
+    #[cfg(test)]
+    pub fail_next_park: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]

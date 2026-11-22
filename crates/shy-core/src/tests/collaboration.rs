@@ -317,3 +317,57 @@ async fn profile_details_reach_everyone_and_newcomers() {
         assert_eq!(seen, details);
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_op_that_fails_locally_is_kept_and_applied_on_the_next_sync() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "the last thing Bob wrote", None)
+        .unwrap();
+    bob.sync().await;
+
+    admin
+        .inner
+        .fail_next_apply
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.sync().await;
+    assert!(admin.status().error.is_some(), "a local failure must show");
+    let texts = |member: &Workspace| -> Vec<String> {
+        member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|message| message.text)
+            .collect()
+    };
+    assert!(!texts(&admin).contains(&"the last thing Bob wrote".to_string()));
+
+    admin.sync().await;
+    assert_eq!(admin.status().error, None);
+    assert!(texts(&admin).contains(&"the last thing Bob wrote".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_op_that_cant_even_be_kept_is_read_again_next_time() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "written while the disk was full", None)
+        .unwrap();
+    bob.sync().await;
+
+    for failpoint in [&admin.inner.fail_next_apply, &admin.inner.fail_next_park] {
+        failpoint.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    admin.sync().await;
+    assert!(admin.status().error.is_some(), "the failure must show");
+
+    admin.sync().await;
+    assert_eq!(admin.status().error, None);
+    let texts: Vec<String> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(texts.contains(&"written while the disk was full".to_string()));
+}

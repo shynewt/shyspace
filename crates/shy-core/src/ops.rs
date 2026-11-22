@@ -159,6 +159,10 @@ impl std::fmt::Display for RuleViolation {
 
 impl std::error::Error for RuleViolation {}
 
+/// The largest number the store can hold (SQLite integers are signed).
+/// Numbers from others above it break a rule instead of failing the write.
+pub(crate) const MAX_STORED_NUMBER: u64 = i64::MAX as u64;
+
 pub(crate) fn rule_violation(reason: impl Into<String>) -> anyhow::Error {
     RuleViolation(reason.into()).into()
 }

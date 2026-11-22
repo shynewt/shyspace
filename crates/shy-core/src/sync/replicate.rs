@@ -3,17 +3,24 @@
 use anyhow::Result;
 use tracing::warn;
 
-use super::peers::peers_to_dial;
+use super::{
+    peers::peers_to_dial,
+    receive::{LocalFailure, NotKept},
+};
 use crate::{ops::now_ms, transport::bucket::split_into_segments, workspace::Workspace};
 
 impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
     /// also needs the history of people removed before they joined. Our own
     /// log is included so a restored device learns what it already wrote.
+    /// An op that fails locally is parked and doesn't hold the cursor back,
+    /// unless it couldn't even be parked; the first such error is returned
+    /// at the end.
     pub(crate) async fn pull(&self) -> Result<()> {
         self.refetch_gaps()?;
+        let mut local_failure = None;
         let authors = self.state().store.everyone_ever()?;
-        for author in authors {
+        'authors: for author in authors {
             let cursor = self.state().store.cursor(&author)?;
             for (key, envelopes) in self.bucket().segments_after(&author, cursor.as_deref()).await? {
                 for envelope in envelopes {
@@ -21,14 +28,24 @@ impl Workspace {
                         warn!("segment {key} contains an op by someone else; skipping it");
                         continue;
                     }
-                    if let Err(error) = self.receive(envelope) {
-                        warn!("dropping op from {key}: {error:#}");
+                    match self.receive(envelope) {
+                        Ok(()) => {}
+                        Err(error) if error.downcast_ref::<NotKept>().is_some() => {
+                            // The cursor stays before this segment, so the
+                            // next pull reads the op again.
+                            local_failure.get_or_insert(error);
+                            continue 'authors;
+                        }
+                        Err(error) if error.downcast_ref::<LocalFailure>().is_some() => {
+                            local_failure.get_or_insert(error);
+                        }
+                        Err(error) => warn!("dropping op from {key}: {error:#}"),
                     }
                 }
                 self.state().store.set_cursor(&author, &key)?;
             }
         }
-        Ok(())
+        local_failure.map_or(Ok(()), Err)
     }
 
     /// Once per gap: if an author's next op went missing after we read past

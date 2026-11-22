@@ -14,7 +14,7 @@ use super::{
     rules::Verdict,
 };
 use crate::{
-    ops::{Op, OpBody, RuleViolation, VerifiedOp, clean_channel_name, rule_violation},
+    ops::{MAX_STORED_NUMBER, Op, OpBody, RuleViolation, VerifiedOp, clean_channel_name, rule_violation},
     storage::{Applied, ApplyContext, Ending, Membership, Origin, Settling, Store, StoredKey, WaitingSealed},
     views::Change,
 };
@@ -86,6 +86,11 @@ impl Store {
             author: &verified.author,
             seq: verified.seq,
         };
+        if grant.generation > MAX_STORED_NUMBER {
+            return Err(rule_violation(
+                "a key grant with a generation too large to be real",
+            ));
+        }
         match private_kind(&grant.channel) {
             Some(PrivateKind::Channel) if grant.dm_members.is_empty() && grant.generation >= 1 => {
                 let announced = self.commitment_of(&grant.channel, grant.generation)?;
@@ -213,6 +218,11 @@ impl Store {
                 // A kind of private op a newer version added.
                 return Ok(Settled::Waiting);
             };
+            if !body.has_storable_numbers() {
+                warn!("skipping a private op with a number too large to be real");
+                self.delete_waiting_sealed(&verified.author, verified.seq)?;
+                return Ok(Settled::Void);
+            }
             if !may_settle_now(self.settling.get(), &body.op) {
                 return Ok(Settled::Waiting);
             }
