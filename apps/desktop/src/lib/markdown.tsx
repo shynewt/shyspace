@@ -67,19 +67,20 @@ export function ChatMarkdown({
   /** Draws a mention of a member, like a button opening their card; plain text without it. */
   renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
 }) {
-  const withTitles = withPlainLineEnds(text)
+  // A bare page link gets an empty label, which the link fills with the page's
+  // title as it draws: titles come from other members, so one never goes into
+  // the markdown source, where `<https://…>`, a backtick or a final `\` would
+  // be read as markup.
+  const source = withPlainLineEnds(text)
     .replace(PAGE_LINK_LINE, (line: string, id: string) => (pageTitle(id) === undefined ? line : ""))
     .replace(MESSAGE_LINK_LINE, "")
-    .replace(BARE_PAGE_LINK, (_, id: string) => {
-      const title = (pageTitle(id) ?? "Untitled page").replace(/[[\]]/g, "");
-      return `[${title}](${PAGE_LINK_PREFIX}${id})`;
-    })
+    .replace(BARE_PAGE_LINK, (_, id: string) => `[](${PAGE_LINK_PREFIX}${id})`)
     .replace(BARE_MESSAGE_LINK, (link: string) => `[a message](${link})`);
-  // Checked as the parser will see it, page titles included.
-  if (!isCheapToFormat(withTitles)) return <PlainText text={text} />;
+  // Checked as the parser will see it.
+  if (!isCheapToFormat(source)) return <PlainText text={text} />;
   return (
     <ErrorBoundary key={text} fallback={<PlainText text={text} />}>
-      <LinkContext.Provider value={{ myId, onOpenPage, onOpenMessage, renderMemberMention }}>
+      <LinkContext.Provider value={{ myId, pageTitle, onOpenPage, onOpenMessage, renderMemberMention }}>
         <Markdown
           remarkPlugins={[remarkGfm, remarkBreaks, remarkSizeLimits]}
           rehypePlugins={[rehypeCallouts]}
@@ -90,7 +91,7 @@ export function ChatMarkdown({
           disallowedElements={["img"]}
           components={COMPONENTS}
         >
-          {withTitles}
+          {source}
         </Markdown>
       </LinkContext.Provider>
     </ErrorBoundary>
@@ -103,6 +104,7 @@ function PlainText({ text }: { text: string }) {
 
 type LinkHandlers = {
   myId: string;
+  pageTitle: (id: string) => string | undefined;
   onOpenPage: (id: string) => void;
   onOpenMessage: (id: string) => void;
   renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
@@ -110,34 +112,41 @@ type LinkHandlers = {
 
 const LinkContext = createContext<LinkHandlers | null>(null);
 
+/** Labels that show nothing: spaces, no-break spaces and zero-width marks. */
+const BLANK = /^[\s\u200b-\u200d\u2060\ufeff]*$/;
+
 function MarkdownLink({ href = "", children, node }: ComponentProps<"a"> & ExtraProps) {
   const handlers = useContext(LinkContext);
   if (!handlers) throw new Error("a markdown link outside ChatMarkdown");
-  const { myId, onOpenPage, onOpenMessage, renderMemberMention } = handlers;
+  const { myId, pageTitle, onOpenPage, onOpenMessage, renderMemberMention } = handlers;
+  // Chips show their label as plain text: markup inside one, like an
+  // autolink, could otherwise put a link out inside a trusted-looking chip.
+  const label = node ? textOf(node) : "";
   const message = href.match(MESSAGE_LINK)?.[1];
   if (message) {
     return (
       <button type="button" className="page-chip" onClick={() => onOpenMessage(message)}>
-        {children}
+        {label}
       </button>
     );
   }
   if (isMentionLink(href)) {
     const className = linkMentions(href, myId) ? "mention mention-me" : "mention";
     const memberId = mentionedMemberId(href);
-    if (memberId && renderMemberMention) return renderMemberMention(memberId, children, className);
-    return <span className={className}>{children}</span>;
+    if (memberId && renderMemberMention) return renderMemberMention(memberId, label, className);
+    return <span className={className}>{label}</span>;
   }
   const page = href.match(PAGE_LINK)?.[1];
   if (page) {
+    // A bare link (or a blank label) shows the page's title, as text.
     return (
       <button type="button" className="page-chip" onClick={() => onOpenPage(page)}>
-        {children}
+        {BLANK.test(label) ? (pageTitle(page) ?? "Untitled page") : label}
       </button>
     );
   }
   return (
-    <ExternalLink href={href} text={node ? textOf(node) : ""}>
+    <ExternalLink href={href} text={label}>
       {children}
     </ExternalLink>
   );
