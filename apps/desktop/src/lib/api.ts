@@ -177,6 +177,8 @@ export type SyncStatus = {
   error: string | null;
   removed: boolean;
   needs_update: boolean;
+  /** Member ids of the teammates whose apps sent what this version can't read. */
+  needs_update_from: string[];
 };
 export type BucketConfig = {
   endpoint: string;

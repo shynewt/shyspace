@@ -43,7 +43,14 @@ test("a channel's alert level doesn't look like a mention", async ({ page }) => 
 });
 
 test("syncing through the bucket alone looks calm, not like a warning", async ({ page }) => {
-  const idle = { peers: 0, last_sync_ms: Date.now(), error: null, removed: false, needs_update: false };
+  const idle = {
+    peers: 0,
+    last_sync_ms: Date.now(),
+    error: null,
+    removed: false,
+    needs_update: false,
+    needs_update_from: [],
+  };
   await answerWith(page, "status", idle, { kind: "sync" });
 
   const label = page.getByText("Synced via bucket");

@@ -18,7 +18,7 @@ use crate::{
     ops::now_ms,
     transport::gossip::{Incoming, Wire},
     views::Change,
-    views::PresenceState,
+    views::{PresenceState, member_id},
     workspace::{NextBeat, Workspace},
 };
 
@@ -37,6 +37,9 @@ pub struct SyncStatus {
     /// A teammate's newer version sent a change this one can't read, and
     /// their later changes wait for it until this app is updated.
     pub needs_update: bool,
+    /// Whose apps sent those changes (member ids), so a false alarm (junk
+    /// signed on purpose) points at its source.
+    pub needs_update_from: Vec<String>,
 }
 
 impl Workspace {
@@ -158,7 +161,10 @@ impl Workspace {
         }
         match self.apply_pending() {
             Ok(pending) => {
-                self.status_lock().needs_update = pending.is_waiting_for_update;
+                let mut status = self.status_lock();
+                status.needs_update = !pending.waiting_for_update.is_empty();
+                status.needs_update_from = pending.waiting_for_update.iter().map(member_id).collect();
+                drop(status);
                 errors.extend(pending.local_failure);
             }
             Err(error) => errors.push(error),

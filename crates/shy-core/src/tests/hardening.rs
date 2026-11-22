@@ -846,7 +846,9 @@ async fn ops_from_a_newer_version_wait_instead_of_being_dropped() {
         .map(|m| m.text)
         .collect();
     assert!(!texts.contains(&"after the new kind".to_string()));
-    assert!(admin.status().needs_update, "the app says to update");
+    let status = admin.status();
+    assert!(status.needs_update, "the app says to update");
+    assert_eq!(status.needs_update_from, [bob.my_id()], "and whose app sent it");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -863,6 +865,7 @@ async fn an_unreadable_op_far_ahead_raises_no_update_alarm() {
 
     let status = admin.status();
     assert!(!status.needs_update);
+    assert!(status.needs_update_from.is_empty());
     assert_eq!(status.error, None, "sync still reports success");
 }
 

@@ -495,7 +495,14 @@ export class FakeBackend {
           pages: this.pages,
         });
       case "status":
-        return { peers: 1, last_sync_ms: Date.now(), error: null, removed: false, needs_update: false };
+        return {
+          peers: 1,
+          last_sync_ms: Date.now(),
+          error: null,
+          removed: false,
+          needs_update: false,
+          needs_update_from: [],
+        };
       default:
         throw new Error(`fake backend: unknown command "${command}"`);
     }

@@ -2,6 +2,7 @@
 //! signature is valid, and its author was a member in the op's epoch.
 
 use anyhow::{Context, Result, bail, ensure};
+use iroh::PublicKey;
 use tracing::warn;
 
 use super::forks::SecondLook;
@@ -43,8 +44,9 @@ impl std::fmt::Display for NotKept {
 
 /// What retrying parked ops found.
 pub(super) struct Pending {
-    /// An op from a newer version is holding up its author.
-    pub is_waiting_for_update: bool,
+    /// Authors held up by an op this version can't read: from a newer
+    /// version, or junk they signed.
+    pub waiting_for_update: Vec<PublicKey>,
     /// The first parked op that failed locally again.
     pub local_failure: Option<anyhow::Error>,
 }
@@ -154,7 +156,7 @@ impl Workspace {
     /// Retries parked ops, for example after a new epoch key arrived. One
     /// that fails locally stays parked, and the others still get their turn.
     pub(super) fn apply_pending(&self) -> Result<Pending> {
-        let mut is_waiting_for_update = false;
+        let mut waiting_for_update = Vec::new();
         let mut local_failure = None;
         let changes = {
             let state = self.state();
@@ -182,7 +184,11 @@ impl Workspace {
                     Err(error) if error.downcast_ref::<NewerFormat>().is_some() => {
                         // Only the op its author needs next blocks anything;
                         // a far-ahead one can't raise a false alarm.
-                        is_waiting_for_update |= envelope.seq == state.store.next_seq(&envelope.author)?;
+                        if envelope.seq == state.store.next_seq(&envelope.author)?
+                            && !waiting_for_update.contains(&envelope.author)
+                        {
+                            waiting_for_update.push(envelope.author);
+                        }
                     }
                     Err(error) => {
                         warn!("dropping pending op: {error:#}");
@@ -196,7 +202,7 @@ impl Workspace {
             self.emit(change);
         }
         Ok(Pending {
-            is_waiting_for_update,
+            waiting_for_update,
             local_failure,
         })
     }
