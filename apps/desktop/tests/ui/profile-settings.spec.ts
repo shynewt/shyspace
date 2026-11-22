@@ -228,3 +228,24 @@ test("details the core would refuse fail in the fake too, so a UI slip can't pas
   expect(await refusal({ ...empty, phone: "call me" })).toMatch(/phone number/);
   expect(await refusal({ ...empty, website: "https://example.com/a?b#c", email: "ada@example.com" })).toBe("saved");
 });
+
+test("Save takes the click even when a field's error pushes it down as you press it", async ({ page }) => {
+  const settings = await openProfile(page);
+  // A longer error than hint (another font or language) grows the form as the field loses focus.
+  await page.addStyleTag({ content: '[id$="-error"] { letter-spacing: 0.25em }' });
+  const email = settings.getByLabel("Email");
+  await email.fill("ada@example");
+  await email.evaluate((input) => {
+    const panel = input.closest('[role="tabpanel"]');
+    if (!(panel instanceof HTMLElement)) throw new Error("the email field is outside a settings panel");
+    panel.scrollTop += input.getBoundingClientRect().bottom - panel.getBoundingClientRect().top - 4;
+  });
+  const save = await settings.getByRole("button", { name: "Save profile" }).boundingBox();
+  if (!save) throw new Error("Save profile has no box");
+
+  await page.mouse.click(save.x + save.width / 2, save.y + save.height / 2);
+
+  await expect(email).toBeFocused();
+  await expect(email).toHaveAccessibleDescription(/name@example\.com/);
+  expect(await savedDetails(page)).toEqual([]);
+});

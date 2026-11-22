@@ -226,6 +226,9 @@ export function ProfileSettings({ target }: { target: SettingsTarget }) {
             variant="primary"
             isLoading={save.isBusy}
             disabled={!draft.name.trim() || !isChanged}
+            // Keeps focus in the field while the button is pressed: leaving it shows its error, which can push
+            // the button down before the press ends, and the click would be lost. Saving checks every field anyway.
+            onMouseDown={(event) => event.preventDefault()}
             className="self-start"
           >
             Save profile
