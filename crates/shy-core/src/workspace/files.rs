@@ -290,6 +290,27 @@ impl Workspace {
         Ok(())
     }
 
+    /// Gives a file you shared a new name. Its bytes stay as they are.
+    pub fn rename_file(&self, file: &str, name: &str) -> Result<()> {
+        self.require_item(file, ItemKind::File)?;
+        let name = name.trim();
+        ensure!(!name.is_empty(), "a file needs a name");
+        let cleaned = clean_file_name(name);
+        ensure!(
+            cleaned == name,
+            "a file name can't hold slashes, hidden characters or a leading dot"
+        );
+        let rename = Op::FileRename {
+            id: file.to_owned(),
+            name: cleaned,
+        };
+        ensure!(
+            self.may(&rename),
+            "only the person who shared a file can rename it"
+        );
+        self.write(rename)
+    }
+
     /// Every file this member can see, newest first.
     pub fn files(&self) -> Result<Vec<FileInfo>> {
         let state = self.state();
@@ -303,6 +324,10 @@ impl Workspace {
     pub(crate) fn file_info(&self, store: &crate::storage::Store, file: StoredFile) -> Result<FileInfo> {
         Ok(FileInfo {
             can_delete: self.may_delete(store, &file.id)?,
+            can_rename: self.may(&Op::FileRename {
+                id: file.id.clone(),
+                name: String::new(),
+            }),
             author: PublicKey::try_from(file.author.as_slice())
                 .map(|author| member_id(&author))
                 .context("reading a file's author")?,

@@ -499,3 +499,99 @@ async fn an_id_used_twice_keeps_the_first_file_even_when_replayed() {
     assert_eq!(shown.len(), 1);
     assert_eq!(shown[0].name, "first.txt");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn someone_elses_file_cant_be_renamed() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    admin
+        .send_files(&general, "", None, vec![bytes_file(b"invoice")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let file = bob.files().unwrap()[0].id.clone();
+
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal(Op::FileRename {
+            id: file.clone(),
+            name: "paid-in-full.pdf".into(),
+        }))
+        .unwrap();
+    admin.sync().await;
+    assert_eq!(admin.files().unwrap()[0].name, "plan.txt");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hostile_new_name_is_cleaned_like_any_file_name() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_files(&general, "", None, vec![bytes_file(b"notes")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let file = admin.files().unwrap()[0].id.clone();
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal(Op::FileRename {
+            id: file,
+            name: "../../.ssh/authorized_keys\u{202e}gpj.exe".into(),
+        }))
+        .unwrap();
+    admin.sync().await;
+    assert_eq!(admin.files().unwrap()[0].name, "_.._.ssh_authorized_keysgpj.exe");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn in_a_private_channel_only_the_sharer_renames() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let plans = bob.create_private_channel("plans", &[carol.my_id()]).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    bob.send_files(&plans, "", None, vec![bytes_file(b"secret")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    let file = carol.files().unwrap()[0].id.clone();
+
+    let plans_key = carol
+        .state()
+        .store
+        .channel_keys(Some(&plans))
+        .unwrap()
+        .pop()
+        .unwrap();
+    let mut forger = Forger::new(&carol);
+    bob.receive(forger.seal_private(
+        &plans_key,
+        PrivateOp::Content(Op::FileRename {
+            id: file,
+            name: "carol-wrote-this.txt".into(),
+        }),
+    ))
+    .unwrap();
+    bob.sync().await;
+    assert_eq!(bob.files().unwrap()[0].name, "plan.txt");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn renaming_a_deleted_file_brings_nothing_back() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_files(&general, "", None, vec![bytes_file(b"gone")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let file = bob.files().unwrap()[0].id.clone();
+    bob.delete_file(&file).unwrap();
+    let mut forger = Forger::new(&bob);
+    let rename = forger.seal(Op::FileRename {
+        id: file,
+        name: "back.txt".into(),
+    });
+    sync_all(&[&admin, &bob]).await;
+    admin.receive(rename).unwrap();
+    admin.sync().await;
+    assert!(admin.files().unwrap().is_empty());
+}

@@ -100,6 +100,7 @@ impl Store {
             | Op::ChannelRename { id, .. }
             | Op::Message { id, .. }
             | Op::MessageEdit { id, .. }
+            | Op::FileRename { id, .. }
             | Op::PageCreate { id, .. }
             | Op::PageRename { id, .. } => id,
             Op::Reaction { message, .. } => message,

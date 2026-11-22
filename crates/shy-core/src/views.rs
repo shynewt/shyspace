@@ -203,6 +203,8 @@ pub struct FileInfo {
     pub size: u64,
     pub created_ms: i64,
     pub can_delete: bool,
+    /// Whether this member may rename it (its sharer).
+    pub can_rename: bool,
 }
 
 /// Where to continue when loading older messages: the oldest one loaded.

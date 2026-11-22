@@ -33,6 +33,7 @@ const SHARED_VIEW_TABLES: &[&str] = &[
     "sealing_keys",
     "files",
     "profile_pictures",
+    "file_names",
 ];
 
 /// A page's updates gathered during a replay, written once at the end.

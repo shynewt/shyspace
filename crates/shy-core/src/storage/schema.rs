@@ -173,6 +173,9 @@ CREATE TABLE blob_removals (
     author BLOB NOT NULL, blob_id TEXT NOT NULL, requested_by BLOB NOT NULL,
     PRIMARY KEY (author, blob_id, requested_by));
 ",
+    // Renames are kept apart from their file, like message edits, so one
+    // that arrives first still applies.
+    "CREATE TABLE file_names (file TEXT PRIMARY KEY, name TEXT NOT NULL, lamport INTEGER NOT NULL);",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

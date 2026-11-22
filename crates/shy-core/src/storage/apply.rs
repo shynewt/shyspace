@@ -223,6 +223,7 @@ impl Store {
                 Change::Storage
             }
             Op::MessageEdit { id, text } => return self.apply_message_edit(id, text, lamport),
+            Op::FileRename { id, name } => return self.apply_file_rename(id, name, lamport),
             Op::ChannelRename { id, name } => self.apply_channel_rename(id, name, lamport, author)?,
             Op::Delete { id } => return self.apply_delete(id, author),
             Op::Status {

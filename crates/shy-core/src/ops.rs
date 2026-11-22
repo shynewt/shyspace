@@ -136,6 +136,12 @@ pub enum Op {
     ProfilePicture {
         picture: Option<crate::files::blob::BlobRef>,
     },
+    /// A new name for a shared file. Only its sharer may rename it; the
+    /// latest rename wins.
+    FileRename {
+        id: EntityId,
+        name: String,
+    },
 }
 
 /// An op that is validly signed but breaks a rule (someone else's id, an
@@ -164,6 +170,7 @@ impl Op {
             Op::ChannelCreate { id, .. }
             | Op::PageRename { id, .. }
             | Op::MessageEdit { id, .. }
+            | Op::FileRename { id, .. }
             | Op::ChannelRename { id, .. }
             | Op::Delete { id } => vec![id],
             Op::Message {
@@ -203,7 +210,7 @@ impl Op {
     pub fn is_permitted(&self, author: &PublicKey, admin: &PublicKey) -> bool {
         match self {
             Op::StorageSettings { .. } => author == admin,
-            Op::MessageEdit { id, .. } => is_owned_by(id, author),
+            Op::MessageEdit { id, .. } | Op::FileRename { id, .. } => is_owned_by(id, author),
             Op::Delete { id } => author == admin || is_owned_by(id, author),
             _ => true,
         }

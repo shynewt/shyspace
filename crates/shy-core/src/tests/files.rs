@@ -261,3 +261,48 @@ async fn a_file_sent_without_a_caption_alerts_with_its_name() {
     }
     assert_eq!(previews, ["Shared q3.pdf", "Shared 2 files"]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sharer_can_rename_a_file_and_everyone_sees_the_new_name() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_files(&general, "", None, vec![bytes_file("IMG_4821.png", b"pixels")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let file = bob.files().unwrap()[0].clone();
+    assert!(file.can_rename);
+    assert!(!admin.files().unwrap()[0].can_rename, "only the sharer renames");
+
+    bob.rename_file(&file.id, "  Office whiteboard.png ").unwrap();
+    sync_all(&[&admin, &bob]).await;
+    for member in [&admin, &bob] {
+        assert_eq!(member.files().unwrap()[0].name, "Office whiteboard.png");
+    }
+    assert!(admin.rename_file(&file.id, "mine now.png").is_err());
+    assert!(bob.rename_file(&file.id, "   ").is_err(), "a name can't be empty");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_newest_rename_wins_in_any_order_even_before_the_file_arrives() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let before = bob.state().store.last_seq(&bob.me()).unwrap();
+    bob.send_files(&general, "", None, vec![bytes_file("draft.txt", b"v1")])
+        .await
+        .unwrap();
+    let file = bob.files().unwrap()[0].id.clone();
+    bob.rename_file(&file, "second.txt").unwrap();
+    bob.rename_file(&file, "third.txt").unwrap();
+
+    let envelopes = bob.state().store.envelopes_after(&bob.me(), before).unwrap();
+    // Carol hears the renames first; the log parks them until the file
+    // arrives, then everything applies in order, twice over.
+    for envelope in envelopes.iter().rev().chain(envelopes.iter()) {
+        carol.receive(envelope.clone()).unwrap();
+    }
+    carol.sync().await;
+    assert_eq!(carol.files().unwrap()[0].name, "third.txt");
+}

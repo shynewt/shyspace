@@ -252,7 +252,7 @@ fn judge_content(channel: &str, author: &PublicKey, op: &Op, kind: PrivateKind) 
                     .is_none_or(|parent| is_message_in(parent, channel))
         }
         Op::Reaction { message, .. } => is_message_in(message, channel),
-        Op::MessageEdit { id, .. } | Op::Delete { id } => {
+        Op::MessageEdit { id, .. } | Op::FileRename { id, .. } | Op::Delete { id } => {
             is_message_in(id, channel) && is_owned_by(id, author)
         }
         Op::ChannelRename { id, .. } => kind == PrivateKind::Channel && id == channel,

@@ -10,6 +10,7 @@ use super::Store;
 use crate::{
     files::{SharedFile, blob::BlobRef, clean_file_name, clean_media_type},
     ops::VerifiedOp,
+    views::Change,
 };
 
 /// A file as every member sees it.
@@ -34,7 +35,10 @@ pub struct BlobRemoval {
     pub requested_by: Vec<u8>,
 }
 
-const FILE_COLUMNS: &str = "id, place, message, author, name, media_type, created_ms, blob";
+/// A file with its latest name.
+const FILE_COLUMNS: &str =
+    "f.id, f.place, f.message, f.author, COALESCE(n.name, f.name), f.media_type, f.created_ms, f.blob";
+const FILES: &str = "files f LEFT JOIN file_names n ON n.file = f.id";
 
 impl Store {
     /// Keeps a file from someone else, cleaned. For an id used twice, the
@@ -78,6 +82,8 @@ impl Store {
             let blob: BlobRef = postcard::from_bytes(&blob).context("reading a stored file")?;
             self.mark_deleted(&file)?;
             self.db.execute("DELETE FROM files WHERE id = ?", [&file])?;
+            self.db
+                .execute("DELETE FROM file_names WHERE file = ?", [&file])?;
             self.request_blob_removal(&author, &blob.id, deleter)?;
             if !places.contains(&place) {
                 places.push(place);
@@ -86,11 +92,29 @@ impl Store {
         Ok(places)
     }
 
+    /// Keeps a rename from the file's sharer, cleaned, unless a later one
+    /// is kept. The file may not have arrived yet; it shows the name when it does.
+    pub(super) fn apply_file_rename(&self, id: &str, name: &str, lamport: u64) -> Result<Option<Change>> {
+        let changed = self.db.execute(
+            "INSERT INTO file_names (file, name, lamport) VALUES (?1, ?2, ?3)
+             ON CONFLICT (file) DO UPDATE SET name = ?2, lamport = ?3 WHERE lamport < ?3",
+            params![id, clean_file_name(name), lamport],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        let place: Option<String> = self
+            .db
+            .query_row("SELECT place FROM files WHERE id = ?", [id], |row| row.get(0))
+            .optional()?;
+        Ok(place.map(|channel| Change::Messages { channel }))
+    }
+
     pub fn file(&self, id: &str) -> Result<Option<StoredFile>> {
         Ok(self
             .db
             .query_row(
-                &format!("SELECT {FILE_COLUMNS} FROM files WHERE id = ?"),
+                &format!("SELECT {FILE_COLUMNS} FROM {FILES} WHERE f.id = ?"),
                 [id],
                 stored_file,
             )
@@ -101,7 +125,7 @@ impl Store {
     pub fn files_of_message(&self, message: &str, channel: &str) -> Result<Vec<StoredFile>> {
         self.db
             .prepare(&format!(
-                "SELECT {FILE_COLUMNS} FROM files WHERE message = ? AND place = ? ORDER BY created_ms, id"
+                "SELECT {FILE_COLUMNS} FROM {FILES} WHERE f.message = ? AND f.place = ? ORDER BY f.created_ms, f.id"
             ))?
             .query_map([message, channel], stored_file)?
             .collect::<Result<_, _>>()
@@ -120,7 +144,7 @@ impl Store {
     pub fn all_files(&self) -> Result<Vec<StoredFile>> {
         self.db
             .prepare(&format!(
-                "SELECT {FILE_COLUMNS} FROM files ORDER BY created_ms DESC, id"
+                "SELECT {FILE_COLUMNS} FROM {FILES} ORDER BY f.created_ms DESC, f.id"
             ))?
             .query_map([], stored_file)?
             .collect::<Result<_, _>>()
