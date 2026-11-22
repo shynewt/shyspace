@@ -160,8 +160,9 @@ impl Store {
     }
 
     fn is_read_in_thread(&self, reply: &UnreadMention, roots: &HashMap<String, String>) -> Result<bool> {
-        // A reply whose parent sits in another channel is its own root; one
-        // in no thread at all shows nowhere, so there's nothing to read.
+        // Not in the channel's threads: either its parent sits in another
+        // channel (thread_root then gives the reply itself), or it is in no
+        // thread at all and shows nowhere, so there's nothing to read.
         let root = match roots.get(&reply.id) {
             Some(root) => root.clone(),
             None => match self.thread_root(&reply.id)? {

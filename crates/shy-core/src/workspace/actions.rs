@@ -171,9 +171,25 @@ impl Workspace {
 
     pub fn send_message(&self, channel: &str, text: &str, reply_to: Option<EntityId>) -> Result<EntityId> {
         let text = checked_message_text(text)?;
+        if let Some(target) = &reply_to {
+            self.ensure_can_reply_to(target)?;
+        }
         let id = self.new_item_id(channel);
         self.post_message(channel, &id, text, reply_to)?;
         Ok(id)
+    }
+
+    /// A reply to a message that is in no thread (its replies loop, or run
+    /// too deep) would show nowhere. One to a message we don't have yet
+    /// shows in the channel until it arrives, as before.
+    fn ensure_can_reply_to(&self, target: &str) -> Result<()> {
+        let store = &self.state().store;
+        let is_message = store.item_kind(target)? == Some(ItemKind::Message);
+        ensure!(
+            !is_message || store.thread_root(target)?.is_some(),
+            "that message isn't in a thread you can reply in"
+        );
+        Ok(())
     }
 
     /// An id for something new in `channel`, owned by this member. Private
@@ -208,14 +224,18 @@ impl Workspace {
         {
             let state = self.state();
             state.store.mark_read(channel, id)?;
-            let draft_target = match state.store.thread_root(id)?.filter(|root| root != id) {
-                Some(root) => {
+            let draft_target = match state.store.thread_root(id)? {
+                Some(root) if root != id => {
                     state.store.mark_thread_read(&root, id)?;
-                    root
+                    Some(root)
                 }
-                None => channel.to_owned(),
+                Some(_) => Some(channel.to_owned()),
+                // In no thread: it shows nowhere, so no draft is done.
+                None => None,
             };
-            state.store.set_draft(&draft_target, "", now_ms()?)?;
+            if let Some(target) = draft_target {
+                state.store.set_draft(&target, "", now_ms()?)?;
+            }
         }
         self.emit(Change::Drafts);
         Ok(())

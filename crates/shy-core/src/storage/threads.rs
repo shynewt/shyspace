@@ -13,7 +13,9 @@ use super::{
 };
 use crate::views::Message;
 
-/// The longest reply chain followed when looking for a thread's root.
+/// The deepest a reply can sit below its thread's first message and still
+/// be in the thread. Every thread query stops here, so a deeper reply is in
+/// no thread anywhere.
 const MAX_THREAD_DEPTH: usize = 1000;
 
 /// A reply, with the first message of its thread.
@@ -58,13 +60,13 @@ impl Store {
         // CROSS JOIN keeps SQLite going from the chain to messages (by
         // index), rather than scanning messages for each step.
         let mut statement = self.db.prepare(&format!(
-            "WITH RECURSIVE chain(id, root) AS (
-                SELECT m.id, m.id FROM messages m
+            "WITH RECURSIVE chain(id, root, depth) AS (
+                SELECT m.id, m.id, 0 FROM messages m
                 WHERE {roots_filter}
                   AND (m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to))
                 UNION
-                SELECT m.id, chain.root FROM chain CROSS JOIN messages m ON m.reply_to = chain.id
-                WHERE m.channel = ?1
+                SELECT m.id, chain.root, chain.depth + 1 FROM chain CROSS JOIN messages m ON m.reply_to = chain.id
+                WHERE m.channel = ?1 AND chain.depth < {MAX_THREAD_DEPTH}
              )
              SELECT chain.id, chain.root, m.author, m.lamport, m.created_ms, COALESCE(e.text, m.text)
              FROM chain CROSS JOIN messages m ON m.id = chain.id
@@ -117,15 +119,15 @@ impl Store {
     /// The thread starting at `root`: its first message, then every reply.
     pub fn thread(&self, root: &str, me: &PublicKey) -> Result<Vec<Message>> {
         let mut statement = self.db.prepare(&format!(
-            "WITH RECURSIVE chain(id) AS (
-                SELECT ?1
+            "WITH RECURSIVE chain(id, depth) AS (
+                SELECT ?1, 0
                 UNION
-                SELECT m.id FROM messages m JOIN chain ON m.reply_to = chain.id
-                WHERE m.channel = (SELECT channel FROM messages WHERE id = ?1)
+                SELECT m.id, chain.depth + 1 FROM messages m JOIN chain ON m.reply_to = chain.id
+                WHERE m.channel = (SELECT channel FROM messages WHERE id = ?1) AND chain.depth < {MAX_THREAD_DEPTH}
              )
              SELECT {MESSAGE_COLUMNS} {MESSAGE_JOINS}
              WHERE m.id IN (SELECT id FROM chain)
-             ORDER BY m.id != ?1, m.lamport, m.author"
+             ORDER BY m.id != ?1, m.lamport, m.author, m.id"
         ))?;
         let rows = statement.query_map([root], message_from_row)?;
         self.with_reactions(rows.collect::<Result<_, _>>()?, me)
@@ -133,11 +135,12 @@ impl Store {
 
     /// The first message of the thread `message` is in (itself if it isn't
     /// a reply), or `None` if `message` doesn't exist or is in no thread: its
-    /// replies loop (only a forged client makes that) or run too deep to
-    /// follow. Such messages show neither in the channel nor in a thread.
+    /// replies loop (only a forged client makes that) or sit deeper than
+    /// `MAX_THREAD_DEPTH`. Such messages show neither in the channel nor in
+    /// a thread.
     pub fn thread_root(&self, message: &str) -> Result<Option<String>> {
         let mut current = message.to_owned();
-        for _ in 0..MAX_THREAD_DEPTH {
+        for _ in 0..=MAX_THREAD_DEPTH {
             let row: Option<(String, Option<String>)> = self
                 .db
                 .query_row(
@@ -192,6 +195,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+    use super::MAX_THREAD_DEPTH;
     use crate::storage::test_channel::TestChannel;
 
     #[test]
@@ -240,23 +244,58 @@ mod tests {
     fn replies_that_tie_come_in_id_order() {
         let mut channel = TestChannel::new();
         let root = channel.post("first", None);
-        let mut ids = Vec::new();
-        for text in ["one", "two", "three"] {
-            let id = crate::ops::new_owned_id(&channel.author);
+        let mut ids: Vec<String> = (0..3)
+            .map(|_| crate::ops::new_owned_id(&channel.author))
+            .collect();
+        ids.sort();
+        // Stored in reverse, so only the tie-break can put them in id order.
+        for id in ids.iter().rev() {
             channel.apply_again(crate::ops::Op::Message {
                 id: id.clone(),
                 channel: channel.id.clone(),
-                text: text.into(),
+                text: "tied".into(),
                 reply_to: Some(root.clone()),
             });
-            ids.push(id);
         }
-        ids.sort();
 
         let replies = channel.store.replies_in_threads(&channel.id, &[root]).unwrap();
 
         let found: Vec<String> = replies.into_iter().map(|reply| reply.id).collect();
         assert_eq!(found, ids);
+    }
+
+    /// A reply deeper than a thread follows is in no thread: not in the
+    /// thread, not among its replies, and without a root, all alike.
+    #[test]
+    fn replies_past_the_deepest_a_thread_follows_are_in_no_thread() {
+        let mut channel = TestChannel::new();
+        let root = channel.post("first", None);
+        let mut chain = vec![root.clone()];
+        for _ in 0..=MAX_THREAD_DEPTH {
+            let parent = chain.last().unwrap().clone();
+            chain.push(channel.post("and then", Some(&parent)));
+        }
+        let deepest_kept = &chain[MAX_THREAD_DEPTH];
+        let too_deep = chain.last().unwrap();
+        let me = channel.author;
+
+        let thread: Vec<String> = channel
+            .store
+            .thread(&root, &me)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        let replies = channel
+            .store
+            .replies_in_threads(&channel.id, std::slice::from_ref(&root))
+            .unwrap();
+
+        assert_eq!(thread.len(), MAX_THREAD_DEPTH + 1);
+        assert!(thread.contains(deepest_kept) && !thread.contains(too_deep));
+        assert_eq!(replies.len(), MAX_THREAD_DEPTH);
+        assert_eq!(channel.store.thread_root(deepest_kept).unwrap(), Some(root));
+        assert_eq!(channel.store.thread_root(too_deep).unwrap(), None);
     }
 
     #[test]

@@ -1867,4 +1867,17 @@ async fn a_reply_loop_does_not_break_counts_the_inbox_or_links() {
     assert!(admin.inbox().unwrap().attention.is_empty());
     let linked = admin.linked_message(&first).unwrap().unwrap();
     assert_eq!(linked.thread_root, None);
+
+    admin.set_draft(&general, "half written").unwrap();
+    assert!(
+        admin
+            .send_message(&general, "a reply", Some(first.clone()))
+            .is_err(),
+        "there's no thread to reply in"
+    );
+    let drafts = admin.drafts().unwrap();
+    assert!(
+        drafts.iter().any(|draft| draft.text == "half written"),
+        "the draft stays"
+    );
 }
