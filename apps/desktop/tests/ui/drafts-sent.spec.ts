@@ -117,7 +117,7 @@ test("a draft untouched for more than a week is marked old", async ({ page }) =>
 test("with nothing written yet, each tab says so in one line", async ({ page }) => {
   await draftsAndSent(page).click();
   await expect(page.getByText("No drafts")).toBeVisible();
-  await expect(page.getByText("Anything you start typing and leave is kept here.")).toBeVisible();
+  await expect(page.getByText("Anything you start typing and leave is kept here, on this device only.")).toBeVisible();
 
   await page.getByRole("tab", { name: "Sent" }).click();
   await expect(page.getByText("Nothing sent yet")).toBeVisible();
@@ -293,6 +293,32 @@ test("alt and the arrows still move through the sidebar from Drafts & sent", asy
   await expect(page.getByRole("tab", { name: "Drafts" })).toBeFocused();
   await page.keyboard.press("Alt+ArrowDown");
   await expect(page.getByRole("main").locator("header").getByRole("heading")).not.toHaveText("Drafts & sent");
+});
+
+test("the Drafts tab says drafts stay on this device", async ({ page }) => {
+  await draftsAndSent(page).click();
+  await expect(page.getByRole("tabpanel")).toContainText("on this device");
+
+  await page.getByRole("button", { name: "random", exact: true }).click();
+  await page.getByLabel("Message #random").fill("half a thought");
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await draftsAndSent(page).click();
+  await expect(page.getByRole("list", { name: "Drafts" })).toBeVisible();
+  await expect(page.getByRole("tabpanel")).toContainText("Drafts stay on this device.");
+});
+
+test("a draft marks its channel in the sidebar without moving it", async ({ page }) => {
+  const nav = page.getByRole("navigation", { name: "Workspace" });
+  const general = nav.getByRole("button", { name: "general", exact: true });
+  const randomRow = nav.getByRole("button", { name: /^random\b/ });
+  const before = await Promise.all([general.boundingBox(), randomRow.boundingBox()]);
+
+  await page.getByLabel("Message #random").fill("half a thought");
+  await general.click();
+
+  await expect(nav.getByRole("button", { name: "random, draft" })).toBeVisible();
+  const after = await Promise.all([general.boundingBox(), randomRow.boundingBox()]);
+  expect(after.map((box) => box?.y)).toEqual(before.map((box) => box?.y));
 });
 
 test("day dividers line up with the rows they head, in Sent and in a channel", async ({ page }) => {

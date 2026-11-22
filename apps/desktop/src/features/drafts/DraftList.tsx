@@ -18,19 +18,23 @@ export function DraftList() {
   if (drafts.length === 0) {
     return (
       <EmptyState icon={<Pencil size={22} />} title="No drafts">
-        Anything you start typing and leave is kept here.
+        Anything you start typing and leave is kept here, on this device only.
       </EmptyState>
     );
   }
   return (
-    <ul aria-label="Drafts" className="flex flex-col gap-1">
-      {/* A row discarded with a key leaves at once; the exit reads this when it starts. */}
-      <AnimatePresence initial={false} custom={instantAfterAKey(tweens.base)}>
-        {drafts.map((draft) => (
-          <DraftRow key={draft.target} draft={draft} />
-        ))}
-      </AnimatePresence>
-    </ul>
+    <div className="flex flex-col gap-3">
+      <ul aria-label="Drafts" className="flex flex-col gap-1">
+        {/* A row discarded with a key leaves at once; the exit reads this when it starts. */}
+        <AnimatePresence initial={false} custom={instantAfterAKey(tweens.base)}>
+          {drafts.map((draft) => (
+            <DraftRow key={draft.target} draft={draft} />
+          ))}
+        </AnimatePresence>
+      </ul>
+      {/* Drafts never leave the device, so nobody else (nor the bucket) sees half-written text. */}
+      <p className="px-3 text-xs text-muted">Drafts stay on this device.</p>
+    </div>
   );
 }
 
