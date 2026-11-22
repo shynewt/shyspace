@@ -17,7 +17,7 @@ import { PAGE_LINK_PREFIX } from "./api";
 import { CALLOUTS, type CalloutKind, isCalloutKind, rehypeCallouts } from "./callouts";
 import { type CodeSegment, highlight } from "./codeHighlight";
 import { openExternalUrl } from "./contact";
-import { isCheapToFormat } from "./markdownBudget";
+import { isCheapToFormat, remarkSizeLimits, withPlainLineEnds } from "./markdownBudget";
 import { isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
 import { reportError } from "./toast";
 
@@ -67,8 +67,7 @@ export function ChatMarkdown({
   /** Draws a mention of a member, like a button opening their card; plain text without it. */
   renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
 }) {
-  if (!isCheapToFormat(text)) return <PlainText text={text} />;
-  const withTitles = text
+  const withTitles = withPlainLineEnds(text)
     .replace(PAGE_LINK_LINE, (line: string, id: string) => (pageTitle(id) === undefined ? line : ""))
     .replace(MESSAGE_LINK_LINE, "")
     .replace(BARE_PAGE_LINK, (_, id: string) => {
@@ -76,11 +75,13 @@ export function ChatMarkdown({
       return `[${title}](${PAGE_LINK_PREFIX}${id})`;
     })
     .replace(BARE_MESSAGE_LINK, (link: string) => `[a message](${link})`);
+  // Checked as the parser will see it, page titles included.
+  if (!isCheapToFormat(withTitles)) return <PlainText text={text} />;
   return (
     <ErrorBoundary key={text} fallback={<PlainText text={text} />}>
       <LinkContext.Provider value={{ myId, onOpenPage, onOpenMessage, renderMemberMention }}>
         <Markdown
-          remarkPlugins={[remarkGfm, remarkBreaks]}
+          remarkPlugins={[remarkGfm, remarkBreaks, remarkSizeLimits]}
           rehypePlugins={[rehypeCallouts]}
           skipHtml
           urlTransform={(url) =>
