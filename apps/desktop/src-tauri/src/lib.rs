@@ -801,6 +801,7 @@ pub fn run() {
             files::file_bytes,
             files::save_file,
             files::delete_file,
+            files::rename_file,
             files::files,
             files::profile_picture,
             files::set_profile_picture,

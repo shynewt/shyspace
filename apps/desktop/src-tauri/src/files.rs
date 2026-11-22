@@ -315,6 +315,11 @@ pub async fn delete_file(state: State<'_, AppState>, file: String) -> CommandRes
 }
 
 #[tauri::command]
+pub async fn rename_file(state: State<'_, AppState>, file: String, name: String) -> CommandResult<()> {
+    current(&state).await?.rename_file(&file, &name).map_err(failed)
+}
+
+#[tauri::command]
 pub async fn files(state: State<'_, AppState>) -> CommandResult<Vec<FileInfo>> {
     current(&state).await?.files().map_err(failed)
 }

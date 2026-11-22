@@ -375,3 +375,31 @@ test("file cards say what kind of file they are", async ({ page }) => {
   await expect(message.getByText("PDF", { exact: true })).toBeVisible();
   await expect(message.getByText("MD", { exact: true })).toBeVisible();
 });
+
+test("you can rename a file you shared; the name before the extension is selected", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.files.pickNext = [{ name: "IMG_4821.png", type: "image/png", bytes: [1, 2] }];
+  });
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Rename IMG_4821.png" }).click();
+  const dialog = page.getByRole("dialog", { name: "Rename file" });
+  const field = dialog.getByLabel("Name");
+  await expect(field).toBeFocused();
+  // Typing replaces only the selected part, keeping ".png".
+  await page.keyboard.type("Whiteboard");
+  await expect(field).toHaveValue("Whiteboard.png");
+  await dialog.getByRole("button", { name: "Rename" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("article").last().getByText("Whiteboard.png")).toBeVisible();
+});
+
+test("someone else's file has no rename", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "Minutes");
+    window.fake.files.receive(grace, message, { name: "minutes.md", type: "text/markdown", bytes: [35] });
+  });
+  await expect(page.getByRole("button", { name: "Save minutes.md" })).toBeAttached();
+  await expect(page.getByRole("button", { name: "Rename minutes.md" })).toHaveCount(0);
+});

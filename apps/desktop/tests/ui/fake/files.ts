@@ -81,6 +81,8 @@ export class FakeFiles {
         return true;
       case "delete_file":
         return this.delete(requireString(args, "file"));
+      case "rename_file":
+        return this.rename(requireString(args, "file"), requireString(args, "name"));
       case "files":
         return this.files.map((file) => this.present(file)).reverse();
       case "profile_picture":
@@ -178,12 +180,26 @@ export class FakeFiles {
       size: file.bytes.length,
       created_ms: Date.now(),
       can_delete: false,
+      can_rename: false,
       bytes: file.bytes,
     };
   }
 
   private present({ bytes: _bytes, ...file }: StoredFile): FileInfo {
-    return { ...file, can_delete: file.author === this.context.me() || this.context.isAdmin() };
+    return {
+      ...file,
+      can_delete: file.author === this.context.me() || this.context.isAdmin(),
+      can_rename: file.author === this.context.me(),
+    };
+  }
+
+  private rename(id: string, name: string): null {
+    const file = this.find(id);
+    if (file.author !== this.context.me()) throw new Error("only the person who shared a file can rename it");
+    if (!name.trim()) throw new Error("a file needs a name");
+    file.name = name.trim();
+    this.context.notify({ kind: "messages", channel: file.place });
+    return null;
   }
 
   private find(id: string): StoredFile {

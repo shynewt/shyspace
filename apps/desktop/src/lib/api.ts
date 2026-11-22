@@ -67,6 +67,8 @@ export type FileInfo = {
   size: number;
   created_ms: number;
   can_delete: boolean;
+  /** Whether you may rename it (you shared it). */
+  can_rename: boolean;
 };
 /** A file picked, dropped or pasted, waiting to be sent; the token is all the app can send. */
 export type StagedFile = { token: string; name: string; size: number; media_type: string };
@@ -320,6 +322,7 @@ export const api = {
   /** Asks where to save it, then saves; false if cancelled. */
   saveFile: (file: string) => invoke<boolean>("save_file", { file }),
   deleteFile: (file: string) => invoke<void>("delete_file", { file }),
+  renameFile: (file: string, name: string) => invoke<void>("rename_file", { file, name }),
   files: () => invoke<FileInfo[]>("files"),
   /** Empty if they have none. */
   profilePicture: async (member: string) => new Uint8Array(await invoke<ArrayBuffer>("profile_picture", { member })),
