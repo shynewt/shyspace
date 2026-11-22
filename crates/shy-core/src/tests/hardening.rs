@@ -6,6 +6,7 @@ use iroh::SecretKey;
 use super::support::*;
 use crate::{
     DataDir, KeyStorage, Networking, Workspace, crypto,
+    membership::commit::{self, FrozenAuthor},
     ops::{Envelope, Op, OpBody, now_ms},
     views::PresenceState,
 };
@@ -1678,4 +1679,43 @@ async fn an_oversized_recovery_snapshot_does_not_hold_up_membership() {
     let current = data_dir(&root.path().join("current"));
     let restored = Workspace::restore_with(&current, &kit, connector(&bucket), Networking::Offline).await;
     assert!(restored.is_ok(), "the next change uploaded a snapshot");
+}
+
+/// A removal in an admin's commit freezes the member's log at a sequence
+/// number. One past anything the store holds must not stop members from
+/// following commits: no op has such a number, so it freezes nothing more.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commit_freezing_a_log_past_any_stored_number_is_still_followed() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let from_epoch = carol.state().mls.epoch().unwrap();
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    let signed = bucket.commit(from_epoch).await.unwrap().unwrap();
+    let removal = commit::verify(&signed, from_epoch, &admin.me()).unwrap();
+    let frozen_past_any_number = vec![FrozenAuthor {
+        member: bob.me(),
+        last_seq: u64::MAX,
+    }];
+    let resigned = commit::sign(
+        &admin.inner.identity,
+        from_epoch,
+        removal.commit,
+        frozen_past_any_number,
+    )
+    .unwrap();
+    bucket.put_commit(from_epoch, resigned).await.unwrap();
+    let general = channel_id(&admin, "general");
+    admin.send_message(&general, "after the removal", None).unwrap();
+    // Not a full sync, which would put the original commit back.
+    admin.push().await.unwrap();
+
+    carol.sync().await;
+
+    assert_eq!(carol.status().error, None);
+    assert_eq!(
+        carol.state().mls.epoch().unwrap(),
+        admin.state().mls.epoch().unwrap()
+    );
+    assert!(texts_in(&carol, &general).contains(&"after the removal".to_string()));
 }

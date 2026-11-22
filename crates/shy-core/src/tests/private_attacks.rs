@@ -1032,6 +1032,41 @@ async fn a_grant_with_a_huge_generation_does_not_stall_its_author() {
     later_ops_still_arrive(&bob, &admin, poison, &mut forger).await;
 }
 
+/// Anyone can start a private channel, so a creation naming a member with
+/// an impossible position in their log is the easiest way in.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_creation_with_a_huge_number_does_not_stall_its_author() {
+    for is_key_first in [true, false] {
+        let (_root, _bucket, _admin, bob, carol, _dave) = four_members().await;
+        let key = new_channel_key();
+        let members = vec![Invitee {
+            member: carol.me(),
+            after_seq: u64::MAX,
+        }];
+        let channel = private_channel_id(&bob.me(), &commitment(&key), "plans", &members).unwrap();
+        let first = StoredKey {
+            channel: channel.clone(),
+            generation: 1,
+            key,
+        };
+        let creation = PrivateOp::Create {
+            name: "plans".into(),
+            commitment: commitment(&key),
+            members,
+        };
+        let mut forger = Forger::new(&bob);
+        let (earlier, later) = if is_key_first {
+            let grant = forger.seal(forged_grant(&bob, &carol, &channel, 1, key));
+            (grant, forger.seal_private(&first, creation))
+        } else {
+            let created = forger.seal_private(&first, creation);
+            (created, forger.seal(forged_grant(&bob, &carol, &channel, 1, key)))
+        };
+        carol.receive(earlier).unwrap();
+        later_ops_still_arrive(&bob, &carol, later, &mut forger).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_owner_op_with_a_huge_number_does_not_stall_its_author() {
     let (_root, _bucket, admin, bob, carol, dave) = four_members().await;

@@ -11,7 +11,7 @@ use tracing::warn;
 
 use super::{ApplyContext, Settling, Store};
 use crate::{
-    ops::{MAX_ID_CHARS, Op, RuleViolation, VerifiedOp},
+    ops::{MAX_ID_CHARS, MAX_STORED_NUMBER, Op, RuleViolation, VerifiedOp},
     pages::PageMerge,
     private::ids::is_private_id,
     views::Change,
@@ -79,6 +79,9 @@ impl Store {
         last_seq: u64,
         context: ApplyContext<'_>,
     ) -> Result<bool> {
+        // No op has a seq past what the store holds (receiving refuses
+        // them), so freezing past it means the same as freezing there.
+        let last_seq = last_seq.min(MAX_STORED_NUMBER);
         self.atomically(|store| {
             store.record_frozen_author(member, last_seq)?;
             let dropped = store.db.execute(
