@@ -218,7 +218,11 @@ export type Change =
   /** Someone started a huddle in a DM you're in; raised once, and only if the DM may alert you. */
   | { kind: "huddle_started"; channel: string; member: string; member_name: string }
   /** Someone in this device's huddle started or stopped speaking; your own member id for your voice. */
-  | { kind: "huddle_speaking"; member: string; speaking: boolean };
+  | { kind: "huddle_speaking"; member: string; speaking: boolean }
+  /** The microphones and speakers offered, or the choice among them, changed. */
+  | { kind: "huddle_devices" }
+  /** Whether huddles play join and leave sounds on this device changed. */
+  | { kind: "huddle_sounds" };
 
 /** Who is in a channel's huddle; you first when you're in it. */
 export type Huddle = { channel: string; participants: HuddleParticipant[]; is_full: boolean };
@@ -390,6 +394,9 @@ export const api = {
   setHuddleMuted: (muted: boolean) => invoke<void>("set_huddle_muted", { muted }),
   huddleDevices: () => invoke<AudioDevices>("huddle_devices"),
   setHuddleDevices: (choice: AudioDeviceChoice) => invoke<void>("set_huddle_devices", { choice }),
+  /** Whether huddles play join and leave sounds on this device. */
+  huddleSounds: () => invoke<boolean>("huddle_sounds"),
+  setHuddleSounds: (isOn: boolean) => invoke<void>("set_huddle_sounds", { isOn }),
 };
 
 /**

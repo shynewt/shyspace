@@ -45,3 +45,13 @@ pub async fn huddle_devices(state: State<'_, AppState>) -> CommandResult<Devices
 pub async fn set_huddle_devices(state: State<'_, AppState>, choice: DeviceChoice) -> CommandResult<()> {
     current(&state).await?.set_huddle_devices(choice).map_err(failed)
 }
+
+#[tauri::command]
+pub async fn huddle_sounds(state: State<'_, AppState>) -> CommandResult<bool> {
+    current(&state).await?.huddle_sounds().map_err(failed)
+}
+
+#[tauri::command]
+pub async fn set_huddle_sounds(state: State<'_, AppState>, is_on: bool) -> CommandResult<()> {
+    current(&state).await?.set_huddle_sounds(is_on).map_err(failed)
+}

@@ -62,6 +62,8 @@ export class FakeHuddles {
   readonly joinedMuted: boolean[] = [];
   /** The last `set_huddle_devices` choice. */
   chosenDevices: AudioDeviceChoice = { input: null, output: null };
+  /** Whether join and leave sounds are on, as `set_huddle_sounds` left it. */
+  soundsOn = true;
 
   constructor(context: HuddlesContext) {
     this.context = context;
@@ -174,6 +176,15 @@ export class FakeHuddles {
         const choice = argument(args, "choice");
         if (!isDeviceChoice(choice)) throw new Error("fake backend: missing device choice");
         this.chosenDevices = choice;
+        return null;
+      }
+      case "huddle_sounds":
+        return this.soundsOn;
+      case "set_huddle_sounds": {
+        const isOn = argument(args, "isOn");
+        if (typeof isOn !== "boolean") throw new Error("fake backend: missing sounds setting");
+        this.soundsOn = isOn;
+        this.context.notify({ kind: "huddle_sounds" });
         return null;
       }
       default:

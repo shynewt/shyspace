@@ -803,6 +803,8 @@ pub fn run() {
             huddles::set_huddle_muted,
             huddles::huddle_devices,
             huddles::set_huddle_devices,
+            huddles::huddle_sounds,
+            huddles::set_huddle_sounds,
             files::pick_files,
             files::stage_pasted_file,
             files::staged_file_bytes,
