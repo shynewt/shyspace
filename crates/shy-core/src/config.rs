@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 
-use crate::{storage::Store, transport::bucket::BucketConfig};
+use crate::{ops::rule_violation, storage::Store, transport::bucket::BucketConfig};
 
 pub(crate) const CONFIG_FILE: &str = "workspace.json";
 const BUCKET_META: &str = "bucket_config";
@@ -89,7 +89,22 @@ pub(crate) fn bucket_lamport(store: &Store) -> Result<u64> {
 }
 
 /// Applies new bucket settings unless newer ones (by lamport) are in place.
+/// Only the region and keys may change: the data stays at its endpoint and
+/// bucket, and settings members can't connect with would lock them out.
 pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) -> Result<bool> {
+    let current = current_bucket(store)?;
+    if bucket.endpoint != current.endpoint || bucket.bucket != current.bucket {
+        return Err(rule_violation(
+            "storage settings that move the workspace elsewhere",
+        ));
+    }
+    let is_filled = |value: &str| !value.trim().is_empty();
+    if !is_filled(&bucket.region)
+        || !is_filled(&bucket.access_key_id)
+        || !is_filled(&bucket.secret_access_key)
+    {
+        return Err(rule_violation("storage settings without a region or keys"));
+    }
     if lamport <= bucket_lamport(store)? {
         return Ok(false);
     }

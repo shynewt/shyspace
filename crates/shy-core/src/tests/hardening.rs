@@ -1719,3 +1719,36 @@ async fn a_commit_freezing_a_log_past_any_stored_number_is_still_followed() {
     );
     assert!(texts_in(&carol, &general).contains(&"after the removal".to_string()));
 }
+
+/// Storage settings may change the region and keys, never the endpoint or
+/// bucket (the data lives there), so a bad or hostile admin op can't point
+/// members somewhere they then fail to open the workspace from.
+#[tokio::test(flavor = "multi_thread")]
+async fn storage_settings_cannot_move_the_workspace_or_empty_the_keys() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let current = admin.bucket_config().unwrap();
+    let mut forger = Forger::new(&admin);
+    let changed = |change: fn(&mut crate::transport::bucket::BucketConfig)| {
+        let mut bucket = current.clone();
+        change(&mut bucket);
+        bucket
+    };
+    let refused = [
+        changed(|bucket| bucket.endpoint = "http://198.51.100.7:9000".into()),
+        changed(|bucket| bucket.endpoint = "not a url at all".into()),
+        changed(|bucket| bucket.bucket = "somewhere-else".into()),
+        changed(|bucket| bucket.access_key_id = String::new()),
+        changed(|bucket| bucket.region = " ".into()),
+    ];
+    for bucket in refused {
+        bob.receive(forger.seal(Op::StorageSettings { bucket })).unwrap();
+        assert_eq!(bob.bucket_config().unwrap(), current);
+    }
+
+    let rotated = changed(|bucket| bucket.secret_access_key = "rotated-secret".into());
+    bob.receive(forger.seal(Op::StorageSettings {
+        bucket: rotated.clone(),
+    }))
+    .unwrap();
+    assert_eq!(bob.bucket_config().unwrap(), rotated);
+}
