@@ -481,8 +481,10 @@ async fn read_blob_into(
     }
     // Every piece was read and checked; a cache that can't be tidied right
     // now is only worth a warning, as after an upload.
-    if let Err(error) = cache.touch(&cached).and_then(|()| cache.trim(&cached)) {
-        warn!("couldn't tidy the file cache: {error:#}");
+    for tidied in [cache.touch(&cached), cache.trim(&cached)] {
+        if let Err(error) = tidied {
+            warn!("couldn't tidy the file cache: {error:#}");
+        }
     }
     Ok(())
 }

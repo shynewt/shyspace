@@ -316,10 +316,11 @@ pub fn clean_display_name(raw: &str) -> String {
 }
 
 /// A page title from someone else, as every device shows it: like a name,
-/// without line breaks or invisible characters, cut short.
+/// without line breaks or invisible characters, cut short. The zero-width
+/// non-joiner stays: Persian spelling needs it, and it can't reorder text.
 pub fn clean_page_title(raw: &str) -> String {
     raw.chars()
-        .filter(|c| is_visible_in_name(*c))
+        .filter(|c| is_visible_in_name(*c) || *c == '\u{200C}')
         .take(MAX_PAGE_TITLE_CHARS)
         .collect()
 }

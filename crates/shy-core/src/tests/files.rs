@@ -335,6 +335,37 @@ async fn writes_that_belong_together_are_kept_all_or_nothing() {
     );
 }
 
+/// A private channel's files and their message are sealed and stored
+/// together: when the message is refused (it replies outside the channel),
+/// the files already sealed in the same batch go too, and their pieces
+/// leave the bucket.
+#[tokio::test(flavor = "multi_thread")]
+async fn files_whose_message_is_refused_are_not_shared_alone() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&bob, "general");
+    let public_message = bob.send_message(&general, "out here", None).unwrap();
+    let plans = bob.create_private_channel("plans", &[carol.my_id()]).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    let next_before = bob.state().store.next_seq(&bob.me()).unwrap();
+
+    let sent = bob
+        .send_files(
+            &plans,
+            "",
+            Some(public_message),
+            vec![bytes_file("a.txt", b"first"), bytes_file("b.txt", b"second")],
+        )
+        .await;
+    sync_all(&[&admin, &bob, &carol]).await;
+
+    assert!(sent.is_err());
+    assert_eq!(bob.state().store.next_seq(&bob.me()).unwrap(), next_before);
+    assert!(bob.files().unwrap().is_empty() && carol.files().unwrap().is_empty());
+    assert!(bucket.blob_ids(&bob.me()).await.unwrap().is_empty());
+}
+
 /// Tidying the cache is housekeeping: a file whose every piece was read and
 /// checked opens even if some old cache folder can't be read.
 #[cfg(unix)]

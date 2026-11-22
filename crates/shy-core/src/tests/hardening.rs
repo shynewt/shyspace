@@ -1831,4 +1831,10 @@ async fn page_titles_from_others_lose_line_breaks_and_invisible_characters() {
         "your own app refuses it"
     );
     assert!(bob.rename_page(&page, "Roadmap 🗺️").is_ok());
+    // The zero-width non-joiner is part of Persian spelling.
+    let persian = "می\u{200C}خواهم";
+    assert!(bob.rename_page(&page, persian).is_ok());
+    bob.sync().await;
+    admin.sync().await;
+    assert_eq!(admin.pages().unwrap()[0].title, persian);
 }
