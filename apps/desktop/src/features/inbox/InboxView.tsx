@@ -1,7 +1,7 @@
-import { AtSign, CheckCheck, Inbox as InboxIcon, MessageSquareReply, Pencil } from "lucide-react";
+import { AtSign, CheckCheck, Inbox as InboxIcon, MessageSquareReply } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo, useState } from "react";
-import { api, type Channel, type Draft, type InboxItem } from "../../lib/api";
+import { api, type Channel, type InboxItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
 import { displayName } from "../../lib/people";
 import { reportError } from "../../lib/toast";
@@ -17,12 +17,11 @@ import { MarkAllReadDialog } from "./MarkAllReadDialog";
 export function InboxView() {
   const loadInbox = useCallback(() => api.inbox(), []);
   const inbox = useLive(loadInbox, (change) => change.kind === "messages" || change.kind === "channels");
-  const drafts = useLive(api.drafts, (change) => change.kind === "drafts") ?? [];
   const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
   // Like the sidebar: a muted channel needs you only when it mentions you.
   const unreadChannels =
     inbox?.channels.filter((channel) => channel.notify !== "nothing" || channel.unread_mentions > 0) ?? [];
-  const isEmpty = inbox && inbox.attention.length === 0 && unreadChannels.length === 0 && drafts.length === 0;
+  const isEmpty = inbox && inbox.attention.length === 0 && unreadChannels.length === 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -53,18 +52,6 @@ export function InboxView() {
                 <AnimatePresence initial={false}>
                   {inbox.attention.map((item) => (
                     <AttentionRow key={item.message.id} item={item} />
-                  ))}
-                </AnimatePresence>
-              </ul>
-            </section>
-          )}
-          {drafts.length > 0 && (
-            <section aria-label="Drafts" className="mb-6">
-              <SectionLabel>Drafts</SectionLabel>
-              <ul className="flex flex-col gap-1">
-                <AnimatePresence initial={false}>
-                  {drafts.map((draft) => (
-                    <DraftRow key={draft.target} draft={draft} />
                   ))}
                 </AnimatePresence>
               </ul>
@@ -113,32 +100,6 @@ function AttentionRow({ item }: { item: InboxItem }) {
         }
       >
         {plainPreview(message.text, (id) => titles.get(id))}
-      </ListRow>
-    </motion.li>
-  );
-}
-
-function DraftRow({ draft }: { draft: Draft }) {
-  const { navigate, pages } = useWorkspace();
-  const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
-  const isThread = draft.target !== draft.channel;
-  return (
-    <motion.li
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, height: 0, transition: tweens.base }}
-    >
-      <ListRow
-        onClick={() => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined })}
-        leading={<Pencil size={15} className="mt-0.5 text-decorative" />}
-        meta={
-          <span>
-            {isThread ? "Reply in a thread in" : "In"}{" "}
-            <ChannelName channelId={draft.channel} className="font-semibold text-ink" />
-          </span>
-        }
-      >
-        {plainPreview(draft.text, (id) => titles.get(id))}
       </ListRow>
     </motion.li>
   );

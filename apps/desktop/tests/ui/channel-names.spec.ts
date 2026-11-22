@@ -30,15 +30,15 @@ test("the inbox shows where a mention was, lock and all", async ({ page }) => {
   await expect(row).not.toContainText("#ops");
 });
 
-test("an inbox draft in a DM is named after the person", async ({ page }) => {
+test("a draft in a DM is named after the person", async ({ page }) => {
   await page.evaluate(() => {
     const dm = window.fake.handle("open_dm", { members: [window.fake.addMember("Grace")] });
     if (typeof dm === "string") window.fake.handle("set_draft", { target: dm, text: "half written" });
   });
-  await page.keyboard.press("Control+Shift+A");
+  await page.getByRole("button", { name: "Drafts & sent, 1 draft" }).click();
 
-  const row = page.getByRole("button", { name: /half written/ });
-  await expect(row).toContainText("In");
+  const row = page.getByRole("list", { name: "Drafts" }).getByRole("button", { name: /half written/ });
+  await expect(row).not.toContainText("Thread in");
   await expect(row.getByText("Grace", { exact: true })).toBeVisible();
   await expect(row).not.toContainText("#");
 });
