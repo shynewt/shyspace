@@ -235,3 +235,29 @@ async fn only_small_png_jpeg_or_webp_pictures_are_shared() {
     let huge = [b"\x89PNG\r\n\x1a\n".as_slice(), &vec![0; 600 * 1024]].concat();
     assert!(admin.set_profile_picture(Some(huge)).await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_sent_without_a_caption_alerts_with_its_name() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mut changes = admin.subscribe();
+    bob.send_files(&general, "", None, vec![bytes_file("q3.pdf", b"numbers")])
+        .await
+        .unwrap();
+    bob.send_files(
+        &general,
+        "",
+        None,
+        vec![bytes_file("a", b"1"), bytes_file("b", b"2")],
+    )
+    .await
+    .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let mut previews = Vec::new();
+    while let Ok(change) = changes.try_recv() {
+        if let crate::views::Change::Alert { preview, .. } = change {
+            previews.push(preview);
+        }
+    }
+    assert_eq!(previews, ["Shared q3.pdf", "Shared 2 files"]);
+}

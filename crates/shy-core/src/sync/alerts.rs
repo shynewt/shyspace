@@ -56,13 +56,24 @@ impl Workspace {
             .find(|member| member.id == author)
             .map(|member| member.name)
             .unwrap_or_default();
-        let preview: String = with_plain_mentions(text)
+        let mut preview: String = with_plain_mentions(text)
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
             .chars()
             .take(PREVIEW_CHARS)
             .collect();
+        if preview.is_empty() {
+            // Files go out before their message, so they are here already.
+            preview = match state.store.files_of_message(id, channel)?.as_slice() {
+                [] => preview,
+                [file] => format!("Shared {}", file.name)
+                    .chars()
+                    .take(PREVIEW_CHARS)
+                    .collect(),
+                files => format!("Shared {} files", files.len()),
+            };
+        }
         Ok(Some(Change::Alert {
             channel: channel.clone(),
             channel_name,

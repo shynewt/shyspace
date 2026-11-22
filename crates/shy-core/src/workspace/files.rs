@@ -129,8 +129,17 @@ impl Workspace {
                 blob,
             });
         }
-        for file in shared {
-            self.write(Op::File { file })?;
+        let mut unwritten = shared.into_iter();
+        while let Some(file) = unwritten.next() {
+            let blob_id = file.blob.id.clone();
+            if let Err(error) = self.write(Op::File { file }) {
+                let cache = self.file_cache();
+                self.abandon_blob(&cache, &blob_id).await;
+                for rest in unwritten {
+                    self.abandon_blob(&cache, &rest.blob.id).await;
+                }
+                return Err(error);
+            }
         }
         self.post_message(channel, &message, caption, reply_to)?;
         Ok(message)
@@ -159,7 +168,25 @@ impl Workspace {
         })
         .await
         .context("encrypting the file")??;
+        if let Err(error) = self.put_blob(&cache, &blob, size, progress).await {
+            self.abandon_blob(&cache, &blob.id).await;
+            return Err(error);
+        }
+        cache.trim(&BlobKey::new(&me, &blob.id)?)?;
+        Ok(blob)
+    }
+
+    /// Uploads a sealed blob's pieces from the cache, retrying each a few
+    /// times.
+    async fn put_blob(
+        &self,
+        cache: &BlobCache,
+        blob: &BlobRef,
+        size: u64,
+        progress: impl Fn(u64),
+    ) -> Result<()> {
         let bucket = self.bucket();
+        let me = self.me();
         let cached = BlobKey::new(&me, &blob.id)?;
         for index in 0..blob.chunk_count() {
             let sealed = cache
@@ -174,10 +201,7 @@ impl Workspace {
                         tokio::time::sleep(Duration::from_secs(u64::from(attempt))).await;
                         attempt += 1;
                     }
-                    Err(error) => {
-                        self.abandon_blob(&cache, &blob.id).await;
-                        return Err(error.context("uploading the file"));
-                    }
+                    Err(error) => return Err(error.context("uploading the file")),
                 }
             }
             progress(
@@ -186,7 +210,7 @@ impl Workspace {
                     .min(size),
             );
         }
-        Ok(blob)
+        Ok(())
     }
 
     async fn abandon_uploads(&self, shared: &[SharedFile]) {
@@ -225,7 +249,9 @@ impl Workspace {
     /// every piece has arrived and checked out.
     pub async fn save_file(&self, file: &str, destination: &Path) -> Result<()> {
         let stored = self.stored_file(file)?;
-        let partial = destination.with_extension("shyspace-partial");
+        let mut partial_name = destination.as_os_str().to_owned();
+        partial_name.push(".shyspace-partial");
+        let partial = PathBuf::from(partial_name);
         let mut output =
             std::fs::File::create(&partial).with_context(|| format!("writing {}", partial.display()))?;
         let result = self.read_blob(&self.file_cache(), &stored, &mut output).await;
@@ -369,7 +395,13 @@ fn seal_into(
             Some(cached) => cached,
             None => started.insert(BlobKey::new(me, blob_id)?),
         };
-        cache.write_chunk(cached, index, piece)
+        cache.write_chunk(cached, index, piece)?;
+        if index == 0 {
+            // So trimming, which goes by last use, never takes a blob
+            // that is still being written.
+            cache.touch(cached)?;
+        }
+        Ok(())
     });
     if sealed.is_err()
         && let Some(cached) = started

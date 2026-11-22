@@ -451,3 +451,51 @@ async fn pictures_settle_on_the_newest_in_any_order_and_applied_twice() {
     admin.sync().await;
     assert_eq!(admin.profile_picture(&bob.me()).await.unwrap(), Some(second));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_damaged_cached_piece_is_fetched_again() {
+    let (root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    admin
+        .send_files(&general, "", None, vec![bytes_file(b"the real plan")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let file = bob.files().unwrap()[0].id.clone();
+    assert_eq!(bob.file_bytes(&file).await.unwrap(), b"the real plan");
+
+    let blob = bob.state().store.file(&file).unwrap().unwrap().blob;
+    let piece = root
+        .path()
+        .join("bob")
+        .join("file-cache")
+        .join(format!("{}-{}", admin.my_id(), blob.id))
+        .join("0");
+    std::fs::write(&piece, b"damaged on disk").unwrap();
+    assert_eq!(bob.file_bytes(&file).await.unwrap(), b"the real plan");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_id_used_twice_keeps_the_first_file_even_when_replayed() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let id = new_owned_id(&bob.me());
+    let Op::File { file: mut first } = forged_file(&bob, &bucket, id.clone(), &general).await else {
+        unreachable!()
+    };
+    first.name = "first.txt".into();
+    let mut second = first.clone();
+    second.name = "second.txt".into();
+    let mut forger = Forger::new(&bob);
+    let envelopes = [
+        forger.seal(Op::File { file: first }),
+        forger.seal(Op::File { file: second }),
+    ];
+    for envelope in envelopes.iter().chain(envelopes.iter()) {
+        admin.receive(envelope.clone()).unwrap();
+    }
+    admin.sync().await;
+    let shown = admin.files().unwrap();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].name, "first.txt");
+}
