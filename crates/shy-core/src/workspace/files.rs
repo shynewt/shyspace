@@ -172,7 +172,11 @@ impl Workspace {
             self.abandon_blob(&cache, &blob.id).await;
             return Err(error);
         }
-        cache.trim(&BlobKey::new(&me, &blob.id)?)?;
+        // The upload worked; a cache that can't shrink right now is only worth a warning.
+        let trimmed = BlobKey::new(&me, &blob.id).and_then(|key| cache.trim(&key));
+        if let Err(error) = trimmed {
+            warn!("couldn't trim the file cache: {error:#}");
+        }
         Ok(blob)
     }
 
@@ -327,7 +331,13 @@ impl Workspace {
             }
             None => None,
         };
-        self.write(Op::ProfilePicture { picture })?;
+        let blob_id = picture.as_ref().map(|picture| picture.id.clone());
+        if let Err(error) = self.write(Op::ProfilePicture { picture }) {
+            if let Some(blob_id) = blob_id {
+                self.abandon_blob(&self.picture_cache(), &blob_id).await;
+            }
+            return Err(error);
+        }
         self.inner.wake.notify_one();
         Ok(())
     }
