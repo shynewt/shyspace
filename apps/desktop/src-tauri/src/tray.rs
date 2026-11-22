@@ -8,7 +8,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-const MAIN_WINDOW: &str = "main";
+pub const MAIN_WINDOW: &str = "main";
 
 /// Whether the tray icon exists. On Linux it needs the system's
 /// appindicator library; without it, closing the window must quit, or the

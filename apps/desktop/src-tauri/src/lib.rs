@@ -4,6 +4,7 @@
 mod alerts;
 mod files;
 mod tray;
+mod window;
 
 use std::path::PathBuf;
 
@@ -772,6 +773,7 @@ pub fn run() {
                 workspace: Mutex::new(None),
                 joining: std::sync::Mutex::new(None),
             });
+            window::create_main_window(app.handle())?;
             alerts::follow_clicks(app.handle())?;
             let has_tray = tray::try_install(app.handle());
             app.manage(tray::HasTray(has_tray));
