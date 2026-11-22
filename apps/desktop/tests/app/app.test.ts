@@ -18,17 +18,15 @@ async function createWorkspace(app: Browser) {
   await app.$("aria/Message #general").waitForDisplayed(TIMEOUT);
 }
 
-/** The full invite code on screen, however the page truncates it visually. */
+/**
+ * The invite code, read from its own box (the one its Copy button copies),
+ * not from the page's text, where it runs into the words beside it.
+ */
 async function waitForInviteCode(app: Browser): Promise<string> {
-  let code: string | undefined;
-  await app.waitUntil(
-    async () => {
-      code = await app.execute(() => document.body.textContent?.match(/shy2_[A-Za-z0-9_-]{40,}/)?.[0]);
-      return Boolean(code);
-    },
-    { timeout: TIMEOUT.timeout, timeoutMsg: "no invite code appeared" },
-  );
-  if (!code) throw new Error("no invite code appeared");
+  const field = app.$("pre*=shy2_");
+  await field.waitForDisplayed(TIMEOUT);
+  const code = (await field.getText()).replace(/\s+/g, "");
+  if (!/^shy2_[A-Za-z0-9_-]{40,}$/.test(code)) throw new Error(`not an invite code: ${code.slice(0, 20)}…`);
   return code;
 }
 
@@ -46,7 +44,8 @@ test("a new workspace keeps its messages after the app restarts", () =>
     });
     await withApp(dataDir, async (app) => {
       await app.$("aria/Message #general").waitForDisplayed(TIMEOUT);
-      assert.ok(await app.$("article*=Written before the restart").isDisplayed());
+      // Messages load after the message box appears; wait rather than look once.
+      await app.$("article*=Written before the restart").waitForDisplayed(TIMEOUT);
     });
   }));
 
