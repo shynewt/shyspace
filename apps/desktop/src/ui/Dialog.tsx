@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Dialog as RadixDialog } from "radix-ui";
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { cx } from "./cx";
 import { IconButton } from "./IconButton";
 import { fade, pop } from "./motion";
@@ -52,6 +52,7 @@ export function Dialog({
   children,
 }: DialogProps) {
   const isInstant = entrance === "instant";
+  const opener = useRef<HTMLElement | null>(null);
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <AnimatePresence>
@@ -69,14 +70,18 @@ export function Dialog({
               <RadixDialog.Content
                 asChild
                 onOpenAutoFocus={(event) => {
+                  opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
                   if (initialFocus !== "dialog") return;
                   event.preventDefault();
                   if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
                 }}
                 onCloseAutoFocus={(event) => {
-                  if (!returnFocusTo?.isConnected) return;
+                  // Radix only returns focus to its own Trigger, which these
+                  // dialogs, opened from state, don't use.
                   event.preventDefault();
-                  returnFocusTo.focus();
+                  if (hasFocusOutside(event.currentTarget)) return;
+                  const target = returnFocusTo?.isConnected ? returnFocusTo : opener.current;
+                  if (target?.isConnected) target.focus();
                 }}
               >
                 <motion.div
@@ -122,4 +127,11 @@ export function Dialog({
 /** The buttons at the foot of a dialog, the main one last. */
 export function DialogActions({ children }: { children: ReactNode }) {
   return <div className="flex justify-end gap-2">{children}</div>;
+}
+
+/** Something the dialog's action focused on its way out (a message box, a message) keeps focus. */
+function hasFocusOutside(dialog: EventTarget | null): boolean {
+  const focused = document.activeElement;
+  if (!focused || focused === document.body) return false;
+  return !(dialog instanceof Node && dialog.contains(focused));
 }

@@ -73,3 +73,14 @@ test("the shortcuts list renders without warnings, even for a repeated key", asy
   await expect(dialog.getByRole("listitem").filter({ hasText: "Link to another page" })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("closing a dialog puts focus back on the button that opened it", async ({ page }) => {
+  await page.goto("");
+  const opener = page.getByRole("button", { name: "Message someone privately" });
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
