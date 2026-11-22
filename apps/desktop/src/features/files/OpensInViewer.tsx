@@ -1,9 +1,10 @@
 import { type ReactNode, useState } from "react";
 import type { FileInfo } from "../../lib/api";
 import type { LoadedImage } from "../../lib/files";
+import { mayPreviewAsPdf } from "../../lib/pdfPreview";
 import { mayPreviewAsText } from "../../lib/textPreview";
 import { cx } from "../../ui";
-import { ImageViewer, TextViewer } from "./FileViewer";
+import { ImageViewer, PdfViewer, TextViewer } from "./FileViewer";
 
 /** A file's summary that opens the file in the viewer on a click, when the app can show it. */
 export function OpensInViewer({
@@ -19,7 +20,8 @@ export function OpensInViewer({
 }) {
   const [isOpen, setOpen] = useState(false);
   const isImage = image.status === "shown";
-  if (!isImage && !mayPreviewAsText(file)) return <div className={className}>{children}</div>;
+  const isPdf = !isImage && mayPreviewAsPdf(file);
+  if (!isImage && !isPdf && !mayPreviewAsText(file)) return <div className={className}>{children}</div>;
   return (
     <>
       <button
@@ -32,6 +34,8 @@ export function OpensInViewer({
       </button>
       {image.status === "shown" ? (
         <ImageViewer file={file} url={image.url} open={isOpen} onOpenChange={setOpen} />
+      ) : isPdf ? (
+        <PdfViewer file={file} open={isOpen} onOpenChange={setOpen} />
       ) : (
         <TextViewer file={file} open={isOpen} onOpenChange={setOpen} />
       )}

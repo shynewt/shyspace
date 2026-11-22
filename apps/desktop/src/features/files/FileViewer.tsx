@@ -4,11 +4,13 @@ import { api, type FileInfo } from "../../lib/api";
 import { copyImage } from "../../lib/copyImage";
 import { formatSize } from "../../lib/files";
 import { ChatMarkdown } from "../../lib/markdown";
+import { looksLikePdf } from "../../lib/pdfPreview";
 import { decodeText, isMarkdownFile } from "../../lib/textPreview";
 import { reportError, showToast } from "../../lib/toast";
 import { linkedMessageView, useWorkspace, type View } from "../../lib/workspace";
 import { ContextMenu, Dialog, type MenuAction } from "../../ui";
 import { FileActions } from "./FileActions";
+import { PdfPages } from "./PdfPages";
 
 /** A file shown large over the app: its name, size and actions, then its content. */
 function FileViewer({
@@ -157,6 +159,46 @@ export function TextViewer({
               {loaded.text}
             </pre>
           ))}
+      </div>
+    </FileViewer>
+  );
+}
+
+type LoadedPdf = { status: "loading" } | { status: "shown"; bytes: Uint8Array } | { status: "not-pdf" | "failed" };
+
+/** A PDF, read when opened and drawn page by page. */
+export function PdfViewer({
+  file,
+  open,
+  onOpenChange,
+}: {
+  file: FileInfo;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [loaded, setLoaded] = useState<LoadedPdf>({ status: "loading" });
+  useEffect(() => {
+    if (!open) return;
+    let isCurrent = true;
+    setLoaded({ status: "loading" });
+    api.fileBytes(file.id).then(
+      (bytes) => isCurrent && setLoaded(looksLikePdf(bytes) ? { status: "shown", bytes } : { status: "not-pdf" }),
+      () => isCurrent && setLoaded({ status: "failed" }),
+    );
+    return () => {
+      isCurrent = false;
+    };
+  }, [open, file.id]);
+
+  return (
+    <FileViewer file={file} open={open} onOpenChange={onOpenChange}>
+      <div className="max-h-[78dvh] overflow-auto bg-surface-2 p-4">
+        {loaded.status === "loading" && <p className="text-sm text-muted">Opening…</p>}
+        {loaded.status === "failed" && <p className="text-sm text-danger-text">This file couldn't be opened.</p>}
+        {loaded.status === "not-pdf" && (
+          <p className="text-sm text-muted">This isn't a PDF. Save it to open it with another app.</p>
+        )}
+        {loaded.status === "shown" && <PdfPages bytes={loaded.bytes} name={file.name} />}
       </div>
     </FileViewer>
   );

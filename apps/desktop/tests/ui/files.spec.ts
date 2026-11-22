@@ -403,3 +403,66 @@ test("someone else's file has no rename", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Save minutes.md" })).toBeAttached();
   await expect(page.getByRole("button", { name: "Rename minutes.md" })).toHaveCount(0);
 });
+
+/** A small, valid PDF with `pages` pages, each saying its number. */
+function pdfWithPages(pages: number): number[] {
+  const objects: string[] = [];
+  const pageIds = Array.from({ length: pages }, (_, index) => 4 + index * 2);
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  objects[2] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages} >>`;
+  objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+  for (const [index, id] of pageIds.entries()) {
+    const content = `BT /F1 48 Tf 72 700 Td (Page ${index + 1}) Tj ET`;
+    objects[id] =
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${id + 1} 0 R >>`;
+    objects[id + 1] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+  }
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (let id = 1; id < objects.length; id++) {
+    offsets[id] = pdf.length;
+    pdf += `${id} 0 obj\n${objects[id]}\nendobj\n`;
+  }
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for (let id = 1; id < objects.length; id++) pdf += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Array.from(new TextEncoder().encode(pdf));
+}
+
+test("a PDF opens drawn page by page", async ({ page }) => {
+  await page.evaluate((bytes) => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "The contract");
+    window.fake.files.receive(grace, message, { name: "contract.pdf", type: "application/pdf", bytes });
+  }, pdfWithPages(2));
+  await page.getByRole("button", { name: "View contract.pdf" }).click();
+  const viewer = page.getByRole("dialog", { name: "contract.pdf" });
+  await expect(viewer.getByRole("img", { name: "Page 1 of contract.pdf" })).toBeVisible();
+  await expect(viewer.getByRole("img", { name: "Page 2 of contract.pdf" })).toBeAttached();
+  const box = await viewer.getByRole("img", { name: "Page 1 of contract.pdf" }).boundingBox();
+  expect(box?.height).toBeGreaterThan(300);
+  await expect(viewer.getByText("couldn't be shown")).toHaveCount(0);
+});
+
+test("a long PDF shows its first 30 pages and says so", async ({ page }) => {
+  await page.evaluate((bytes) => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "The manual");
+    window.fake.files.receive(grace, message, { name: "manual.pdf", type: "application/pdf", bytes });
+  }, pdfWithPages(31));
+  await page.getByRole("button", { name: "View manual.pdf" }).click();
+  const viewer = page.getByRole("dialog", { name: "manual.pdf" });
+  await expect(viewer.getByText("Showing the first 30 of 31 pages.")).toBeVisible({ timeout: 20_000 });
+  await expect(viewer.getByRole("img", { name: /^Page \d+ of manual\.pdf$/ })).toHaveCount(30);
+});
+
+test("a file named like a PDF that isn't one says so", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "Fake");
+    window.fake.files.receive(grace, message, { name: "fake.pdf", type: "application/pdf", bytes: [60, 104, 116] });
+  });
+  await page.getByRole("button", { name: "View fake.pdf" }).click();
+  await expect(page.getByText("This isn't a PDF.")).toBeVisible();
+});

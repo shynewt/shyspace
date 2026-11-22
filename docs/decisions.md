@@ -95,3 +95,7 @@ A file's key travels in the op that shares it, in a channel or DM, so whoever ca
 
 ## File pieces: separate bucket objects, fetched on demand (2026-11)
 A file is encrypted with its own key in 4 MiB pieces (STREAM over XChaCha20-Poly1305, `aead-stream`), and each piece is its own object under `files/<author>/<blob>/`. S3 multipart was rejected: a 150 MB object breaks the 32 MB bound readers keep, parts must be at least 5 MiB, and abandoned uploads cost money silently. Separate objects give retries and resuming with plain PUT and GET. The signed op holds a hash of every piece, since every member holds the bucket keys and every reader holds the file key. Files aren't copied to every device like ops; the bucket is their durable copy, and devices cache the pieces they opened.
+
+## PDF previews with pdf.js, drawn as pictures (2026-11)
+WebKitGTK can't show PDFs and macOS's engine can, so a native path would leave Linux without previews. PDFium (Chrome's renderer) is native C++ parsing hostile files inside the app's process with no sandbox; MuPDF and Poppler are AGPL and GPL; pure-Rust readers aren't mature enough yet. pdf.js runs as JavaScript inside the engine's sandbox, in a worker, on both systems, and only loads when someone opens a PDF (about 1.7 MB). We draw pages onto canvases with forms and WebAssembly off and never draw links, so a PDF can only be looked at; for anything more, Save opens it in the system's viewer.
+
