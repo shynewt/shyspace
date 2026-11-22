@@ -3,6 +3,7 @@ import { type ReactNode, useState } from "react";
 import { showToast } from "../lib/toast";
 import {
   Avatar,
+  AvatarStack,
   Badge,
   Button,
   Card,
@@ -19,6 +20,7 @@ import {
   Field,
   FormError,
   IconButton,
+  InlineNotice,
   Input,
   Kbd,
   ListRow,
@@ -31,6 +33,7 @@ import {
   SegmentedControl,
   Select,
   Spinner,
+  Switch,
   TextArea,
   Tooltip,
 } from "../ui";
@@ -40,6 +43,8 @@ export default function Gallery() {
   const [isDialogOpen, setDialogOpen] = useState(false);
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [segment, setSegment] = useState<"one" | "two" | "three">("one");
+  const [isSwitchOn, setSwitchOn] = useState(true);
+  const [isSpeaking, setSpeaking] = useState(true);
   return (
     <div className="h-full overflow-y-auto bg-surface">
       <div className="mx-auto flex max-w-[860px] flex-col gap-8 px-8 py-10">
@@ -91,6 +96,7 @@ export default function Gallery() {
         </Example>
 
         <Example title="Selection">
+          <Switch label="An on/off setting" checked={isSwitchOn} onChange={setSwitchOn} />
           <SegmentedControl
             label="Example choice"
             options={[
@@ -151,6 +157,15 @@ export default function Gallery() {
         <Example title="Content">
           <Avatar id="a" name="Ada Lovelace" />
           <Avatar id="b" name="Claude" isBot />
+          <button type="button" aria-label="Toggle speaking" onClick={() => setSpeaking(!isSpeaking)}>
+            <Avatar id="c" name="Grace Hopper" isSpeaking={isSpeaking} />
+          </button>
+          <AvatarStack
+            avatars={["Ada Lovelace", "Grace Hopper", "Linus", "Mia", "Sam"].map((name) => ({
+              key: name,
+              avatar: <Avatar id={name} name={name} size={18} />,
+            }))}
+          />
           <Badge tone="accent">Agent</Badge>
           <Badge>neutral</Badge>
           <Badge tone="warning">warning</Badge>
@@ -201,6 +216,12 @@ export default function Gallery() {
             <Notice tone="danger" title="Your storage can lose data">
               <p>Dangers are for problems that put data at risk.</p>
             </Notice>
+            <div className="flex w-64 flex-col gap-2">
+              <InlineNotice tone="warning" action={{ label: "Choose another microphone", onClick: () => {} }}>
+                Inline notices fit narrow places, with one fix.
+              </InlineNotice>
+              <InlineNotice tone="danger">Or none, when the fix is outside the app.</InlineNotice>
+            </div>
           </div>
         </Example>
 
