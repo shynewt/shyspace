@@ -1,7 +1,18 @@
 //! Restoring a lost admin from their recovery kit.
 
 use super::support::*;
-use crate::{Networking, Workspace};
+use crate::{
+    Networking, Workspace,
+    workspace::{FileSource, NewFile},
+};
+
+fn bytes_file(name: &str, content: &[u8]) -> NewFile {
+    NewFile {
+        name: name.into(),
+        media_type: "application/octet-stream".into(),
+        source: FileSource::Bytes(content.to_vec()),
+    }
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_lost_admin_is_restored_from_the_recovery_kit() {
@@ -162,4 +173,54 @@ async fn deleting_commit_slots_does_not_make_a_stale_snapshot_restorable() {
         attempt("try-2").await.is_err(),
         "Bob re-uploaded the commits he had applied"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shared_files_and_pictures_survive_a_restore() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let picture = [b"\x89PNG\r\n\x1a\n".as_slice(), b"ada"].concat();
+    admin.set_profile_picture(Some(picture.clone())).await.unwrap();
+    bob.set_profile_picture(Some(picture.clone())).await.unwrap();
+    admin
+        .send_files(&general, "", None, vec![bytes_file("plan.txt", b"the plan")])
+        .await
+        .unwrap();
+    bob.send_files(&general, "", None, vec![bytes_file("notes.txt", b"bob's notes")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    // Taken now, after the files and pictures exist.
+    let kit = admin.recovery_kit().await.unwrap();
+    let admin_id = admin.me();
+    let pieces_before = (
+        bucket.blob_ids(&admin_id).await.unwrap().len(),
+        bucket.blob_ids(&bob.me()).await.unwrap().len(),
+    );
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let restored = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+    // Twice, so removals the replay may have queued have run.
+    restored.sync().await;
+    restored.sync().await;
+
+    let mut contents = Vec::new();
+    for file in restored.files().unwrap() {
+        contents.push(restored.file_bytes(&file.id).await.unwrap());
+    }
+    contents.sort();
+    assert_eq!(contents, [b"bob's notes".to_vec(), b"the plan".to_vec()]);
+    assert_eq!(
+        restored.profile_picture(&admin_id).await.unwrap(),
+        Some(picture.clone())
+    );
+    assert_eq!(restored.profile_picture(&bob.me()).await.unwrap(), Some(picture));
+    let pieces_after = (
+        bucket.blob_ids(&admin_id).await.unwrap().len(),
+        bucket.blob_ids(&bob.me()).await.unwrap().len(),
+    );
+    assert_eq!(pieces_after, pieces_before, "nothing left the bucket");
 }

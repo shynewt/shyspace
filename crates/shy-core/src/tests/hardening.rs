@@ -1645,3 +1645,37 @@ async fn profile_details_applied_just_before_a_removal_are_undone() {
         assert_eq!(details_of(member, &bob.my_id()).title, "Engineer");
     }
 }
+
+/// A workspace whose recovery snapshot outgrows what restore reads still
+/// changes membership: the snapshot is skipped, not the commit. The kit then
+/// refuses to restore (its snapshot is stale) instead of splitting the group,
+/// a new kit is refused with a clear error, and once the snapshot fits again
+/// the next change uploads it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_oversized_recovery_snapshot_does_not_hold_up_membership() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let store_sql = |sql: &str| admin.state().store.execute_for_test(sql);
+    store_sql("INSERT INTO meta (key, value) VALUES ('padding', randomblob(34000000))");
+
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let general = channel_id(&admin, "general");
+    admin.send_message(&general, "welcome, Carol", None).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    assert_eq!(admin.status().error, None);
+    for member in [&bob, &carol] {
+        assert!(texts_in(member, &general).contains(&"welcome, Carol".to_string()));
+    }
+    let stale = data_dir(&root.path().join("stale"));
+    let restored = Workspace::restore_with(&stale, &kit, connector(&bucket), Networking::Offline).await;
+    assert!(restored.is_err(), "the stale snapshot is refused");
+    let refused = admin.recovery_kit().await.unwrap_err();
+    assert!(format!("{refused:#}").contains("too large"), "{refused:#}");
+
+    store_sql("DELETE FROM meta WHERE key = 'padding'");
+    join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    drop(admin);
+    let current = data_dir(&root.path().join("current"));
+    let restored = Workspace::restore_with(&current, &kit, connector(&bucket), Networking::Offline).await;
+    assert!(restored.is_ok(), "the next change uploaded a snapshot");
+}

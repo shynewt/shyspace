@@ -34,8 +34,14 @@ impl TestChannel {
         channel
     }
 
-    fn apply(&mut self, op: Op) {
+    pub fn apply(&mut self, op: Op) {
         self.seq += 1;
+        self.apply_again(op);
+    }
+
+    /// Applies `op` as the same op as the last one applied, as when it
+    /// arrives a second time.
+    pub fn apply_again(&mut self, op: Op) {
         self.store
             .apply(&VerifiedOp {
                 author: self.author,

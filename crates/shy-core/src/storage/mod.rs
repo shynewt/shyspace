@@ -65,6 +65,16 @@ impl Store {
             .expect("counting rows")
     }
 
+    pub(crate) fn table_names(&self) -> Vec<String> {
+        self.db
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+            .expect("listing tables")
+            .query_map([], |row| row.get(0))
+            .expect("listing tables")
+            .collect::<rusqlite::Result<_>>()
+            .expect("listing tables")
+    }
+
     /// SQLite steps run by `work`, a measure of its cost that doesn't depend
     /// on the machine.
     pub(crate) fn steps_of(&self, work: impl FnOnce()) -> u64 {

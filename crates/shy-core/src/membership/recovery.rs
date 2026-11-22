@@ -15,6 +15,7 @@ use chacha20poly1305::{
 };
 use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 use zeroize::Zeroizing;
 
 use super::commit;
@@ -22,7 +23,7 @@ use crate::{
     config::{CONFIG_FILE, write_private_file},
     keys::DeviceKey,
     storage::{snapshot_database, snapshot_store_without_content},
-    transport::bucket::{Bucket, BucketConfig, Connector, s3_connector},
+    transport::bucket::{Bucket, BucketConfig, Connector, MAX_RECOVERY_SNAPSHOT_BYTES, s3_connector},
     workspace::{DataDir, MLS_FILE, Networking, STORE_FILE, Workspace},
 };
 
@@ -32,6 +33,8 @@ const RECOVERY_KEY_META: &str = "recovery_key";
 /// uploaded generation matches.
 const CHANGE_GENERATION_META: &str = "recovery_change_generation";
 const UPLOADED_GENERATION_META: &str = "recovery_uploaded_generation";
+/// The latest generation whose snapshot was too large to upload.
+const OVERSIZED_GENERATION_META: &str = "recovery_oversized_generation";
 const SNAPSHOT_LABEL: &str = "shyspace recovery snapshot v1";
 
 /// Everything needed to restore the admin on a new device. A secret: it
@@ -155,8 +158,17 @@ impl Workspace {
             }
         };
         let recovery_key = Zeroizing::new(recovery_key);
-        self.state().store.delete_meta(UPLOADED_GENERATION_META)?;
+        {
+            let store = &self.state().store;
+            store.delete_meta(UPLOADED_GENERATION_META)?;
+            store.delete_meta(OVERSIZED_GENERATION_META)?;
+        }
         self.refresh_recovery_snapshot().await?;
+        ensure!(
+            self.state().store.meta(OVERSIZED_GENERATION_META)?.is_none(),
+            "the recovery snapshot is too large for restore to read ({} MB at most), so a recovery kit can't restore this workspace",
+            MAX_RECOVERY_SNAPSHOT_BYTES / (1024 * 1024)
+        );
         let config = &self.inner.config;
         RecoveryKit {
             workspace_id: config.workspace_id.clone(),
@@ -184,9 +196,10 @@ impl Workspace {
                 return Ok(());
             };
             let current = generation(&state.store, CHANGE_GENERATION_META)?;
-            let is_uploaded = state.store.meta(UPLOADED_GENERATION_META)?.is_some()
-                && generation(&state.store, UPLOADED_GENERATION_META)? == current;
-            if is_uploaded {
+            let is_done = |meta: &str| -> Result<bool> {
+                Ok(state.store.meta(meta)?.is_some() && generation(&state.store, meta)? == current)
+            };
+            if is_done(UPLOADED_GENERATION_META)? || is_done(OVERSIZED_GENERATION_META)? {
                 return Ok(());
             }
             let recovery_key: Zeroizing<[u8; 32]> = Zeroizing::new(
@@ -200,6 +213,19 @@ impl Workspace {
             let sealed = seal_snapshot(&recovery_key, &self.inner.config.workspace_id, &snapshot)?;
             (current, sealed)
         };
+        if sealed.len() as u64 > MAX_RECOVERY_SNAPSHOT_BYTES {
+            // Failing here would hold back the commit that changed membership.
+            // The kit keeps its older snapshot, which restore then refuses as
+            // stale rather than splitting the group.
+            warn!(
+                "the recovery snapshot ({} bytes) is too large for restore to read; the recovery kit can't restore this workspace",
+                sealed.len()
+            );
+            return self
+                .state()
+                .store
+                .set_meta(OVERSIZED_GENERATION_META, &generation_taken.to_be_bytes());
+        }
         self.bucket().put_recovery_snapshot(sealed).await?;
         self.state()
             .store

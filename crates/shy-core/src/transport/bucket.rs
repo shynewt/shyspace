@@ -43,6 +43,9 @@ const LOCK_PROBE_PREFIX: &str = "ops/lock-probe-";
 /// load arbitrary amounts of data into memory.
 const MAX_OBJECT_SIZE: u64 = 32 * 1024 * 1024;
 
+/// The largest recovery snapshot restore reads.
+pub const MAX_RECOVERY_SNAPSHOT_BYTES: u64 = MAX_OBJECT_SIZE;
+
 /// Splits a log's run of envelopes, in order, into segments that each stay
 /// under the size readers accept. A segment holds a count (at most 10 bytes)
 /// and then the envelopes back to back.
@@ -424,7 +427,16 @@ impl Bucket {
         }
     }
 
+    /// Refuses a snapshot larger than restore would read, so the admin
+    /// learns now rather than when they need the kit.
     pub async fn put_recovery_snapshot(&self, sealed: Vec<u8>) -> Result<()> {
+        let size = sealed.len() as u64;
+        ensure!(
+            size <= MAX_RECOVERY_SNAPSHOT_BYTES,
+            "the recovery snapshot is too large ({} MB; restore reads at most {} MB), so the recovery kit can't restore this workspace",
+            size.div_ceil(1024 * 1024),
+            MAX_RECOVERY_SNAPSHOT_BYTES / (1024 * 1024)
+        );
         self.put(&Path::from(RECOVERY_SNAPSHOT), sealed).await
     }
 
@@ -602,6 +614,23 @@ mod tests {
         let printed = format!("{:?}", test_config());
         assert!(!printed.contains("very-secret-key"), "{printed}");
         assert!(printed.contains("AKIDEXAMPLE"));
+    }
+
+    #[tokio::test]
+    async fn a_recovery_snapshot_too_large_to_read_back_is_refused() {
+        let bucket = Bucket::without_signing(Arc::new(object_store::memory::InMemory::new()));
+        let largest = MAX_RECOVERY_SNAPSHOT_BYTES as usize;
+        bucket.put_recovery_snapshot(vec![7; largest]).await.unwrap();
+        let stored = bucket.recovery_snapshot().await.unwrap().map(|bytes| bytes.len());
+        assert_eq!(stored, Some(largest));
+
+        let refused = bucket
+            .put_recovery_snapshot(vec![7; largest + 1])
+            .await
+            .unwrap_err();
+        assert!(format!("{refused:#}").contains("too large"), "{refused:#}");
+        let stored = bucket.recovery_snapshot().await.unwrap().map(|bytes| bytes.len());
+        assert_eq!(stored, Some(largest), "the last good snapshot stays");
     }
 
     #[tokio::test]

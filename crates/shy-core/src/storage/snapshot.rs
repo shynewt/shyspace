@@ -6,45 +6,34 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rusqlite::backup::Backup;
 
-use super::open_encrypted;
+use super::{open_encrypted, private::PRIVATE_STATE_TABLES, rebuild::SHARED_VIEW_TABLES};
 
-/// Tables rebuilt from the bucket after a restore, so they're left out of
-/// snapshots to keep them small.
-const REPLAYABLE_TABLES: &[&str] = &[
-    "ops",
-    "pending_ops",
-    "forks",
-    "fork_proofs_checked",
-    "cursors",
-    "profiles",
-    "channels",
-    "messages",
-    "reactions",
-    "pages",
-    "search",
-    "search_rows",
-    "message_edits",
-    "channel_names",
-    "deleted",
+/// The op log and how far we've read the bucket: a restore reads them again.
+const OP_LOG_TABLES: &[&str] = &["ops", "pending_ops", "forks", "fork_proofs_checked", "cursors"];
+
+/// This device's own state (read positions, alerts, follows, drafts, Later,
+/// sidebar order), which a new device starts without.
+const PERSONAL_TABLES: &[&str] = &[
     "read_markers",
     "channel_notify",
     "thread_follows",
     "drafts",
     "later",
     "sidebar_placement",
-    "member_status",
-    "sealing_keys",
-    "private_channels",
-    "private_owners",
-    "private_positions",
-    "private_generations",
-    "private_keys",
-    "private_adds",
-    "private_closures",
-    "dm_members",
-    "sealed_pending",
-    "private_applied",
 ];
+
+/// Everything a snapshot leaves out: what replaying the bucket gives back
+/// (the op log, the views, private channel state), queued file removals,
+/// which a rebuild starts without too, and this device's personal state.
+fn tables_left_out() -> impl Iterator<Item = &'static str> {
+    OP_LOG_TABLES
+        .iter()
+        .chain(SHARED_VIEW_TABLES)
+        .chain(PRIVATE_STATE_TABLES)
+        .chain(PERSONAL_TABLES)
+        .chain(&["blob_removals"])
+        .copied()
+}
 
 /// Copies the database at `source` to `destination`, both under `key`.
 pub fn snapshot_database(source: &Path, key: &str, destination: &Path) -> Result<()> {
@@ -60,9 +49,64 @@ pub fn snapshot_database(source: &Path, key: &str, destination: &Path) -> Result
 pub fn snapshot_store_without_content(source: &Path, key: &str, destination: &Path) -> Result<()> {
     snapshot_database(source, key, destination)?;
     let copy = open_encrypted(destination, key)?;
-    for table in REPLAYABLE_TABLES {
+    for table in tables_left_out() {
         copy.execute(&format!("DELETE FROM {table}"), [])?;
     }
     copy.execute_batch("VACUUM")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{Store, TEST_DB_KEY};
+
+    /// What a snapshot keeps: the keys, the membership and its history,
+    /// invites and their pending welcomes, and settings.
+    const TABLES_KEPT: &[&str] = &[
+        "commits",
+        "deliveries",
+        "epoch_keys",
+        "epoch_members",
+        "frozen_authors",
+        "invites",
+        "members",
+        "meta",
+        "sealing_secrets",
+        "sidebar_sections",
+    ];
+
+    /// FTS5 keeps the search index in tables of its own.
+    const SEARCH_INDEX_PARTS: &[&str] = &[
+        "search_config",
+        "search_content",
+        "search_data",
+        "search_docsize",
+        "search_idx",
+    ];
+
+    #[test]
+    fn every_table_is_kept_or_left_out_of_snapshots_and_every_listed_one_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db"), TEST_DB_KEY).unwrap();
+        let left_out: Vec<&str> = tables_left_out().collect();
+        let mut unsorted = Vec::new();
+        for table in store.table_names() {
+            let places = usize::from(left_out.contains(&table.as_str()))
+                + usize::from(TABLES_KEPT.contains(&table.as_str()))
+                + usize::from(SEARCH_INDEX_PARTS.contains(&table.as_str()));
+            if places != 1 {
+                unsorted.push(table);
+            }
+        }
+        assert!(unsorted.is_empty(), "in no list, or in two: {unsorted:?}");
+        let tables = store.table_names();
+        let missing: Vec<&str> = left_out
+            .iter()
+            .chain(TABLES_KEPT)
+            .filter(|listed| !tables.iter().any(|table| table == *listed))
+            .copied()
+            .collect();
+        assert!(missing.is_empty(), "listed but not tables: {missing:?}");
+    }
 }

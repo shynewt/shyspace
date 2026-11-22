@@ -152,8 +152,9 @@ impl Store {
     }
 
     /// Keeps a member's picture unless a newer one is kept. Whichever loses
-    /// leaves the bucket, through its author's device. Returns whether the
-    /// picture shown changed.
+    /// leaves the bucket, through its author's device; the same picture
+    /// arriving again changes nothing. Returns whether the picture shown
+    /// changed.
     pub(super) fn put_profile_picture(
         &self,
         member: &[u8],
@@ -161,6 +162,11 @@ impl Store {
         lamport: u64,
     ) -> Result<bool> {
         let kept = self.kept_picture(member)?;
+        if kept.as_ref().is_some_and(|(kept_picture, kept_lamport)| {
+            *kept_lamport == lamport && kept_picture.as_ref() == picture
+        }) {
+            return Ok(false);
+        }
         let is_newer = kept
             .as_ref()
             .is_none_or(|(_, kept_lamport)| *kept_lamport < lamport);
@@ -251,4 +257,35 @@ fn stored_file(row: &Row<'_>) -> rusqlite::Result<StoredFile> {
         created_ms: row.get(6)?,
         blob,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{files::blob, ops::Op, storage::test_channel::TestChannel};
+
+    #[test]
+    fn applying_a_picture_twice_changes_nothing() {
+        let mut channel = TestChannel::new();
+        let content = b"\x89PNG\r\n\x1a\npicture".to_vec();
+        let picture = blob::seal(&mut content.as_slice(), content.len() as u64, |_, _, _| Ok(())).unwrap();
+        let op = Op::ProfilePicture {
+            picture: Some(picture.clone()),
+        };
+        channel.apply(op.clone());
+        channel.apply_again(op);
+
+        let author = channel.author;
+        assert!(
+            channel.store.blob_removals().unwrap().is_empty(),
+            "the shown picture stays"
+        );
+        assert_eq!(
+            channel
+                .store
+                .profile_picture(author.as_bytes())
+                .unwrap()
+                .map(|kept| kept.id),
+            Some(picture.id)
+        );
+    }
 }
