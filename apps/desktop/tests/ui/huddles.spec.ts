@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { failWith } from "./support";
 
 function workspaceNav(page: Page) {
   return page.getByRole("navigation", { name: "Workspace" });
@@ -265,6 +266,12 @@ test("Settings picks the microphone and speakers, and can join muted", async ({ 
   await expect(settings).toContainText("A headset's microphone lowers what you hear to call quality.");
   expect(await page.evaluate(() => window.fake.huddles.chosenDevices)).toEqual({ input: "headset-mic", output: null });
 
+  const sounds = settings.getByRole("switch", { name: "Play huddle sounds" });
+  await expect(sounds).toBeChecked();
+  await sounds.click();
+  await expect(sounds).not.toBeChecked();
+  expect(await page.evaluate(() => window.fake.huddles.soundsOn)).toBe(false);
+
   await settings.getByRole("switch", { name: "Join huddles muted" }).click();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Start a huddle" }).click();
@@ -286,4 +293,19 @@ test("a join that fails says why, and notes have no huddle", async ({ page }) =>
     .click();
   await expect(page.getByLabel("Write a note")).toBeVisible();
   await expect(page.getByRole("button", { name: "Start a huddle" })).toHaveCount(0);
+});
+
+test("without voice in this build, Settings › Huddles says why and offers nothing that can't work", async ({
+  page,
+}) => {
+  await openApp(page);
+  await failWith(page, "huddle_devices", "this build has no audio");
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Huddles" }).click();
+
+  await expect(settings.getByText("Voice isn't available")).toBeVisible();
+  await expect(settings).toContainText("this build has no audio");
+  await expect(settings.getByRole("switch")).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
