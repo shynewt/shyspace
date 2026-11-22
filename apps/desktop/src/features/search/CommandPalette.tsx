@@ -6,6 +6,7 @@ import {
   Inbox,
   MessageSquare,
   Search,
+  Send,
   Settings,
   UserPlus,
 } from "lucide-react";
@@ -108,6 +109,12 @@ function PaletteBody({
         icon: <Inbox size={15} />,
         onChoose: go({ kind: "inbox" }),
         shortcut: shortcutKeys("inbox"),
+      },
+      {
+        title: "Open Drafts & sent",
+        icon: <Send size={15} />,
+        onChoose: go({ kind: "drafts" }),
+        shortcut: shortcutKeys("draftsAndSent"),
       },
       {
         title: "New page",

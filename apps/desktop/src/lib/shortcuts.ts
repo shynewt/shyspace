@@ -28,6 +28,7 @@ const isAltArrow = (event: KeyboardEvent, arrow: "ArrowLeft" | "ArrowRight") =>
 export type ShortcutId =
   | "search"
   | "inbox"
+  | "draftsAndSent"
   | "back"
   | "forward"
   | "previous"
@@ -57,6 +58,12 @@ export const SHORTCUTS: Shortcut[] = [
     keys: [MOD_LABEL, "Shift", "A"],
     description: "Open the inbox",
     matches: (event) => hasMod(event) && event.shiftKey && event.key.toLowerCase() === "a",
+  },
+  {
+    id: "draftsAndSent",
+    keys: [MOD_LABEL, "Shift", "D"],
+    description: "Open Drafts & sent",
+    matches: (event) => hasMod(event) && event.shiftKey && event.key.toLowerCase() === "d",
   },
   {
     id: "back",
@@ -119,6 +126,8 @@ export const LOCAL_SHORTCUTS: { keys: string[]; description: string }[] = [
   { keys: ["Esc"], description: "Mark the channel read and jump to the newest message" },
   { keys: ["Enter"], description: "Send a message" },
   { keys: ["Shift", "Enter"], description: "New line in a message" },
+  { keys: ["↑", "↓"], description: "Move through the rows in Drafts & sent" },
+  { keys: ["Delete"], description: "Discard the draft you're on, in Drafts & sent" },
   { keys: ["@"], description: "Mention someone" },
   { keys: ["/"], description: "Add a heading, list, checklist or other block in a page" },
   { keys: ["[["], description: "Link to another page from a page" },

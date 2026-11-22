@@ -4,7 +4,8 @@ import { cx } from "./cx";
 /**
  * A clickable row in a list (Inbox, Later): a leading avatar or icon, a small
  * line saying who and where, and a one-line preview. Actions in `trailing`
- * sit outside the button, so they stay separate controls.
+ * sit outside the button, so they stay separate controls. The button is
+ * marked `data-list-row`, so a list can move between rows with the arrows.
  */
 export function ListRow({
   leading,
@@ -38,6 +39,7 @@ export function ListRow({
     >
       <button
         type="button"
+        data-list-row
         onClick={onClick}
         className="focus-ring-inset flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-2.5 text-left"
       >

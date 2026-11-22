@@ -38,6 +38,7 @@ test("shortcuts open the inbox and the cheat sheet", async ({ page }) => {
   await page.keyboard.press("Control+/");
   const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
   await expect(sheet).toContainText("Next unread channel");
+  await expect(sheet).toContainText("Open Drafts & sent");
 });
 
 test("keys the page editor uses stay in the editor", async ({ page }) => {

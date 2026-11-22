@@ -1,6 +1,6 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { AnimatePresence, motion, type Transition } from "motion/react";
-import { useMemo } from "react";
+import { type KeyboardEvent, useMemo } from "react";
 import { api, type Draft } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
 import { reportError, showUndoToast } from "../../lib/toast";
@@ -52,8 +52,16 @@ function DraftRow({ draft }: { draft: Draft }) {
       .then(() => showUndoToast("Draft discarded.", () => api.setDraft(draft.target, draft.text)))
       .catch(reportError);
 
+  const discardWithKey = (event: KeyboardEvent<HTMLLIElement>) => {
+    if (event.key !== "Delete" && event.key !== "Backspace") return;
+    if (!(event.target instanceof HTMLElement) || !event.target.matches("[data-list-row]")) return;
+    event.preventDefault();
+    moveFocusOffRow(event.target);
+    discard();
+  };
+
   return (
-    <motion.li variants={rowMotion} initial="initial" animate="animate" exit="exit">
+    <motion.li variants={rowMotion} initial="initial" animate="animate" exit="exit" onKeyDown={discardWithKey}>
       <ListRow
         onClick={open}
         leading={<Pencil size={15} className="mt-0.5 text-decorative" />}
@@ -75,4 +83,13 @@ function DraftRow({ draft }: { draft: Draft }) {
       </ListRow>
     </motion.li>
   );
+}
+
+/** Moves focus off a row that's going: to the next row, else the one before, else the chosen tab. */
+function moveFocusOffRow(row: HTMLElement) {
+  const rows = [...(row.closest("ul")?.querySelectorAll<HTMLElement>("[data-list-row]") ?? [])];
+  const index = rows.indexOf(row);
+  const neighbour =
+    rows[index + 1] ?? rows[index - 1] ?? document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+  neighbour?.focus();
 }

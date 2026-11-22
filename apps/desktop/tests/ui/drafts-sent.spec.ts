@@ -219,3 +219,70 @@ test("Drafts & sent is a place in the history, and the app reopens there", async
   await page.reload();
   await expect(heading).toBeVisible();
 });
+
+test("the keyboard opens Drafts & sent, moves through drafts and discards them", async ({ page }) => {
+  await page.getByLabel("Message #random").fill("first draft");
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await page.getByLabel("Message #general").fill("second draft");
+  await page.getByLabel("Message #general").press("Control+Shift+D");
+  await expect(page.getByRole("heading", { name: "Drafts & sent" })).toBeVisible();
+  const draftsTab = page.getByRole("tab", { name: "Drafts" });
+  await expect(draftsTab).toBeFocused();
+
+  const rows = page.getByRole("list", { name: "Drafts" }).getByRole("listitem");
+  const rowButton = (index: number) => rows.nth(index).getByRole("button").first();
+  await page.keyboard.press("ArrowDown");
+  await expect(rowButton(0)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(rowButton(1)).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await expect(draftsTab).toBeFocused();
+
+  await page.keyboard.press("ArrowDown");
+  const firstText = await rowButton(0).textContent();
+  await page.keyboard.press("Delete");
+  await expect(rows).toHaveCount(1);
+  await expect(rowButton(0)).toBeFocused();
+  await expect(rows.first()).not.toHaveText(firstText ?? "");
+  await page.keyboard.press("Backspace");
+  await expect(page.getByText("No drafts")).toBeVisible();
+  await expect(draftsTab).toBeFocused();
+
+  // Each discard has its own Undo; the newest brings back the last draft.
+  await page.getByRole("button", { name: "Undo" }).last().click();
+  await expect(rows).toHaveCount(1);
+});
+
+test("enter opens the draft you moved to", async ({ page }) => {
+  await page.getByLabel("Message #random").fill("pick this up");
+  await page.getByLabel("Message #random").press("Control+Shift+D");
+  await expect(page.getByRole("tab", { name: "Drafts" })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Message #random")).toHaveValue("pick this up");
+});
+
+test("in Sent, the arrows go from the tab to the filter to the rows, and enter opens one", async ({ page }) => {
+  await send(page, "general", "Older note");
+  await send(page, "random", "Newest note");
+  await page.keyboard.press("Control+Shift+D");
+  await expect(page.getByRole("tab", { name: "Drafts" })).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: "Sent" })).toBeFocused();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByLabel("Filter sent messages")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("tabpanel").getByRole("button", { name: /Older note/ })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+});
+
+test("alt and the arrows still move through the sidebar from Drafts & sent", async ({ page }) => {
+  await page.getByLabel("Message #random").press("Control+Shift+D");
+  await expect(page.getByRole("tab", { name: "Drafts" })).toBeFocused();
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect(page.getByRole("main").locator("header").getByRole("heading")).not.toHaveText("Drafts & sent");
+});

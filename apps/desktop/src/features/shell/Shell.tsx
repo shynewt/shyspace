@@ -92,6 +92,8 @@ export function Shell({ session }: { session: Session }) {
           return setPaletteQuery((query) => (query === null ? "" : null));
         case "inbox":
           return navigate({ kind: "inbox" });
+        case "draftsAndSent":
+          return navigate({ kind: "drafts" });
         case "back":
           return back();
         case "forward":
