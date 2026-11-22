@@ -53,7 +53,7 @@ export function AttachmentList({
 }
 
 function StagedThumbnail({ file }: { file: StagedFile }) {
-  return <FileThumbnail mediaType={file.media_type} image={useStagedImage(file)} size="sm" />;
+  return <FileThumbnail name={file.name} mediaType={file.media_type} image={useStagedImage(file)} size="sm" />;
 }
 
 /** How far the upload of the files being sent has got. */

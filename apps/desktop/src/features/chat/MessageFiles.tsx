@@ -58,7 +58,7 @@ function FileCard({ file }: { file: FileInfo }) {
   return (
     <div className="flex w-full max-w-card items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2">
       <OpensInViewer file={file} image={{ status: "none" }} className="flex min-w-0 flex-1 items-center gap-3">
-        <FileThumbnail mediaType={file.media_type} image={{ status: "none" }} />
+        <FileThumbnail name={file.name} mediaType={file.media_type} image={{ status: "none" }} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">{file.name}</span>
           <span className="block text-xs text-faint">{formatSize(file.size)}</span>

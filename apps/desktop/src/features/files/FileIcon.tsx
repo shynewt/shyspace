@@ -1,10 +1,32 @@
-import { File, FileArchive, FileImage, FileText, FileVideo } from "lucide-react";
+import {
+  File,
+  FileArchive,
+  FileAudio,
+  FileBraces,
+  FileCode,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  Presentation,
+} from "lucide-react";
+import { type FileKind, fileKindOf } from "../../lib/fileKinds";
 
-/** An icon for a file's kind, by its media type (only a hint). */
-export function FileIcon({ mediaType }: { mediaType: string }) {
-  if (mediaType.startsWith("image/")) return <FileImage size={18} />;
-  if (mediaType.startsWith("video/")) return <FileVideo size={18} />;
-  if (mediaType.startsWith("text/") || mediaType === "application/pdf") return <FileText size={18} />;
-  if (mediaType === "application/zip") return <FileArchive size={18} />;
-  return <File size={18} />;
+const ICONS: Record<FileKind, typeof File> = {
+  document: FileText,
+  code: FileCode,
+  data: FileBraces,
+  spreadsheet: FileSpreadsheet,
+  slides: Presentation,
+  archive: FileArchive,
+  audio: FileAudio,
+  video: FileVideo,
+  image: FileImage,
+  other: File,
+};
+
+/** An icon for a file's kind, by its name and media type (only hints). */
+export function FileIcon({ name, mediaType, size = 18 }: { name: string; mediaType: string; size?: number }) {
+  const Icon = ICONS[fileKindOf(name, mediaType)];
+  return <Icon size={size} />;
 }

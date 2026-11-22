@@ -1,5 +1,7 @@
 /** Which shared files can be read as text in the app, and how. Pure. */
 
+import { extensionOf } from "./fileKinds";
+
 /** Text files up to this size open in the viewer; larger ones are saved instead. */
 export const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
 
@@ -39,22 +41,17 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 const TEXT_MEDIA_TYPES = new Set(["application/json", "application/xml", "application/x-yaml", "application/toml"]);
 
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
-}
-
 /** Whether a file may be text worth opening; its bytes decide in the end. */
 export function mayPreviewAsText(file: { name: string; media_type: string; size: number }): boolean {
   const isText =
     file.media_type.startsWith("text/") ||
     TEXT_MEDIA_TYPES.has(file.media_type) ||
-    TEXT_EXTENSIONS.has(extensionOf(file.name));
+    TEXT_EXTENSIONS.has(extensionOf(file.name) ?? "");
   return isText && file.size <= MAX_TEXT_PREVIEW_BYTES;
 }
 
 export function isMarkdownFile(file: { name: string; media_type: string }): boolean {
-  return file.media_type === "text/markdown" || ["md", "markdown"].includes(extensionOf(file.name));
+  return file.media_type === "text/markdown" || ["md", "markdown"].includes(extensionOf(file.name) ?? "");
 }
 
 /** The bytes as text, or null when they aren't valid UTF-8 text (a NUL byte means binary). */

@@ -361,3 +361,17 @@ test("right-clicking an image copies it, without opening the message's menu", as
     expect(types).toContain("image/png");
   }
 });
+
+test("file cards say what kind of file they are", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.files.pickNext = [
+      { name: "report.pdf", type: "application/pdf", bytes: [37, 80] },
+      { name: "notes.md", type: "text/markdown", bytes: [35] },
+    ];
+  });
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Send" }).click();
+  const message = page.getByRole("article").last();
+  await expect(message.getByText("PDF", { exact: true })).toBeVisible();
+  await expect(message.getByText("MD", { exact: true })).toBeVisible();
+});

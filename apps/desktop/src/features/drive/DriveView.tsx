@@ -123,7 +123,7 @@ function DriveRow({ file, sharedBy }: { file: FileInfo; sharedBy: string }) {
   return (
     <li className="flex items-center gap-3 rounded-lg px-2.5 py-1.5 hover:bg-surface-2">
       <OpensInViewer file={file} image={image} className="flex min-w-0 flex-1 items-center gap-3">
-        <FileThumbnail mediaType={file.media_type} image={image} size="sm" />
+        <FileThumbnail name={file.name} mediaType={file.media_type} image={image} size="sm" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">{file.name}</span>
           <span className="block truncate text-xs text-faint">
