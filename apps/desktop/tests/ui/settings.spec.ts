@@ -1,6 +1,12 @@
 import { expect, type Page, test } from "@playwright/test";
 import { failWith } from "./support";
 
+declare global {
+  interface Window {
+    finishStorageSave?: () => void;
+  }
+}
+
 async function openSettings(page: Page) {
   await page.goto("");
   await expect(page.getByLabel("Message #general")).toBeVisible();
@@ -302,16 +308,22 @@ test("typed text waits while you look at another section", async ({ page }) => {
 test("a storage save that ends on another section still shows the new kit", async ({ page }) => {
   const settings = await openSettings(page);
   await settings.getByRole("tab", { name: "Storage" }).click();
+  // The save waits until the test lets it finish, so it ends after the move to Appearance however slow the engine.
   await page.evaluate(() => {
     const answer = window.fake.handle.bind(window.fake);
     window.fake.handle = (command, args) =>
       command === "update_storage"
-        ? new Promise((resolve) => setTimeout(() => resolve(answer(command, args)), 400))
+        ? new Promise((resolve) => {
+            window.finishStorageSave = () => resolve(answer(command, args));
+          })
         : answer(command, args);
   });
   await settings.getByLabel("Secret key").fill("new-secret");
   await settings.getByRole("button", { name: "Save storage settings" }).click();
+  await expect.poll(() => page.evaluate(() => typeof window.finishStorageSave)).toBe("function");
   await settings.getByRole("tab", { name: "Appearance" }).click();
+  await expect(settings.getByRole("tab", { name: "Appearance" })).toHaveAttribute("aria-selected", "true");
+  await page.evaluate(() => window.finishStorageSave?.());
 
   await expect(page.getByRole("dialog", { name: "Save your updated recovery kit" })).toBeVisible();
 });
