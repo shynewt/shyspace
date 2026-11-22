@@ -156,7 +156,14 @@ export type Invite = {
   requester_is_bot: boolean;
   requester_safety_code: string | null;
 };
-export type StorageSettings = { endpoint: string; bucket: string; region: string; access_key_id: string };
+export type StorageSettings = {
+  /** Every object in the bucket sits under this prefix, so bucket rules name it. */
+  workspace_id: string;
+  endpoint: string;
+  bucket: string;
+  region: string;
+  access_key_id: string;
+};
 /**
  * Whether the bucket keeps deleted or overwritten data. "locked": deletes are refused, safe even from someone
  * with the keys. "versioned": accidents can be undone, but someone with the keys could delete old versions.

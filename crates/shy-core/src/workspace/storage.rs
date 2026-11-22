@@ -29,6 +29,7 @@ impl Workspace {
     pub fn storage_settings(&self) -> Result<StorageSettings> {
         let bucket = self.bucket_config()?;
         Ok(StorageSettings {
+            workspace_id: self.inner.config.workspace_id.clone(),
             endpoint: bucket.endpoint,
             bucket: bucket.bucket,
             region: bucket.region,

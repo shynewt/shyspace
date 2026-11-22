@@ -519,6 +519,7 @@ export class FakeBackend {
       },
     ];
     this.storage = {
+      workspace_id: "a1b2c3d4e5f60718",
       endpoint: bucket.endpoint,
       bucket: bucket.bucket,
       region: bucket.region,
@@ -567,6 +568,14 @@ export class FakeBackend {
       },
     ];
     this.chat.addChannel(ownedId(admin), "general");
+    // Members get the bucket settings with their welcome, as in the core.
+    this.storage = {
+      workspace_id: "a1b2c3d4e5f60718",
+      endpoint: "https://s3.example.com",
+      bucket: "team",
+      region: "auto",
+      access_key_id: "AKIDEXAMPLE",
+    };
     this.session = { workspace_name: "Team", me, is_admin: false };
     return this.session;
   }

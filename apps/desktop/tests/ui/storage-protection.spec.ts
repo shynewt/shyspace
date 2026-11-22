@@ -39,12 +39,14 @@ test("a versioned bucket shows a notice that can't be dismissed", async ({ page 
 
   const notice = storage.getByRole("region", { name: "Storage protection" });
   await expect(notice).toContainText("Accidents can be undone");
-  await expect(notice).toContainText("S3 Object Lock, you can ignore this");
+  // A key without version deletes makes versioning enough, and the app can't see the key's rights.
+  await expect(notice).toContainText("If the members' key can't delete old versions");
+  await expect(notice).toContainText("shyspace can't check that from here");
   await expect(notice.getByRole("button", { name: /dismiss|close/i })).toHaveCount(0);
   await expect(meButton(page).getByRole("img", { name: "Storage needs attention" })).toHaveCount(0);
 });
 
-test("an unprotected bucket warns, puts the retention lock first and marks the way there", async ({ page }) => {
+test("an unprotected bucket warns, says what to turn on and marks the way there", async ({ page }) => {
   await setProtection(page, "unprotected");
   await expect(meButton(page).getByRole("img", { name: "Storage needs attention" })).toBeVisible();
 
@@ -52,9 +54,7 @@ test("an unprotected bucket warns, puts the retention lock first and marks the w
   const notice = storage.getByRole("region", { name: "Storage protection" });
   await expect(notice).toContainText("Your storage can lose data");
   await expect(notice).toContainText("nothing could bring it back");
-  const text = (await notice.textContent()) ?? "";
-  expect(text.indexOf("retention lock")).toBeGreaterThan(-1);
-  expect(text.indexOf("retention lock")).toBeLessThan(text.indexOf("versioning"));
+  await expect(notice).toContainText("Turn on versioning, and give members a key that can't delete old versions");
   await expect(
     page
       .getByRole("dialog", { name: "Settings" })
@@ -154,4 +154,16 @@ test("the me menu has no storage item while the bucket is protected", async ({ p
   await meButton(page).click();
   await expect(page.getByRole("menuitem", { name: "Set status" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Storage needs attention" })).toHaveCount(0);
+});
+
+test("the protection steps name this workspace's own folders in the bucket", async ({ page }) => {
+  await setProtection(page, "unprotected");
+  const storage = await openStorage(page);
+  await storage.getByText("How to protect your bucket").click();
+  // Rules match whole prefixes, and every object sits under the workspace id.
+  await expect(storage.getByText("a1b2c3d4e5f60718/ops/").first()).toBeVisible();
+  await expect(storage.getByText("a1b2c3d4e5f60718/files/").first()).toBeVisible();
+  // An Object Lock default retention would freeze the whole bucket, files and recovery snapshot included.
+  await expect(storage).not.toContainText("then set an Object Lock default retention");
+  await expect(storage).toContainText("Don't set an Object Lock default retention");
 });

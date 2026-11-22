@@ -330,6 +330,8 @@ pub struct Invite {
 /// Bucket settings as shown to people: never the secret key.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct StorageSettings {
+    /// Every object sits under this prefix, so bucket rules name it.
+    pub workspace_id: String,
     pub endpoint: String,
     pub bucket: String,
     pub region: String,
