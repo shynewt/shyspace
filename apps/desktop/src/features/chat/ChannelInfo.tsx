@@ -1,7 +1,6 @@
 import { Bot, Info, Lock } from "lucide-react";
-import { type ReactNode, useCallback } from "react";
-import { api } from "../../lib/api";
-import { useLive } from "../../lib/useLive";
+import type { ReactNode } from "react";
+import { useMembers } from "../../lib/members";
 import { IconButton, Popover } from "../../ui";
 import { HeaderAction } from "../shell/ViewHeader";
 
@@ -13,8 +12,7 @@ type InfoItem = { id: string; icon: ReactNode; label: string; detail: string; lo
  * button when it's narrower still.
  */
 export function ChannelInfo() {
-  const loadMembers = useCallback(() => api.members(), []);
-  const members = useLive(loadMembers, (change) => change.kind === "members");
+  const members = useMembers();
   const agents = members?.filter((member) => member.active && member.is_bot).length ?? 0;
   const items: InfoItem[] = [
     ...(agents > 0

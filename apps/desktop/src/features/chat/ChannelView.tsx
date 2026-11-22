@@ -2,6 +2,7 @@ import { AnimatePresence } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
 import { channelReference, composerLabel } from "../../lib/channels";
+import { useMembers } from "../../lib/members";
 import { distanceFromBottom, isAboveView, isInView } from "../../lib/messageList";
 import { captureScrollAnchor, restoreScrollAnchor, type ScrollRestore } from "../../lib/scrollAnchor";
 import { useLive } from "../../lib/useLive";
@@ -46,7 +47,7 @@ export function ChannelView({
   const { channels, session, navigate } = useWorkspace();
   const { registerAnchorSource, noteScrolled } = useScrollMemory();
   const channel = channels.find((candidate) => candidate.id === channelId);
-  const members = useLive(api.members, (change) => change.kind === "members");
+  const members = useMembers();
   const isLooking = useWindowAttention();
   // Loading older messages grows the window, so new arrivals never leave gaps.
   const [windowSize, setWindowSize] = useState(PAGE_SIZE);
