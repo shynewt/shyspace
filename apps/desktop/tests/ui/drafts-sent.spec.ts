@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { allowClipboard } from "./support";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -18,6 +18,14 @@ function draftsAndSent(page: Page) {
 async function openSent(page: Page) {
   await draftsAndSent(page).click();
   await page.getByRole("tab", { name: "Sent" }).click();
+}
+
+/** Where a day divider's lines start and end on screen, from its label's two hairlines. */
+async function dividerLineSpan(scope: Locator, label: string) {
+  const lines = scope.getByText(label, { exact: true }).locator("xpath=..").locator("> div");
+  const [first, last] = await Promise.all([lines.first().boundingBox(), lines.last().boundingBox()]);
+  if (!first || !last) throw new Error(`the "${label}" divider has no lines on screen`);
+  return { left: first.x, right: last.x + last.width };
 }
 
 async function send(page: Page, channel: string, text: string) {
@@ -285,4 +293,22 @@ test("alt and the arrows still move through the sidebar from Drafts & sent", asy
   await expect(page.getByRole("tab", { name: "Drafts" })).toBeFocused();
   await page.keyboard.press("Alt+ArrowDown");
   await expect(page.getByRole("main").locator("header").getByRole("heading")).not.toHaveText("Drafts & sent");
+});
+
+test("day dividers line up with the rows they head, in Sent and in a channel", async ({ page }) => {
+  await send(page, "general", "Shipping notes are up");
+  const article = await page.getByRole("article").filter({ hasText: "Shipping notes are up" }).boundingBox();
+  if (!article) throw new Error("the message has no box");
+  // A channel's divider keeps the messages' 20 px gutter on both sides.
+  const inChannel = await dividerLineSpan(page.getByRole("log"), "Today");
+  expect(inChannel.left).toBe(article.x + 20);
+  expect(inChannel.right).toBe(article.x + article.width - 20);
+
+  await openSent(page);
+  const today = page.getByRole("region", { name: "Today" });
+  const row = await today.getByRole("listitem").first().boundingBox();
+  if (!row) throw new Error("the sent row has no box");
+  const inSent = await dividerLineSpan(today, "Today");
+  expect(inSent.left).toBe(row.x);
+  expect(inSent.right).toBe(row.x + row.width);
 });

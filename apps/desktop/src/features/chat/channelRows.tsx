@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import type { Channel, Member, Message, MessageCursor } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
 import { formatDay } from "../../lib/people";
-import { EmptyState, Spinner } from "../../ui";
+import { DayDivider, EmptyState, Spinner } from "../../ui";
 import { MessageItem } from "./MessageItem";
 import { isAfter } from "./useReadPosition";
 
@@ -59,16 +59,6 @@ export function UnreadLine() {
   );
 }
 
-export function DayDivider({ label }: { label: string }) {
-  return (
-    <div className="my-3 flex items-center gap-3 px-5">
-      <div className="h-px flex-1 bg-line" />
-      <span className="text-xs font-medium text-faint">{label}</span>
-      <div className="h-px flex-1 bg-line" />
-    </div>
-  );
-}
-
 export function MessageRows({
   channel,
   members,
@@ -101,7 +91,10 @@ export function MessageRows({
       <AnimatePresence initial={false}>
         {rows.map((row) =>
           row.kind === "day" ? (
-            <DayDivider key={row.key} label={row.label} />
+            // The channel's 20 px gutter, the same as its messages'.
+            <div key={row.key} className="px-5">
+              <DayDivider label={row.label} />
+            </div>
           ) : row.kind === "unread" ? (
             <UnreadLine key={row.key} />
           ) : (

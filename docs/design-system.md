@@ -74,6 +74,7 @@ The app is for desktop windows, full screen (1280 to 2560 px wide) and split scr
 | `Card`, `SectionLabel`, `EmptyState` | grouping and empty screens |
 | `Avatar`, `Badge`, `Kbd`, `Spinner`, `Logo` | small content pieces |
 | `ListRow` | a clickable row in a list (Inbox, Later, Drafts & sent): `leading` avatar or icon, a small `meta` line, a one-line preview, an optional `footer` line under it (how people responded); `trailing` actions sit outside the button; `isHighlighted` keeps the hover background (while its menu is open) |
+| `DayDivider` | a day's heading in a dated list ("Today", "Monday, April 27"); no side margin, so it spans what the list gives it and lines up with the rows (a channel wraps it in its 20 px gutter) |
 | `CountBadge` | a count pill ("3", "@2", "4 new"), `accent` or `danger`, or `quiet` (grey) for things only waiting, like drafts; takes motion props so it can pop in when the count changes |
 | `Notice` | a callout inside a screen: `info` (read-only and other things to know), `warning` or `danger` (something to fix), with an optional title |
 | `RelativeTime` | a past moment as short as stays clear ("Yesterday 4:41 PM"), the full date on hover |

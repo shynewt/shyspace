@@ -11,6 +11,7 @@ import {
   CopyButton,
   CopyField,
   CountBadge,
+  DayDivider,
   Dialog,
   DialogActions,
   EmojiPicker,
@@ -172,6 +173,7 @@ export default function Gallery() {
 
         <Example title="List rows">
           <div className="w-full">
+            <DayDivider label="Today" />
             <ListRow
               onClick={() => showToast("Opened")}
               leading={<Avatar id="a" name="Ada Lovelace" size={32} />}
