@@ -224,3 +224,24 @@ async fn shared_files_and_pictures_survive_a_restore() {
     );
     assert_eq!(pieces_after, pieces_before, "nothing left the bucket");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admin_sees_how_close_the_snapshot_is_to_what_restore_reads() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    assert_eq!(
+        admin.storage_settings().unwrap().recovery_snapshot_bytes,
+        None,
+        "no kit yet"
+    );
+
+    admin.recovery_kit().await.unwrap();
+
+    let settings = admin.storage_settings().unwrap();
+    assert!(settings.recovery_snapshot_bytes.unwrap() > 0);
+    assert_eq!(settings.recovery_snapshot_limit, 32 * 1024 * 1024);
+    assert_eq!(
+        bob.storage_settings().unwrap().recovery_snapshot_bytes,
+        None,
+        "members have none"
+    );
+}

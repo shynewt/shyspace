@@ -10,7 +10,7 @@ use super::Workspace;
 use crate::{
     config,
     ops::Op,
-    transport::bucket::BucketConfig,
+    transport::bucket::{BucketConfig, MAX_RECOVERY_SNAPSHOT_BYTES},
     views::{Change, StorageSettings},
 };
 
@@ -34,6 +34,8 @@ impl Workspace {
             bucket: bucket.bucket,
             region: bucket.region,
             access_key_id: bucket.access_key_id,
+            recovery_snapshot_bytes: Workspace::recovery_snapshot_bytes(&self.state().store)?,
+            recovery_snapshot_limit: MAX_RECOVERY_SNAPSHOT_BYTES,
         })
     }
 

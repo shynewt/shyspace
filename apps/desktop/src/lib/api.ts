@@ -163,6 +163,10 @@ export type StorageSettings = {
   bucket: string;
   region: string;
   access_key_id: string;
+  /** Bytes in the admin's last recovery snapshot; null for members and before the admin made a kit. */
+  recovery_snapshot_bytes: number | null;
+  /** The largest recovery snapshot restore reads, in bytes. Past it, the kit can't restore the workspace. */
+  recovery_snapshot_limit: number;
 };
 /**
  * Whether the bucket keeps deleted or overwritten data. "locked": deletes are refused, safe even from someone

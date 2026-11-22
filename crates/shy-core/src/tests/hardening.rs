@@ -1667,6 +1667,11 @@ async fn an_oversized_recovery_snapshot_does_not_hold_up_membership() {
     admin.send_message(&general, "welcome, Carol", None).unwrap();
     sync_all(&[&admin, &bob, &carol]).await;
     assert_eq!(admin.status().error, None);
+    let settings = admin.storage_settings().unwrap();
+    assert!(
+        settings.recovery_snapshot_bytes.unwrap() > settings.recovery_snapshot_limit,
+        "the app can tell the admin"
+    );
     for member in [&bob, &carol] {
         assert!(texts_in(member, &general).contains(&"welcome, Carol".to_string()));
     }

@@ -336,6 +336,12 @@ pub struct StorageSettings {
     pub bucket: String,
     pub region: String,
     pub access_key_id: String,
+    /// Size in bytes of the admin's last recovery snapshot: `None` for
+    /// members and before the admin made a kit. Past the limit, the kit
+    /// can't restore the workspace.
+    pub recovery_snapshot_bytes: Option<u64>,
+    /// The largest recovery snapshot restore reads, in bytes.
+    pub recovery_snapshot_limit: u64,
 }
 
 /// Whether the bucket keeps deleted or overwritten data, so a member with

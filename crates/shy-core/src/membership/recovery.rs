@@ -35,6 +35,8 @@ const CHANGE_GENERATION_META: &str = "recovery_change_generation";
 const UPLOADED_GENERATION_META: &str = "recovery_uploaded_generation";
 /// The latest generation whose snapshot was too large to upload.
 const OVERSIZED_GENERATION_META: &str = "recovery_oversized_generation";
+/// How large the last snapshot was, uploaded or not.
+const SNAPSHOT_BYTES_META: &str = "recovery_snapshot_bytes";
 const SNAPSHOT_LABEL: &str = "shyspace recovery snapshot v1";
 
 /// Everything needed to restore the admin on a new device. A secret: it
@@ -179,6 +181,17 @@ impl Workspace {
         .encode()
     }
 
+    /// How large the last recovery snapshot was, if this device took one.
+    pub(crate) fn recovery_snapshot_bytes(store: &crate::storage::Store) -> Result<Option<u64>> {
+        let Some(bytes) = store.meta(SNAPSHOT_BYTES_META)? else {
+            return Ok(None);
+        };
+        let bytes: [u8; 8] = bytes
+            .try_into()
+            .map_err(|_| anyhow!("the stored recovery snapshot size is corrupt"))?;
+        Ok(Some(u64::from_be_bytes(bytes)))
+    }
+
     /// Records that admin state changed and needs a new snapshot.
     pub(crate) fn mark_recovery_snapshot_stale(store: &crate::storage::Store) -> Result<()> {
         let next = generation(store, CHANGE_GENERATION_META)? + 1;
@@ -213,7 +226,11 @@ impl Workspace {
             let sealed = seal_snapshot(&recovery_key, &self.inner.config.workspace_id, &snapshot)?;
             (current, sealed)
         };
-        if sealed.len() as u64 > MAX_RECOVERY_SNAPSHOT_BYTES {
+        let size = sealed.len() as u64;
+        self.state()
+            .store
+            .set_meta(SNAPSHOT_BYTES_META, &size.to_be_bytes())?;
+        if size > MAX_RECOVERY_SNAPSHOT_BYTES {
             // Failing here would hold back the commit that changed membership.
             // The kit keeps its older snapshot, which restore then refuses as
             // stale rather than splitting the group.

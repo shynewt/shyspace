@@ -45,6 +45,10 @@ import { sentMessages } from "./sent";
 
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
+/** What restore reads at most, as in the core. */
+const RECOVERY_SNAPSHOT_LIMIT = 32 * 1024 * 1024;
+/** A small workspace's snapshot, about what the core measures. */
+const FAKE_SNAPSHOT_BYTES = 620_000;
 
 type StoredPage = Omit<Page, "can_delete" | "is_saved"> & { doc: Y.Doc };
 
@@ -441,7 +445,7 @@ export class FakeBackend {
       case "safety_code":
         return "8506 3956 2869 2874 2976";
       case "recovery_kit":
-        return `shyrec1_${randomHex(48)}`;
+        return this.newRecoveryKit();
       case "storage_settings":
         return this.requireStorage();
       case "storage_protection":
@@ -531,6 +535,8 @@ export class FakeBackend {
       bucket: bucket.bucket,
       region: bucket.region,
       access_key_id: bucket.access_key_id,
+      recovery_snapshot_bytes: null,
+      recovery_snapshot_limit: RECOVERY_SNAPSHOT_LIMIT,
     };
     this.session = { workspace_name: workspaceName, me, is_admin: true };
     this.chat.createChannel("general");
@@ -582,6 +588,8 @@ export class FakeBackend {
       bucket: "team",
       region: "auto",
       access_key_id: "AKIDEXAMPLE",
+      recovery_snapshot_bytes: null,
+      recovery_snapshot_limit: RECOVERY_SNAPSHOT_LIMIT,
     };
     this.session = { workspace_name: "Team", me, is_admin: false };
     return this.session;
@@ -601,6 +609,12 @@ export class FakeBackend {
   private updateStorage(region: string, accessKeyId: string): string | null {
     this.storage = { ...this.requireStorage(), region, access_key_id: accessKeyId };
     this.notify({ kind: "storage" });
+    return this.newRecoveryKit();
+  }
+
+  /** Making a kit uploads a snapshot, as in the core. */
+  private newRecoveryKit(): string {
+    this.storage = { ...this.requireStorage(), recovery_snapshot_bytes: FAKE_SNAPSHOT_BYTES };
     return `shyrec1_${randomHex(48)}`;
   }
 
