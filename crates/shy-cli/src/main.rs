@@ -330,7 +330,9 @@ fn report_sync_error(workspace: &Workspace) -> Result<()> {
 /// The recovery kit from `SHY_RECOVERY_KIT`, or else the first line of
 /// standard input.
 fn read_recovery_kit() -> Result<String> {
-    if let Ok(kit) = std::env::var(RECOVERY_KIT_VARIABLE) {
+    if let Ok(kit) = std::env::var(RECOVERY_KIT_VARIABLE)
+        && !kit.trim().is_empty()
+    {
         return Ok(kit.trim().to_owned());
     }
     if std::io::stdin().is_terminal() {
@@ -353,11 +355,11 @@ mod tests {
 
     use super::*;
 
-    /// Secrets come from the environment or standard input: never from
-    /// arguments (shell history, other users' process lists) and never
-    /// printed back by `--help`.
+    /// `--help` never prints a secret taken from the environment, and the
+    /// recovery kit is never an argument (shell history, other users'
+    /// process lists).
     #[test]
-    fn secrets_stay_out_of_arguments_and_help() {
+    fn help_hides_secrets_and_the_kit_is_never_an_argument() {
         let cli = Cli::command();
         let mut secrets = 0;
         let mut commands = vec![&cli];
