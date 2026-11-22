@@ -1881,3 +1881,53 @@ async fn a_reply_loop_does_not_break_counts_the_inbox_or_links() {
         "the draft stays"
     );
 }
+
+/// A reply to a message in another channel isn't in that channel's thread,
+/// so it shows in its own channel like any message, and reading the channel
+/// reads it. Your own app doesn't send one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_to_another_channel_shows_where_it_was_sent() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let other = bob.create_channel("other").unwrap();
+    let elsewhere = bob.send_message(&other, "over here", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let mention = crate::mentions::member_link("Ada", &admin.my_id());
+    let reply = crate::ops::new_owned_id(&bob.me());
+    admin
+        .receive(Forger::new(&bob).seal(Op::Message {
+            id: reply.clone(),
+            channel: general.clone(),
+            text: format!("{mention} across channels"),
+            reply_to: Some(elsewhere.clone()),
+        }))
+        .unwrap();
+
+    assert!(texts_in(&admin, &general).contains(&format!("{mention} across channels")));
+    let unread_mentions = |admin: &Workspace| {
+        admin
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == general)
+            .unwrap()
+            .unread_mentions
+    };
+    assert_eq!(unread_mentions(&admin), 1);
+    admin.mark_read(&general, &reply).unwrap();
+    assert_eq!(unread_mentions(&admin), 0, "reading the channel reads it");
+    assert!(
+        bob.send_message(&general, "nope", Some(elsewhere.clone()))
+            .is_err()
+    );
+    let file = crate::workspace::NewFile {
+        name: "nope.txt".into(),
+        media_type: "text/plain".into(),
+        source: crate::workspace::FileSource::Bytes(b"nope".to_vec()),
+    };
+    assert!(
+        bob.send_files(&general, "", Some(elsewhere), vec![file])
+            .await
+            .is_err()
+    );
+}

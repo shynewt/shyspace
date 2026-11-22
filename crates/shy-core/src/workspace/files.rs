@@ -87,6 +87,9 @@ impl Workspace {
         };
         ensure!(caption.chars().count() <= MAX_MESSAGE_CHARS, "message too long");
         self.require_item(channel, ItemKind::Channel)?;
+        if let Some(target) = &reply_to {
+            self.ensure_can_reply_to(channel, target)?;
+        }
         let mut sizes = Vec::new();
         for file in &files {
             let size = file.source.size()?;

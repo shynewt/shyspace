@@ -202,7 +202,7 @@ impl Store {
         Ok(())
     }
 
-    fn message_channel(&self, id: &str) -> Result<Option<String>> {
+    pub(crate) fn message_channel(&self, id: &str) -> Result<Option<String>> {
         Ok(self
             .db
             .query_row("SELECT channel FROM messages WHERE id = ?", [id], |row| {

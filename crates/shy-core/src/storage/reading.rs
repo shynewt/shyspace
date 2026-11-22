@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
-use super::Store;
+use super::{Store, queries::IS_SHOWN_IN_CHANNEL};
 use crate::{
     mentions::{GROUP_MENTION_PREFIX, MEMBER_LINK_PREFIX, mentions},
     views::{MessageCursor, NotifyLevel, member_id},
@@ -17,10 +17,6 @@ use crate::{
 /// (`?3`, `?4`). Comparing as a pair lets SQLite start reading the channel's
 /// index there instead of at the beginning.
 const UNREAD_BY_OTHERS: &str = "m.channel = ?1 AND m.author != ?2 AND (m.lamport, m.author) > (?3, ?4)";
-/// Whether message `m` shows in its channel: it isn't a reply, or its
-/// parent hasn't arrived.
-const IS_SHOWN_IN_CHANNEL: &str =
-    "(m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to))";
 
 /// An unread message that mentions you.
 pub struct UnreadMention {
@@ -160,9 +156,8 @@ impl Store {
     }
 
     fn is_read_in_thread(&self, reply: &UnreadMention, roots: &HashMap<String, String>) -> Result<bool> {
-        // Not in the channel's threads: either its parent sits in another
-        // channel (thread_root then gives the reply itself), or it is in no
-        // thread at all and shows nowhere, so there's nothing to read.
+        // Not in the channel's threads, so in no thread at all: it shows
+        // nowhere, and there's nothing to read.
         let root = match roots.get(&reply.id) {
             Some(root) => root.clone(),
             None => match self.thread_root(&reply.id)? {

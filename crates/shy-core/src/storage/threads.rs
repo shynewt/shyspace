@@ -9,7 +9,7 @@ use rusqlite::{OptionalExtension, ToSql, params};
 
 use super::{
     Store,
-    queries::{MESSAGE_COLUMNS, MESSAGE_JOINS, message_from_row},
+    queries::{IS_SHOWN_IN_CHANNEL, MESSAGE_COLUMNS, MESSAGE_JOINS, message_from_row},
 };
 use crate::views::Message;
 
@@ -36,7 +36,7 @@ impl Store {
     }
 
     /// The replies in the threads that start at `roots`, oldest first. A
-    /// root that is itself a reply (its parent exists) has no thread.
+    /// root that is itself a reply in this channel has no thread.
     pub fn replies_in_threads(&self, channel: &str, roots: &[String]) -> Result<Vec<Reply>> {
         if roots.is_empty() {
             return Ok(Vec::new());
@@ -62,8 +62,7 @@ impl Store {
         let mut statement = self.db.prepare(&format!(
             "WITH RECURSIVE chain(id, root, depth) AS (
                 SELECT m.id, m.id, 0 FROM messages m
-                WHERE {roots_filter}
-                  AND (m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to))
+                WHERE {roots_filter} AND {IS_SHOWN_IN_CHANNEL}
                 UNION
                 SELECT m.id, chain.root, chain.depth + 1 FROM chain CROSS JOIN messages m ON m.reply_to = chain.id
                 WHERE m.channel = ?1 AND chain.depth < {MAX_THREAD_DEPTH}

@@ -33,6 +33,11 @@ impl SearchFilters {
 pub(super) const MESSAGE_COLUMNS: &str =
     "m.id, m.channel, m.author, COALESCE(p.name, ''), COALESCE(p.is_bot, 0),
      COALESCE(e.text, m.text), m.reply_to, m.created_ms, m.lamport, e.message IS NOT NULL";
+/// Whether message `m` shows in its channel rather than in a thread: it
+/// isn't a reply, or its parent hasn't arrived or sits in another channel
+/// (threads stay within a channel).
+pub(super) const IS_SHOWN_IN_CHANNEL: &str = "(m.reply_to IS NULL OR NOT EXISTS (
+    SELECT 1 FROM messages parent WHERE parent.id = m.reply_to AND parent.channel = m.channel))";
 pub(super) const MESSAGE_JOINS: &str = "FROM messages m
      LEFT JOIN profiles p ON p.member = m.author
      LEFT JOIN message_edits e ON e.message = m.id";
@@ -111,17 +116,15 @@ impl Store {
             Some(cursor) => (Some(cursor.lamport), Some(hex::decode(&cursor.author)?)),
             None => (None, None),
         };
-        let mut statement = self.db.prepare(
-            &format!(
-                "SELECT * FROM (
+        let mut statement = self.db.prepare(&format!(
+            "SELECT * FROM (
                     SELECT {MESSAGE_COLUMNS} {MESSAGE_JOINS}
                     WHERE m.channel = ?1
-                      AND (m.reply_to IS NULL OR NOT EXISTS (SELECT 1 FROM messages parent WHERE parent.id = m.reply_to))
+                      AND {IS_SHOWN_IN_CHANNEL}
                       AND (?2 IS NULL OR m.lamport < ?2 OR (m.lamport = ?2 AND m.author < ?3))
                     ORDER BY m.lamport DESC, m.author DESC LIMIT ?4)
                  ORDER BY lamport, author"
-            ),
-        )?;
+        ))?;
         let rows = statement.query_map(
             params![channel, before_lamport, before_author, limit],
             message_from_row,
