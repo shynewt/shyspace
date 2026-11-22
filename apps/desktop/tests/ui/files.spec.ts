@@ -662,3 +662,55 @@ test("a file row centers its thumbnail on the two lines of text", async ({ page 
   const textMiddle = (meta.y + name.y + name.height) / 2;
   expect(Math.abs(thumbnail.y + thumbnail.height / 2 - textMiddle)).toBeLessThanOrEqual(2);
 });
+
+test("the files view narrows to one channel, offering only places that have files", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.handle("create_channel", { name: "random" });
+    window.fake.handle("create_channel", { name: "quiet" });
+    const grace = window.fake.addMember("Grace");
+    window.fake.receivePrivateChannel(grace, "ops");
+    const inGeneral = window.fake.receiveMessage(grace, "general", "Agenda");
+    window.fake.files.receive(grace, inGeneral, { name: "agenda.txt", type: "text/plain", bytes: [1] });
+    const inRandom = window.fake.receiveMessage(grace, "random", "Meme");
+    window.fake.files.receive(grace, inRandom, { name: "meme.txt", type: "text/plain", bytes: [1] });
+    const inOps = window.fake.receiveMessage(grace, "ops", "Runbook");
+    window.fake.files.receive(grace, inOps, { name: "runbook.txt", type: "text/plain", bytes: [1] });
+  });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const place = page.getByRole("combobox", { name: "In" });
+  await expect(place).toHaveText("Anywhere");
+
+  await place.click();
+  await expect(page.getByRole("option")).toHaveText(["Anywhere", "ops", "random", "general"]);
+  // The private channel's option says so.
+  await expect(page.getByRole("option", { name: /ops/ }).getByLabel("Private")).toBeVisible();
+  await page.getByRole("option", { name: "random" }).click();
+  await expect(place).toHaveText("random");
+  await expect(page.getByText("meme.txt")).toBeVisible();
+  await expect(page.getByText("agenda.txt")).toHaveCount(0);
+  await expect(page.getByText("runbook.txt")).toHaveCount(0);
+
+  await place.click();
+  await page.getByRole("option", { name: "Anywhere" }).click();
+  await expect(page.getByText("agenda.txt")).toBeVisible();
+  await expect(page.getByText("runbook.txt")).toBeVisible();
+});
+
+test("the kind filter sorts files the way their icons do", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "Files");
+    // Sent with a generic type: the name says what it is.
+    window.fake.files.receive(grace, message, { name: "notes.md", type: "application/octet-stream", bytes: [35] });
+    window.fake.files.receive(grace, message, { name: "budget.xlsx", type: "application/octet-stream", bytes: [1] });
+    window.fake.files.receive(grace, message, { name: "backup.zip", type: "application/zip", bytes: [1] });
+  });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("radio", { name: "Documents" }).check();
+  await expect(page.getByText("notes.md")).toBeVisible();
+  await expect(page.getByText("budget.xlsx")).toBeVisible();
+  await expect(page.getByText("backup.zip")).toHaveCount(0);
+  await page.getByRole("radio", { name: "Other" }).check();
+  await expect(page.getByText("backup.zip")).toBeVisible();
+  await expect(page.getByText("notes.md")).toHaveCount(0);
+});

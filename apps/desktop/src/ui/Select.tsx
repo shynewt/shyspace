@@ -19,6 +19,7 @@ export function Select<Value extends string>({
   options,
   onChange,
   id,
+  isActive = false,
   className,
   "aria-label": ariaLabel,
   "aria-describedby": ariaDescribedBy,
@@ -27,6 +28,8 @@ export function Select<Value extends string>({
   options: SelectOption<Value>[];
   onChange: (value: Value) => void;
   id?: string;
+  /** Tints the button like a chosen option, e.g. a filter that's narrowing a list. */
+  isActive?: boolean;
   /** Sets the width; the list is at least as wide as the button. */
   className?: string;
   "aria-label"?: string;
@@ -46,11 +49,16 @@ export function Select<Value extends string>({
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}
         className={cx(
-          "flex h-9 items-center gap-2 rounded-lg border border-line bg-bg px-2.5 text-left text-sm text-ink outline-none transition hover:bg-surface-2 focus-visible:border-accent focus-visible:ring-3 focus-visible:ring-accent/15 disabled:opacity-50 data-[state=open]:border-accent",
+          "flex h-9 items-center gap-2 rounded-lg border px-2.5 text-left text-sm outline-none transition focus-visible:border-accent focus-visible:ring-3 focus-visible:ring-accent/15 disabled:opacity-50 data-[state=open]:border-accent",
+          isActive
+            ? "border-accent/35 bg-accent-soft font-medium text-accent-text"
+            : "border-line bg-bg text-ink hover:bg-surface-2",
           className,
         )}
       >
-        {chosen?.icon && <span className="flex shrink-0 text-muted">{chosen.icon}</span>}
+        {chosen?.icon && (
+          <span className={cx("flex shrink-0", isActive ? "text-accent-text" : "text-muted")}>{chosen.icon}</span>
+        )}
         <span className="min-w-0 flex-1 truncate">
           <RadixSelect.Value>{chosen?.label}</RadixSelect.Value>
         </span>

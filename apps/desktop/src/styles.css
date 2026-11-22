@@ -247,6 +247,7 @@
   --container-header-labels: 720px;
   --container-header-pills: 480px;
   --container-composer-hints: 460px;
+  --container-filters-one-row: 680px;
 }
 
 /* Sizes of floating surfaces and cards, so copies of one stay the same. */
