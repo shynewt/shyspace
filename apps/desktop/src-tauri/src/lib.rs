@@ -3,6 +3,7 @@
 
 mod alerts;
 mod files;
+mod huddles;
 mod tray;
 mod window;
 
@@ -795,6 +796,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            huddles::huddle,
+            huddles::my_huddle,
+            huddles::join_huddle,
+            huddles::leave_huddle,
+            huddles::set_huddle_muted,
+            huddles::huddle_devices,
+            huddles::set_huddle_devices,
             files::pick_files,
             files::stage_pasted_file,
             files::staged_file_bytes,

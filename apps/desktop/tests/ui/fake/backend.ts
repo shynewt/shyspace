@@ -36,6 +36,7 @@ import {
   requireNotifyLevel,
   requireString,
 } from "./helpers";
+import { FakeHuddles, NOT_HUDDLES } from "./huddles";
 import { FakeInvites } from "./invites";
 import { FakeLater } from "./later";
 import { FakePrivate, NOT_PRIVATE } from "./private";
@@ -86,6 +87,12 @@ export class FakeBackend {
     notify: (change) => this.notify(change),
     sendMessage: (channel, text, replyTo) => this.answer("send_message", { channel, text, replyTo }) as string,
     channelOf: (message) => this.chat.channelOf(message),
+  });
+  readonly huddles = new FakeHuddles({
+    me: () => this.me(),
+    members: () => this.members,
+    notify: (change) => this.notify(change),
+    privateView: (channel) => this.private.view(channel),
   });
   private later = new FakeLater();
   private sections = new FakeSections();
@@ -317,6 +324,8 @@ export class FakeBackend {
   private answer(command: string, args: InvokeArgs | undefined): unknown {
     const filesAnswer = this.files.answer(command, args);
     if (filesAnswer !== NOT_FILES) return filesAnswer;
+    const huddlesAnswer = this.huddles.answer(command, args);
+    if (huddlesAnswer !== NOT_HUDDLES) return huddlesAnswer;
     const privateAnswer = this.private.answer(command, args);
     if (privateAnswer !== NOT_PRIVATE) return privateAnswer;
     const chatAnswer = this.chat.answer(command, args);
