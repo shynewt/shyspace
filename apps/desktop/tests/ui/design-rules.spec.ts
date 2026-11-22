@@ -34,8 +34,6 @@ const ROWS_THAT_COLLAPSE_AS_THEY_LEAVE = [
   "features/later/LaterView.tsx",
   "features/members/JoinRequests.tsx",
 ];
-/** Durations owned by work that hasn't landed yet; each moves to a token with it. */
-const DURATION_CLASS_EXCEPTIONS = ["ui/Avatar.tsx"];
 
 function inlineDurations(text: string): string[] {
   return [...text.matchAll(INLINE_DURATION)].map((match) => match[0]).filter((found) => !/\brepeat:/.test(found));
@@ -97,11 +95,9 @@ test("the duration check catches numbers but not tokens or loops", () => {
 });
 
 test("CSS transitions use the named durations", () => {
-  const found = sourceFiles(SOURCE)
-    .filter((path) => !DURATION_CLASS_EXCEPTIONS.includes(relative(path)))
-    .flatMap((path) =>
-      [...readFileSync(path, "utf8").matchAll(DURATION_CLASS)].map((match) => `${relative(path)} ${match[0]}`),
-    );
+  const found = sourceFiles(SOURCE).flatMap((path) =>
+    [...readFileSync(path, "utf8").matchAll(DURATION_CLASS)].map((match) => `${relative(path)} ${match[0]}`),
+  );
   expect(found).toEqual([]);
 });
 

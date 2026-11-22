@@ -53,7 +53,7 @@ export function Avatar({
             exit={{ scale: 0.4, opacity: 0 }}
             transition={springs.pop}
             className={cx(
-              "absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-surface transition-colors duration-300",
+              "absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-surface transition-colors duration-base",
               presence === "online" ? "bg-success" : "bg-surface ring-2 ring-warning ring-inset",
             )}
             style={{ width: Math.max(9, size * 0.32), height: Math.max(9, size * 0.32) }}
