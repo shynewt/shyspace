@@ -92,7 +92,7 @@ impl Store {
              LEFT JOIN message_edits e ON e.message = m.id
              WHERE {UNREAD_BY_OTHERS}
                AND (instr(COALESCE(e.text, m.text), ?5) > 0 OR instr(COALESCE(e.text, m.text), ?6) > 0)
-             ORDER BY m.lamport, m.author"
+             ORDER BY m.lamport, m.author, m.id"
         ))?;
         let rows = statement.query_map(
             params![
@@ -160,12 +160,13 @@ impl Store {
     }
 
     fn is_read_in_thread(&self, reply: &UnreadMention, roots: &HashMap<String, String>) -> Result<bool> {
-        // A reply whose parent sits in another channel isn't in any thread here.
+        // A reply whose parent sits in another channel is its own root; one
+        // in no thread at all shows nowhere, so there's nothing to read.
         let root = match roots.get(&reply.id) {
             Some(root) => root.clone(),
             None => match self.thread_root(&reply.id)? {
                 Some(root) => root,
-                None => return Ok(false),
+                None => return Ok(true),
             },
         };
         Ok(self.read_marker(&root)?.is_some_and(|read| {

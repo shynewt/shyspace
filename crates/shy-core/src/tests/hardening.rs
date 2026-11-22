@@ -1838,3 +1838,33 @@ async fn page_titles_from_others_lose_line_breaks_and_invisible_characters() {
     admin.sync().await;
     assert_eq!(admin.pages().unwrap()[0].title, persian);
 }
+
+/// Two messages replying to each other (only a forged client can make one
+/// reply to the other before it exists) are in no thread and show nowhere;
+/// they must not break the sidebar, the inbox or links.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_loop_does_not_break_counts_the_inbox_or_links() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mention = crate::mentions::member_link("Ada", &admin.my_id());
+    let first = crate::ops::new_owned_id(&bob.me());
+    let second = crate::ops::new_owned_id(&bob.me());
+    let mut forger = Forger::new(&bob);
+    for (id, reply_to) in [(&first, &second), (&second, &first)] {
+        admin
+            .receive(forger.seal(Op::Message {
+                id: id.clone(),
+                channel: general.clone(),
+                text: format!("{mention} round and round"),
+                reply_to: Some(reply_to.clone()),
+            }))
+            .unwrap();
+    }
+
+    let listed = admin.channels().unwrap();
+    let listed_general = listed.iter().find(|channel| channel.id == general).unwrap();
+    assert_eq!(listed_general.unread_mentions, 0, "they show nowhere");
+    assert!(admin.inbox().unwrap().attention.is_empty());
+    let linked = admin.linked_message(&first).unwrap().unwrap();
+    assert_eq!(linked.thread_root, None);
+}

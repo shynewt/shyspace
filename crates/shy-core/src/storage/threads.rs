@@ -3,7 +3,7 @@
 //! out when reading, so a reply that arrives before its parent still lands
 //! in the right place; one whose parent is missing shows in the channel.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use iroh::PublicKey;
 use rusqlite::{OptionalExtension, ToSql, params};
 
@@ -70,7 +70,7 @@ impl Store {
              FROM chain CROSS JOIN messages m ON m.id = chain.id
              LEFT JOIN message_edits e ON e.message = m.id
              WHERE chain.id != chain.root
-             ORDER BY m.lamport, m.author"
+             ORDER BY m.lamport, m.author, m.id"
         ))?;
         let mut parameters: Vec<&dyn ToSql> = vec![&channel];
         parameters.extend_from_slice(values);
@@ -132,7 +132,9 @@ impl Store {
     }
 
     /// The first message of the thread `message` is in (itself if it isn't
-    /// a reply), or `None` if `message` doesn't exist.
+    /// a reply), or `None` if `message` doesn't exist or is in no thread: its
+    /// replies loop (only a forged client makes that) or run too deep to
+    /// follow. Such messages show neither in the channel nor in a thread.
     pub fn thread_root(&self, message: &str) -> Result<Option<String>> {
         let mut current = message.to_owned();
         for _ in 0..MAX_THREAD_DEPTH {
@@ -163,7 +165,7 @@ impl Store {
                 None => return Ok(Some(current)),
             }
         }
-        bail!("reply chain too long or looping at message {message}")
+        Ok(None)
     }
 
     /// Your explicit choice to follow a thread or not, if you made one.
@@ -230,6 +232,31 @@ mod tests {
         let replies = channel.store.replies_in_threads(&channel.id, &asked).unwrap();
 
         assert_eq!(replies.len(), 4);
+    }
+
+    /// Only a forged op can tie on lamport and author; the order is still the
+    /// same on every device.
+    #[test]
+    fn replies_that_tie_come_in_id_order() {
+        let mut channel = TestChannel::new();
+        let root = channel.post("first", None);
+        let mut ids = Vec::new();
+        for text in ["one", "two", "three"] {
+            let id = crate::ops::new_owned_id(&channel.author);
+            channel.apply_again(crate::ops::Op::Message {
+                id: id.clone(),
+                channel: channel.id.clone(),
+                text: text.into(),
+                reply_to: Some(root.clone()),
+            });
+            ids.push(id);
+        }
+        ids.sort();
+
+        let replies = channel.store.replies_in_threads(&channel.id, &[root]).unwrap();
+
+        let found: Vec<String> = replies.into_iter().map(|reply| reply.id).collect();
+        assert_eq!(found, ids);
     }
 
     #[test]
