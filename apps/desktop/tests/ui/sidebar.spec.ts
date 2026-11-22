@@ -42,6 +42,37 @@ test("a channel's alert level doesn't look like a mention", async ({ page }) => 
   await expect(item.locator(".lucide-at-sign")).toHaveCount(0);
 });
 
+test("an update notice names whose app sent what this version can't read, without guessing why", async ({ page }) => {
+  const [grace, alan] = await page.evaluate(() => [window.fake.addMember("Grace"), window.fake.addMember("Alan")]);
+  const stuck = (from: string[]) => ({
+    peers: 1,
+    last_sync_ms: Date.now(),
+    error: null,
+    removed: false,
+    needs_update: true,
+    needs_update_from: from,
+  });
+  await answerWith(page, "status", stuck([grace]), { kind: "sync" });
+  await page.getByText("Update shyspace").hover();
+  await expect(page.getByRole("tooltip")).toHaveText(
+    "Grace's app sent something this version can't read. Updating shyspace usually fixes it; if it doesn't, ask Grace or an admin.",
+  );
+
+  await page.mouse.move(600, 400);
+  await answerWith(page, "status", stuck([grace, alan]), { kind: "sync" });
+  await page.getByText("Update shyspace").hover();
+  await expect(page.getByRole("tooltip")).toHaveText(
+    "Grace's and Alan's apps sent something this version can't read. Updating shyspace usually fixes it; if it doesn't, ask them or an admin.",
+  );
+
+  await page.mouse.move(600, 400);
+  await answerWith(page, "status", stuck(["f".repeat(64)]), { kind: "sync" });
+  await page.getByText("Update shyspace").hover();
+  await expect(page.getByRole("tooltip")).toHaveText(
+    "A teammate's app sent something this version can't read. Updating shyspace usually fixes it; if it doesn't, ask an admin.",
+  );
+});
+
 test("syncing through the bucket alone looks calm, not like a warning", async ({ page }) => {
   const idle = {
     peers: 0,
