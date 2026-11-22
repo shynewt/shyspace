@@ -139,6 +139,26 @@ test("a notification names the place: the person for a DM, the group, or the cha
     ]);
 });
 
+test("notifications show in the order their messages came, even when one is slow to prepare", async ({ page }) => {
+  await page.evaluate(() => {
+    // The first notification's lookup of the members answers late, as a busy core might.
+    const answer = window.fake.handle.bind(window.fake);
+    let isFirst = true;
+    window.fake.handle = (command, args) => {
+      if (command !== "members" || !isFirst) return answer(command, args);
+      isFirst = false;
+      const late = answer(command, args);
+      return new Promise((resolve) => setTimeout(() => resolve(late), 300));
+    };
+    const grace = window.fake.memberNamed("Grace");
+    window.fake.receiveMessage(grace, "random", "first");
+    window.fake.receiveMessage(grace, "random", "second");
+  });
+
+  await expect.poll(() => alertsShown(page)).toHaveLength(2);
+  expect((await alertsShown(page)).map((alert) => alert.body)).toEqual(["first", "second"]);
+});
+
 test("a notification shows the sender's picture", async ({ page }) => {
   await graceSays(page, "random", "hello");
   const grace = await page.evaluate(() => window.fake.memberNamed("Grace"));
