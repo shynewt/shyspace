@@ -240,6 +240,18 @@ test("the admin can show the recovery kit", async ({ page }) => {
   await expect(page.getByRole("dialog", { name: "Your recovery kit" })).toContainText(/shyrec1_/);
 });
 
+test("a recovery kit that can't restore the workspace says why, instead of showing a kit", async ({ page }) => {
+  const settings = await openSettings(page);
+  const tooLarge =
+    "the recovery snapshot is too large for restore to read (32 MB at most), so a recovery kit can't restore this workspace";
+  await failWith(page, "recovery_kit", tooLarge);
+  await settings.getByRole("tab", { name: "Recovery" }).click();
+  await settings.getByRole("button", { name: "Show recovery kit" }).click();
+
+  await expect(settings.getByRole("alert")).toHaveText(tooLarge);
+  await expect(page.getByRole("dialog", { name: "Your recovery kit" })).toHaveCount(0);
+});
+
 test("members see who manages storage and recovery", async ({ page }) => {
   await page.goto("?start=member");
   await expect(page.getByLabel("Message #general")).toBeVisible();
