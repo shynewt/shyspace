@@ -7,6 +7,7 @@ import { displayName } from "../../lib/people";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { EmptyState, IconButton, Input, RelativeTime, SectionLabel, SegmentedControl, Select } from "../../ui";
+import { ImageViewer } from "../chat/ImageViewer";
 import { FileActions, FileIcon } from "../chat/MessageFiles";
 import { ChannelName } from "../private/ChannelName";
 import { ViewHeader } from "../shell/ViewHeader";
@@ -118,8 +119,21 @@ export function DriveView() {
 /** A small look at an image, from the same decrypted bytes the chat shows. */
 function Preview({ file }: { file: FileInfo }) {
   const image = useFileImage(file);
+  const [isViewing, setViewing] = useState(false);
   if (image.status !== "shown") return <IconTile file={file} />;
-  return <img src={image.url} alt="" className="size-8 shrink-0 rounded-lg border border-line object-cover" />;
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={`View ${file.name}`}
+        onClick={() => setViewing(true)}
+        className="shrink-0 cursor-zoom-in rounded-lg"
+      >
+        <img src={image.url} alt="" className="size-8 rounded-lg border border-line object-cover" />
+      </button>
+      <ImageViewer file={file} url={image.url} open={isViewing} onOpenChange={setViewing} />
+    </>
+  );
 }
 
 function IconTile({ file }: { file: FileInfo }) {

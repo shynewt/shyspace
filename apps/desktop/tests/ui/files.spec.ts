@@ -226,3 +226,17 @@ test("the files view previews small images", async ({ page }) => {
   await page.getByRole("button", { name: "Files", exact: true }).click();
   await expect(page.getByRole("main").locator("img[src^='blob:']")).toHaveCount(1);
 });
+
+test("clicking an image opens it large, and Esc closes it", async ({ page }) => {
+  await page.evaluate((png) => {
+    window.fake.files.pickNext = [{ name: "photo.png", type: "image/png", bytes: png }];
+  }, PNG);
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "View photo.png" }).click();
+  const viewer = page.getByRole("dialog", { name: "photo.png" });
+  await expect(viewer.getByRole("img", { name: "photo.png" })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Save photo.png" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
+});

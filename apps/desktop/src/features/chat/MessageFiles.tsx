@@ -4,6 +4,7 @@ import { api, type FileInfo } from "../../lib/api";
 import { formatSize, mayShowInline, useFileImage } from "../../lib/files";
 import { reportError } from "../../lib/toast";
 import { ConfirmDialog, IconButton } from "../../ui";
+import { ImageViewer } from "./ImageViewer";
 
 /** The files shared with a message: images inline, everything else as a card. */
 export function MessageFiles({ files }: { files: FileInfo[] }) {
@@ -19,16 +20,27 @@ export function MessageFiles({ files }: { files: FileInfo[] }) {
 
 function InlineImage({ file }: { file: FileInfo }) {
   const image = useFileImage(file);
+  const [isViewing, setViewing] = useState(false);
   if (image.status === "not-an-image" || image.status === "failed") return <FileCard file={file} />;
   return (
     <figure className="group/file relative max-w-card overflow-hidden rounded-xl border border-line bg-surface-2">
       {image.status === "shown" ? (
-        <img
-          src={image.url}
-          alt={file.name}
-          draggable={false}
-          className="block max-h-80 w-auto max-w-full object-contain"
-        />
+        <>
+          <button
+            type="button"
+            aria-label={`View ${file.name}`}
+            onClick={() => setViewing(true)}
+            className="block cursor-zoom-in"
+          >
+            <img
+              src={image.url}
+              alt={file.name}
+              draggable={false}
+              className="block max-h-80 w-auto max-w-full object-contain"
+            />
+          </button>
+          <ImageViewer file={file} url={image.url} open={isViewing} onOpenChange={setViewing} />
+        </>
       ) : (
         <div role="img" aria-label={`Loading ${file.name}`} className="h-40 w-64" />
       )}
