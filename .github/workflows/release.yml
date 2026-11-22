@@ -67,7 +67,7 @@ jobs:
           args: --features vendored-openssl
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: shyspace ${{ github.ref_name }}
-          releaseBody: "Internal test build. macOS: the app isn't signed yet, so open it the first time with right-click › Open."
+          releaseBody: "Internal test build. macOS: the app isn't signed yet. Open it once, then allow it in System Settings › Privacy & Security › Open Anyway."
           releaseDraft: true
           prerelease: true
           uploadWorkflowArtifacts: true
