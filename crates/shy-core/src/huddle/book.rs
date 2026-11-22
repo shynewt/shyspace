@@ -18,9 +18,12 @@ pub const MAX_CLOCK_SKEW_MS: i64 = 2 * 60 * 1000;
 pub const REFRESH_MS: u64 = 30 * 1000;
 /// Without a refresh for this long, a participant has left.
 pub const EXPIRY_MS: u64 = 90 * 1000;
-/// Joins and leaves from one device closer together than this are refused,
-/// so nobody can make everyone's roster redraw nonstop.
-const MIN_CHANGE_GAP_MS: u64 = 1000;
+/// Visible changes (joining, camera, screen) one device may make in a quick
+/// burst, like a misclick and the right huddle. Beyond that, one more is
+/// earned per `CHANGE_EARNED_MS`, so nobody can make everyone's roster
+/// redraw nonstop.
+const CHANGE_BURST: u32 = 4;
+const CHANGE_EARNED_MS: u64 = 1000;
 /// Ended sessions remembered per device. A real device ends a few per
 /// minute; a hostile one sending leaves for made-up sessions only pushes out
 /// its own older ones.
@@ -37,6 +40,12 @@ pub struct Participant {
     pub screen: bool,
     pub reach: Reach,
     pub media_wire: u16,
+}
+
+#[derive(Clone, Copy)]
+struct Allowance {
+    left: u32,
+    earned_until: u64,
 }
 
 struct Entry {
@@ -58,7 +67,7 @@ pub struct HuddleBook {
     /// Sessions that ended, per device, until when (our monotonic clock) a
     /// replay of them is still possible.
     retired: HashMap<PublicKey, Vec<(SessionId, u64)>>,
-    last_change: HashMap<PublicKey, u64>,
+    allowances: HashMap<PublicKey, Allowance>,
 }
 
 impl HuddleBook {
@@ -108,7 +117,7 @@ impl HuddleBook {
             self.retire(device, body.session, now);
             return Ok(Changed::default());
         };
-        ensure!(!self.is_changing_too_often(&device, now), "joining too often");
+        ensure!(self.spend_change(device, now), "joining too often");
         let mut changed = self.end(device, now);
         changed.channels.push(body.channel.clone());
         self.entries.insert(
@@ -129,7 +138,6 @@ impl HuddleBook {
                 heard_at: now,
             },
         );
-        self.last_change.insert(device, now);
         Ok(changed)
     }
 
@@ -138,8 +146,7 @@ impl HuddleBook {
     fn continue_session(&mut self, beacon: &Beacon, now: u64) -> Result<Changed> {
         let body = &beacon.body;
         let device = body.endpoint;
-        let is_too_soon = self.is_changing_too_often(&device, now);
-        let entry = self.entries.get_mut(&device).context("no live session")?;
+        let entry = self.entries.get(&device).context("no live session")?;
         ensure!(body.seq > entry.seq, "a beacon older than one already heard");
         let BeaconState::Joined {
             camera,
@@ -149,21 +156,22 @@ impl HuddleBook {
         else {
             return Ok(self.end(device, now));
         };
+        let shown = &entry.participant;
+        let is_visible_change = (shown.camera, shown.screen, shown.reach) != (camera, screen, reach);
+        // Over the allowance, it still counts as a refresh; a later refresh
+        // carries the change.
+        let is_shown = is_visible_change && self.spend_change(device, now);
+        let entry = self.entries.get_mut(&device).context("no live session")?;
         entry.seq = body.seq;
         entry.sent_ms = body.sent_ms;
         entry.heard_at = now;
-        let shown = &mut entry.participant;
-        let is_visible_change = (shown.camera, shown.screen, shown.reach) != (camera, screen, reach);
-        // Too soon after the last change, it still counts as a refresh; the
-        // next refresh carries the change.
-        if !is_visible_change || is_too_soon {
+        if !is_shown {
             return Ok(Changed::default());
         }
+        let shown = &mut entry.participant;
         (shown.camera, shown.screen, shown.reach) = (camera, screen, reach);
-        let channel = shown.channel.clone();
-        self.last_change.insert(device, now);
         Ok(Changed {
-            channels: vec![channel],
+            channels: vec![shown.channel.clone()],
         })
     }
 
@@ -197,8 +205,10 @@ impl HuddleBook {
             sessions.retain(|(_, until)| *until > now);
         }
         self.retired.retain(|_, sessions| !sessions.is_empty());
-        self.last_change
-            .retain(|_, last| now.saturating_sub(*last) < MIN_CHANGE_GAP_MS);
+        // A device whose allowance is full again needs no record.
+        let refill_ms = u64::from(CHANGE_BURST) * CHANGE_EARNED_MS;
+        self.allowances
+            .retain(|_, allowance| now.saturating_sub(allowance.earned_until) < refill_ms);
         changed
     }
 
@@ -233,10 +243,23 @@ impl HuddleBook {
         })
     }
 
-    fn is_changing_too_often(&self, device: &PublicKey, now: u64) -> bool {
-        self.last_change
-            .get(device)
-            .is_some_and(|last| now.saturating_sub(*last) < MIN_CHANGE_GAP_MS)
+    /// Uses one of the device's visible changes, if it has any left.
+    fn spend_change(&mut self, device: PublicKey, now: u64) -> bool {
+        let allowance = self.allowances.entry(device).or_insert(Allowance {
+            left: CHANGE_BURST,
+            earned_until: now,
+        });
+        let earned = now.saturating_sub(allowance.earned_until) / CHANGE_EARNED_MS;
+        if earned > 0 {
+            let earned_changes = u32::try_from(earned).unwrap_or(u32::MAX);
+            allowance.left = CHANGE_BURST.min(allowance.left.saturating_add(earned_changes));
+            allowance.earned_until += earned * CHANGE_EARNED_MS;
+        }
+        if allowance.left == 0 {
+            return false;
+        }
+        allowance.left -= 1;
+        true
     }
 }
 
@@ -351,20 +374,36 @@ mod tests {
         let mut book = HuddleBook::default();
         book.receive(&joined(&ada, "general", [1; 16], 0, WALL), WALL, 0)
             .unwrap();
-        let mut camera_on = body(&ada, "general", [1; 16], 1, WALL);
-        camera_on.state = BeaconState::Joined {
-            camera: true,
-            screen: false,
-            reach: Reach::Direct,
+        let toggle = |seq: u64| {
+            let mut changed = body(&ada, "general", [1; 16], seq, WALL);
+            changed.state = BeaconState::Joined {
+                camera: seq % 2 == 1,
+                screen: false,
+                reach: Reach::Direct,
+            };
+            Beacon::sign(&ada, "w1", changed).unwrap()
         };
-        let camera_on = Beacon::sign(&ada, "w1", camera_on).unwrap();
-        assert_eq!(book.receive(&camera_on, WALL, 100).unwrap(), Changed::default());
-        assert!(!book.roster("general", 100)[0].camera);
-        let mut later = camera_on.body.clone();
-        later.seq = 2;
-        let later = Beacon::sign(&ada, "w1", later).unwrap();
-        assert_eq!(book.receive(&later, WALL, 1_200).unwrap().channels, ["general"]);
-        assert!(book.roster("general", 1_200)[0].camera);
+        // The join used one change; the rest of the burst shows.
+        for seq in 1..u64::from(CHANGE_BURST) {
+            assert_eq!(
+                book.receive(&toggle(seq), WALL, 10 + seq).unwrap().channels,
+                ["general"]
+            );
+        }
+        let held = toggle(u64::from(CHANGE_BURST));
+        assert_eq!(book.receive(&held, WALL, 20).unwrap(), Changed::default());
+        let shown_camera = book.roster("general", 20)[0].camera;
+        let later = toggle(u64::from(CHANGE_BURST) + 2);
+        assert_eq!(
+            book.receive(&later, WALL, 20 + CHANGE_EARNED_MS)
+                .unwrap()
+                .channels,
+            ["general"]
+        );
+        assert_ne!(
+            book.roster("general", 20 + CHANGE_EARNED_MS)[0].camera,
+            shown_camera
+        );
     }
 
     #[test]
@@ -376,7 +415,7 @@ mod tests {
         book.receive(&left(&ada, "general", [1; 16], 1, WALL), WALL, 10)
             .unwrap();
         book.forget_expired(10 + 2 * MAX_CLOCK_SKEW_MS as u64 + 1);
-        assert!(book.last_change.is_empty());
+        assert!(book.allowances.is_empty());
     }
 
     #[test]
@@ -442,17 +481,23 @@ mod tests {
     }
 
     #[test]
-    fn rapid_rejoining_is_refused() {
+    fn a_quick_switch_is_fine_but_a_flood_is_refused() {
         let ada = SecretKey::generate();
         let mut book = HuddleBook::default();
-        book.receive(&joined(&ada, "general", [1; 16], 0, WALL), WALL, 0)
+        for index in 0..CHANGE_BURST {
+            let session = [u8::try_from(index).unwrap() + 1; 16];
+            let sent_ms = WALL + i64::from(index);
+            book.receive(
+                &joined(&ada, "general", session, 0, sent_ms),
+                WALL,
+                u64::from(index),
+            )
             .unwrap();
-        assert!(
-            book.receive(&joined(&ada, "design", [2; 16], 0, WALL + 1), WALL, 200)
-                .is_err()
-        );
-        book.receive(&joined(&ada, "design", [3; 16], 0, WALL + 2), WALL, 1_200)
-            .unwrap();
+        }
+        let flood = joined(&ada, "design", [99; 16], 0, WALL + 100);
+        assert!(book.receive(&flood, WALL, 50).is_err());
+        let later = joined(&ada, "design", [100; 16], 0, WALL + 200);
+        book.receive(&later, WALL, 50 + CHANGE_EARNED_MS).unwrap();
     }
 
     #[test]

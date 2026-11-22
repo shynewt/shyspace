@@ -467,3 +467,74 @@ async fn joining_and_leaving_work_from_a_plain_thread() {
     .join()
     .unwrap();
 }
+
+fn huddles_started(
+    changes: &mut tokio::sync::broadcast::Receiver<crate::views::Change>,
+) -> Vec<(String, String)> {
+    let mut started = Vec::new();
+    while let Ok(change) = changes.try_recv() {
+        if let crate::views::Change::HuddleStarted { channel, member, .. } = change {
+            started.push((channel, member));
+        }
+    }
+    started
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dm_huddle_starting_alerts_the_others_once() {
+    let (_root, [ada, bob, carol]) = three_members().await;
+    let dm = ada.workspace.open_dm(&[bob.workspace.my_id()]).unwrap();
+    let general = channel_id(&ada.workspace, "general");
+    sync_all(&[&ada.workspace, &bob.workspace, &carol.workspace]).await;
+    let mut changes = bob.workspace.subscribe();
+
+    ada.workspace.join_huddle(&general, false).unwrap();
+    carry(&ada.workspace, &[&bob.workspace], Via::Gossip);
+    assert!(
+        huddles_started(&mut changes).is_empty(),
+        "public huddles don't ring"
+    );
+
+    ada.workspace.join_huddle(&dm, false).unwrap();
+    let joined = ada.workspace.take_sent_beacons();
+    let ada_joins_dm: Vec<&Beacon> = joined
+        .iter()
+        .filter(|beacon| beacon.body.channel == dm && beacon.body.state != BeaconState::Left)
+        .collect();
+    for beacon in &joined {
+        let via = if beacon.body.channel == dm {
+            Via::Direct(ada.workspace.me())
+        } else {
+            Via::Gossip
+        };
+        bob.workspace.receive_beacon(beacon, via).unwrap();
+    }
+    assert_eq!(
+        huddles_started(&mut changes),
+        [(dm.clone(), ada.workspace.my_id())]
+    );
+
+    // A refresh, or Bob joining too, doesn't ring again.
+    let mut refresh = ada_joins_dm[0].clone();
+    refresh.body.seq += 1;
+    let ada_inner = &ada.workspace.inner;
+    let refresh = Beacon::sign(&ada_inner.identity, &ada_inner.config.workspace_id, refresh.body).unwrap();
+    bob.workspace
+        .receive_beacon(&refresh, Via::Direct(ada.workspace.me()))
+        .unwrap();
+    assert!(huddles_started(&mut changes).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_muted_dm_doesnt_ring() {
+    let (_root, [ada, bob, _carol]) = three_members().await;
+    let dm = ada.workspace.open_dm(&[bob.workspace.my_id()]).unwrap();
+    sync_all(&[&ada.workspace, &bob.workspace]).await;
+    bob.workspace
+        .set_notify_level(&dm, crate::views::NotifyLevel::Nothing)
+        .unwrap();
+    let mut changes = bob.workspace.subscribe();
+    ada.workspace.join_huddle(&dm, false).unwrap();
+    carry(&ada.workspace, &[&bob.workspace], Via::Direct(ada.workspace.me()));
+    assert!(huddles_started(&mut changes).is_empty());
+}

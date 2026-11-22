@@ -22,8 +22,9 @@ use crate::{
         rules::{MAX_PARTICIPANTS, Visibility, hearing_set, huddle_members},
     },
     ops::now_ms,
+    private::ids::{PrivateKind, private_kind},
     transport::direct::DirectMessage,
-    views::{Change, Huddle, HuddleParticipant, HuddlePeer, HuddlePhase, MyHuddle, member_id},
+    views::{Change, Huddle, HuddleParticipant, HuddlePeer, HuddlePhase, MyHuddle, NotifyLevel, member_id},
 };
 
 /// How often the session checks membership and whether the device slept.
@@ -379,14 +380,59 @@ impl Workspace {
             "a private huddle's beacon arrived over gossip"
         );
         let wall_ms = now_ms()?;
-        let (expired, received) = {
+        let (expired, received, is_start) = {
             let mut huddles = self.huddles();
             let now = huddles.now();
             let expired = huddles.book.forget_expired(now);
-            (expired, huddles.book.receive(beacon, wall_ms, now))
+            let was_empty = huddles.book.roster(&body.channel, now).is_empty();
+            let received = huddles.book.receive(beacon, wall_ms, now);
+            let is_start = was_empty && !huddles.book.roster(&body.channel, now).is_empty();
+            (expired, received, is_start)
         };
         self.after_roster_change(expired.channels)?;
-        self.after_roster_change(received?.channels)
+        self.after_roster_change(received?.channels)?;
+        if is_start {
+            self.ring_if_wanted(&body.channel, &body.member)?;
+        }
+        Ok(())
+    }
+
+    /// Tells this member that `starter` began a huddle, if it's in a DM they
+    /// aren't already in, and the DM may alert them.
+    fn ring_if_wanted(&self, channel: &str, starter: &PublicKey) -> Result<()> {
+        if private_kind(channel) != Some(PrivateKind::Dm) {
+            return Ok(());
+        }
+        if self
+            .huddles()
+            .mine
+            .as_ref()
+            .is_some_and(|mine| mine.channel == channel)
+        {
+            return Ok(());
+        }
+        let member_name = {
+            let state = self.state();
+            let my_status = state.store.member_status(self.me().as_bytes(), now_ms()?)?;
+            let status_level = my_status.map_or(NotifyLevel::All, |status| status.alerts);
+            if state.store.notify_level(channel)?.stricter(status_level) == NotifyLevel::Nothing {
+                return Ok(());
+            }
+            let starter_id = member_id(starter);
+            state
+                .store
+                .members(&self.inner.config.admin)?
+                .into_iter()
+                .find(|member| member.id == starter_id)
+                .map(|member| member.name)
+                .unwrap_or_default()
+        };
+        self.emit(Change::HuddleStarted {
+            channel: channel.to_owned(),
+            member: member_id(starter),
+            member_name,
+        });
+        Ok(())
     }
 
     /// The beacons this device sent since the last call.

@@ -416,6 +416,14 @@ pub enum Change {
     },
     /// Something about this device's own huddle changed.
     MyHuddle,
+    /// Someone started a huddle in a DM you're in: worth one notification.
+    /// Raised only for the first to join, and only if the DM may alert you.
+    HuddleStarted {
+        channel: EntityId,
+        /// Member id (hex).
+        member: String,
+        member_name: String,
+    },
     /// A participant in this device's huddle started or stopped speaking.
     HuddleSpeaking {
         /// Member id (hex); this device's own member for its own voice.
