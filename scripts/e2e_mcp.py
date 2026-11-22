@@ -97,9 +97,11 @@ def check(condition: bool, message: str) -> None:
     print(f"ok  {message}")
 
 
-def run_shy(*arguments: str, timeout: int = 120) -> str:
+def run_shy(*arguments: str, timeout: int = 120, stdin: str | None = None) -> str:
     environment = {**LOCAL_BUCKET, **os.environ}
-    finished = subprocess.run([SHY, *arguments], env=environment, capture_output=True, text=True, timeout=timeout)
+    finished = subprocess.run(
+        [SHY, *arguments], env=environment, input=stdin, capture_output=True, text=True, timeout=timeout
+    )
     if finished.returncode != 0:
         raise RuntimeError(f"shy {' '.join(arguments[2:4])} failed:\n{finished.stderr}")
     return finished.stdout
@@ -217,7 +219,7 @@ def main() -> int:
             member.close()
     kit = run_shy(*member_args("admin"), "recovery-kit").strip()
     check(kit.startswith("shyrec1_"), "admin exported a recovery kit")
-    restored = run_shy(*member_args("admin-restored"), "restore", kit)
+    restored = run_shy(*member_args("admin-restored"), "restore", stdin=kit)
     check("Restored the admin" in restored, "a new device restored the admin from the kit")
     invites = run_shy(*member_args("admin-restored"), "invite", "list")
     check("Accepted" in invites, "the restored admin still knows its invites")

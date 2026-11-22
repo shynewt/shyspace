@@ -2,11 +2,13 @@ mod agents;
 mod mcp;
 mod skill;
 
-use std::path::PathBuf;
+use std::{io::IsTerminal, path::PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use shy_core::{BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace, workspace::StorageUpdate};
+
+const RECOVERY_KIT_VARIABLE: &str = "SHY_RECOVERY_KIT";
 
 #[derive(Parser)]
 #[command(
@@ -58,8 +60,10 @@ enum Command {
     /// Print the admin's recovery kit. Store it in a password manager.
     RecoveryKit,
     /// Restore the admin onto this device from a recovery kit. Only do this
-    /// if the old admin device is gone.
-    Restore { kit: String },
+    /// if the old admin device is gone. The kit is read from standard input
+    /// (or SHY_RECOVERY_KIT), never the command line, where shell history
+    /// and other users could see it.
+    Restore,
     /// Serve the workspace to an AI agent over MCP on stdin/stdout.
     Mcp,
     /// List the named agents on this machine.
@@ -114,7 +118,8 @@ struct BucketArgs {
     bucket: String,
     #[arg(long, env = "SHY_S3_ACCESS_KEY_ID")]
     access_key_id: String,
-    #[arg(long, env = "SHY_S3_SECRET_ACCESS_KEY")]
+    /// Prefer the environment variable, to keep it out of shell history.
+    #[arg(long, env = "SHY_S3_SECRET_ACCESS_KEY", hide_env_values = true)]
     secret_access_key: String,
 }
 
@@ -201,7 +206,8 @@ async fn main() -> Result<()> {
             println!("{}", workspace.recovery_kit().await?.as_str());
             eprintln!("Keep this secret: it restores the admin role and holds the bucket credentials.");
         }
-        Command::Restore { kit } => {
+        Command::Restore => {
+            let kit = read_recovery_kit()?;
             let workspace = Workspace::restore(&data, &kit, Networking::Offline).await?;
             println!(
                 "Restored the admin of \"{}\" into {}",
@@ -318,5 +324,58 @@ fn report_sync_error(workspace: &Workspace) -> Result<()> {
     match workspace.status().error {
         Some(error) => bail!("sync failed: {error}"),
         None => Ok(()),
+    }
+}
+
+/// The recovery kit from `SHY_RECOVERY_KIT`, or else the first line of
+/// standard input.
+fn read_recovery_kit() -> Result<String> {
+    if let Ok(kit) = std::env::var(RECOVERY_KIT_VARIABLE) {
+        return Ok(kit.trim().to_owned());
+    }
+    if std::io::stdin().is_terminal() {
+        eprintln!("Paste the recovery kit, then press Enter:");
+    }
+    let mut kit = String::new();
+    std::io::stdin()
+        .read_line(&mut kit)
+        .context("reading the recovery kit from standard input")?;
+    let kit = kit.trim();
+    if kit.is_empty() {
+        bail!("no recovery kit: pipe it to standard input or set {RECOVERY_KIT_VARIABLE}");
+    }
+    Ok(kit.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+
+    use super::*;
+
+    /// Secrets come from the environment or standard input: never from
+    /// arguments (shell history, other users' process lists) and never
+    /// printed back by `--help`.
+    #[test]
+    fn secrets_stay_out_of_arguments_and_help() {
+        let cli = Cli::command();
+        let mut secrets = 0;
+        let mut commands = vec![&cli];
+        while let Some(command) = commands.pop() {
+            commands.extend(command.get_subcommands());
+            for argument in command.get_arguments() {
+                if argument.get_id().as_str().contains("secret") {
+                    secrets += 1;
+                    assert!(
+                        argument.is_hide_env_values_set(),
+                        "{} shows its value",
+                        argument.get_id()
+                    );
+                }
+            }
+        }
+        assert!(secrets >= 2, "found {secrets} secret arguments");
+        let restore = cli.find_subcommand("restore").unwrap();
+        assert_eq!(restore.get_arguments().count(), 0, "the kit isn't an argument");
     }
 }
