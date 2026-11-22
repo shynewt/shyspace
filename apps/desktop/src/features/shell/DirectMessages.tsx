@@ -5,7 +5,8 @@ import { channelTitle } from "../../lib/channels";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, IconButton } from "../../ui";
+import { IconButton } from "../../ui";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { NewDmDialog } from "../private/NewPrivateDialogs";
 import { NavItem } from "./NavItem";
 
@@ -74,7 +75,7 @@ function DmItem({ dm, title }: { dm: Channel; title: string }) {
   return (
     <NavItem
       view={{ kind: "channel", id: dm.id }}
-      icon={first ? <Avatar id={first} name={title} size={16} /> : null}
+      icon={first ? <MemberAvatar id={first} name={title} size={16} /> : null}
       label={title}
       kind="direct message"
       unread={dm.unread}

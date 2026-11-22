@@ -1,7 +1,8 @@
 import { channelTitle } from "../../lib/channels";
 import { useMembers } from "../../lib/members";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, cx } from "../../ui";
+import { cx } from "../../ui";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { ChannelGlyph } from "./ChannelGlyph";
 
 /**
@@ -20,7 +21,7 @@ export function ChannelName({ channelId, className }: { channelId: string; class
   return (
     <span className={cx("inline-flex max-w-full min-w-0 items-center gap-1 align-bottom", className)}>
       {channel.kind === "dm" ? (
-        person && <Avatar id={person} name={title} size={14} />
+        person && <MemberAvatar id={person} name={title} size={14} />
       ) : (
         <ChannelGlyph kind={channel.kind} size={12} className="shrink-0 text-decorative" />
       )}

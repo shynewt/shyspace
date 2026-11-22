@@ -10,8 +10,9 @@ import { usePreferences, validRecentEmoji, withRecentEmoji } from "../../lib/pre
 import { hasCommandModifier } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, cx, pop, springs } from "../../ui";
+import { cx, pop, springs } from "../../ui";
 import { type CatalogEmoji, type EmojiCatalog, loadEmojiCatalog, searchEmoji } from "../../ui/emojiData";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { describeStatus, shownStatus } from "../members/StatusEmoji";
 
 const MAX_SUGGESTIONS = 6;
@@ -304,7 +305,7 @@ function PersonRow({ person }: { person: Person }) {
   const status = shownStatus(member);
   return (
     <>
-      <Avatar
+      <MemberAvatar
         id={member.id}
         name={person.name}
         isBot={member.is_bot}

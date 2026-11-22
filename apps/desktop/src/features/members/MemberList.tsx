@@ -3,7 +3,8 @@ import { type ReactNode, useState } from "react";
 import type { Member } from "../../lib/api";
 import { displayName, presenceLabel } from "../../lib/people";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Badge, Input } from "../../ui";
+import { Badge, Input } from "../../ui";
+import { MemberAvatar } from "./MemberAvatar";
 import { alertsLabel, StatusEmoji } from "./StatusEmoji";
 
 type ListProps = {
@@ -59,7 +60,7 @@ function MemberRow({ member, isMe, actions }: { member: Member; isMe: boolean; a
   const name = displayName(member.name, member.id);
   return (
     <li className="flex min-h-12 items-center gap-3 rounded-lg px-2 py-1.5">
-      <Avatar
+      <MemberAvatar
         id={member.id}
         name={name}
         isBot={member.is_bot}

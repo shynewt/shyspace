@@ -4,7 +4,8 @@ import { displayName, presenceLabel } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Menu, type MenuItem } from "../../ui";
+import { Menu, type MenuItem } from "../../ui";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { StorageAttentionSign, useStorageNeedsAttention } from "../settings/StorageProtection";
 
 /** You, at the foot of the sidebar: your status, appearing offline, and Settings. */
@@ -54,7 +55,7 @@ export function MeMenu() {
           type="button"
           className="focus-ring-inset flex h-11 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors hover:bg-surface-2 data-[state=open]:bg-surface-2"
         >
-          <Avatar id={me.id} name={name} size={28} presence={isOffline ? undefined : me.presence} />
+          <MemberAvatar id={me.id} name={name} size={28} presence={isOffline ? undefined : me.presence} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium">{name}</span>
             <span className="block truncate text-xs text-muted">{statusLine(me, isOffline)}</span>

@@ -15,6 +15,7 @@ import { useReminders } from "../../lib/useReminders";
 import { sameView, savedItemView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog, tweens } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
+import { DriveView } from "../drive/DriveView";
 import { InboxView } from "../inbox/InboxView";
 import { LaterView } from "../later/LaterView";
 import { FullProfileDialog } from "../members/FullProfileDialog";
@@ -183,6 +184,7 @@ export function Shell({ session }: { session: Session }) {
             {view.kind === "page" && <PageView pageId={view.id} />}
             {view.kind === "inbox" && <InboxView />}
             {view.kind === "later" && <LaterView />}
+            {view.kind === "files" && <DriveView />}
           </motion.div>
         )}
         {!view && !sidebar.isDocked && <ViewHeader />}

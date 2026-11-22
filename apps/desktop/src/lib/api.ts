@@ -51,7 +51,25 @@ export type Message = {
   is_following: boolean;
   unread_replies: number;
   reactions: Reaction[];
+  /** Files shared with it, in the order they were sent. */
+  files: FileInfo[];
 };
+/** A shared file. Its bytes come through `api.fileBytes`; show it by what they are, never by its name or type. */
+export type FileInfo = {
+  id: string;
+  /** The channel or DM it was shared in. */
+  place: string;
+  message: string | null;
+  author: string;
+  name: string;
+  /** As the sender's system named it; only a hint. */
+  media_type: string;
+  size: number;
+  created_ms: number;
+  can_delete: boolean;
+};
+/** A file picked, dropped or pasted, waiting to be sent; the token is all the app can send. */
+export type StagedFile = { token: string; name: string; size: number; media_type: string };
 export type InboxItem = {
   message: Message;
   channel_name: string;
@@ -113,6 +131,8 @@ export type Member = {
   status: MemberStatus | null;
   presence: PresenceState;
   details: ProfileDetails;
+  /** Their picture's id, if they shared one; it changes with the picture. */
+  picture: string | null;
 };
 export type SearchHit = {
   kind: "message" | "page";
@@ -178,6 +198,8 @@ export type Change =
   | { kind: "invites" }
   | { kind: "storage" }
   | { kind: "storage_protection" }
+  /** How far this device's upload into `channel` has got, in bytes of the files. */
+  | { kind: "upload"; channel: string; sent: number; total: number }
   | { kind: "sync" }
   | { kind: "removed" };
 
@@ -277,8 +299,50 @@ export const api = {
   rejectInvite: (token: string) => invoke<void>("reject_invite", { token }),
   revokeInvite: (token: string) => invoke<void>("revoke_invite", { token }),
   search: (query: string) => invoke<SearchHit[]>("search", { query }),
+  /** Opens the system's file picker; resolves to what was picked (nothing if cancelled). */
+  pickFiles: () => invoke<StagedFile[]>("pick_files"),
+  /** The file crosses the bridge as raw bytes, framed by `framePastedFile`. */
+  stagePastedFile: async (file: File) =>
+    invoke<StagedFile>(
+      "stage_pasted_file",
+      framePastedFile(file.name, file.type, new Uint8Array(await file.arrayBuffer())),
+    ),
+  unstageFile: (token: string) => invoke<void>("unstage_file", { token }),
+  /** Uploads the staged files, then sends one message carrying them; `text` may be empty. */
+  sendFiles: (channel: string, text: string, replyTo: string | null, tokens: string[]) =>
+    invoke<string>("send_files", { channel, text, replyTo, tokens }),
+  fileBytes: async (file: string) => new Uint8Array(await invoke<ArrayBuffer>("file_bytes", { file })),
+  /** Asks where to save it, then saves; false if cancelled. */
+  saveFile: (file: string) => invoke<boolean>("save_file", { file }),
+  deleteFile: (file: string) => invoke<void>("delete_file", { file }),
+  files: () => invoke<FileInfo[]>("files"),
+  /** Empty if they have none. */
+  profilePicture: async (member: string) => new Uint8Array(await invoke<ArrayBuffer>("profile_picture", { member })),
+  /** An already cropped PNG, JPEG or WebP; null removes yours. */
+  setProfilePicture: (image: Uint8Array | null) =>
+    invoke<void>("set_profile_picture", { image: image ? Array.from(image) : [] }),
   status: () => invoke<SyncStatus>("status"),
 };
+
+/**
+ * A pasted file as one byte string: its name and media type, each as a
+ * 2-byte big-endian length and UTF-8, then the file's bytes. Must match
+ * `unframe_pasted_file` in src-tauri/src/files.rs.
+ */
+export function framePastedFile(name: string, mediaType: string, bytes: Uint8Array): Uint8Array {
+  const encoder = new TextEncoder();
+  const parts = [encoder.encode(name.slice(0, 1000)), encoder.encode(mediaType.slice(0, 200))];
+  const framed = new Uint8Array(parts.reduce((sum, part) => sum + 2 + part.length, 0) + bytes.length);
+  let offset = 0;
+  for (const part of parts) {
+    framed[offset] = part.length >> 8;
+    framed[offset + 1] = part.length & 0xff;
+    framed.set(part, offset + 2);
+    offset += 2 + part.length;
+  }
+  framed.set(bytes, offset);
+  return framed;
+}
 
 type ChangeListener = (change: Change) => void;
 const listeners = new Set<ChangeListener>();
@@ -294,6 +358,31 @@ export function onChange(listener: ChangeListener): () => void {
   }
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Files dropped on the window, already staged; and whether files are being dragged over it. */
+export function onFilesDropped(listener: (files: StagedFile[]) => void): () => void {
+  return subscribe<StagedFile[]>("files-dropped", listener);
+}
+export function onFileDrag(listener: (isDragging: boolean) => void): () => void {
+  return subscribe<boolean>("file-drag", listener);
+}
+
+function subscribe<T>(event: string, listener: (payload: T) => void): () => void {
+  let isActive = true;
+  let stop: (() => void) | null = null;
+  listen<T>(event, (received) => {
+    if (isActive) listener(received.payload);
+  })
+    .then((unlisten) => {
+      if (isActive) stop = unlisten;
+      else unlisten();
+    })
+    .catch(reportError);
+  return () => {
+    isActive = false;
+    stop?.();
+  };
 }
 
 export const PAGE_LINK_PREFIX = "shy://page/";

@@ -24,6 +24,7 @@ import type {
 } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
 import { FakeDrafts } from "./drafts";
+import { FakeFiles, NOT_FILES } from "./files";
 import {
   argument,
   type Kind,
@@ -61,6 +62,8 @@ export class FakeBackend {
     notify: (change) => this.notify(change),
     savedMark: (item) => this.later.mark(item),
     privateView: (channel) => this.private.view(channel),
+    filesOf: (message) => this.files.filesOf(message),
+    onMessageDeleted: (message) => this.files.dropFilesOf(message),
   });
   private private = new FakePrivate({
     me: () => this.me(),
@@ -70,7 +73,17 @@ export class FakeBackend {
     notify: (change) => this.notify(change),
     savedMark: (item) => this.later.mark(item),
     privateView: (channel) => this.private.view(channel),
+    filesOf: (message) => this.files.filesOf(message),
+    onMessageDeleted: (message) => this.files.dropFilesOf(message),
     listChannel: (id, name) => this.chat.listChannel(id, name),
+  });
+  readonly files = new FakeFiles({
+    me: () => this.me(),
+    isAdmin: () => Boolean(this.session?.is_admin),
+    members: () => this.members,
+    notify: (change) => this.notify(change),
+    sendMessage: (channel, text, replyTo) => this.answer("send_message", { channel, text, replyTo }) as string,
+    channelOf: (message) => this.chat.channelOf(message),
   });
   private later = new FakeLater();
   private sections = new FakeSections();
@@ -112,6 +125,7 @@ export class FakeBackend {
       status: null,
       presence: "unreachable",
       details: noDetails(),
+      picture: null,
     });
     this.notify({ kind: "members" });
     return id;
@@ -295,6 +309,8 @@ export class FakeBackend {
   }
 
   private answer(command: string, args: InvokeArgs | undefined): unknown {
+    const filesAnswer = this.files.answer(command, args);
+    if (filesAnswer !== NOT_FILES) return filesAnswer;
     const privateAnswer = this.private.answer(command, args);
     if (privateAnswer !== NOT_PRIVATE) return privateAnswer;
     const chatAnswer = this.chat.answer(command, args);
@@ -485,6 +501,7 @@ export class FakeBackend {
         status: null,
         presence: "online",
         details: noDetails(),
+        picture: null,
       },
     ];
     this.storage = {
@@ -521,6 +538,7 @@ export class FakeBackend {
         status: null,
         presence: "unreachable",
         details: noDetails(),
+        picture: null,
       },
       {
         id: me,
@@ -531,6 +549,7 @@ export class FakeBackend {
         status: null,
         presence: "online",
         details: noDetails(),
+        picture: null,
       },
     ];
     this.chat.addChannel(ownedId(admin), "general");

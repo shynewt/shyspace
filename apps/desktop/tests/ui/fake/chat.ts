@@ -2,6 +2,7 @@
 import type {
   Change,
   Channel,
+  FileInfo,
   Inbox,
   InboxItem,
   LinkedMessage,
@@ -26,6 +27,9 @@ export type ChatContext = {
   savedMark: (item: string) => SavedMark | null;
   /** How a private channel or DM shows, or null for a public one. */
   privateView: (channel: string) => PrivateView | null;
+  filesOf: (message: string) => FileInfo[];
+  /** A message was deleted, with its files. */
+  onMessageDeleted: (message: string) => void;
 };
 
 /** Returned by `answer` for commands that aren't about chat. */
@@ -48,6 +52,7 @@ type StoredMessage = Omit<
   | "last_reply_preview"
   | "is_following"
   | "unread_replies"
+  | "files"
 >;
 type StoredReaction = { message: string; author: string; emoji: string };
 
@@ -302,6 +307,7 @@ export class FakeChat {
       saved: this.context.savedMark(message.id),
       ...this.threadSummary(message),
       reactions: Array.from(counts, ([emoji, entry]) => ({ emoji, ...entry })),
+      files: this.context.filesOf(message.id),
     };
   }
 
@@ -402,6 +408,7 @@ export class FakeChat {
     const message = this.messages.find((candidate) => candidate.id === id);
     this.messages = this.messages.filter((candidate) => candidate.id !== id);
     this.reactions = this.reactions.filter((reaction) => reaction.message !== id);
+    this.context.onMessageDeleted(id);
     if (message) this.context.notify({ kind: "messages", channel: message.channel });
   }
 

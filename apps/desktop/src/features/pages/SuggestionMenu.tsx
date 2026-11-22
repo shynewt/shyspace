@@ -20,7 +20,8 @@ import { api, type Member, type Page, pageLink } from "../../lib/api";
 import { memberLink } from "../../lib/mentions";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, cx, pop } from "../../ui";
+import { cx, pop } from "../../ui";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { BLOCKS, type BlockKind, insertBlock } from "./editor/blocks";
 import { closeSuggestions, type MenuKey, openSuggestions, type Suggestion } from "./editor/suggestions";
 
@@ -112,7 +113,7 @@ function memberOptions(query: string, members: Member[], me: string): Option[] {
     .map((member) => ({
       key: member.id,
       label: member.name,
-      icon: <Avatar id={member.id} name={member.name} isBot={member.is_bot} size={20} />,
+      icon: <MemberAvatar id={member.id} name={member.name} isBot={member.is_bot} size={20} />,
       detail: member.id === me ? "you" : member.is_bot ? "agent" : "",
       choose: (view, suggestion) => replaceTrigger(view, suggestion, `${memberLink(member.name, member.id)} `),
     }));

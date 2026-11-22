@@ -2,6 +2,7 @@
 //! call, and every core change is forwarded to the UI as a "change" event.
 
 mod alerts;
+mod files;
 mod tray;
 
 use std::path::PathBuf;
@@ -21,12 +22,12 @@ use shy_core::{
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, ipc::Response};
 use tokio::sync::Mutex;
 
-type CommandResult<T> = Result<T, String>;
+pub(crate) type CommandResult<T> = Result<T, String>;
 
 /// How long quitting may wait to upload unsent changes.
 const EXIT_UPLOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 
-struct AppState {
+pub(crate) struct AppState {
     data: DataDir,
     workspace: Mutex<Option<Workspace>>,
     /// Stops the join in progress, if one is waiting for the admin.
@@ -40,7 +41,7 @@ struct Session {
     is_admin: bool,
 }
 
-fn failed(error: anyhow::Error) -> String {
+pub(crate) fn failed(error: anyhow::Error) -> String {
     format!("{error:#}")
 }
 
@@ -76,13 +77,14 @@ async fn install(app: &AppHandle, state: &AppState, workspace: Workspace) -> Ses
 
 /// Makes `workspace` the open one and starts forwarding its changes to the UI.
 fn activate(app: &AppHandle, slot: &mut Option<Workspace>, workspace: Workspace) -> Session {
+    app.state::<files::StagedFiles>().clear();
     forward_changes(app, &workspace);
     let session = session_of(&workspace);
     *slot = Some(workspace);
     session
 }
 
-async fn current(state: &State<'_, AppState>) -> CommandResult<Workspace> {
+pub(crate) async fn current(state: &State<'_, AppState>) -> CommandResult<Workspace> {
     state
         .workspace
         .lock()
@@ -748,6 +750,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(files::StagedFiles::default())
         .setup(|app| {
             let dir = data_dir(app.handle())?;
             app.manage(AppState {
@@ -763,6 +767,9 @@ pub fn run() {
         // With a tray icon, closing the window keeps shyspace running there,
         // so alerts still arrive; Quit in the tray menu ends it.
         .on_window_event(|window, event| {
+            if let WindowEvent::DragDrop(drop) = event {
+                files::on_drag_drop(window.app_handle(), &window.state::<files::StagedFiles>(), drop);
+            }
             if let WindowEvent::CloseRequested { api, .. } = event
                 && window.state::<tray::HasTray>().0
             {
@@ -773,6 +780,16 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            files::pick_files,
+            files::stage_pasted_file,
+            files::unstage_file,
+            files::send_files,
+            files::file_bytes,
+            files::save_file,
+            files::delete_file,
+            files::files,
+            files::profile_picture,
+            files::set_profile_picture,
             session,
             create_workspace,
             join_workspace,

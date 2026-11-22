@@ -9,18 +9,8 @@ import { reportError, showUndoToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
 import { savedItemView, useWorkspace } from "../../lib/workspace";
-import {
-  Avatar,
-  cx,
-  EmptyState,
-  IconButton,
-  ListRow,
-  Menu,
-  type MenuItem,
-  SectionLabel,
-  springs,
-  tweens,
-} from "../../ui";
+import { cx, EmptyState, IconButton, ListRow, Menu, type MenuItem, SectionLabel, springs, tweens } from "../../ui";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { ChannelName } from "../private/ChannelName";
 import { ViewHeader } from "../shell/ViewHeader";
 import { ReminderPicker } from "./ReminderPicker";
@@ -147,7 +137,12 @@ function LaterRow({ item }: { item: LaterItem }) {
         isHighlighted={isMenuOpen}
         leading={
           linked ? (
-            <Avatar id={linked.message.author} name={author ?? ""} isBot={linked.message.author_is_bot} size={30} />
+            <MemberAvatar
+              id={linked.message.author}
+              name={author ?? ""}
+              isBot={linked.message.author_is_bot}
+              size={30}
+            />
           ) : (
             <span aria-hidden className="grid size-[30px] place-items-center rounded-[30%] bg-surface-2 text-muted">
               <FileText size={15} />

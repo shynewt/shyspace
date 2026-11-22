@@ -20,6 +20,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1.0.104"
 tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
 
 [lints]
 workspace = true

@@ -13,7 +13,8 @@ import {
 } from "../../lib/localTime";
 import { displayName, formatStatusEnd, presenceLabel } from "../../lib/people";
 import { useMinuteClock } from "../../lib/useMinuteClock";
-import { Avatar, Badge, CopyButton, cx, Tooltip } from "../../ui";
+import { Badge, CopyButton, cx, Tooltip } from "../../ui";
+import { MemberAvatar } from "./MemberAvatar";
 import { alertsLabel, shownStatus } from "./StatusEmoji";
 
 const ICON_SIZE = 14;
@@ -28,7 +29,7 @@ export function ProfileHeader({ member, isMe }: { member: Member; isMe: boolean 
   const { title, pronouns } = member.details;
   return (
     <div className="flex items-center gap-3">
-      <Avatar
+      <MemberAvatar
         id={member.id}
         name={name}
         isBot={member.is_bot}

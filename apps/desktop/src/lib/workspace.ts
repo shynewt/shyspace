@@ -7,10 +7,13 @@ export type View =
   | { kind: "channel"; id: string; thread?: string; focus?: string }
   | { kind: "page"; id: string }
   | { kind: "inbox" }
-  | { kind: "later" };
+  | { kind: "later" }
+  | { kind: "files" };
 
 export function viewKey(view: View): string {
-  return view.kind === "inbox" || view.kind === "later" ? view.kind : `${view.kind}:${view.id}`;
+  return view.kind === "inbox" || view.kind === "later" || view.kind === "files"
+    ? view.kind
+    : `${view.kind}:${view.id}`;
 }
 
 export type WorkspaceContextValue = {

@@ -7,7 +7,8 @@ import { displayName } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Avatar, Button, CountBadge, EmptyState, ListRow, RelativeTime, SectionLabel, tweens } from "../../ui";
+import { Button, CountBadge, EmptyState, ListRow, RelativeTime, SectionLabel, tweens } from "../../ui";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { ChannelName } from "../private/ChannelName";
 import { HeaderAction, ViewHeader } from "../shell/ViewHeader";
 import { MarkAllReadDialog } from "./MarkAllReadDialog";
@@ -101,7 +102,7 @@ function AttentionRow({ item }: { item: InboxItem }) {
         onClick={() =>
           navigate({ kind: "channel", id: message.channel, thread: item.thread_root ?? undefined, focus: message.id })
         }
-        leading={<Avatar id={message.author} name={name} isBot={message.author_is_bot} size={32} />}
+        leading={<MemberAvatar id={message.author} name={name} isBot={message.author_is_bot} size={32} />}
         meta={
           <>
             {item.reason === "mention" ? <AtSign size={12} /> : <MessageSquareReply size={12} />}

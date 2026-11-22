@@ -61,6 +61,7 @@ export class FakeInvites {
       status: null,
       presence: "unreachable",
       details: noDetails(),
+      picture: null,
     };
   }
 

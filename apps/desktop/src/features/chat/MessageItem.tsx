@@ -21,7 +21,6 @@ import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
 import {
-  Avatar,
   Badge,
   ConfirmDialog,
   cx,
@@ -36,9 +35,11 @@ import {
 } from "../../ui";
 import { ReminderPicker } from "../later/ReminderPicker";
 import { remindMeItem } from "../later/remindMeItem";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { ProfileCard, ProfileCardAvatar, ProfileCardTrigger } from "../members/ProfileCard";
 import { StatusEmoji } from "../members/StatusEmoji";
 import { MessageCard } from "./MessageCard";
+import { MessageFiles } from "./MessageFiles";
 import { PageCard } from "./PageCard";
 import { describeSaved, SavedLabel } from "./SavedLabel";
 import { ThreadSummary } from "./ThreadSummary";
@@ -122,7 +123,7 @@ export const MessageItem = memo(function MessageItem({
             </span>
           ) : (
             <ProfileCardAvatar>
-              <Avatar id={message.author} name={name} isBot={message.author_is_bot} size={36} />
+              <MemberAvatar id={message.author} name={name} isBot={message.author_is_bot} size={36} />
             </ProfileCardAvatar>
           )}
         </div>
@@ -145,21 +146,24 @@ export const MessageItem = memo(function MessageItem({
             </div>
           )}
           <SavedLabel saved={message.saved} />
-          <div className="prose-chat selectable text-base">
-            <ChatMarkdown
-              text={message.text}
-              myId={session.me}
-              pageTitle={(id) => titles.get(id)}
-              onOpenPage={(id) => navigate({ kind: "page", id })}
-              onOpenMessage={openLinkedMessage}
-              renderMemberMention={(memberId, label, className) => (
-                <ProfileCard memberId={memberId} onMention={onMention}>
-                  <ProfileCardTrigger className={className}>{label}</ProfileCardTrigger>
-                </ProfileCard>
-              )}
-            />
-            {message.is_edited && <span className="edited-mark ml-1 text-2xs text-faint">(edited)</span>}
-          </div>
+          {(message.text !== "" || message.files.length === 0) && (
+            <div className="prose-chat selectable text-base">
+              <ChatMarkdown
+                text={message.text}
+                myId={session.me}
+                pageTitle={(id) => titles.get(id)}
+                onOpenPage={(id) => navigate({ kind: "page", id })}
+                onOpenMessage={openLinkedMessage}
+                renderMemberMention={(memberId, label, className) => (
+                  <ProfileCard memberId={memberId} onMention={onMention}>
+                    <ProfileCardTrigger className={className}>{label}</ProfileCardTrigger>
+                  </ProfileCard>
+                )}
+              />
+              {message.is_edited && <span className="edited-mark ml-1 text-2xs text-faint">(edited)</span>}
+            </div>
+          )}
+          <MessageFiles files={message.files} />
 
           {linkedPages.map((id) => (
             <PageCard key={id} pageId={id} />
@@ -264,7 +268,11 @@ export const MessageItem = memo(function MessageItem({
           open={isConfirmingDelete}
           onOpenChange={setConfirmingDelete}
           title="Delete this message?"
-          description="It disappears for everyone, along with its reactions. This can't be undone."
+          description={
+            message.files.length > 0
+              ? "It disappears for everyone, along with its reactions and files. This can't be undone."
+              : "It disappears for everyone, along with its reactions. This can't be undone."
+          }
           confirmLabel="Delete message"
           onConfirm={() => api.deleteMessage(message.id)}
         >
@@ -329,7 +337,12 @@ function MessageMenu({
   );
   if (message.can_edit) items.push({ label: "Edit", icon: <Pencil size={14} />, onSelect: onEdit });
   if (message.can_delete) {
-    items.push({ label: "Delete", icon: <Trash2 size={14} />, onSelect: onDelete, isDestructive: true });
+    items.push({
+      label: "Delete",
+      icon: <Trash2 size={14} />,
+      onSelect: onDelete,
+      isDestructive: true,
+    });
   }
   return (
     <>

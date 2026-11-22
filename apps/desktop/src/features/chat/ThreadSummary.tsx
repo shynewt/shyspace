@@ -3,7 +3,8 @@ import type { Message } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
 import { useMembers } from "../../lib/members";
 import { displayName, formatWhen } from "../../lib/people";
-import { Avatar, CountBadge, cx, RelativeTime } from "../../ui";
+import { CountBadge, cx, RelativeTime } from "../../ui";
+import { MemberAvatar } from "../members/MemberAvatar";
 
 /**
  * One line under a thread's first message: the latest repliers, the reply
@@ -54,7 +55,7 @@ export function ThreadSummary({
               style={{ zIndex: message.recent_reply_authors.length - index }}
               className="relative rounded-[30%] ring-2 ring-surface transition-colors group-hover/thread:ring-surface-2"
             >
-              <Avatar id={id} name={nameOf(id)} isBot={memberFor(id)?.is_bot ?? false} size={16} />
+              <MemberAvatar id={id} name={nameOf(id)} isBot={memberFor(id)?.is_bot ?? false} size={16} />
             </span>
           ))}
         </span>

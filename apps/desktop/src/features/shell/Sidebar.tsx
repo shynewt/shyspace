@@ -1,4 +1,4 @@
-import { Bookmark, Inbox as InboxIcon, Search } from "lucide-react";
+import { Bookmark, HardDrive, Inbox as InboxIcon, Search } from "lucide-react";
 import { useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
@@ -41,6 +41,7 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto px-2 pb-3">
         <InboxLink />
         <LaterLink />
+        <NavItem view={{ kind: "files" }} icon={<HardDrive size={15} />} label="Files" />
         <ChannelSections />
         <DirectMessages />
 

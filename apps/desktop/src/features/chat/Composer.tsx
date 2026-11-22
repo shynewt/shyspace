@@ -1,4 +1,4 @@
-import { ArrowUp, Pencil, Smile, X } from "lucide-react";
+import { ArrowUp, Paperclip, Pencil, Smile, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -8,6 +8,8 @@ import { droppedPageId, isPageDrag } from "../../lib/pageDrag";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { Button, cx, EmojiPicker, fade, IconButton, Kbd, Popover, tweens } from "../../ui";
+import { AttachmentList, DropHint, UploadProgress } from "./Attachments";
+import { useAttachments } from "./useAttachments";
 import { useDraft } from "./useDraft";
 import { type InsertMention, useSuggestions } from "./useSuggestions";
 
@@ -51,9 +53,12 @@ export function Composer({
       if (mentionTarget.current === insertMention) mentionTarget.current = null;
     };
   }, [mentionTarget, insertMention]);
+  const attachments = useAttachments(channelId);
+  const hasFiles = !editing && attachments.staged.length > 0;
   const sentLength = characterCount(picker.toSend(text).trim());
   const isTooLong = sentLength > MAX_MESSAGE_CHARS;
-  const canSend = sentLength > 0 && !isTooLong;
+  const canSend =
+    (sentLength > 0 || hasFiles) && !isTooLong && !(hasFiles && attachments.problem) && !attachments.upload;
 
   const updateText = useCallback((next: string) => {
     setText(next);
@@ -102,7 +107,8 @@ export function Composer({
     setText("");
     if (input.current) input.current.style.height = "";
     try {
-      await api.sendMessage(channelId, picker.toSend(draft), threadRoot);
+      if (hasFiles) await attachments.send(picker.toSend(draft), threadRoot);
+      else await api.sendMessage(channelId, picker.toSend(draft), threadRoot);
       picker.forgetPicked();
       onSent?.();
     } catch (error) {
@@ -130,6 +136,7 @@ export function Composer({
   return (
     <div className="@container/composer relative shrink-0 px-5 pt-1 pb-7">
       <div className="relative">
+        <DropHint isShown={attachments.isDragTarget && !editing} label={label} />
         <AnimatePresence>{picker.list}</AnimatePresence>
         <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-card transition-colors focus-within:border-accent/50 focus-within:ring-3 focus-within:ring-accent/10">
           <AnimatePresence initial={false}>
@@ -149,6 +156,10 @@ export function Composer({
               </motion.div>
             )}
           </AnimatePresence>
+          {!editing && (
+            <AttachmentList files={attachments.staged} problem={attachments.problem} onRemove={attachments.remove} />
+          )}
+          {attachments.upload && <UploadProgress upload={attachments.upload} />}
           <div className="flex items-end gap-2 p-2 pl-3.5">
             <textarea
               ref={input}
@@ -156,7 +167,14 @@ export function Composer({
               rows={1}
               aria-label={label}
               {...picker.inputProps}
-              onFocus={() => setFocused(true)}
+              onFocus={() => {
+                setFocused(true);
+                attachments.markActive();
+              }}
+              onPaste={(event) => {
+                if (editing) return;
+                if (attachments.paste(Array.from(event.clipboardData.files))) event.preventDefault();
+              }}
               onBlur={() => setFocused(false)}
               onDragOver={(event) => {
                 if (!isPageDrag(event)) return;
@@ -189,6 +207,14 @@ export function Composer({
               placeholder={label}
               className="max-h-[200px] min-h-8 flex-1 resize-none bg-transparent py-[5.5px] text-base leading-[1.5] outline-none placeholder:text-faint"
             />
+            {!editing && (
+              <IconButton
+                label="Attach files"
+                icon={<Paperclip size={16} />}
+                onClick={attachments.pick}
+                className="mb-0.5"
+              />
+            )}
             <Popover
               open={isEmojiOpen}
               onOpenChange={setEmojiOpen}

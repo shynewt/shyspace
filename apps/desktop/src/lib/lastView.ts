@@ -48,7 +48,7 @@ function parseLastView(stored: unknown, me: string): LastView | null {
 
 function parseView(value: unknown): View | null {
   if (!isRecord(value)) return null;
-  if (value.kind === "inbox" || value.kind === "later") return { kind: value.kind };
+  if (value.kind === "inbox" || value.kind === "later" || value.kind === "files") return { kind: value.kind };
   if (typeof value.id !== "string") return null;
   if (value.kind === "page") return { kind: "page", id: value.id };
   if (value.kind !== "channel") return null;

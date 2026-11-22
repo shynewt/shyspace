@@ -8,6 +8,7 @@ import { useFormAction } from "../../lib/useFormAction";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, Field, FormError, Input, TextArea } from "../../ui";
+import { PictureField } from "./PictureField";
 import { ProfileCompletion } from "./ProfileCompletion";
 import { TimeZonePicker } from "./TimeZonePicker";
 import { WorkingHoursField, workingHoursProblem } from "./WorkingHoursField";
@@ -102,6 +103,7 @@ export function ProfileSettings({ target }: { target: SettingsTarget }) {
   return (
     <>
       <ProfileCompletion details={saved.details} />
+      {me && <PictureField me={me} />}
       <form ref={form} onSubmit={submit} noValidate className="flex flex-col gap-6">
         <Group title="About you">
           <Field label="Display name" hint="Everyone in the workspace sees this name.">

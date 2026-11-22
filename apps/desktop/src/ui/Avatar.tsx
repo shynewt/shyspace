@@ -24,11 +24,14 @@ export function Avatar({
   isBot = false,
   size = 32,
   presence,
+  pictureUrl = null,
 }: {
   id: string;
   name: string;
   isBot?: boolean;
   size?: number;
+  /** Their picture, shown instead of the initials once it has loaded. */
+  pictureUrl?: string | null;
   /** A small dot: green online, an amber ring when away, none when unreachable. */
   presence?: "online" | "away" | "unreachable";
 }) {
@@ -45,6 +48,14 @@ export function Avatar({
       }}
     >
       {isBot ? <Bot size={size * 0.55} strokeWidth={2.2} /> : initials(name)}
+      {pictureUrl && (
+        <img
+          src={pictureUrl}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 size-full rounded-[30%] object-cover"
+        />
+      )}
       <AnimatePresence initial={false}>
         {(presence === "online" || presence === "away") && (
           <motion.span

@@ -2,7 +2,8 @@ import { Hash, Lock, NotebookPen, Users } from "lucide-react";
 import { useState } from "react";
 import type { Channel, Member } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
-import { Avatar, IconButton } from "../../ui";
+import { IconButton } from "../../ui";
+import { MemberAvatar } from "../members/MemberAvatar";
 import { PrivateMembersDialog } from "./PrivateMembersDialog";
 
 /** A channel's heading: #name, a lock and the people button for a private one, a DM's people, or your notes. */
@@ -24,7 +25,7 @@ function TitleMark({ channel, title }: { channel: Channel; title: string }) {
   switch (channel.kind) {
     case "dm": {
       const [first] = channel.dm_members;
-      return first ? <Avatar id={first} name={title} size={22} /> : null;
+      return first ? <MemberAvatar id={first} name={title} size={22} /> : null;
     }
     case "notes":
       return <NotebookPen size={16} className="text-decorative" />;

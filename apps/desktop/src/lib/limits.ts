@@ -24,3 +24,10 @@ export function characterCount(text: string): number {
 export function cutToCharacters(text: string, max: number): string {
   return Array.from(text).slice(0, max).join("");
 }
+
+/** Must match `MAX_FILE_BYTES` and `MAX_PICTURE_BYTES` in shy-core's files module, and `MAX_FILES_PER_MESSAGE` in workspace/files.rs. */
+export const MAX_FILE_BYTES = 150 * 1024 * 1024;
+export const MAX_PICTURE_BYTES = 512 * 1024;
+export const MAX_FILES_PER_MESSAGE = 10;
+/** Must match `MAX_PASTED_BYTES` in src-tauri/src/files.rs: pasted files cross the bridge as bytes. */
+export const MAX_PASTED_BYTES = 25 * 1024 * 1024;
