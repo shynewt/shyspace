@@ -22,6 +22,7 @@ const REPLAYABLE_TABLES: &[&str] = &[
     "reactions",
     "pages",
     "search",
+    "search_rows",
     "message_edits",
     "channel_names",
     "deleted",

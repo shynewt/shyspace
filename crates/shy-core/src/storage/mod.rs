@@ -18,6 +18,7 @@ mod revisions;
 mod schema;
 mod sealed;
 mod sealing;
+mod search_index;
 mod sections;
 mod sent;
 mod snapshot;

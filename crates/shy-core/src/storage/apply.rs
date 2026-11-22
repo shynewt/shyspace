@@ -340,14 +340,4 @@ impl Store {
         let text = pages::read(state.as_deref())?;
         self.index_for_search("page", id, &title, cut_to(&text, MAX_INDEXED_PAGE_CHARS))
     }
-
-    pub(super) fn index_for_search(&self, kind: &str, id: &str, title: &str, body: &str) -> Result<()> {
-        self.db
-            .execute("DELETE FROM search WHERE kind = ? AND ref = ?", params![kind, id])?;
-        self.db.execute(
-            "INSERT INTO search (kind, ref, title, body) VALUES (?, ?, ?, ?)",
-            params![kind, id, title, body],
-        )?;
-        Ok(())
-    }
 }

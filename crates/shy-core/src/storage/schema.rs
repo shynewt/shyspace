@@ -176,6 +176,16 @@ CREATE TABLE blob_removals (
     // Renames are kept apart from their file, like message edits, so one
     // that arrives first still applies.
     "CREATE TABLE file_names (file TEXT PRIMARY KEY, name TEXT NOT NULL, lamport INTEGER NOT NULL);",
+    // Where each item's search entry is: FTS5 can't index kind and ref, so
+    // finding an entry by them read the whole index on every write. An item
+    // with duplicate entries keeps only its newest.
+    "
+CREATE TABLE search_rows (
+    kind TEXT NOT NULL, ref TEXT NOT NULL, search_rowid INTEGER NOT NULL,
+    PRIMARY KEY (kind, ref)) WITHOUT ROWID;
+INSERT INTO search_rows (kind, ref, search_rowid) SELECT kind, ref, MAX(rowid) FROM search GROUP BY kind, ref;
+DELETE FROM search WHERE rowid NOT IN (SELECT search_rowid FROM search_rows);
+",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
@@ -232,5 +242,47 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM profile_details", [], |row| row.get(0))
             .unwrap();
         assert_eq!(details, 0);
+    }
+
+    #[test]
+    fn search_entries_from_before_the_lookup_table_can_be_found_by_item() {
+        let mut db = Connection::open_in_memory().unwrap();
+        let before = MIGRATIONS
+            .iter()
+            .position(|migration| migration.contains("CREATE TABLE search_rows"))
+            .unwrap();
+        for migration in &MIGRATIONS[..before] {
+            db.execute_batch(migration).unwrap();
+        }
+        db.pragma_update(None, "user_version", before).unwrap();
+        db.execute_batch(
+            "INSERT INTO search (kind, ref, title, body) VALUES ('message', 'm1', '', 'old copy');
+             INSERT INTO search (kind, ref, title, body) VALUES ('page', 'p1', 'Plan', 'steps');
+             INSERT INTO search (kind, ref, title, body) VALUES ('message', 'm1', '', 'new copy');",
+        )
+        .unwrap();
+
+        migrate(&mut db).unwrap();
+        let entries: Vec<(String, String, String)> = db
+            .prepare(
+                "SELECT r.kind, r.ref, s.body FROM search_rows r JOIN search s ON s.rowid = r.search_rowid
+                 ORDER BY r.kind",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            entries,
+            [
+                ("message".into(), "m1".into(), "new copy".into()),
+                ("page".into(), "p1".into(), "steps".into())
+            ]
+        );
+        let all: i64 = db
+            .query_row("SELECT COUNT(*) FROM search", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(all, 2, "the older duplicate is gone");
     }
 }

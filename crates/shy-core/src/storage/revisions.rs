@@ -173,8 +173,7 @@ impl Store {
         self.purge_message(id)?;
         self.purge_channel(id)?;
         self.db.execute("DELETE FROM pages WHERE id = ?", [id])?;
-        self.db
-            .execute("DELETE FROM search WHERE kind = 'page' AND ref = ?", [id])?;
+        self.remove_from_search("page", id)?;
         Ok(match kind {
             Some(ItemKind::Channel) => Some(Change::Channels),
             Some(ItemKind::Page) => Some(Change::Pages),
@@ -247,8 +246,7 @@ impl Store {
         self.db
             .execute("DELETE FROM message_edits WHERE message = ?", [id])?;
         self.db.execute("DELETE FROM reactions WHERE message = ?", [id])?;
-        self.db
-            .execute("DELETE FROM search WHERE kind = 'message' AND ref = ?", [id])?;
+        self.remove_from_search("message", id)?;
         Ok(())
     }
 }
