@@ -32,7 +32,7 @@ type CardControl = {
 const CardContext = createContext<CardControl | null>(null);
 
 export const CARD_SURFACE =
-  "z-50 w-[320px] origin-(--radix-popover-content-transform-origin) rounded-xl border border-line bg-surface p-4 shadow-float outline-none";
+  "z-50 w-popover origin-(--radix-popover-content-transform-origin) rounded-xl border border-line bg-surface p-4 shadow-float outline-none";
 
 /**
  * A member's profile card: who they are, their status and presence, and

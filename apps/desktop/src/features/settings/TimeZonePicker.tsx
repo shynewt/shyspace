@@ -138,7 +138,7 @@ function ZoneList({ value, onChoose }: { value: string; onChoose: (zone: string)
   }, [activeIndex]);
 
   return (
-    <div className="flex w-[320px] flex-col">
+    <div className="flex w-popover flex-col">
       <div className="relative p-1">
         <Search size={14} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-decorative" />
         <input

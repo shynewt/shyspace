@@ -280,7 +280,7 @@ function keyOf(suggestion: Suggestion): string {
 function PageRow({ page }: { page: Page }) {
   return (
     <>
-      <span className="grid h-[22px] w-[22px] place-items-center rounded-md bg-surface-2 text-muted">
+      <span className="grid size-5.5 place-items-center rounded-md bg-surface-2 text-muted">
         <FileText size={13} />
       </span>
       <span className="truncate font-medium">{page.title}</span>
@@ -293,7 +293,7 @@ function PersonRow({ person }: { person: Person }) {
   if (!member) {
     return (
       <>
-        <span className="grid h-[22px] w-[22px] place-items-center rounded-full bg-surface-2 text-muted">
+        <span className="grid size-5.5 place-items-center rounded-full bg-surface-2 text-muted">
           <AtSign size={13} />
         </span>
         <span className="font-medium">{person.name}</span>
@@ -326,7 +326,7 @@ function PersonRow({ person }: { person: Person }) {
 function EmojiRow({ emoji }: { emoji: CatalogEmoji }) {
   return (
     <>
-      <span aria-hidden className="grid w-[22px] place-items-center text-xl">
+      <span aria-hidden className="grid w-5.5 place-items-center text-xl">
         {emoji.emoji}
       </span>
       <span className="font-medium">{emoji.label}</span>

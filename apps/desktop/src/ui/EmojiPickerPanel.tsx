@@ -25,7 +25,7 @@ export function EmojiPickerPanel({ onSelect }: { onSelect: (emoji: string) => vo
       onEmojiSelect={({ emoji, label }) => choose({ emoji, label })}
       resolveEmojiData={loadEmojiData}
       columns={8}
-      className="isolate flex h-[320px] w-[290px] flex-col"
+      className="isolate flex h-emoji-picker w-emoji-picker flex-col"
     >
       <Picker.Search
         aria-label="Search emoji"

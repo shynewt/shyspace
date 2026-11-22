@@ -249,6 +249,17 @@
   --container-composer-hints: 460px;
 }
 
+/* Sizes of floating surfaces and cards, so copies of one stay the same. */
+@theme {
+  --max-width-tooltip: 320px;
+  --max-width-card: 440px;
+  --width-popover: 320px;
+  --width-emoji-picker: 290px;
+  --height-emoji-picker: 320px;
+  --min-width-menu: 180px;
+  --height-settings: 540px;
+}
+
 /* In the base layer so Tailwind utilities (like outline-none) can override it. */
 @layer base {
   html,

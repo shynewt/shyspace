@@ -106,7 +106,7 @@ function SettingsWindow({
       value={target.section}
       onValueChange={choose}
       orientation="vertical"
-      className="@container/settings mt-4 flex h-[min(540px,calc(100dvh-6rem))] border-t border-line"
+      className="@container/settings mt-4 flex h-settings max-h-[calc(100dvh-6rem)] border-t border-line"
     >
       <Tabs.List
         aria-label="Settings sections"

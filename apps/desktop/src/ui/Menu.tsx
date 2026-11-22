@@ -23,7 +23,7 @@ export type MenuItem = MenuAction | MenuChoices;
 
 const ITEM =
   "flex h-8 cursor-default items-center gap-2 rounded-lg px-2.5 text-sm outline-none data-[highlighted]:bg-surface-2 data-[state=open]:bg-surface-2";
-const SURFACE = "z-50 min-w-[180px] rounded-xl border border-line bg-surface p-1 shadow-float outline-none";
+const SURFACE = "z-50 min-w-menu rounded-xl border border-line bg-surface p-1 shadow-float outline-none";
 
 /**
  * A dropdown of actions. Keyboard navigation comes from Radix. Pass `open`

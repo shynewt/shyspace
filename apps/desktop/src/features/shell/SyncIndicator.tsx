@@ -36,7 +36,7 @@ function describeStatus(status: SyncStatus | undefined): { tone: Tone; label: st
 export function SyncIndicator({ status }: { status: SyncStatus | undefined }) {
   const { tone, label, detail } = describeStatus(status);
   return (
-    <Tooltip label={<span className="block max-w-[260px] whitespace-normal">{detail}</span>} side="bottom">
+    <Tooltip label={detail} side="bottom">
       <div className="flex w-fit items-center gap-1.5 text-xs text-muted">
         <span className="relative grid h-2 w-2 place-items-center">
           {tone === "live" && (

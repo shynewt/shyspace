@@ -52,7 +52,7 @@ function TooltipSurface({ "data-state": state, ...props }: HTMLMotionProps<"div"
       {...pop}
       data-state={state}
       initial={state === "instant-open" ? false : pop.initial}
-      className="z-50 origin-(--radix-tooltip-content-transform-origin) rounded-md bg-ink px-2 py-1 text-xs font-medium text-bg shadow-float"
+      className="z-50 origin-(--radix-tooltip-content-transform-origin) max-w-tooltip rounded-md bg-ink px-2 py-1 text-xs font-medium wrap-anywhere text-bg shadow-float"
     />
   );
 }

@@ -24,7 +24,7 @@ export function PageCard({ pageId }: { pageId: string }) {
       whileHover={{ y: -2 }}
       transition={tweens.fast}
       onClick={() => navigate({ kind: "page", id: pageId })}
-      className="group/card mt-1.5 flex w-full max-w-[440px] items-start gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-card transition-colors hover:border-accent/40"
+      className="group/card mt-1.5 flex w-full max-w-card items-start gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-card transition-colors hover:border-accent/40"
     >
       <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
         <FileText size={17} />

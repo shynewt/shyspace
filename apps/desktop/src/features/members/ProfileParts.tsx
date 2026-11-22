@@ -132,7 +132,7 @@ function LinkRow({
       label={label}
       action={<CopyButton value={copyValue} label={`Copy ${label.toLowerCase()}`} />}
     >
-      <Tooltip label={<span className="block max-w-[360px] break-all whitespace-normal">{url}</span>}>
+      <Tooltip label={url}>
         <a
           href={url}
           onClick={(event) => {

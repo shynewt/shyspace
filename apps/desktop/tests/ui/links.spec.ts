@@ -153,3 +153,17 @@ test("a link with an uppercase scheme still opens, with the scheme lowercased", 
   await page.getByRole("link", { name: "the guide" }).click();
   await expect.poll(() => openedLinks(page)).toEqual(["https://Example.com/Guide"]);
 });
+
+test("a long link's tooltip wraps inside the tooltip width", async ({ page }) => {
+  const address = `https://example.com/${"very-long-path-segment/".repeat(12)}end`;
+  await send(page, "general", `Read [the long docs](${address})`);
+
+  await page.getByRole("link", { name: "the long docs" }).hover();
+  const tooltip = page.locator("[data-radix-popper-content-wrapper] > div").filter({ hasText: address });
+  await expect(tooltip).toBeVisible();
+  const box = await tooltip.boundingBox();
+  if (!box) throw new Error("the tooltip has no box");
+  expect(box.width).toBeLessThanOrEqual(320);
+  expect(box.height).toBeGreaterThan(40);
+  expect(await tooltip.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});

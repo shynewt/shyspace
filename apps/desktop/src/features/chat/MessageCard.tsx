@@ -23,7 +23,7 @@ export function MessageCard({ messageId }: { messageId: string }) {
     return (
       <div
         role="note"
-        className="mt-1.5 flex w-full max-w-[440px] items-start gap-3 rounded-xl border border-line border-dashed p-3"
+        className="mt-1.5 flex w-full max-w-card items-start gap-3 rounded-xl border border-line border-dashed p-3"
       >
         <Lock size={15} className="mt-0.5 shrink-0 text-decorative" aria-hidden />
         <span className="min-w-0 flex-1">
@@ -48,7 +48,7 @@ export function MessageCard({ messageId }: { messageId: string }) {
       transition={tweens.fast}
       aria-label={`Message from ${author} in ${where}`}
       onClick={() => navigate(linkedMessageView(linked))}
-      className="mt-1.5 flex w-full max-w-[440px] items-start gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-card transition-colors hover:border-accent/40"
+      className="mt-1.5 flex w-full max-w-card items-start gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-card transition-colors hover:border-accent/40"
     >
       <Quote size={15} className="mt-0.5 shrink-0 text-decorative" />
       <span className="min-w-0 flex-1">

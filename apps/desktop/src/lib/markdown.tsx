@@ -205,7 +205,7 @@ function ExternalLink({ href, text, children }: { href: string; text: string; ch
   const open = () => openExternalUrl(href);
   return (
     <>
-      <Tooltip label={<span className="block max-w-[360px] break-all whitespace-normal">{href}</span>}>
+      <Tooltip label={href}>
         <a
           href={href}
           onClick={(event) => {
