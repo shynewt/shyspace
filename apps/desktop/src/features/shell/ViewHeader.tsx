@@ -15,9 +15,7 @@ export const HEADER_BAR = "flex h-13 shrink-0 items-center gap-2 border-b border
 export function ViewHeader({ children, className }: { children?: ReactNode; className?: string }) {
   const { sidebar } = useShellLayout();
   return (
-    <header
-      className={cx("@container/header px-5", HEADER_BAR, className)}
-    >
+    <header className={cx("@container/header px-5", HEADER_BAR, className)}>
       <AnimatePresence initial={false}>
         {!sidebar.isDocked && <HeaderSidebarToggle key="sidebar-toggle" />}
       </AnimatePresence>
