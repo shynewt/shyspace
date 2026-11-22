@@ -139,16 +139,18 @@ test("sharing working hours suggests weekdays nine to five, and remembers change
     await expect(days.getByRole("button", { name: day })).toHaveAttribute("aria-pressed", "true");
   for (const day of ["Saturday", "Sunday"])
     await expect(days.getByRole("button", { name: day })).toHaveAttribute("aria-pressed", "false");
-  await expect(settings.getByLabel("Start")).toHaveValue(String(9 * 60));
-  await expect(settings.getByLabel("End")).toHaveValue(String(17 * 60));
-  await expect(settings.getByLabel("Start").locator("option:checked")).toHaveText("9:00 AM");
+  const start = settings.getByRole("combobox", { name: "Start" });
+  const end = settings.getByRole("combobox", { name: "End" });
+  await expect(start).toHaveText("9:00 AM");
+  await expect(end).toHaveText("5:00 PM");
 
   await days.getByRole("button", { name: "Saturday" }).click();
-  await settings.getByLabel("End").selectOption({ label: "2:00 AM (next day)" });
+  await end.click();
+  await page.getByRole("option", { name: "2:00 AM (next day)" }).click();
   await share.click();
   await share.click();
   await expect(days.getByRole("button", { name: "Saturday" })).toHaveAttribute("aria-pressed", "true");
-  await expect(settings.getByLabel("End")).toHaveValue(String(2 * 60));
+  await expect(end).toHaveText("2:00 AM (next day)");
 
   await settings.getByRole("button", { name: "Save profile" }).click();
   await expect

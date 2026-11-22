@@ -66,7 +66,8 @@ The app is for desktop windows, full screen (1280 to 2560 px wide) and split scr
 |---|---|
 | `Button` | actions; variants `primary`, `secondary`, `ghost`, `danger`; sizes `sm`, `md`, `lg`; `isLoading` |
 | `IconButton` | icon-only actions; `label` is required and becomes the tooltip and accessible name; `shortcut` adds its keys to the tooltip |
-| `Input`, `TextArea`, `Select`, `Field` | form controls; `Field` links its label, hint and `error` to the control through a render function (the error replaces the hint and turns the control's border red) |
+| `Input`, `TextArea`, `Field` | form controls; `Field` links its label, hint and `error` to the control through a render function (the error replaces the hint and turns the control's border red) |
+| `Select` | a choice from a list (`options`, each with an optional icon), drawn by the app and styled like `Menu`, because the system's list can't be styled in the webview (Linux's WebKit draws its own); keyboard and typeahead from Radix; never a native `<select>` |
 | `FormError` | why a form's last save failed, under the form; announced to screen readers |
 | `Dialog` | modal surfaces (centered, or `placement="top"` like the search palette); never taller than the window, longer content scrolls inside; `hasCloseButton` for dialogs without their own Cancel or Done; on closing, focus goes back to what had it when the dialog opened (unless the dialog's action moved it on purpose, like into the message box), or to `returnFocusTo` when that is gone, like a card; pads its content and stacks it 16 px apart (`padding="none"` for edge-to-edge layouts like the palette and Settings); end with `DialogActions` for the buttons, the main one last |
 | `ContextMenu` | actions on right-click at the pointer, styled like `Menu` (an image's Copy image); a message's own right-click menu leaves it alone |

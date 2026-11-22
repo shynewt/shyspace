@@ -109,29 +109,25 @@ export function WorkingHoursField({
               <div className="flex items-center gap-2 text-sm text-muted">
                 <Select
                   aria-label="Start"
-                  value={value.start_minute}
-                  onChange={(event) => change({ start_minute: Number(event.target.value) })}
+                  value={String(value.start_minute)}
+                  options={timeOptions(value.start_minute, 0, MINUTES_PER_DAY - STEP_MINUTES).map((minute) => ({
+                    value: String(minute),
+                    label: formatMinuteOfDay(minute),
+                  }))}
+                  onChange={(minute) => change({ start_minute: Number(minute) })}
                   className="w-32"
-                >
-                  {timeOptions(value.start_minute, 0, MINUTES_PER_DAY - STEP_MINUTES).map((minute) => (
-                    <option key={minute} value={minute}>
-                      {formatMinuteOfDay(minute)}
-                    </option>
-                  ))}
-                </Select>
+                />
                 <span aria-hidden>to</span>
                 <Select
                   aria-label="End"
-                  value={value.end_minute}
-                  onChange={(event) => change({ end_minute: Number(event.target.value) })}
+                  value={String(value.end_minute)}
+                  options={timeOptions(value.end_minute, STEP_MINUTES, MINUTES_PER_DAY).map((minute) => ({
+                    value: String(minute),
+                    label: describeEnd(minute, value.start_minute),
+                  }))}
+                  onChange={(minute) => change({ end_minute: Number(minute) })}
                   className="w-44"
-                >
-                  {timeOptions(value.end_minute, STEP_MINUTES, MINUTES_PER_DAY).map((minute) => (
-                    <option key={minute} value={minute}>
-                      {describeEnd(minute, value.start_minute)}
-                    </option>
-                  ))}
-                </Select>
+                />
               </div>
               {error && (
                 <span id={errorId} className="text-xs text-danger-text">

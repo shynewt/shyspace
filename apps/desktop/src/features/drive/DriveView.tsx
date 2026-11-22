@@ -22,6 +22,8 @@ const KINDS: Array<{ value: Kind; label: string }> = [
   { value: "other", label: "Other" },
 ];
 
+const ANYONE = "anyone";
+
 function kindOf(file: FileInfo): Exclude<Kind, "all"> {
   if (file.media_type.startsWith("image/")) return "images";
   const isDocument =
@@ -38,7 +40,7 @@ export function DriveView() {
   const { members, channels } = useWorkspace();
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<Kind>("all");
-  const [person, setPerson] = useState("");
+  const [person, setPerson] = useState(ANYONE);
 
   const nameOf = (id: string) => displayName(members?.find((member) => member.id === id)?.name ?? "", id);
   const placeName = (place: string) => {
@@ -50,7 +52,7 @@ export function DriveView() {
     (file) =>
       file.name.toLowerCase().includes(query.trim().toLowerCase()) &&
       (kind === "all" || kindOf(file) === kind) &&
-      (!person || file.author === person),
+      (person === ANYONE || file.author === person),
   );
   const places = [...new Set(shown.map((file) => file.place))].filter((place) =>
     channels.some((channel) => channel.id === place),
@@ -83,16 +85,13 @@ export function DriveView() {
                 <Select
                   aria-label="Shared by"
                   value={person}
-                  onChange={(event) => setPerson(event.target.value)}
+                  options={[
+                    { value: ANYONE, label: "Anyone" },
+                    ...sharers.map((id) => ({ value: id, label: nameOf(id) })),
+                  ]}
+                  onChange={setPerson}
                   className="w-40"
-                >
-                  <option value="">Anyone</option>
-                  {sharers.map((id) => (
-                    <option key={id} value={id}>
-                      {nameOf(id)}
-                    </option>
-                  ))}
-                </Select>
+                />
               </div>
               {files && shown.length === 0 && <p className="px-1 text-sm text-muted">No files match.</p>}
               {places.map((place) => (

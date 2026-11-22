@@ -85,14 +85,7 @@ export default function Gallery() {
             <Field label="Email" hint="Checked once you leave the field." error="Use an address like name@example.com.">
               {(id, description) => <Input id={id} {...description} defaultValue="ada@example" />}
             </Field>
-            <Field label="Start">
-              {(id) => (
-                <Select id={id} defaultValue="540">
-                  <option value="540">9:00 AM</option>
-                  <option value="570">9:30 AM</option>
-                </Select>
-              )}
-            </Field>
+            <Field label="Start">{(id) => <GallerySelect id={id} />}</Field>
             <FormError message="The bucket refused these keys: 403 Forbidden" />
           </div>
         </Example>
@@ -274,5 +267,20 @@ function Example({ title, children }: { title: string; children: ReactNode }) {
       <h2 className="mb-3 text-sm font-semibold text-muted">{title}</h2>
       <div className="flex flex-wrap items-center gap-3">{children}</div>
     </section>
+  );
+}
+
+function GallerySelect({ id }: { id: string }) {
+  const [start, setStart] = useState("540");
+  return (
+    <Select
+      id={id}
+      value={start}
+      onChange={setStart}
+      options={[
+        { value: "540", label: "9:00 AM" },
+        { value: "570", label: "9:30 AM" },
+      ]}
+    />
   );
 }
