@@ -78,7 +78,8 @@ impl Store {
             }
         }
         if let Op::File { file } = op {
-            if self.is_deleted(&file.id)? {
+            let is_earlier_kept = self.file_seq(&file.id)?.is_some_and(|kept| kept <= seq);
+            if self.is_deleted(&file.id)? || is_earlier_kept {
                 return Ok(true);
             }
             let is_home_deleted = self.is_deleted(&file.place)?

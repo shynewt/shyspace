@@ -17,6 +17,10 @@ pub const CHUNK_SIZE: u32 = 4 * 1024 * 1024;
 /// change it without breaking older ones.
 const MIN_CHUNK_SIZE: u32 = 64 * 1024;
 const MAX_CHUNK_SIZE: u32 = 16 * 1024 * 1024;
+/// What receivers accept at most, far above what this version sends, so a
+/// later one can raise its limit; it bounds what a forged size can make a
+/// device do.
+pub const MAX_RECEIVED_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 const FORMAT: u8 = 1;
 const TAG_LEN: u64 = 16;
 const ID_BYTES: usize = 16;
@@ -59,6 +63,7 @@ impl BlobRef {
             (MIN_CHUNK_SIZE..=MAX_CHUNK_SIZE).contains(&self.chunk_size),
             "file piece size out of range"
         );
+        ensure!(self.size <= MAX_RECEIVED_SIZE, "file too large");
         ensure!(
             u64::try_from(self.chunk_hashes.len())? == chunk_count(self.size, self.chunk_size),
             "file piece count doesn't match its size"
@@ -296,9 +301,14 @@ mod tests {
         let mut newer = blob.clone();
         newer.format = 2;
         assert!(newer.check().is_err());
-        let mut bad_id = blob;
+        let mut bad_id = blob.clone();
         bad_id.id = "../../ops".into();
         assert!(bad_id.check().is_err());
+        let mut huge = blob;
+        huge.chunk_size = MAX_CHUNK_SIZE;
+        huge.size = MAX_RECEIVED_SIZE + 1;
+        huge.chunk_hashes = vec![[0; 32]; huge.size.div_ceil(u64::from(MAX_CHUNK_SIZE)) as usize];
+        assert!(huge.check().is_err());
     }
 
     #[test]

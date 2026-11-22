@@ -209,7 +209,7 @@ impl Store {
                 status: None,
                 presence: PresenceState::default(),
                 details: crate::profile::ProfileDetails::default(),
-                has_picture: false,
+                picture: None,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

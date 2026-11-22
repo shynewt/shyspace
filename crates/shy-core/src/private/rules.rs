@@ -263,7 +263,7 @@ fn judge_content(channel: &str, author: &PublicKey, op: &Op, kind: PrivateKind) 
                 && file
                     .message
                     .as_deref()
-                    .is_none_or(|message| is_message_in(message, channel))
+                    .is_none_or(|message| is_message_in(message, channel) && is_owned_by(message, author))
         }
         _ => false,
     };

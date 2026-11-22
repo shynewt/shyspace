@@ -212,7 +212,7 @@ async fn a_profile_picture_reaches_others_and_the_old_one_leaves_the_bucket() {
     assert!(
         shown
             .iter()
-            .any(|member| member.id == bob.my_id() && member.has_picture)
+            .any(|member| member.id == bob.my_id() && member.picture.is_some())
     );
     assert_eq!(admin.profile_picture(&bob.me()).await.unwrap(), Some(second));
     assert_eq!(bucket.blob_ids(&bob.me()).await.unwrap().len(), 1);

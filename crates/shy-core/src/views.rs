@@ -245,8 +245,9 @@ pub struct Member {
     pub presence: PresenceState,
     /// What they share about themselves; every field may be empty.
     pub details: crate::profile::ProfileDetails,
-    /// Whether they shared a picture (`Workspace::profile_picture`).
-    pub has_picture: bool,
+    /// Their picture's id, if they shared one; it changes with the picture,
+    /// so it can key a cache (`Workspace::profile_picture`).
+    pub picture: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

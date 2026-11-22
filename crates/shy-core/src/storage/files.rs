@@ -1,7 +1,7 @@
 //! Shared files and profile pictures, and the bucket removals they leave
 //! behind. A blob stays in the bucket until its file is deleted or its
-//! picture replaced; then the author's device, or whoever deleted it, takes
-//! it out (see `files::transfer`).
+//! picture replaced; then the device that deleted or replaced it takes it
+//! out (see `workspace/files.rs`).
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, Row, named_params, params};
@@ -37,11 +37,15 @@ pub struct BlobRemoval {
 const FILE_COLUMNS: &str = "id, place, message, author, name, media_type, created_ms, blob";
 
 impl Store {
-    /// Keeps a file from someone else, cleaned. The first op with an id wins.
+    /// Keeps a file from someone else, cleaned. For an id used twice, the
+    /// op earliest in its author's log wins, whatever order they opened in.
     pub(super) fn put_file(&self, file: &SharedFile, verified: &VerifiedOp) -> Result<()> {
         self.db.execute(
-            "INSERT OR IGNORE INTO files (id, place, message, author, name, media_type, size, blob, created_ms)
-             VALUES (:id, :place, :message, :author, :name, :media_type, :size, :blob, :now)",
+            "INSERT INTO files (id, place, message, author, name, media_type, size, blob, created_ms, seq)
+             VALUES (:id, :place, :message, :author, :name, :media_type, :size, :blob, :now, :seq)
+             ON CONFLICT (id) DO UPDATE SET place = :place, message = :message, name = :name,
+                 media_type = :media_type, size = :size, blob = :blob, created_ms = :now, seq = :seq
+             WHERE :seq < seq",
             named_params! {
                 ":id": file.id,
                 ":place": file.place,
@@ -52,6 +56,7 @@ impl Store {
                 ":size": i64::try_from(file.blob.size)?,
                 ":blob": postcard::to_stdvec(&file.blob)?,
                 ":now": verified.body.timestamp_ms,
+                ":seq": verified.seq,
             },
         )?;
         Ok(())
@@ -92,18 +97,23 @@ impl Store {
             .optional()?)
     }
 
-    /// The files shared with these messages, oldest first.
-    pub fn files_of_messages(&self, messages: &[String]) -> Result<Vec<StoredFile>> {
-        let mut statement = self.db.prepare(&format!(
-            "SELECT {FILE_COLUMNS} FROM files WHERE message = ? ORDER BY created_ms, id"
-        ))?;
-        let mut files = Vec::new();
-        for message in messages {
-            for file in statement.query_map([message], stored_file)? {
-                files.push(file?);
-            }
-        }
-        Ok(files)
+    /// The files shared with `message` in `channel`, oldest first.
+    pub fn files_of_message(&self, message: &str, channel: &str) -> Result<Vec<StoredFile>> {
+        self.db
+            .prepare(&format!(
+                "SELECT {FILE_COLUMNS} FROM files WHERE message = ? AND place = ? ORDER BY created_ms, id"
+            ))?
+            .query_map([message, channel], stored_file)?
+            .collect::<Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Where the kept file with this id sits in its author's log.
+    pub(super) fn file_seq(&self, id: &str) -> Result<Option<u64>> {
+        Ok(self
+            .db
+            .query_row("SELECT seq FROM files WHERE id = ?", [id], |row| row.get(0))
+            .optional()?)
     }
 
     /// Every file this device can see, newest first.

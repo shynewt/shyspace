@@ -164,7 +164,8 @@ CREATE TABLE profile_details (
     "
 CREATE TABLE files (
     id TEXT PRIMARY KEY, place TEXT NOT NULL, message TEXT, author BLOB NOT NULL, name TEXT NOT NULL,
-    media_type TEXT NOT NULL, size INTEGER NOT NULL, blob BLOB NOT NULL, created_ms INTEGER NOT NULL);
+    media_type TEXT NOT NULL, size INTEGER NOT NULL, blob BLOB NOT NULL, created_ms INTEGER NOT NULL,
+    seq INTEGER NOT NULL);
 CREATE INDEX files_by_place ON files (place, created_ms);
 CREATE INDEX files_by_message ON files (message);
 CREATE TABLE profile_pictures (member BLOB PRIMARY KEY, blob BLOB, lamport INTEGER NOT NULL);

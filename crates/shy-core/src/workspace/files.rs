@@ -18,17 +18,19 @@ use crate::{
     files::{
         MAX_FILE_BYTES, MAX_PICTURE_BYTES, SharedFile,
         blob::{self, BlobRef},
-        cache::BlobCache,
+        cache::{BlobCache, BlobKey},
         clean_file_name, clean_media_type,
     },
     ops::{EntityId, MAX_MESSAGE_CHARS, Op},
-    storage::{ItemKind, StoredFile},
+    storage::{BlobRemoval, ItemKind, StoredFile},
     views::{Change, FileInfo, member_id},
 };
 
 pub const MAX_FILES_PER_MESSAGE: usize = 10;
 const FILE_CACHE_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 const UPLOAD_ATTEMPTS: u32 = 3;
+/// Files opened whole in memory (to show them) stay at most this large.
+const MAX_OPENED_IN_MEMORY: u64 = 64 * 1024 * 1024;
 
 /// A file to share: its name, its media type as the sender's system knows
 /// it, and where its bytes are.
@@ -38,6 +40,7 @@ pub struct NewFile {
     pub source: FileSource,
 }
 
+#[derive(Clone)]
 pub enum FileSource {
     Path(PathBuf),
     Bytes(Vec<u8>),
@@ -142,24 +145,25 @@ impl Workspace {
         size: u64,
         progress: impl Fn(u64),
     ) -> Result<BlobRef> {
+        let me = self.me();
         let (cache, blob) = tokio::task::spawn_blocking(move || -> Result<(BlobCache, BlobRef)> {
             let blob = match source {
                 FileSource::Path(path) => {
                     let mut file =
                         std::fs::File::open(&path).with_context(|| format!("opening {}", path.display()))?;
-                    seal_into(&cache, &mut file, size)?
+                    seal_into(&cache, &me, &mut file, size)?
                 }
-                FileSource::Bytes(bytes) => seal_into(&cache, &mut bytes.as_slice(), size)?,
+                FileSource::Bytes(bytes) => seal_into(&cache, &me, &mut bytes.as_slice(), size)?,
             };
             Ok((cache, blob))
         })
         .await
         .context("encrypting the file")??;
         let bucket = self.bucket();
-        let me = self.me();
+        let cached = BlobKey::new(&me, &blob.id)?;
         for index in 0..blob.chunk_count() {
             let sealed = cache
-                .read_chunk(&blob.id, index)?
+                .read_chunk(&cached, index)?
                 .context("a file piece vanished from the cache")?;
             let mut attempt = 1;
             loop {
@@ -171,7 +175,7 @@ impl Workspace {
                         attempt += 1;
                     }
                     Err(error) => {
-                        self.abandon_blob(&blob.id).await;
+                        self.abandon_blob(&cache, &blob.id).await;
                         return Err(error.context("uploading the file"));
                     }
                 }
@@ -186,24 +190,33 @@ impl Workspace {
     }
 
     async fn abandon_uploads(&self, shared: &[SharedFile]) {
+        let cache = self.file_cache();
         for file in shared {
-            self.abandon_blob(&file.blob.id).await;
+            self.abandon_blob(&cache, &file.blob.id).await;
         }
     }
 
-    /// Takes a blob nobody will hear about out of the bucket, as far as we
-    /// can; what stays behind is only unreadable bytes.
-    async fn abandon_blob(&self, blob_id: &str) {
+    /// Takes a blob nobody will hear about out of the bucket and the cache,
+    /// as far as we can; what stays behind is only unreadable bytes.
+    async fn abandon_blob(&self, cache: &BlobCache, blob_id: &str) {
         if let Err(error) = self.bucket().delete_blob(&self.me(), blob_id).await {
             warn!("couldn't remove an abandoned upload: {error:#}");
         }
+        let forgotten = BlobKey::new(&self.me(), blob_id).and_then(|key| cache.forget(&key));
+        if let Err(error) = forgotten {
+            warn!("couldn't remove an abandoned upload from the cache: {error:#}");
+        }
     }
 
-    /// A file's whole contents, checked. For showing images and small files;
-    /// use [`Workspace::save_file`] for anything large.
+    /// A file's whole contents, checked, for showing in place. Larger files
+    /// are refused; [`Workspace::save_file`] streams them to disk instead.
     pub async fn file_bytes(&self, file: &str) -> Result<Vec<u8>> {
         let stored = self.stored_file(file)?;
-        let mut content = Vec::with_capacity(usize::try_from(stored.blob.size)?);
+        ensure!(
+            stored.blob.size <= MAX_OPENED_IN_MEMORY,
+            "this file is too large to open here; save it instead"
+        );
+        let mut content = Vec::new();
         self.read_blob(&self.file_cache(), &stored, &mut content).await?;
         Ok(content)
     }
@@ -310,35 +323,57 @@ impl Workspace {
         Ok(Some(content))
     }
 
-    /// Takes deleted files and replaced pictures out of the bucket: ours, or
-    /// ones we deleted. Every device drops its own cached copy.
+    /// Takes the blobs we deleted (or replaced) out of the bucket. Only the
+    /// device that asked does, so a removal can't follow from a delete that
+    /// turns out not to count elsewhere. Every device drops its own cached
+    /// copy. One failure doesn't hold up the rest; the first is returned.
     pub(crate) async fn remove_unused_blobs(&self) -> Result<()> {
         let removals = self.state().store.blob_removals()?;
         let me = self.me();
+        let mut first_error = None;
         for removal in removals {
-            self.file_cache().forget(&removal.blob_id)?;
-            self.picture_cache().forget(&removal.blob_id)?;
-            let is_ours = removal.author == me.as_bytes() || removal.requested_by == me.as_bytes();
-            if is_ours {
-                let author = PublicKey::try_from(removal.author.as_slice())
-                    .context("reading a removed file's author")?;
-                self.bucket().delete_blob(&author, &removal.blob_id).await?;
+            let removed = self.remove_blob(&removal, &me).await;
+            match removed {
+                Ok(()) => self.state().store.forget_blob_removal(&removal)?,
+                Err(error) => {
+                    warn!("couldn't remove a deleted file from the bucket: {error:#}");
+                    first_error.get_or_insert(error);
+                }
             }
-            self.state().store.forget_blob_removal(&removal)?;
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    async fn remove_blob(&self, removal: &BlobRemoval, me: &PublicKey) -> Result<()> {
+        let author =
+            PublicKey::try_from(removal.author.as_slice()).context("reading a removed file's author")?;
+        let cached = BlobKey::new(&author, &removal.blob_id)?;
+        self.file_cache().forget(&cached)?;
+        self.picture_cache().forget(&cached)?;
+        if removal.requested_by == me.as_bytes() {
+            self.bucket().delete_blob(&author, &removal.blob_id).await?;
         }
         Ok(())
     }
 }
 
-fn seal_into(cache: &BlobCache, source: &mut impl std::io::Read, size: u64) -> Result<BlobRef> {
-    let mut started: Option<String> = None;
+fn seal_into(
+    cache: &BlobCache,
+    me: &PublicKey,
+    source: &mut impl std::io::Read,
+    size: u64,
+) -> Result<BlobRef> {
+    let mut started: Option<BlobKey> = None;
     let sealed = blob::seal(source, size, |blob_id, index, piece| {
-        started.get_or_insert_with(|| blob_id.to_owned());
-        cache.write_chunk(blob_id, index, piece)
+        let cached = match &started {
+            Some(cached) => cached,
+            None => started.insert(BlobKey::new(me, blob_id)?),
+        };
+        cache.write_chunk(cached, index, piece)
     });
     if sealed.is_err()
-        && let Some(blob_id) = started
-        && let Err(error) = cache.forget(&blob_id)
+        && let Some(cached) = started
+        && let Err(error) = cache.forget(&cached)
     {
         warn!("couldn't remove a half encrypted file: {error:#}");
     }
@@ -352,30 +387,42 @@ async fn read_blob_into(
     blob: &BlobRef,
     output: &mut impl Write,
 ) -> Result<()> {
+    let cached = BlobKey::new(author, &blob.id)?;
     for index in 0..blob.chunk_count() {
-        let sealed = match cache.read_chunk(&blob.id, index)? {
-            Some(sealed) => sealed,
-            None => {
-                let fetched = bucket
-                    .file_chunk(author, &blob.id, index, blob::sealed_chunk_len(blob, index))
-                    .await?
-                    .context("a piece of this file is missing from the bucket")?;
-                let expected = blob.chunk_hashes.get(usize::try_from(index)?);
-                ensure!(
-                    expected == Some(blake3::hash(&fetched).as_bytes()),
-                    "a piece of this file doesn't match what its author signed"
-                );
-                cache.write_chunk(&blob.id, index, &fetched)?;
-                fetched.to_vec()
-            }
+        let opened = match cache.read_chunk(&cached, index)? {
+            Some(sealed) => match blob.open_chunk(index, &sealed) {
+                Ok(opened) => opened,
+                // A damaged cached piece is dropped and fetched again.
+                Err(_) => {
+                    cache.forget_chunk(&cached, index)?;
+                    fetch_chunk(bucket, cache, author, blob, &cached, index).await?
+                }
+            },
+            None => fetch_chunk(bucket, cache, author, blob, &cached, index).await?,
         };
-        output
-            .write_all(&blob.open_chunk(index, &sealed)?)
-            .context("writing the file")?;
+        output.write_all(&opened).context("writing the file")?;
     }
-    cache.touch(&blob.id)?;
-    cache.trim(&blob.id)?;
+    cache.touch(&cached)?;
+    cache.trim(&cached)?;
     Ok(())
+}
+
+/// Fetches a piece, checks it against its signed hash, keeps it, and opens it.
+async fn fetch_chunk(
+    bucket: &crate::transport::bucket::Bucket,
+    cache: &BlobCache,
+    author: &PublicKey,
+    blob: &BlobRef,
+    cached: &BlobKey,
+    index: u32,
+) -> Result<Vec<u8>> {
+    let fetched = bucket
+        .file_chunk(author, &blob.id, index, blob::sealed_chunk_len(blob, index))
+        .await?
+        .context("a piece of this file is missing from the bucket")?;
+    let opened = blob.open_chunk(index, &fetched)?;
+    cache.write_chunk(cached, index, &fetched)?;
+    Ok(opened)
 }
 
 /// PNG, JPEG or WebP, by their first bytes.

@@ -119,6 +119,9 @@ impl Store {
         for table in SHARED_VIEW_TABLES {
             self.db.execute(&format!("DELETE FROM {table}"), [])?;
         }
+        // Replaying queues again the removals of deletes that still count;
+        // one whose delete no longer counts must not run.
+        self.db.execute("DELETE FROM blob_removals", [])?;
         self.clear_private_state()?;
         let settled = [
             Settling::Nothing,

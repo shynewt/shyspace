@@ -256,6 +256,13 @@ impl Store {
                 file.blob
                     .check()
                     .map_err(|error| rule_violation(format!("malformed file: {error:#}")))?;
+                if file
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| !is_owned_by(message, &verified.author))
+                {
+                    return Err(rule_violation("a file attached to someone else's message"));
+                }
                 self.put_file(file, verified)?;
                 Change::Messages {
                     channel: file.place.clone(),
