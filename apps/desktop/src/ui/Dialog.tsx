@@ -24,6 +24,11 @@ type DialogProps = {
   returnFocusTo?: HTMLElement | null;
   /** "instant" for a dialog opened many times a day, like the command palette. */
   entrance?: "pop" | "instant";
+  /**
+   * "dialog" focuses the dialog itself on opening, for viewers whose first
+   * control is an icon button: its tooltip would take the first Escape.
+   */
+  initialFocus?: "first" | "dialog";
   children: ReactNode;
 };
 
@@ -43,6 +48,7 @@ export function Dialog({
   padding = "standard",
   returnFocusTo,
   entrance = "pop",
+  initialFocus = "first",
   children,
 }: DialogProps) {
   const isInstant = entrance === "instant";
@@ -62,6 +68,11 @@ export function Dialog({
             >
               <RadixDialog.Content
                 asChild
+                onOpenAutoFocus={(event) => {
+                  if (initialFocus !== "dialog") return;
+                  event.preventDefault();
+                  if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+                }}
                 onCloseAutoFocus={(event) => {
                   if (!returnFocusTo?.isConnected) return;
                   event.preventDefault();

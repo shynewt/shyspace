@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { allowClipboard } from "./support";
 
 const PNG = [
   137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137,
@@ -283,4 +284,80 @@ test("files dropped after the thread closes go to the channel's message box", as
 
   await page.evaluate(() => window.fake.files.drop([{ name: "agenda.md", type: "text/markdown", bytes: [35] }]));
   await expect(page.getByRole("list", { name: "Files to send" }).getByText("agenda.md")).toBeVisible();
+});
+
+test("a text file opens as plain text, and markdown opens formatted", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const first = window.fake.receiveMessage(grace, "general", "Logs");
+    const encode = (text: string) => Array.from(new TextEncoder().encode(text));
+    window.fake.files.receive(grace, first, {
+      name: "server.log",
+      type: "text/plain",
+      bytes: encode("<b>not bold</b>\nline two"),
+    });
+    const second = window.fake.receiveMessage(grace, "general", "Notes");
+    window.fake.files.receive(grace, second, {
+      name: "notes.md",
+      type: "text/markdown",
+      bytes: encode("# Plan\n\n- **Ship** files"),
+    });
+  });
+  await page.getByRole("button", { name: "View server.log" }).click();
+  const log = page.getByRole("dialog", { name: "server.log" });
+  await expect(log.getByText("<b>not bold</b>")).toBeVisible();
+  await expect(log.locator("b")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(log).toHaveCount(0);
+
+  await page.getByRole("button", { name: "View notes.md" }).click();
+  const notes = page.getByRole("dialog", { name: "notes.md" });
+  const heading = notes.getByRole("heading", { name: "Plan" });
+  await expect(heading).toBeVisible();
+  // Reads like a page: a heading stands out from the text below it.
+  const sizes = await notes.evaluate((dialog) => {
+    const size = (selector: string) => {
+      const element = dialog.querySelector(selector);
+      if (!element) throw new Error(`no ${selector} in the preview`);
+      return Number.parseFloat(getComputedStyle(element).fontSize);
+    };
+    return { heading: size("h1"), text: size("li") };
+  });
+  expect(sizes.heading).toBeGreaterThan(sizes.text * 1.5);
+  await expect(notes.locator("strong", { hasText: "Ship" })).toBeVisible();
+});
+
+test("a file named like text but holding binary says so instead of showing garbage", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "Data");
+    window.fake.files.receive(grace, message, { name: "data.txt", type: "text/plain", bytes: [0, 159, 146, 150] });
+  });
+  await page.getByRole("button", { name: "View data.txt" }).click();
+  await expect(page.getByText("This isn't readable as text.")).toBeVisible();
+});
+
+test("right-clicking an image copies it, without opening the message's menu", async ({
+  page,
+  context,
+  browserName,
+}) => {
+  await allowClipboard(context, browserName);
+  await page.evaluate((png) => {
+    window.fake.files.pickNext = [{ name: "photo.png", type: "image/png", bytes: png }];
+  }, PNG);
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "View photo.png" }).click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Copy image" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Save for later" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "Copy image" }).click();
+  await expect(page.getByText("Image copied.")).toBeVisible();
+  // Playwright's WebKit keeps text on its clipboard but no images (its read
+  // comes back empty), so what lands there is checked in Chromium here and
+  // in the real app by hand.
+  if (browserName === "chromium") {
+    const types = await page.evaluate(async () => (await navigator.clipboard.read()).flatMap((item) => item.types));
+    expect(types).toContain("image/png");
+  }
 });

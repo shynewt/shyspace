@@ -1,9 +1,11 @@
 import { useState } from "react";
 import type { FileInfo } from "../../lib/api";
 import { formatSize, mayShowInline, useFileImage } from "../../lib/files";
+import { ContextMenu } from "../../ui";
 import { FileActions } from "../files/FileActions";
 import { FileThumbnail } from "../files/FileThumbnail";
-import { ImageViewer } from "../files/ImageViewer";
+import { ImageViewer, imageMenu } from "../files/FileViewer";
+import { OpensInViewer } from "../files/OpensInViewer";
 
 /** The files shared with a message: images inline, everything else as a card. */
 export function MessageFiles({ files }: { files: FileInfo[] }) {
@@ -25,19 +27,21 @@ function InlineImage({ file }: { file: FileInfo }) {
     <figure className="group/file relative max-w-card overflow-hidden rounded-xl border border-line bg-surface-2">
       {image.status === "shown" ? (
         <>
-          <button
-            type="button"
-            aria-label={`View ${file.name}`}
-            onClick={() => setViewing(true)}
-            className="block cursor-zoom-in"
-          >
-            <img
-              src={image.url}
-              alt={file.name}
-              draggable={false}
-              className="block max-h-80 w-auto max-w-full object-contain"
-            />
-          </button>
+          <ContextMenu items={imageMenu(file, image.url)}>
+            <button
+              type="button"
+              aria-label={`View ${file.name}`}
+              onClick={() => setViewing(true)}
+              className="block cursor-zoom-in"
+            >
+              <img
+                src={image.url}
+                alt={file.name}
+                draggable={false}
+                className="block max-h-80 w-auto max-w-full object-contain"
+              />
+            </button>
+          </ContextMenu>
           <ImageViewer file={file} url={image.url} open={isViewing} onOpenChange={setViewing} />
         </>
       ) : (
@@ -53,11 +57,13 @@ function InlineImage({ file }: { file: FileInfo }) {
 function FileCard({ file }: { file: FileInfo }) {
   return (
     <div className="flex w-full max-w-card items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2">
-      <FileThumbnail mediaType={file.media_type} image={{ status: "none" }} />
-      <div className="min-w-0 flex-1">
-        <p className="selectable truncate text-sm font-medium">{file.name}</p>
-        <p className="text-xs text-faint">{formatSize(file.size)}</p>
-      </div>
+      <OpensInViewer file={file} image={{ status: "none" }} className="flex min-w-0 flex-1 items-center gap-3">
+        <FileThumbnail mediaType={file.media_type} image={{ status: "none" }} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{file.name}</span>
+          <span className="block text-xs text-faint">{formatSize(file.size)}</span>
+        </span>
+      </OpensInViewer>
       <FileActions file={file} />
     </div>
   );

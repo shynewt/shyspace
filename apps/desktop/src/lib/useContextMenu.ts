@@ -16,6 +16,9 @@ export function useContextMenu(ref: RefObject<HTMLElement | null>, onOpen: () =>
     if (!element) return;
     const open = (event: MouseEvent) => {
       if (hasSelectionInside(element)) return;
+      // Something inside with its own menu (an image) answers for itself.
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[data-own-menu]") && target.closest("[data-own-menu]") !== element) return;
       event.preventDefault();
       onOpen();
     };

@@ -9,7 +9,7 @@ import { useWorkspace } from "../../lib/workspace";
 import { EmptyState, IconButton, Input, RelativeTime, SectionLabel, SegmentedControl, Select } from "../../ui";
 import { FileActions } from "../files/FileActions";
 import { FileThumbnail } from "../files/FileThumbnail";
-import { ImageViewer } from "../files/ImageViewer";
+import { OpensInViewer } from "../files/OpensInViewer";
 import { ChannelName } from "../private/ChannelName";
 import { ViewHeader } from "../shell/ViewHeader";
 
@@ -120,35 +120,17 @@ export function DriveView() {
 function DriveRow({ file, sharedBy }: { file: FileInfo; sharedBy: string }) {
   const { navigate } = useWorkspace();
   const image = useFileImage(file);
-  const [isViewing, setViewing] = useState(false);
-  const summary = (
-    <>
-      <FileThumbnail mediaType={file.media_type} image={image} size="sm" />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{file.name}</span>
-        <span className="block truncate text-xs text-faint">
-          {formatSize(file.size)} · {sharedBy} · <RelativeTime ms={file.created_ms} />
-        </span>
-      </span>
-    </>
-  );
   return (
     <li className="flex items-center gap-3 rounded-lg px-2.5 py-1.5 hover:bg-surface-2">
-      {image.status === "shown" ? (
-        <>
-          <button
-            type="button"
-            aria-label={`View ${file.name}`}
-            onClick={() => setViewing(true)}
-            className="flex min-w-0 flex-1 cursor-zoom-in items-center gap-3 rounded-md text-left"
-          >
-            {summary}
-          </button>
-          <ImageViewer file={file} url={image.url} open={isViewing} onOpenChange={setViewing} />
-        </>
-      ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-3">{summary}</div>
-      )}
+      <OpensInViewer file={file} image={image} className="flex min-w-0 flex-1 items-center gap-3">
+        <FileThumbnail mediaType={file.media_type} image={image} size="sm" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{file.name}</span>
+          <span className="block truncate text-xs text-faint">
+            {formatSize(file.size)} · {sharedBy} · <RelativeTime ms={file.created_ms} />
+          </span>
+        </span>
+      </OpensInViewer>
       {file.message && (
         <IconButton
           label={`Show ${file.name} in chat`}

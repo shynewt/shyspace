@@ -21,9 +21,9 @@ export type MenuChoices = {
 
 export type MenuItem = MenuAction | MenuChoices;
 
-const ITEM =
+export const MENU_ITEM =
   "flex h-8 cursor-default items-center gap-2 rounded-lg px-2.5 text-sm outline-none data-[highlighted]:bg-surface-2 data-[state=open]:bg-surface-2";
-const SURFACE = "z-50 min-w-menu rounded-xl border border-line bg-surface p-1 shadow-float outline-none";
+export const MENU_SURFACE = "z-50 min-w-menu rounded-xl border border-line bg-surface p-1 shadow-float outline-none";
 
 /**
  * A dropdown of actions. Keyboard navigation comes from Radix. Pass `open`
@@ -54,7 +54,7 @@ export function Menu({
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} asChild>
-          <motion.div {...pop} className={cx(SURFACE, "origin-(--radix-dropdown-menu-content-transform-origin)")}>
+          <motion.div {...pop} className={cx(MENU_SURFACE, "origin-(--radix-dropdown-menu-content-transform-origin)")}>
             {items.map((item, index) =>
               "choices" in item ? (
                 <Choices key={item.label} item={item} />
@@ -82,7 +82,7 @@ function Action({ item }: { item: MenuAction }) {
   return (
     <DropdownMenu.Item
       onSelect={item.onSelect}
-      className={cx(ITEM, item.isDestructive ? "text-danger-text" : "text-ink")}
+      className={cx(MENU_ITEM, item.isDestructive ? "text-danger-text" : "text-ink")}
     >
       {item.icon && <span className={item.isDestructive ? undefined : "text-muted"}>{item.icon}</span>}
       {item.label}
@@ -94,20 +94,20 @@ function Choices({ item }: { item: MenuChoices }) {
   const chosen = item.choices.find((choice) => choice.isChosen)?.label;
   return (
     <DropdownMenu.Sub>
-      <DropdownMenu.SubTrigger className={cx(ITEM, "text-ink")}>
+      <DropdownMenu.SubTrigger className={cx(MENU_ITEM, "text-ink")}>
         {item.icon && <span className="text-muted">{item.icon}</span>}
         <span className="flex-1">{item.label}</span>
         <ChevronRight size={14} className="text-decorative" />
       </DropdownMenu.SubTrigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.SubContent sideOffset={6} className={SURFACE}>
+        <DropdownMenu.SubContent sideOffset={6} className={MENU_SURFACE}>
           <DropdownMenu.RadioGroup value={chosen}>
             {item.choices.map((choice) => (
               <DropdownMenu.RadioItem
                 key={choice.label}
                 value={choice.label}
                 onSelect={choice.onSelect}
-                className={cx(ITEM, "text-ink")}
+                className={cx(MENU_ITEM, "text-ink")}
               >
                 {choice.icon && <span className="text-muted">{choice.icon}</span>}
                 <span className="flex-1">{choice.label}</span>

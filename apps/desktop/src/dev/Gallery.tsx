@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   ConfirmDialog,
+  ContextMenu,
   CopyButton,
   CopyField,
   CountBadge,
@@ -124,6 +125,11 @@ export default function Gallery() {
         <Example title="Floating surfaces">
           <Button onClick={() => setDialogOpen(true)}>Open dialog</Button>
           <Button onClick={() => setConfirmOpen(true)}>Confirm a delete</Button>
+          <ContextMenu items={[{ label: "Copy image", onSelect: () => showToast("Copy image") }]}>
+            <span className="rounded-lg border border-dashed border-line px-3 py-2 text-sm text-muted">
+              Right-click here
+            </span>
+          </ContextMenu>
           <Menu
             trigger={<Button>Open menu</Button>}
             items={[

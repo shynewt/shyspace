@@ -336,6 +336,49 @@
 .prose-chat ol {
   padding-left: 1.25rem;
 }
+/* A markdown file in the viewer reads like a page: headings sized as the
+   page editor draws them (features/pages/editor/theme.ts), roomier spacing. */
+.prose-document p + p,
+.prose-document ul,
+.prose-document ol,
+.prose-document pre,
+.prose-document blockquote,
+.prose-document .table-scroll {
+  margin-top: 0.75rem;
+}
+.prose-document h1,
+.prose-document h2,
+.prose-document h3,
+.prose-document h4,
+.prose-document h5,
+.prose-document h6 {
+  margin-top: 1.25rem;
+  font-weight: 600;
+}
+.prose-document > :first-child {
+  margin-top: 0;
+}
+.prose-document h1 {
+  font-size: 1.75em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+.prose-document h2 {
+  font-size: 1.4em;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+.prose-document h3 {
+  font-size: 1.18em;
+  font-weight: 620;
+  line-height: 1.4;
+}
+.prose-document hr {
+  margin: 1.25rem 0;
+  border-color: var(--border);
+}
 .prose-chat ul {
   list-style: disc;
 }
