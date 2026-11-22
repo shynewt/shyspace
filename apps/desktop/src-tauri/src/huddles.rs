@@ -1,8 +1,8 @@
 //! One command per huddle call on the workspace.
 
 use shy_core::{
-    huddle::media::{DeviceChoice, Devices},
-    views::{Huddle, MyHuddle},
+    huddle::media::DeviceChoice,
+    views::{Devices, Huddle, MyHuddle},
 };
 use tauri::State;
 

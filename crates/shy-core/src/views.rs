@@ -424,6 +424,8 @@ pub enum Change {
         member: String,
         member_name: String,
     },
+    /// The microphones and speakers offered, or the choice among them, changed.
+    HuddleDevices,
     /// A participant in this device's huddle started or stopped speaking.
     HuddleSpeaking {
         /// Member id (hex); this device's own member for its own voice.
@@ -449,6 +451,15 @@ pub struct HuddleParticipant {
     pub is_me: bool,
     /// Their app can't exchange audio with this one; one of you must update.
     pub needs_update: bool,
+}
+
+/// The microphones and speakers to pick from, and which this device uses.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Devices {
+    pub inputs: Vec<crate::huddle::media::AudioDevice>,
+    pub outputs: Vec<crate::huddle::media::AudioDevice>,
+    /// `None` (the system's default) also when the chosen one went away.
+    pub chosen: crate::huddle::media::DeviceChoice,
 }
 
 /// This device's own huddle.

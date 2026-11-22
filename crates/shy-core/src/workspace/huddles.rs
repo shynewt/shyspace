@@ -18,17 +18,23 @@ use crate::{
     huddle::{
         beacon::{Beacon, BeaconBody, BeaconState, MEDIA_WIRE, Reach, SessionId, media_path_name},
         book::{EXPIRY_MS, HuddleBook, REFRESH_MS},
-        media::{DeviceChoice, Devices, Link, MediaCall, MediaEvent, MicState, OutputState},
+        media::{AudioDevice, DeviceChoice, Link, MediaCall, MediaEvent, MicState, OutputState},
         rules::{MAX_PARTICIPANTS, Visibility, hearing_set, huddle_members},
     },
     ops::now_ms,
     private::ids::{PrivateKind, private_kind},
     transport::direct::DirectMessage,
-    views::{Change, Huddle, HuddleParticipant, HuddlePeer, HuddlePhase, MyHuddle, NotifyLevel, member_id},
+    views::{
+        Change, Devices, Huddle, HuddleParticipant, HuddlePeer, HuddlePhase, MyHuddle, NotifyLevel, member_id,
+    },
 };
 
 /// How often the session checks membership and whether the device slept.
 const TICK: Duration = Duration::from_secs(5);
+/// Where this device keeps its chosen microphone and speaker.
+const DEVICES_META: &str = "huddle_devices";
+/// System device ids are short; anything longer isn't one.
+const MAX_DEVICE_ID_CHARS: usize = 512;
 /// A `Left` is sent this many times, since gossip may lose one.
 const LEFT_REPEATS: usize = 2;
 
@@ -202,6 +208,7 @@ impl Workspace {
             "this huddle is full"
         );
 
+        let chosen_devices = self.huddle_devices()?.chosen;
         let session: SessionId = rand::random();
         let beacon = self.sign_beacon(channel, session, 0, joined())?;
         let (events, event_receiver) = mpsc::channel(64);
@@ -232,7 +239,7 @@ impl Workspace {
                     peers: peer_receiver,
                     events,
                     muted,
-                    devices: DeviceChoice::default(),
+                    devices: chosen_devices,
                 })
                 .context("couldn't start the huddle's audio"),
             Ok(Audience::Lost(_)) => Err(anyhow::anyhow!("you aren't a member of this channel")),
@@ -336,20 +343,52 @@ impl Workspace {
         Ok(())
     }
 
+    /// The microphones and speakers to pick from, and which this device uses.
     pub fn huddle_devices(&self) -> Result<Devices> {
-        self.inner
+        let offered = self
+            .inner
             .huddle_media
             .as_ref()
             .context("this build has no audio")?
-            .list_devices()
+            .list_devices()?;
+        let saved = self.saved_devices()?;
+        let still_there = |chosen: Option<String>, devices: &[AudioDevice]| {
+            chosen.filter(|id| devices.iter().any(|device| device.id == *id))
+        };
+        Ok(Devices {
+            chosen: DeviceChoice {
+                input: still_there(saved.input, &offered.inputs),
+                output: still_there(saved.output, &offered.outputs),
+            },
+            inputs: offered.inputs,
+            outputs: offered.outputs,
+        })
     }
 
+    /// Picks the microphone and speaker for calls on this device, now and
+    /// after a restart.
     pub fn set_huddle_devices(&self, choice: DeviceChoice) -> Result<()> {
-        self.inner
+        let media = self
+            .inner
             .huddle_media
             .as_ref()
-            .context("this build has no audio")?
-            .set_devices(choice)
+            .context("this build has no audio")?;
+        for id in [&choice.input, &choice.output].into_iter().flatten() {
+            ensure!(id.len() <= MAX_DEVICE_ID_CHARS, "that isn't a device's id");
+        }
+        media.set_devices(choice.clone())?;
+        self.state()
+            .store
+            .set_meta(DEVICES_META, &serde_json::to_vec(&choice)?)?;
+        self.emit(Change::HuddleDevices);
+        Ok(())
+    }
+
+    fn saved_devices(&self) -> Result<DeviceChoice> {
+        match self.state().store.meta(DEVICES_META)? {
+            Some(bytes) => serde_json::from_slice(&bytes).context("the saved huddle devices can't be read"),
+            None => Ok(DeviceChoice::default()),
+        }
     }
 
     /// Takes a beacon from gossip or straight from a device, after every check.
@@ -667,6 +706,10 @@ impl Workspace {
     }
 
     fn apply_media_event(&self, event: MediaEvent) {
+        if event == MediaEvent::DevicesChanged {
+            self.emit(Change::HuddleDevices);
+            return;
+        }
         let mut speaking_change = None;
         {
             let mut huddles = self.huddles();
@@ -694,7 +737,7 @@ impl Workspace {
                 MediaEvent::MeSpeaking(speaking) => speaking_change = Some((self.my_id(), speaking)),
                 MediaEvent::Mic(mic) => mine.mic = mic,
                 MediaEvent::Output(output) => mine.output = output,
-                MediaEvent::Incompatible { .. } => {}
+                MediaEvent::Incompatible { .. } | MediaEvent::DevicesChanged => {}
             }
         }
         match speaking_change {

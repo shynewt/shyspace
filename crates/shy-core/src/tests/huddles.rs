@@ -9,7 +9,7 @@ use crate::{
     Networking, Workspace, WorkspaceOptions,
     huddle::{
         beacon::{Beacon, BeaconBody, BeaconState, MEDIA_WIRE, Reach},
-        media::{MediaEvent, MicState, fake::FakeMedia},
+        media::{DeviceChoice, MediaEvent, MicState, fake::FakeMedia},
         rules::MAX_PARTICIPANTS,
     },
     ops::now_ms,
@@ -537,4 +537,64 @@ async fn a_muted_dm_doesnt_ring() {
     ada.workspace.join_huddle(&dm, false).unwrap();
     carry(&ada.workspace, &[&bob.workspace], Via::Direct(ada.workspace.me()));
     assert!(huddles_started(&mut changes).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_chosen_devices_are_kept_and_used_for_the_next_call() {
+    let (_root, [ada, _bob, _carol]) = three_members().await;
+    let devices = ada.workspace.huddle_devices().unwrap();
+    assert_eq!(
+        devices.chosen,
+        DeviceChoice::default(),
+        "the system's default until chosen"
+    );
+
+    let mut changes = ada.workspace.subscribe();
+    let choice = DeviceChoice {
+        input: Some("usb-mic".into()),
+        output: Some("headset".into()),
+    };
+    ada.workspace.set_huddle_devices(choice.clone()).unwrap();
+    assert_eq!(ada.workspace.huddle_devices().unwrap().chosen, choice);
+    let mut saw_change = false;
+    while let Ok(change) = changes.try_recv() {
+        saw_change |= matches!(change, crate::views::Change::HuddleDevices);
+    }
+    assert!(saw_change, "pickers reload when the choice changes");
+
+    let general = channel_id(&ada.workspace, "general");
+    ada.workspace.join_huddle(&general, false).unwrap();
+    assert_eq!(
+        ada.media.devices(),
+        choice,
+        "the call starts on the chosen devices"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chosen_device_that_went_away_shows_as_the_default() {
+    let (_root, [ada, _bob, _carol]) = three_members().await;
+    ada.workspace
+        .set_huddle_devices(DeviceChoice {
+            input: Some("a-mic-unplugged-since".into()),
+            output: Some("headset".into()),
+        })
+        .unwrap();
+    let chosen = ada.workspace.huddle_devices().unwrap().chosen;
+    assert_eq!(chosen.input, None);
+    assert_eq!(chosen.output.as_deref(), Some("headset"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_list_change_during_a_call_reloads_the_pickers() {
+    let (_root, [ada, _bob, _carol]) = three_members().await;
+    let general = channel_id(&ada.workspace, "general");
+    ada.workspace.join_huddle(&general, false).unwrap();
+    let mut changes = ada.workspace.subscribe();
+    ada.media.report(MediaEvent::DevicesChanged).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !matches!(changes.recv().await, Ok(crate::views::Change::HuddleDevices)) {}
+    })
+    .await
+    .expect("no huddle_devices change");
 }

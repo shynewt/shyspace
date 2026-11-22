@@ -41,8 +41,9 @@ pub struct AudioDevice {
     pub is_bluetooth: bool,
 }
 
+/// The microphones and speakers the system offers right now.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Devices {
+pub struct DeviceList {
     pub inputs: Vec<AudioDevice>,
     pub outputs: Vec<AudioDevice>,
 }
@@ -104,6 +105,8 @@ pub enum MediaEvent {
     Incompatible {
         peer: PublicKey,
     },
+    /// A microphone or speaker was plugged in or removed.
+    DevicesChanged,
 }
 
 /// Moves a huddle's sound. One call at a time.
@@ -116,7 +119,7 @@ pub trait HuddleMedia: Send + Sync + 'static {
     fn stop(&self);
     fn set_muted(&self, muted: bool) -> Result<()>;
     fn set_devices(&self, choice: DeviceChoice) -> Result<()>;
-    fn list_devices(&self) -> Result<Devices>;
+    fn list_devices(&self) -> Result<DeviceList>;
 }
 
 #[cfg(test)]
@@ -131,6 +134,7 @@ pub(crate) mod fake {
         events: Option<mpsc::Sender<MediaEvent>>,
         my_path: Option<String>,
         muted: bool,
+        devices: DeviceChoice,
     }
 
     /// Records what the core asks of the media layer, and lets a test report
@@ -160,6 +164,11 @@ pub(crate) mod fake {
             self.live().muted
         }
 
+        /// The devices the media layer was last told to use.
+        pub(crate) fn devices(&self) -> DeviceChoice {
+            self.live().devices.clone()
+        }
+
         pub(crate) async fn report(&self, event: MediaEvent) {
             let events = self.live().events.clone().expect("no call is running");
             events.send(event).await.expect("the call's events are gone");
@@ -173,11 +182,17 @@ pub(crate) mod fake {
             live.events = Some(call.events);
             live.my_path = Some(call.my_path);
             live.muted = call.muted;
+            live.devices = call.devices;
             Ok(())
         }
 
         fn stop(&self) {
-            *self.live() = Live::default();
+            let mut live = self.live();
+            let devices = std::mem::take(&mut live.devices);
+            *live = Live {
+                devices,
+                ..Live::default()
+            };
         }
 
         fn set_muted(&self, muted: bool) -> Result<()> {
@@ -185,12 +200,29 @@ pub(crate) mod fake {
             Ok(())
         }
 
-        fn set_devices(&self, _choice: DeviceChoice) -> Result<()> {
+        fn set_devices(&self, choice: DeviceChoice) -> Result<()> {
+            self.live().devices = choice;
             Ok(())
         }
 
-        fn list_devices(&self) -> Result<Devices> {
-            Ok(Devices::default())
+        fn list_devices(&self) -> Result<DeviceList> {
+            let device = |id: &str, is_default: bool, is_bluetooth: bool| AudioDevice {
+                id: id.into(),
+                name: id.into(),
+                is_default,
+                is_bluetooth,
+            };
+            Ok(DeviceList {
+                inputs: vec![
+                    device("built-in-mic", true, false),
+                    device("usb-mic", false, false),
+                    device("headset-mic", false, true),
+                ],
+                outputs: vec![
+                    device("built-in-speakers", true, false),
+                    device("headset", false, true),
+                ],
+            })
         }
     }
 }
