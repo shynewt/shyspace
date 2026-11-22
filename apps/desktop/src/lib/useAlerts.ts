@@ -19,37 +19,44 @@ export function useAlerts(view: View | null, navigate: (view: View) => void) {
     currentView.current = view;
   }, [view]);
 
-  useEffect(
-    () =>
-      onChange((change) => {
-        if (change.kind !== "alert" && change.kind !== "huddle_started") return;
-        const shown = currentView.current;
-        const isLooking = document.hasFocus() && shown?.kind === "channel" && shown.id === change.channel;
-        if (isLooking) return;
-        const author =
-          change.kind === "alert"
-            ? { id: change.author, name: change.author_name }
-            : { id: change.member, name: change.member_name };
-        // A huddle's ring carries no message text, so it shows whatever the text setting.
-        const body =
-          change.kind === "huddle_started"
-            ? "Started a huddle"
-            : readPreferences().alertsShowText
-              ? change.preview
-              : "New message";
-        const target: AlertTarget =
-          change.kind === "alert" ? { kind: "message", id: change.message } : { kind: "channel", id: change.channel };
-        const fallbackName = change.kind === "alert" ? change.channel_name : "";
-        Promise.all([api.channels(), api.members(), avatarPng(author.id, displayName(author.name, author.id))])
-          .then(([channels, members, png]) => {
-            const channel = channels.find((candidate) => candidate.id === change.channel);
-            const title = alertTitle(author, channel, members, fallbackName);
-            return api.showAlert(title, body, target, { member: author.id, png });
-          })
-          .catch(reportError);
-      }),
-    [],
-  );
+  useEffect(() => {
+    // Each alert is prepared at once but shown after the one before, so they
+    // appear in the order their messages came, however long each took to prepare.
+    let lastShown: Promise<void> = Promise.resolve();
+    return onChange((change) => {
+      if (change.kind !== "alert" && change.kind !== "huddle_started") return;
+      const shown = currentView.current;
+      const isLooking = document.hasFocus() && shown?.kind === "channel" && shown.id === change.channel;
+      if (isLooking) return;
+      const author =
+        change.kind === "alert"
+          ? { id: change.author, name: change.author_name }
+          : { id: change.member, name: change.member_name };
+      // A huddle's ring carries no message text, so it shows whatever the text setting.
+      const body =
+        change.kind === "huddle_started"
+          ? "Started a huddle"
+          : readPreferences().alertsShowText
+            ? change.preview
+            : "New message";
+      const target: AlertTarget =
+        change.kind === "alert" ? { kind: "message", id: change.message } : { kind: "channel", id: change.channel };
+      const fallbackName = change.kind === "alert" ? change.channel_name : "";
+      const prepared = Promise.all([
+        api.channels(),
+        api.members(),
+        avatarPng(author.id, displayName(author.name, author.id)),
+      ]);
+      lastShown = lastShown
+        .then(() => prepared)
+        .then(([channels, members, png]) => {
+          const channel = channels.find((candidate) => candidate.id === change.channel);
+          const title = alertTitle(author, channel, members, fallbackName);
+          return api.showAlert(title, body, target, { member: author.id, png });
+        })
+        .catch(reportError);
+    });
+  }, []);
 
   useEffect(() => {
     const opening = listen<AlertTarget>("alert-opened", (event) => {
