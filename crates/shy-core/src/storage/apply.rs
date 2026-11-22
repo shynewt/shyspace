@@ -10,8 +10,8 @@ use crate::{
     config,
     files::MAX_PICTURE_BYTES,
     ops::{
-        MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, MAX_PAGE_TITLE_CHARS, Op, VerifiedOp,
-        clean_channel_name, clean_display_name, clean_emoji, cut_to, is_owned_by, is_valid_status,
+        MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, Op, VerifiedOp, clean_channel_name,
+        clean_display_name, clean_emoji, clean_page_title, cut_to, is_owned_by, is_valid_status,
         rule_violation,
     },
     pages,
@@ -323,7 +323,7 @@ impl Store {
     }
 
     fn set_title(&self, id: &str, title: &str, lamport: u64, author: &[u8], now: i64) -> Result<()> {
-        let title = cut_to(title, MAX_PAGE_TITLE_CHARS);
+        let title = clean_page_title(title);
         self.db.execute(
             "UPDATE pages SET title = ?2, title_lamport = ?3, title_author = ?4, updated_ms = MAX(updated_ms, ?5)
              WHERE id = ?1 AND (title_lamport < ?3 OR (title_lamport = ?3 AND title_author < ?4))",

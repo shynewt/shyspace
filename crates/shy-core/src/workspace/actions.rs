@@ -9,7 +9,7 @@ use crate::{
     ops::{
         EntityId, Envelope, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS, MAX_OP_BYTES, MAX_PAGE_TITLE_CHARS,
         MAX_PAGE_UPDATE_BYTES, MAX_PROFILE_NAME_CHARS, Op, OpBody, VerifiedOp, clean_display_name,
-        clean_emoji, new_owned_id, normalize_channel_name, now_ms,
+        clean_emoji, clean_page_title, new_owned_id, normalize_channel_name, now_ms,
     },
     pages::{self, Edit},
     private::ids::{new_private_message_id, private_channel_of, private_kind},
@@ -450,6 +450,10 @@ fn checked_page_title(title: &str) -> Result<&str> {
     ensure!(
         title.chars().count() <= MAX_PAGE_TITLE_CHARS,
         "a page title has at most {MAX_PAGE_TITLE_CHARS} characters"
+    );
+    ensure!(
+        clean_page_title(title) == title,
+        "a page title can't hold line breaks or invisible characters"
     );
     Ok(title)
 }

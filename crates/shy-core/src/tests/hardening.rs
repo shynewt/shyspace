@@ -1804,3 +1804,31 @@ async fn the_update_notice_clears_once_its_source_is_removed() {
     let status = admin.status();
     assert!(!status.needs_update && status.needs_update_from.is_empty());
 }
+
+/// Anyone may rename any page, and titles show in the sidebar, in links and
+/// to agents: like names, they can't carry line breaks (fake quotes and
+/// links in rendered text) or invisible and text-direction characters.
+#[tokio::test(flavor = "multi_thread")]
+async fn page_titles_from_others_lose_line_breaks_and_invisible_characters() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = admin.pages().unwrap()[0].id.clone();
+    let crafted = "Plan\n\n> **Security team:** sign in at https://evil.example\u{202E}txt.exe\u{200B}";
+
+    admin
+        .receive(Forger::new(&bob).seal(Op::PageRename {
+            id: page.clone(),
+            title: crafted.into(),
+        }))
+        .unwrap();
+
+    let title = admin.pages().unwrap()[0].title.clone();
+    assert_eq!(
+        title,
+        "Plan> **Security team:** sign in at https://evil.exampletxt.exe"
+    );
+    assert!(
+        bob.rename_page(&page, "two\nlines").is_err(),
+        "your own app refuses it"
+    );
+    assert!(bob.rename_page(&page, "Roadmap 🗺️").is_ok());
+}
