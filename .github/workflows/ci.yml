@@ -1,9 +1,14 @@
 name: CI
 
+# Every check runs locally before each commit (AGENTS.md), so CI is the
+# backstop: on pull requests, weekly on main, and on demand. Actions minutes
+# are limited on a private repository.
 on:
-  push:
-    branches: [main]
   pull_request:
+    paths-ignore: ["docs/**", "**/*.md"]
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -48,10 +53,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm exec playwright install --with-deps chromium-headless-shell webkit
+      - name: Find the Playwright version, for the browser cache
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-webkit-${{ steps.playwright.outputs.version }}
+      # The app ships in WebKit; Chromium runs locally, where it's the fast loop.
+      - run: pnpm exec playwright install --with-deps webkit
       - run: pnpm test:ui --forbid-only --reporter=github
         env:
-          UI_TEST_BROWSERS: chromium,webkit
+          UI_TEST_BROWSERS: webkit
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
@@ -61,6 +74,8 @@ jobs:
 
   app:
     name: Desktop app (real UI, real bucket)
+    # The slowest job: it builds the whole app. Only when asked for.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

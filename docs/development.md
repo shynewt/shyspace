@@ -43,7 +43,7 @@ Every member has a data directory in `/var/tmp/shyspace-demo/<name>` (or `$SHY_D
 
 ## Checks
 
-Run all of these before committing (CI runs them too, on every push and pull request: `.github/workflows/ci.yml`):
+Run all of these before committing. CI (`.github/workflows/ci.yml`) is the backstop, not the first line: it runs on pull requests, weekly on main, and from the Actions tab's "Run workflow" button, because Actions minutes are limited on a private repository. The real-app job runs only from that button.
 
 ```sh
 cargo fmt --check
@@ -62,9 +62,9 @@ python3 scripts/e2e_mcp.py
 
 `pnpm test:ui` (in `apps/desktop`) runs the Playwright tests in `tests/ui/`. They load the real frontend from `tests/ui/app.html`, which answers every `invoke` from an in-memory fake (`tests/ui/fake/backend.ts`, through Tauri's `mockIPC`) instead of Rust. Tests act as other members through `window.fake` (for example `window.fake.receiveMessage(...)`). The fake copies only the behavior the screens rely on, so keep it in step with `src-tauri/src/lib.rs`. First run: `pnpm exec playwright install chromium-headless-shell`.
 
-The app runs in WebKitGTK, so the tests run in WebKit too. `pnpm test:ui` runs Chromium only, because Playwright's WebKit needs Ubuntu libraries; `UI_TEST_BROWSERS` (`chromium`, `webkit` or both, comma-separated) picks others, and CI runs both. `pnpm test:ui:webkit` (`scripts/test-ui-webkit.sh`) runs the WebKit tests in the official Playwright container with Podman, so it works on any distribution; it takes the same arguments as `playwright test`. The container has its own network, so its dev server doesn't clash with one on the host's port 1430. Failures there are usually real WebKit differences: fix the app, not the test.
+The app runs in WebKitGTK, so the tests run in WebKit too. `pnpm test:ui` runs Chromium only, because Playwright's WebKit needs Ubuntu libraries; `UI_TEST_BROWSERS` (`chromium`, `webkit` or both, comma-separated) picks others, and CI runs WebKit only, the engine the app ships. Playwright runs 4 browsers at once locally and 3 on CI (`playwright.config.ts`), so a full run doesn't take over a laptop. `pnpm test:ui:webkit` (`scripts/test-ui-webkit.sh`) runs the WebKit tests in the official Playwright container with Podman, so it works on any distribution; it takes the same arguments as `playwright test`. The container has its own network, so its dev server doesn't clash with one on the host's port 1430. Failures there are usually real WebKit differences: fix the app, not the test.
 
-`pnpm test:app` drives the real built app (Rust core, real bucket) through `tauri-driver`, with the `shy` CLI as a second member (`tests/app/`). It needs WebKit's WebDriver for webkit2gtk 4.1 (Ubuntu's `webkit2gtk-driver`; Fedora doesn't package it), a display (`xvfb-run`), an unlocked keyring (`printf pass | gnome-keyring-daemon --unlock`), and the local bucket. CI runs it on Ubuntu; locally, run it in an Ubuntu container with the same packages, with `SHY_APP` and `SHY_CLI` pointing at the built binaries.
+`pnpm test:app` drives the real built app (Rust core, real bucket) through `tauri-driver`, with the `shy` CLI as a second member (`tests/app/`). It needs WebKit's WebDriver for webkit2gtk 4.1 (Ubuntu's `webkit2gtk-driver`; Fedora doesn't package it), a display (`xvfb-run`), an unlocked keyring (`printf pass | gnome-keyring-daemon --unlock`), and the local bucket. CI runs it on Ubuntu when started by hand; locally, run it in an Ubuntu container with the same packages, with `SHY_APP` and `SHY_CLI` pointing at the built binaries.
 
 To see every shared component, open the app with `#gallery` in development. To check a change by hand, run the app on a pre-filled workspace and drive a second member through the CLI or MCP so you can watch live updates arrive.
 
