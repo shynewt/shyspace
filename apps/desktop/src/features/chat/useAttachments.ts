@@ -4,8 +4,17 @@ import { formatSize } from "../../lib/files";
 import { MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, MAX_PASTED_BYTES } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
 
-/** Files dropped on the window go to the message box used last. */
-let activeBox: string | null = null;
+/**
+ * Message boxes on screen, the one used last at the end: files dropped on
+ * the window go there, and when it closes, to the one used before it.
+ */
+const boxes: string[] = [];
+const activeBox = () => boxes.at(-1) ?? null;
+
+function forgetBox(box: string) {
+  const index = boxes.indexOf(box);
+  if (index !== -1) boxes.splice(index, 1);
+}
 let isFallbackListening = false;
 
 /** Drops with no message box on screen (a page, the Files view) are let go, and say why. */
@@ -13,7 +22,7 @@ function listenForUnclaimedDrops() {
   if (isFallbackListening) return;
   isFallbackListening = true;
   onFilesDropped((files) => {
-    if (activeBox !== null) return;
+    if (activeBox() !== null) return;
     for (const file of files) api.unstageFile(file.token).catch(reportError);
     reportError("Open a channel or direct message to attach files.");
   });
@@ -31,22 +40,28 @@ export function useAttachments(channelId: string) {
   const stagedNow = useRef(staged);
   stagedNow.current = staged;
 
+  const isMounted = useRef(true);
+
   useEffect(() => {
     listenForUnclaimedDrops();
-    activeBox ??= boxId;
+    isMounted.current = true;
+    // A box focused while mounting has already put itself last.
+    if (!boxes.includes(boxId)) boxes.unshift(boxId);
     return () => {
-      if (activeBox === boxId) activeBox = null;
+      isMounted.current = false;
+      forgetBox(boxId);
       // Leaving the box lets its files go; a send already under way has its own copy.
       for (const file of stagedNow.current) api.unstageFile(file.token).catch(reportError);
     };
   }, [boxId]);
   const markActive = useCallback(() => {
-    activeBox = boxId;
+    forgetBox(boxId);
+    boxes.push(boxId);
   }, [boxId]);
 
   const add = useCallback((files: StagedFile[]) => setStaged((current) => [...current, ...files]), []);
-  useEffect(() => onFilesDropped((files) => activeBox === boxId && add(files)), [boxId, add]);
-  useEffect(() => onFileDrag((isDragging) => setDragTarget(isDragging && activeBox === boxId)), [boxId]);
+  useEffect(() => onFilesDropped((files) => activeBox() === boxId && add(files)), [boxId, add]);
+  useEffect(() => onFileDrag((isDragging) => setDragTarget(isDragging && activeBox() === boxId)), [boxId]);
   useEffect(
     () =>
       onChange((change) => {
@@ -80,7 +95,11 @@ export function useAttachments(channelId: string) {
           reportError(`${file.name} is too large to paste. Attach it instead.`);
           continue;
         }
-        api.stagePastedFile(file).then((stagedFile) => add([stagedFile]), reportError);
+        api.stagePastedFile(file).then((stagedFile) => {
+          // The box may have closed while the bytes crossed over.
+          if (isMounted.current) add([stagedFile]);
+          else api.unstageFile(stagedFile.token).catch(reportError);
+        }, reportError);
       }
       return true;
     },

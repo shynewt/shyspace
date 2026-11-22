@@ -5,6 +5,7 @@
 
 use std::{
     collections::HashMap,
+    io::Read,
     path::{Path, PathBuf},
     sync::{
         Mutex,
@@ -31,18 +32,24 @@ const MAX_PASTED_BYTES: usize = 25 * 1024 * 1024;
 /// Matches `MAX_INLINE_IMAGE_BYTES` in the UI's `lib/files.ts`.
 const MAX_THUMBNAIL_SOURCE_BYTES: u64 = 5 * 1024 * 1024;
 
-/// The source's bytes, if it holds at most `limit` of them.
-fn small_copy(source: &FileSource, limit: u64) -> CommandResult<Vec<u8>> {
+/// The source's bytes, if it holds at most `limit` of them. Reads at most
+/// one byte past the limit, so a file that grew since it was staged is
+/// refused rather than read whole.
+fn small_copy(source: FileSource, limit: u64) -> CommandResult<Vec<u8>> {
     let too_large = || "too large for a thumbnail".to_owned();
     match source {
-        FileSource::Bytes(bytes) if bytes.len() as u64 <= limit => Ok(bytes.clone()),
+        FileSource::Bytes(bytes) if bytes.len() as u64 <= limit => Ok(bytes),
         FileSource::Bytes(_) => Err(too_large()),
         FileSource::Path(path) => {
-            let size = std::fs::metadata(path).map_err(|error| error.to_string())?.len();
-            if size > limit {
+            let file = std::fs::File::open(&path).map_err(|error| error.to_string())?;
+            let mut bytes = Vec::new();
+            file.take(limit + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|error| error.to_string())?;
+            if bytes.len() as u64 > limit {
                 return Err(too_large());
             }
-            std::fs::read(path).map_err(|error| error.to_string())
+            Ok(bytes)
         }
     }
 }
@@ -223,16 +230,21 @@ fn unframe_pasted_file(framed: &[u8]) -> CommandResult<(String, String, &[u8])> 
 
 /// A staged image's bytes, for its thumbnail in the message box. Only small
 /// files, so a large one isn't read into memory just to show a corner of it.
-#[tauri::command]
+/// Runs off the main thread, so a slow disk never freezes the window.
+#[tauri::command(async)]
 pub fn staged_file_bytes(staged: State<'_, StagedFiles>, token: String) -> CommandResult<Response> {
-    let source = {
-        let files = staged.lock();
-        let file = files
-            .get(&token)
-            .ok_or_else(|| "that file is no longer waiting to be sent".to_owned())?;
-        small_copy(&file.source, MAX_THUMBNAIL_SOURCE_BYTES)?
-    };
-    Ok(Response::new(source))
+    let source = staged
+        .lock()
+        .get(&token)
+        .map(|file| match &file.source {
+            FileSource::Path(path) => Ok(FileSource::Path(path.clone())),
+            FileSource::Bytes(bytes) if bytes.len() as u64 <= MAX_THUMBNAIL_SOURCE_BYTES => {
+                Ok(FileSource::Bytes(bytes.clone()))
+            }
+            FileSource::Bytes(_) => Err("too large for a thumbnail".to_owned()),
+        })
+        .ok_or_else(|| "that file is no longer waiting to be sent".to_owned())??;
+    Ok(Response::new(small_copy(source, MAX_THUMBNAIL_SOURCE_BYTES)?))
 }
 
 #[tauri::command]

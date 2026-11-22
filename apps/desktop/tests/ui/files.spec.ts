@@ -264,3 +264,23 @@ test("in the files view, a whole image row opens the viewer", async ({ page }) =
   await page.getByText("logo.png").click();
   await expect(page.getByRole("dialog", { name: "logo.png" }).getByRole("img", { name: "logo.png" })).toBeVisible();
 });
+
+test("files dropped after the thread closes go to the channel's message box", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const root = window.fake.receiveMessage(grace, "general", "Plans for the offsite");
+    window.fake.receiveReply(grace, root, "Lisbon?");
+  });
+  await page
+    .getByRole("log")
+    .getByRole("button", { name: /1 reply/ })
+    .click();
+  const thread = page.getByRole("complementary", { name: "Thread" });
+  await thread.getByLabel("Reply in thread").focus();
+  await thread.getByRole("button", { name: "Close" }).click();
+  await expect(thread).toHaveCount(0);
+
+  await page.evaluate(() => window.fake.files.drop([{ name: "agenda.md", type: "text/markdown", bytes: [35] }]));
+  await expect(page.getByRole("list", { name: "Files to send" }).getByText("agenda.md")).toBeVisible();
+});
