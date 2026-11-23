@@ -20,7 +20,7 @@ use crate::{
     access::{Access, Allowed, CallId},
     audience::{distinct_peers, peer_changes},
     backend::{Backend, Speaker},
-    devices::{ResolvedDevices, output_state, resolve, unchecked},
+    devices::{Resolved, ResolvedDevices, output_state, resolve, unchecked},
     listen::listen,
     mic::{Mic, until},
 };
@@ -254,7 +254,9 @@ async fn run_devices<B: Backend>(mut call: DeviceCall<B>) {
     } else {
         mic.open(&speaker, resolved.input.device.clone(), resolved.input.is_lost);
     }
-    output.set(state_of(&resolved, offered.as_ref(), &mic));
+    // A speaker that stopped working after a switch, tried again each check.
+    let mut speaker_lost = false;
+    output.set(state_of(&resolved, offered.as_ref(), &mic, speaker_lost));
     let mut device_check = tokio::time::interval(DEVICE_CHECK_EVERY);
     device_check.tick().await;
     loop {
@@ -275,7 +277,7 @@ async fn run_devices<B: Backend>(mut call: DeviceCall<B>) {
                     return;
                 }
                 let wanted = resolve_against(&call.choice.borrow_and_update(), offered.as_ref());
-                apply_devices(&call, &speaker, &mut mic, &mut resolved, wanted).await;
+                speaker_lost = !apply_devices(&call, &speaker, &mut mic, &mut resolved, wanted, speaker_lost).await;
             }
             report = mic.next_report() => mic.handle(report),
             () = until(retry_at) => {
@@ -283,20 +285,23 @@ async fn run_devices<B: Backend>(mut call: DeviceCall<B>) {
                     offered = Some(fresh);
                 }
                 resolved.input = resolve_against(&call.choice.borrow(), offered.as_ref()).input;
-                mic.open(&speaker, resolved.input.device.clone(), resolved.input.is_lost);
+                mic.retry(&speaker, resolved.input.device.clone());
             }
             _ = device_check.tick() => {
                 let Some(fresh) = list_devices(&call.backend).await else { continue };
-                if offered.as_ref() == Some(&fresh) {
+                let is_changed = offered.as_ref() != Some(&fresh);
+                if !is_changed && !speaker_lost {
                     continue;
                 }
                 offered = Some(fresh);
-                let _ = call.events.try_send(MediaEvent::DevicesChanged);
+                if is_changed {
+                    let _ = call.events.try_send(MediaEvent::DevicesChanged);
+                }
                 let wanted = resolve_against(&call.choice.borrow(), offered.as_ref());
-                apply_devices(&call, &speaker, &mut mic, &mut resolved, wanted).await;
+                speaker_lost = !apply_devices(&call, &speaker, &mut mic, &mut resolved, wanted, speaker_lost).await;
             }
         }
-        output.set(state_of(&resolved, offered.as_ref(), &mic));
+        output.set(state_of(&resolved, offered.as_ref(), &mic, speaker_lost));
     }
 }
 
@@ -308,31 +313,65 @@ fn resolve_against(choice: &DeviceChoice, offered: Option<&DeviceList>) -> Resol
     }
 }
 
+/// `Lost` only while no speaker plays: a chosen one that's gone while the
+/// default plays is shown by the device pickers instead.
 fn state_of<B: Backend>(
     resolved: &ResolvedDevices,
     offered: Option<&DeviceList>,
     mic: &Mic<B>,
+    speaker_lost: bool,
 ) -> OutputState {
+    if speaker_lost {
+        return OutputState::Lost;
+    }
     output_state(resolved, offered.unwrap_or(&DeviceList::default()), mic.is_open())
 }
 
-/// Moves to the devices `wanted` names, reopening only what changed.
+/// Moves to the devices `wanted` names, reopening only what changed, or
+/// the speaker again when it was lost. Returns whether a speaker plays.
 async fn apply_devices<B: Backend>(
     call: &DeviceCall<B>,
     speaker: &B::Speaker,
     mic: &mut Mic<B>,
     resolved: &mut ResolvedDevices,
-    wanted: ResolvedDevices,
-) {
-    if wanted.output != resolved.output
-        && let Err(error) = speaker.switch(wanted.output.device.clone()).await
-    {
-        warn!(error = %error, "the speaker can't switch");
-    }
+    mut wanted: ResolvedDevices,
+    speaker_lost: bool,
+) -> bool {
+    let speaker_plays = if wanted.output != resolved.output || speaker_lost {
+        switch_speaker(speaker, &mut wanted.output).await
+    } else {
+        true
+    };
     let input_changed = wanted.input != resolved.input;
     *resolved = wanted;
     if input_changed && !*call.muted.borrow() {
         mic.open(speaker, resolved.input.device.clone(), resolved.input.is_lost);
+    }
+    speaker_plays
+}
+
+/// Moves the speaker to `output`, or to the default when that won't open.
+/// Returns whether either worked.
+async fn switch_speaker<S: Speaker>(speaker: &S, output: &mut Resolved) -> bool {
+    match speaker.switch(output.device.clone()).await {
+        Ok(()) => return true,
+        Err(error) => warn!(error = %error, "the speaker can't switch"),
+    }
+    if output.device.is_none() {
+        return false;
+    }
+    match speaker.switch(None).await {
+        Ok(()) => {
+            *output = Resolved {
+                device: None,
+                is_lost: true,
+            };
+            true
+        }
+        Err(error) => {
+            warn!(error = %error, "the default speaker can't open either");
+            false
+        }
     }
 }
 

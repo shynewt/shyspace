@@ -35,13 +35,16 @@ struct Device {
 
 impl Device {
     async fn new(lookup: &MemoryLookup, frequency: f32) -> Self {
+        Self::with(lookup, Tones::new(frequency)).await
+    }
+
+    async fn with(lookup: &MemoryLookup, tones: Tones) -> Self {
         let endpoint = Endpoint::builder(presets::Minimal)
             .address_lookup(lookup.clone())
             .bind()
             .await
             .expect("bind a test endpoint");
         lookup.add_endpoint_info(endpoint.addr());
-        let tones = Tones::new(frequency);
         let speaker = tones.speaker();
         let media = Arc::new(Media::new(tones));
         let router = media.attach(&endpoint, Router::builder(endpoint.clone())).spawn();
@@ -333,4 +336,24 @@ async fn a_peer_copying_anothers_path_is_played_as_no_one() {
     );
     assert!(!is_hearing(&bob.speaker, G), "Bob played Carol as Alice");
     assert!(goes_quiet(&alice.speaker).await, "Alice played her own path back");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broken_microphone_stays_lost_while_it_is_retried() {
+    let lookup = MemoryLookup::new();
+    let alice = Device::with(&lookup, Tones::with_a_broken_microphone(A)).await;
+    let mut call = alice.join("h-alice", &[]);
+    call.event(|event| *event == MediaEvent::Mic(MicState::Lost))
+        .await;
+
+    // Two retries go by.
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    let mut later = Vec::new();
+    while let Ok(event) = call.events.try_recv() {
+        later.push(event);
+    }
+    assert!(
+        !later.iter().any(|event| matches!(event, MediaEvent::Mic(_))),
+        "the microphone's state flickered while retrying: {later:?}"
+    );
 }

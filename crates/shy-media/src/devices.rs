@@ -44,17 +44,14 @@ pub(crate) fn unchecked(choice: &DeviceChoice) -> ResolvedDevices {
     }
 }
 
-/// What the speaker is doing. A Bluetooth headset whose own microphone is
-/// open drops to its call mode (mono, low quality); the system doesn't say
-/// so, so it's worked out from which devices are in use.
+/// What a working speaker is doing. A Bluetooth headset whose own
+/// microphone is open drops to its call mode (mono, low quality); the
+/// system doesn't say so, so it's worked out from which devices are in use.
 pub(crate) fn output_state(
     resolved: &ResolvedDevices,
     offered: &DeviceList,
     is_mic_open: bool,
 ) -> OutputState {
-    if resolved.output.is_lost {
-        return OutputState::Lost;
-    }
     let headset_both_ways = is_bluetooth(in_use(&resolved.output, &offered.outputs))
         && is_bluetooth(in_use(&resolved.input, &offered.inputs));
     if is_mic_open && headset_both_ways {
@@ -86,6 +83,7 @@ pub(crate) fn offer(listed: impl IntoIterator<Item = Listed>) -> Vec<AudioDevice
     listed
         .into_iter()
         .filter(|device| default_host.as_ref().is_none_or(|host| device.host == *host))
+        .filter(|device| !is_stand_in_for_the_default(&device.id))
         .map(|device| AudioDevice {
             is_bluetooth: is_bluetooth_id(&device.id),
             id: device.id,
@@ -93,6 +91,16 @@ pub(crate) fn offer(listed: impl IntoIterator<Item = Listed>) -> Vec<AudioDevice
             is_default: device.is_default,
         })
         .collect()
+}
+
+/// PipeWire lists the system default as devices of its own, which follow
+/// whatever the default is. Choosing no device does the same, and the
+/// pickers offer that as the system default already.
+fn is_stand_in_for_the_default(id: &str) -> bool {
+    matches!(
+        id,
+        "pipewire:input_default" | "pipewire:output_default" | "pipewire:sink_default"
+    )
 }
 
 /// The inputs that are microphones. A Linux sound server also lists every
@@ -267,6 +275,22 @@ mod tests {
     }
 
     #[test]
+    fn pipewires_stand_ins_for_the_default_arent_offered() {
+        let offered = offer([
+            listed("alsa:hw:0,0", "ALSA", false),
+            listed("pipewire:sink_default", "PipeWire", false),
+            listed("pipewire:output_default", "PipeWire", true),
+            listed("pipewire:alsa_output.analog-stereo", "PipeWire", false),
+        ]);
+        let ids: Vec<&str> = offered.iter().map(|device| device.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["pipewire:alsa_output.analog-stereo"],
+            "the real ones, of the default's host only"
+        );
+    }
+
+    #[test]
     fn without_a_default_every_device_is_offered() {
         let offered = offer([
             listed("alsa:hw:0,0", "ALSA", false),
@@ -429,11 +453,11 @@ mod tests {
     }
 
     #[test]
-    fn a_lost_speaker_says_so() {
+    fn a_gone_speaker_replaced_by_the_default_plays() {
         let resolved = resolve(&choice(None, Some("usb-speakers")), &headset_as_default());
         assert_eq!(
-            output_state(&resolved, &headset_as_default(), true),
-            OutputState::Lost
+            output_state(&resolved, &headset_as_default(), false),
+            OutputState::Playing
         );
     }
 }

@@ -25,6 +25,8 @@ const LOUDNESS: f32 = 0.3;
 pub(super) struct Tones {
     frequency: f32,
     speaker: Recorder,
+    /// Every microphone fails to open, as a broken one would.
+    is_microphone_broken: bool,
 }
 
 impl Tones {
@@ -32,6 +34,14 @@ impl Tones {
         Self {
             frequency,
             speaker: Recorder::default(),
+            is_microphone_broken: false,
+        }
+    }
+
+    pub(super) fn with_a_broken_microphone(frequency: f32) -> Self {
+        Self {
+            is_microphone_broken: true,
+            ..Self::new(frequency)
         }
     }
 
@@ -68,6 +78,7 @@ impl Backend for Tones {
         outgoing: Outgoing,
         reports: mpsc::Sender<VoiceReport>,
     ) -> Result<Playing> {
+        anyhow::ensure!(!self.is_microphone_broken, "the microphone is broken");
         let frequency = self.frequency;
         Ok(Playing(tokio::spawn(async move {
             if let Err(error) = play_tone(outgoing, frequency, &reports).await {

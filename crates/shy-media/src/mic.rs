@@ -69,6 +69,18 @@ impl<B: Backend> Mic<B> {
             self.report(MicState::Lost);
         }
         self.report(MicState::Opening);
+        self.start(speaker, device);
+    }
+
+    /// Tries a failed microphone again. It stays reported lost until it
+    /// works, rather than flickering through opening on every try.
+    pub(crate) fn retry(&mut self, speaker: &B::Speaker, device: Option<String>) {
+        self.release();
+        self.retry_at = None;
+        self.start(speaker, device);
+    }
+
+    fn start(&mut self, speaker: &B::Speaker, device: Option<String>) {
         self.openings += 1;
         let outgoing = Outgoing {
             broadcast: self.broadcast.clone(),
