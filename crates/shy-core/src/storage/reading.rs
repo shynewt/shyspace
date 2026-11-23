@@ -158,14 +158,10 @@ impl Store {
     fn is_read_in_thread(&self, reply: &UnreadMention, roots: &HashMap<String, String>) -> Result<bool> {
         // Not in the channel's threads, so in no thread at all: it shows
         // nowhere, and there's nothing to read.
-        let root = match roots.get(&reply.id) {
-            Some(root) => root.clone(),
-            None => match self.thread_root(&reply.id)? {
-                Some(root) => root,
-                None => return Ok(true),
-            },
+        let Some(root) = roots.get(&reply.id) else {
+            return Ok(true);
         };
-        Ok(self.read_marker(&root)?.is_some_and(|read| {
+        Ok(self.read_marker(root)?.is_some_and(|read| {
             (reply.lamport, reply.author.as_str()) <= (read.lamport, read.author.as_str())
         }))
     }

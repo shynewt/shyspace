@@ -98,7 +98,7 @@ export class FakeBackend {
   private storage: StorageSettings | null = null;
   private lamport = 0;
 
-  /** Starts as the admin of a workspace with #general, as `create` would. */
+  /** Starts as the admin of a workspace with #general, as `create` would, who has already saved a recovery kit. */
   static withWorkspace(workspaceName: string, myName: string): FakeBackend {
     const backend = new FakeBackend();
     backend.createWorkspace(workspaceName, myName, {
@@ -108,6 +108,7 @@ export class FakeBackend {
       access_key_id: "AKIDEXAMPLE",
       secret_access_key: "secret",
     });
+    backend.newRecoveryKit();
     return backend;
   }
 
@@ -606,10 +607,11 @@ export class FakeBackend {
     return this.storage;
   }
 
+  /** As in the core, the new kit comes back only if the admin has made one before. */
   private updateStorage(region: string, accessKeyId: string): string | null {
     this.storage = { ...this.requireStorage(), region, access_key_id: accessKeyId };
     this.notify({ kind: "storage" });
-    return this.newRecoveryKit();
+    return this.requireStorage().recovery_snapshot_bytes === null ? null : this.newRecoveryKit();
   }
 
   /** Making a kit uploads a snapshot, as in the core. */

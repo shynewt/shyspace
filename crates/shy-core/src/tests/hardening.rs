@@ -1921,6 +1921,13 @@ async fn a_reply_to_another_channel_shows_where_it_was_sent() {
     assert_eq!(unread_mentions(&admin), 1);
     admin.mark_read(&general, &reply).unwrap();
     assert_eq!(unread_mentions(&admin), 0, "reading the channel reads it");
+    // It starts a thread of its own here, and leaves the other channel's alone.
+    let answer = admin
+        .send_message(&general, "answering it", Some(reply.clone()))
+        .unwrap();
+    let thread: Vec<String> = admin.thread(&reply).unwrap().into_iter().map(|m| m.id).collect();
+    assert_eq!(thread, [reply.clone(), answer]);
+    assert_eq!(admin.thread(&elsewhere).unwrap().len(), 1);
     assert!(
         bob.send_message(&general, "nope", Some(elsewhere.clone()))
             .is_err()
