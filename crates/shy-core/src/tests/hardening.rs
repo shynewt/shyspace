@@ -1006,7 +1006,6 @@ async fn junk_after_someones_last_segment_is_fetched_once_a_run() {
 async fn a_segment_named_by_its_hash_must_match_it() {
     let (_root, bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");
-    let bob_segments = format!("ops/{}", bob.my_id());
     let texts = |admin: &Workspace| -> Vec<String> {
         admin
             .messages(&general, None, 50)
@@ -1015,28 +1014,22 @@ async fn a_segment_named_by_its_hash_must_match_it() {
             .map(|message| message.text)
             .collect()
     };
-    let unpushed_segment = |bob: &Workspace| {
+    let named = |bytes: &[u8]| {
         let envelopes = bob.state().store.unpushed(&bob.me()).unwrap();
-        let range = format!(
-            "{:020}-{:020}",
-            envelopes.last().unwrap().seq,
-            envelopes.first().unwrap().seq
-        );
-        (range, postcard::to_stdvec(&envelopes).unwrap())
+        let (first, last) = (envelopes.first().unwrap().seq, envelopes.last().unwrap().seq);
+        crate::transport::bucket::segment_name_for(&bob.me(), first, last, &[5; 16], bytes)
     };
 
     bob.send_message(&general, "tampered", None).unwrap();
-    let (range, bytes) = unpushed_segment(&bob);
-    let wrong_hash = blake3::hash(b"other bytes").to_hex();
-    let tampered = format!("{bob_segments}/{range}-{wrong_hash}");
-    bucket.put_raw(&tampered, bytes).await.unwrap();
+    let envelopes = bob.state().store.unpushed(&bob.me()).unwrap();
+    let bytes = postcard::to_stdvec(&envelopes).unwrap();
+    let tampered = named(b"other bytes");
+    bucket.put_raw(&tampered, bytes.clone()).await.unwrap();
     admin.sync().await;
     assert!(!texts(&admin).contains(&"tampered".to_string()));
 
     bucket.delete_raw(&tampered).await.unwrap();
-    let (range, bytes) = unpushed_segment(&bob);
-    let named = format!("{bob_segments}/{range}-{}", blake3::hash(&bytes).to_hex());
-    bucket.put_raw(&named, bytes).await.unwrap();
+    bucket.put_raw(&named(&bytes), bytes).await.unwrap();
     admin.sync().await;
     assert!(texts(&admin).contains(&"tampered".to_string()));
 }
@@ -3120,4 +3113,32 @@ async fn a_removal_that_cannot_be_finished_is_not_read_at_every_check() {
     let settled_check = store.requests().since(&before);
 
     assert_eq!(settled_check.list_pages(), 1, "only heads: {settled_check}");
+}
+
+/// A commit slot's name is predictable, so junk could be put there before
+/// the admin's next commit. The junk stays, and the commit still reaches
+/// every member under another name.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_put_first_at_a_commit_slot_neither_is_overwritten_nor_blocks_it() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let next_slot = admin.state().mls.epoch().unwrap();
+    let slot = format!("mls/commit/{next_slot:020}");
+    bucket.put_raw(&slot, b"junk".to_vec()).await.unwrap();
+
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    bob.sync().await;
+
+    assert_eq!(
+        bucket.get_raw(&slot).await.unwrap().unwrap().as_ref(),
+        b"junk",
+        "not overwritten"
+    );
+    let carol_is_active = bob
+        .members()
+        .unwrap()
+        .into_iter()
+        .any(|member| member.id == carol.my_id() && member.active);
+    assert!(!carol_is_active, "the removal reached Bob");
 }

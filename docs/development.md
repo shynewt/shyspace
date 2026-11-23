@@ -25,6 +25,8 @@ curl --aws-sigv4 "aws:amz:us-east-1:s3" --user shyadmin:shysecret123 -X PUT "htt
   --data '<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></VersioningConfiguration>'
 ```
 
+Segments (`ops/`) and commits (`mls/`) are written create-only (If-None-Match: *). To make that a guarantee rather than a habit, give the bucket a policy that refuses writes over an existing object under `ops/` and `mls/` where the provider supports one (AWS S3 bucket policies can require the `s3:if-none-match` condition; check your provider's documentation for the exact form). The bucket probe below checks that create-only writes are honoured.
+
 With versioning on, every head rewrite (`heads/`, after each upload) leaves an old version behind. Add a lifecycle rule that expires noncurrent versions and expired delete markers after 1 day for `heads/` (and `probe/`, if you run the bucket probe below); in S3 terms, `NoncurrentVersionExpiration` of 1 day and `ExpiredObjectDeleteMarker` for those prefixes. It's a setup recommendation; the app doesn't change bucket settings.
 
 To check that a real provider does what sync relies on (listings carry an ETag that changes on overwrite, new objects are listed at once, listing after an offset), run the ignored bucket probe with an env file holding the `SHY_S3_*` settings below. It prints nothing from the file and deletes what it writes under `probe/<random>/`:

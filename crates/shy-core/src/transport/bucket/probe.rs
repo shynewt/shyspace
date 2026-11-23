@@ -1,7 +1,8 @@
 //! Checks a real bucket provider does what sync relies on: listings carry
 //! an ETag that matches the upload's, an overwrite changes it at once, a new
-//! object is listed straight after it's written, and listing after an offset
-//! skips exactly the segment names that hold nothing more. Ignored by default;
+//! object is listed straight after it's written, listing after an offset
+//! skips exactly the segment names that hold nothing more, and a create-only
+//! write (If-None-Match) is refused over an existing object. Ignored by default;
 //! run it against a bucket you may write to:
 //!
 //! ```sh
@@ -18,7 +19,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, ensure};
 use futures_lite::StreamExt;
-use object_store::{ObjectStore, ObjectStoreExt, PutPayload, path::Path};
+use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload, path::Path};
 
 use super::{BucketConfig, listing_after, object_version, segment_path};
 
@@ -86,8 +87,8 @@ async fn run_checks(store: &dyn ObjectStore) -> Result<()> {
     println!("ok  an overwrite changes the ETag at once, and a fetch agrees");
 
     let author = iroh::SecretKey::generate().public();
-    let holds_up_to_5 = segment_path(&author, 1, 5, b"one");
-    let holds_more = segment_path(&author, 6, 7, b"two");
+    let holds_up_to_5 = segment_path(&author, 1, 5, &[1; 16], b"one");
+    let holds_more = segment_path(&author, 6, 7, &[2; 16], b"two");
     for path in [&holds_up_to_5, &holds_more] {
         store.put(path, PutPayload::from(b"segment".to_vec())).await?;
     }
@@ -106,6 +107,27 @@ async fn run_checks(store: &dyn ObjectStore) -> Result<()> {
         names.len()
     );
     println!("ok  listing after what is held skips exactly the names holding nothing more");
+
+    let written_once = Path::from("ops/create-only");
+    let create = || PutOptions {
+        mode: PutMode::Create,
+        ..PutOptions::default()
+    };
+    store
+        .put_opts(&written_once, PutPayload::from(b"first".to_vec()), create())
+        .await
+        .context("a create-only write of a new object failed")?;
+    match store
+        .put_opts(&written_once, PutPayload::from(b"second".to_vec()), create())
+        .await
+    {
+        Err(object_store::Error::AlreadyExists { .. }) => {}
+        Ok(_) => anyhow::bail!("a create-only write replaced an existing object"),
+        Err(error) => anyhow::bail!("a create-only write over an existing object failed oddly: {error}"),
+    }
+    let kept = store.get(&written_once).await?.bytes().await?;
+    ensure!(kept.as_ref() == b"first", "the existing object changed");
+    println!("ok  a create-only write is refused over an existing object, which stays as it was");
     Ok(())
 }
 

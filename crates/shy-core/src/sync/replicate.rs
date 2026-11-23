@@ -9,7 +9,8 @@ use crate::{
     crypto,
     ops::{Envelope, now_ms},
     transport::bucket::{
-        ListedObject, MAX_OBJECT_SIZE, SegmentName, listing_after, parse_segment_name, split_into_segments,
+        ListedObject, MAX_OBJECT_SIZE, SegmentName, listing_after, parse_segment_name, segment_hash,
+        split_into_segments,
     },
     views::member_id,
     workspace::Workspace,
@@ -163,7 +164,7 @@ impl Workspace {
         if u64::try_from(ours.len())? != name.last - name.first + 1 {
             return Ok(false);
         }
-        Ok(blake3::hash(&postcard::to_stdvec(&ours)?) == name.hash)
+        Ok(segment_hash(&name.nonce, &postcard::to_stdvec(&ours)?) == name.hash)
     }
 
     /// Whether every one of these envelopes is the op in our log: the same

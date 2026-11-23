@@ -2,9 +2,9 @@
 //! ciphertext (op envelopes, MLS messages) plus public ids.
 //!
 //! Layout under the workspace prefix:
-//!   ops/<author>/<last seq>-<first seq>-<hash>   segments of envelopes
+//!   ops/<author>/<last seq>-<first seq>-<nonce>-<hash>   segments of envelopes
 //!   ops/forks/<author>/<seq>/<hash>       proof an author signed two versions of one op
-//!   mls/commit/<from epoch>               admin-signed commits, one per epoch
+//!   mls/commit/<from epoch>[-<hash>]      admin-signed commits, one per epoch
 //!   invites/<token>/request               a joiner's request (via presigned link)
 //!   invites/<token>/answer                the admin's answer (via presigned link)
 //!   peers/<endpoint id>                   gossip bootstrap hints
@@ -93,14 +93,14 @@ impl SegmentFetch {
             return Ok(None);
         };
         let path = &listed.key;
-        let named_hash = parse_segment_name(&self.author, path).map(|name| name.hash);
+        let named = parse_segment_name(&self.author, path).map(|name| (name.nonce, name.hash));
         let fetched = fetching.await.context("fetching a segment")??;
         if let Some((_, version)) = &fetched {
             // Name exactly what was read, which may be newer than the listing.
             listed.version = version.clone();
         }
         let envelopes = match fetched.map(|(bytes, _)| bytes) {
-            Some(bytes) if named_hash.is_some_and(|hash| blake3::hash(&bytes) != hash) => {
+            Some(bytes) if named.is_some_and(|(nonce, hash)| segment_hash(&nonce, &bytes) != hash) => {
                 warn!("skipping segment {path}: its bytes don't match its name");
                 Vec::new()
             }
@@ -311,26 +311,51 @@ pub fn fork_proof_path(author: &PublicKey, seq: u64, proof: &[u8]) -> String {
 pub struct SegmentName {
     pub first: u64,
     pub last: u64,
-    /// A hash of the segment's bytes; bytes that don't match it are ignored.
+    /// Picked at random when the segment was written, so nobody can know its
+    /// name in advance and put something there first.
+    pub nonce: [u8; 16],
+    /// `segment_hash(nonce, bytes)`; bytes that don't match it are ignored.
     pub hash: blake3::Hash,
 }
 
+/// The name a segment of `author`'s holding `bytes` gets with `nonce`.
+#[cfg(test)]
+pub fn segment_name_for(author: &PublicKey, first: u64, last: u64, nonce: &[u8; 16], bytes: &[u8]) -> String {
+    segment_path(author, first, last, nonce, bytes).to_string()
+}
+
+/// What a segment's name commits to: its nonce and its bytes.
+pub fn segment_hash(nonce: &[u8; 16], bytes: &[u8]) -> blake3::Hash {
+    blake3::Hasher::new().update(nonce).update(bytes).finalize()
+}
+
 /// Parses `key` if it is exactly a segment name of `author`'s:
-/// `ops/<author>/<last>-<first>-<hash of the bytes>`, numbers padded, the
-/// hash 64 lowercase hex digits. Leading with the last seq makes names sort
-/// by it, so a reader can list everything past what it holds.
+/// `ops/<author>/<last>-<first>-<nonce>-<hash>`, numbers padded, the nonce 32
+/// and the hash 64 lowercase hex digits. Leading with the last seq makes
+/// names sort by it, so a reader can list everything past what it holds.
 pub fn parse_segment_name(author: &PublicKey, key: &str) -> Option<SegmentName> {
     let name = key.strip_prefix(&format!("ops/{}/", member_id(author)))?;
     let mut parts = name.split('-');
     let (last, first) = (parse_padded(parts.next()?)?, parse_padded(parts.next()?)?);
-    let hex = parts.next()?;
-    let is_lowercase_hex =
-        hex.len() == 64 && hex.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
-    let hash = blake3::Hash::from_hex(is_lowercase_hex.then_some(hex)?).ok()?;
+    let mut nonce = [0; 16];
+    nonce.copy_from_slice(&parse_lowercase_hex(parts.next()?, 16)?);
+    let mut hash = [0; 32];
+    hash.copy_from_slice(&parse_lowercase_hex(parts.next()?, 32)?);
     if parts.next().is_some() {
         return None;
     }
-    (first <= last).then_some(SegmentName { first, last, hash })
+    (first <= last).then_some(SegmentName {
+        first,
+        last,
+        nonce,
+        hash: blake3::Hash::from_bytes(hash),
+    })
+}
+
+fn parse_lowercase_hex(text: &str, length: usize) -> Option<Vec<u8>> {
+    let is_lowercase_hex =
+        text.len() == length * 2 && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+    is_lowercase_hex.then(|| hex::decode(text).ok()).flatten()
 }
 
 fn parse_padded(number: &str) -> Option<u64> {
@@ -348,19 +373,28 @@ pub fn listing_after(author: &PublicKey, held: u64) -> String {
 
 /// Changes whenever the object is replaced: an overwrite always changes the
 /// ETag, and stores without one still change the size or time.
+/// Whether a create-only write failed because the object already exists.
+fn is_already_there(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<object_store::Error>(),
+        Some(object_store::Error::AlreadyExists { .. })
+    )
+}
+
 pub(super) fn object_version(meta: &object_store::ObjectMeta) -> String {
     meta.e_tag
         .clone()
         .unwrap_or_else(|| format!("{}@{}", meta.size, meta.last_modified))
 }
 
-fn segment_path(author: &PublicKey, first: u64, last: u64, bytes: &[u8]) -> Path {
+fn segment_path(author: &PublicKey, first: u64, last: u64, nonce: &[u8; 16], bytes: &[u8]) -> Path {
     Path::from(format!(
-        "ops/{}/{}-{}-{}",
+        "ops/{}/{}-{}-{}-{}",
         member_id(author),
         padded(last),
         padded(first),
-        blake3::hash(bytes).to_hex()
+        hex::encode(nonce),
+        segment_hash(nonce, bytes).to_hex()
     ))
 }
 
@@ -419,13 +453,35 @@ impl Bucket {
 
     /// Uploads `envelopes` as one segment; see [`split_into_segments`] for
     /// keeping it readable.
+    /// Writes `envelopes` as a new segment, never over an existing object:
+    /// with a bucket policy refusing overwrites, nothing honest can be
+    /// replaced. Its name holds a fresh random nonce, so nobody can put
+    /// something there first.
     pub async fn put_segment(&self, envelopes: &[Envelope]) -> Result<()> {
+        self.put_segment_with_nonce(envelopes, rand::random()).await
+    }
+
+    async fn put_segment_with_nonce(&self, envelopes: &[Envelope], nonce: [u8; 16]) -> Result<()> {
         let (Some(first), Some(last)) = (envelopes.first(), envelopes.last()) else {
             return Ok(());
         };
         let bytes = postcard::to_stdvec(envelopes)?;
-        let path = segment_path(&first.author, first.seq, last.seq, &bytes);
-        self.put(&path, bytes).await
+        let path = segment_path(&first.author, first.seq, last.seq, &nonce, &bytes);
+        self.put_new(&path, bytes)
+            .await
+            .with_context(|| format!("writing segment {path}"))
+    }
+
+    /// Writes an object that must not exist yet (If-None-Match: *).
+    async fn put_new(&self, path: &Path, bytes: Vec<u8>) -> Result<()> {
+        let options = object_store::PutOptions {
+            mode: object_store::PutMode::Create,
+            ..object_store::PutOptions::default()
+        };
+        self.store
+            .put_opts(path, PutPayload::from(bytes), options)
+            .await?;
+        Ok(())
     }
 
     /// Objects under `author`'s segments, all of them or those whose keys
@@ -516,14 +572,45 @@ impl Bucket {
         self.get_at_most(&Path::from(path), MAX_FORK_PROOF_BYTES).await
     }
 
-    /// Commits are signed by the admin (checked by readers), so a plain put
-    /// is enough: the admin re-uploads its latest commit if it goes missing.
+    /// Writes a commit create-only. Its slot is predictable, so someone may
+    /// have put something else there first: then it goes under
+    /// `mls/commit/<epoch>-<hash>`, which readers look at when the slot
+    /// doesn't hold a valid commit (`commit_alternatives`).
     pub async fn put_commit(&self, from_epoch: u64, signed_commit: Vec<u8>) -> Result<()> {
-        self.put(
-            &Path::from(format!("mls/commit/{}", padded(from_epoch))),
-            signed_commit,
-        )
-        .await
+        let slot = Path::from(format!("mls/commit/{}", padded(from_epoch)));
+        match self.put_new(&slot, signed_commit.clone()).await {
+            Ok(()) => Ok(()),
+            Err(error) if is_already_there(&error) => {
+                if self.get(&slot).await?.as_deref() == Some(signed_commit.as_slice()) {
+                    return Ok(());
+                }
+                let alternative = Path::from(format!(
+                    "mls/commit/{}-{}",
+                    padded(from_epoch),
+                    blake3::hash(&signed_commit).to_hex()
+                ));
+                match self.put_new(&alternative, signed_commit).await {
+                    Err(error) if is_already_there(&error) => Ok(()),
+                    written => written,
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Commits written beside `from_epoch`'s slot because something else
+    /// took it; each is checked like the slot's.
+    pub async fn commit_alternatives(&self, from_epoch: u64) -> Result<Vec<Bytes>> {
+        let prefix = format!("mls/commit/{}-", padded(from_epoch));
+        let mut alternatives = Vec::new();
+        for path in self.list("mls/commit", None).await? {
+            if path.as_ref().starts_with(&prefix)
+                && let Some(bytes) = self.get(&path).await?
+            {
+                alternatives.push(bytes);
+            }
+        }
+        Ok(alternatives)
     }
 
     /// Commit slots in the bucket, valid or not, with their versions.
@@ -760,29 +847,33 @@ mod tests {
     fn only_exact_segment_names_of_the_author_parse() {
         let alice = iroh::SecretKey::generate().public();
         let bob = iroh::SecretKey::generate().public();
-        let written = segment_path(&alice, 3, 5, b"segment bytes").to_string();
+        let nonce = [0xab; 16];
+        let written = segment_path(&alice, 3, 5, &nonce, b"segment bytes").to_string();
         let named = parse_segment_name(&alice, &written).unwrap();
-        assert_eq!((named.first, named.last), (3, 5));
-        assert_eq!(named.hash, blake3::hash(b"segment bytes"));
+        assert_eq!((named.first, named.last, named.nonce), (3, 5, nonce));
+        assert_eq!(named.hash, segment_hash(&nonce, b"segment bytes"));
         assert_eq!(parse_segment_name(&bob, &written), None, "someone else's prefix");
 
         let alice_ops = format!("ops/{}", member_id(&alice));
-        let hash = blake3::hash(b"segment bytes").to_hex();
+        let hash = segment_hash(&nonce, b"segment bytes").to_hex();
+        let nonce = hex::encode(nonce);
         let max = padded(u64::MAX);
-        let highest = parse_segment_name(&alice, &format!("{alice_ops}/{max}-{max}-{hash}")).unwrap();
+        let highest = parse_segment_name(&alice, &format!("{alice_ops}/{max}-{max}-{nonce}-{hash}")).unwrap();
         assert_eq!((highest.first, highest.last), (u64::MAX, u64::MAX));
         let (three, five) = (padded(3), padded(5));
         for junk in [
             "z".to_owned(),
             format!("{five}-{three}"),
-            format!("{three}-{five}-{hash}"),
-            format!("{}-{}-{hash}", "9".repeat(20), "9".repeat(20)),
-            format!("5-3-{hash}"),
-            format!("{five}-{three}-{}", hash.to_uppercase()),
-            format!("{five}-{three}-{}", &hash[..63]),
-            format!("{five}-{three}-not-hex"),
-            format!("{five}-{three}-{hash}-more"),
-            format!("+{}-{three}-{hash}", &five[1..]),
+            format!("{five}-{three}-{hash}"),
+            format!("{three}-{five}-{nonce}-{hash}"),
+            format!("{}-{}-{nonce}-{hash}", "9".repeat(20), "9".repeat(20)),
+            format!("5-3-{nonce}-{hash}"),
+            format!("{five}-{three}-{}-{hash}", nonce.to_uppercase()),
+            format!("{five}-{three}-{}-{hash}", &nonce[..31]),
+            format!("{five}-{three}-{nonce}-{}", hash.to_uppercase()),
+            format!("{five}-{three}-{nonce}-{}", &hash[..63]),
+            format!("{five}-{three}-{nonce}-{hash}-more"),
+            format!("+{}-{three}-{nonce}-{hash}", &five[1..]),
         ] {
             assert_eq!(
                 parse_segment_name(&alice, &format!("{alice_ops}/{junk}")),
@@ -792,13 +883,46 @@ mod tests {
         }
     }
 
+    /// Nobody can tell a segment's name from its ops before it's written,
+    /// and a write never replaces an object already there.
+    #[tokio::test]
+    async fn segment_names_cannot_be_guessed_and_writes_never_replace() {
+        let store = Arc::new(object_store::memory::InMemory::new());
+        let bucket = Bucket::without_signing(store);
+        let author = iroh::SecretKey::generate().public();
+        let envelopes = vec![Envelope {
+            author,
+            seq: 1,
+            epoch: 1,
+            nonce: [0; 24],
+            ciphertext: vec![1, 2, 3],
+        }];
+        bucket.put_segment(&envelopes).await.unwrap();
+        bucket.put_segment(&envelopes).await.unwrap();
+        assert_eq!(
+            bucket.list_segments(&author, None).await.unwrap().len(),
+            2,
+            "two names"
+        );
+
+        let nonce = [9; 16];
+        let bytes = postcard::to_stdvec(&envelopes).unwrap();
+        let taken = segment_path(&author, 1, 1, &nonce, &bytes);
+        bucket.put(&taken, b"there first".to_vec()).await.unwrap();
+        assert!(bucket.put_segment_with_nonce(&envelopes, nonce).await.is_err());
+        assert_eq!(
+            bucket.get(&taken).await.unwrap().unwrap().as_ref(),
+            b"there first"
+        );
+    }
+
     /// Listing past what a reader holds keeps every newer name that holds
     /// more, and none that doesn't.
     #[test]
     fn listing_after_what_is_held_skips_exactly_the_names_holding_nothing_more() {
         let alice = iroh::SecretKey::generate().public();
         let offset = Path::from(listing_after(&alice, 7)).to_string();
-        let name = |first, last| segment_path(&alice, first, last, b"bytes").to_string();
+        let name = |first, last| segment_path(&alice, first, last, &[7; 16], b"bytes").to_string();
         assert!(name(8, 8) > offset && name(6, 8) > offset && name(8, 1000) > offset);
         assert!(name(7, 7) < offset && name(1, 7) < offset && name(3, 5) < offset);
     }
@@ -935,7 +1059,7 @@ mod tests {
         let bucket = Bucket::without_signing(store.clone());
         let author = iroh::SecretKey::generate().public();
         let empty = postcard::to_stdvec(&Vec::<Envelope>::new()).unwrap();
-        let path = segment_path(&author, 1, 1, &empty);
+        let path = segment_path(&author, 1, 1, &[7; 16], &empty);
         bucket.put(&path, empty.clone()).await.unwrap();
         let listed = bucket.list_segments(&author, None).await.unwrap();
         bucket.put(&path, empty).await.unwrap();
@@ -960,7 +1084,7 @@ mod tests {
         let empty = postcard::to_stdvec(&Vec::<Envelope>::new()).unwrap();
         let mut written = Vec::new();
         for segment in 0..20 {
-            let path = segment_path(&author, segment * 10 + 1, segment * 10 + 10, &empty);
+            let path = segment_path(&author, segment * 10 + 1, segment * 10 + 10, &[7; 16], &empty);
             bucket.put(&path, empty.clone()).await.unwrap();
             written.push(path.to_string());
         }

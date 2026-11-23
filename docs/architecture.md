@@ -76,9 +76,9 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 
 | Path | Content |
 |---|---|
-| `ops/<author>/<last seq>-<first seq>-<hash>` | a segment of that author's envelopes; the name leads with the last seq so a reader lists exactly what holds more than it has, and ends in a BLAKE3 hash of the bytes |
+| `ops/<author>/<last seq>-<first seq>-<nonce>-<hash>` | a segment of that author's envelopes, written create-only; the name leads with the last seq so a reader lists exactly what holds more than it has, holds a random nonce picked at upload so nobody can take the name first, and ends in a BLAKE3 hash of the nonce and the bytes |
 | `ops/forks/<author>/<seq>/<hash>` | proof that the author signed two versions of that op: both envelopes |
-| `mls/commit/<from epoch>` | admin-signed MLS commits |
+| `mls/commit/<from epoch>` | admin-signed MLS commits, written create-only; if something else took the slot first, the commit goes to `mls/commit/<from epoch>-<hash>`, which readers check when the slot isn't a valid commit |
 | `invites/<token>/request` | a joiner's request, written through a presigned link |
 | `invites/<token>/answer` | the admin's answer, read through a presigned link |
 | `recovery/snapshot` | the admin's recovery snapshot, encrypted with the recovery key |
