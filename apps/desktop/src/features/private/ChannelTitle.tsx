@@ -1,7 +1,9 @@
-import { Hash, Lock, NotebookPen, Users } from "lucide-react";
+import { Clock, Hash, Lock, NotebookPen, Users } from "lucide-react";
 import { useState } from "react";
 import type { Channel, Member } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
+import { deviceTimeZone, formatTimeIn, isFarAway, isKnownTimeZone } from "../../lib/localTime";
+import { useMinuteClock } from "../../lib/useMinuteClock";
 import { IconButton } from "../../ui";
 import { MemberAvatar } from "../members/MemberAvatar";
 import { PrivateMembersDialog } from "./PrivateMembersDialog";
@@ -17,7 +19,23 @@ export function ChannelTitle({ channel, members }: { channel: Channel; members: 
         <span className="shrink-0 text-xs text-faint @max-header-labels/header:hidden">Only you can see them</span>
       )}
       {channel.kind === "private" && <PrivatePeopleButton channel={channel} />}
+      {channel.kind === "dm" && channel.dm_members.length === 1 && (
+        <TheirTime person={members?.find((member) => member.id === channel.dm_members[0])} />
+      )}
     </>
+  );
+}
+
+/** "10:00 AM their time", for someone hours away; nothing when they're close to your clock. */
+function TheirTime({ person }: { person: Member | undefined }) {
+  const now = useMinuteClock();
+  const zone = person?.details.time_zone ?? "";
+  if (!person || person.is_bot || !isKnownTimeZone(zone) || !isFarAway(zone, deviceTimeZone(), now)) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-2xs text-faint @max-header-labels/header:hidden">
+      <Clock size={11} aria-hidden className="text-decorative" />
+      {formatTimeIn(zone, now)} their time
+    </span>
   );
 }
 

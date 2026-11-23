@@ -5,8 +5,8 @@ import {
   describeDays,
   describeTimeDifference,
   formatOffset,
+  isAfterHours,
   isKnownTimeZone,
-  isNight,
   isWithinWorkingHours,
   offsetMinutes,
   wallClockIn,
@@ -60,10 +60,11 @@ test("hours that cross midnight belong to the day they start", () => {
   expect(isWithinWorkingHours(WEEKEND_NIGHTS, at(5, 12))).toBe(false);
 });
 
-test("night is from 22:00 to 07:00", () => {
-  expect(isNight({ weekday: 0, minute: 22 * 60 })).toBe(true);
-  expect(isNight({ weekday: 0, minute: 6 * 60 + 59 })).toBe(true);
-  expect(isNight({ weekday: 0, minute: 7 * 60 })).toBe(false);
+test("after hours run from 20:00 to 08:00", () => {
+  expect(isAfterHours({ weekday: 0, minute: 19 * 60 + 59 })).toBe(false);
+  expect(isAfterHours({ weekday: 0, minute: 20 * 60 })).toBe(true);
+  expect(isAfterHours({ weekday: 0, minute: 7 * 60 + 59 })).toBe(true);
+  expect(isAfterHours({ weekday: 0, minute: 8 * 60 })).toBe(false);
 });
 
 test("days read as runs", () => {

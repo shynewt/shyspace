@@ -7,9 +7,11 @@ import type { WorkingHours } from "./api";
 import { formatTime } from "./people";
 
 export const MINUTES_PER_DAY = 24 * 60;
-/** From 22:00 to 07:00 it's night, whatever someone's working hours. */
-const NIGHT_STARTS = 22 * 60;
-const NIGHT_ENDS = 7 * 60;
+/** From 20:00 to 08:00 most people are off work, for someone who hasn't shared their hours. */
+const AFTER_HOURS_START = 20 * 60;
+const AFTER_HOURS_END = 8 * 60;
+/** Closer than this, someone's clock is near enough yours not to mention. */
+const FAR_AWAY_MINUTES = 2 * 60;
 const SHORT_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 /** What a clock in some zone shows: the day of the week (0 is Monday) and the minute of the day. */
@@ -140,8 +142,13 @@ export function isWithinWorkingHours(hours: WorkingHours, clock: WallClock): boo
   );
 }
 
-export function isNight(clock: WallClock): boolean {
-  return clock.minute >= NIGHT_STARTS || clock.minute < NIGHT_ENDS;
+export function isAfterHours(clock: WallClock): boolean {
+  return clock.minute >= AFTER_HOURS_START || clock.minute < AFTER_HOURS_END;
+}
+
+/** Whether `theirZone`'s clocks are at least two hours off `myZone`'s at `at`. */
+export function isFarAway(theirZone: string, myZone: string, at: Date): boolean {
+  return Math.abs(offsetMinutes(theirZone, at) - offsetMinutes(myZone, at)) >= FAR_AWAY_MINUTES;
 }
 
 /** "9:00 AM" or "09:00", as this device writes times; 24:00 reads as midnight. */

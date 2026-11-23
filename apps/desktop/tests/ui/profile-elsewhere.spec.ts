@@ -61,6 +61,35 @@ test("late at night for them, a DM says what time it is there", async ({ page })
   await expect(page.getByLabel("Message Theo")).toBeEnabled();
 });
 
+test("from 8 PM their time, without working hours, a DM says what time it is there", async ({ page }) => {
+  await page.clock.install({ time: MONDAY_AT(19, 59) });
+  await openApp(page);
+  await addPerson(page, "Theo", { time_zone: "Europe/Lisbon" });
+  await openDmWith(page, "Theo");
+  await expect(page.getByText(/for Theo/)).toHaveCount(0);
+  await page.clock.runFor(61_000);
+  await expect(page.getByText("It's 8:00 PM for Theo")).toBeVisible();
+});
+
+test("someone hours away shows their time in the DM's header, and someone close by doesn't", async ({ page }) => {
+  await page.clock.setFixedTime(MONDAY_AT(1, 0));
+  await openApp(page);
+  await addPerson(page, "Aiko", { time_zone: "Asia/Tokyo" });
+  await addPerson(page, "Marta", { time_zone: "Europe/Madrid" });
+  await openDmWith(page, "Aiko");
+  const header = page.locator("header").filter({ hasText: "Aiko" });
+  await expect(header).toContainText("10:00 AM their time");
+  // Their day has started, so the message box stays quiet.
+  await expect(page.getByText(/for Aiko/)).toHaveCount(0);
+
+  await page
+    .getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: /^general\b/ })
+    .click();
+  await openDmWith(page, "Marta");
+  await expect(page.locator("header").filter({ hasText: "Marta" })).not.toContainText("their time");
+});
+
 test("outside their working hours, the DM hint says so", async ({ page }) => {
   await page.clock.setFixedTime(MONDAY_AT(23, 10));
   await openApp(page);
