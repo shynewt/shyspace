@@ -6,7 +6,7 @@ use tracing::warn;
 use super::peers::peers_to_dial;
 use crate::{
     ops::now_ms,
-    transport::bucket::{ListedObject, parse_segment_name, split_into_segments},
+    transport::bucket::{ListedObject, listing_after, parse_segment_name, split_into_segments},
     views::member_id,
     workspace::Workspace,
 };
@@ -19,36 +19,39 @@ impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
     /// also needs the history of people removed before they joined. Our own
     /// log is included so a restored device learns what it already wrote.
-    /// An op that fails locally is parked and doesn't hold the cursor back,
-    /// unless it couldn't even be parked; the first such error is returned
-    /// at the end.
+    /// Each author is listed from what we hold of their log, never from a
+    /// stored bucket key, so objects others put in the bucket can't make us
+    /// skip any of it. An op that fails locally is parked and doesn't hold
+    /// reading back, unless it couldn't even be parked; the first such error
+    /// is returned at the end.
     pub(crate) async fn pull(&self) -> Result<()> {
         self.refetch_gaps()?;
         let mut local_failure = None;
         let authors = self.state().store.everyone_ever()?;
         'authors: for author in authors {
-            let cursor = self.state().store.cursor(&author)?;
-            // Older versions resumed after any object, junk included; start
-            // that author over rather than trust it.
-            let cursor = match cursor {
-                Some(key) if parse_segment_name(&author, &key).is_none() => {
-                    warn!(
-                        "reading {author}'s history again: we were resuming after {key}, which isn't a segment"
-                    );
-                    self.state().store.forget_cursor(&author)?;
-                    None
-                }
-                cursor => cursor,
+            let held = self.state().store.last_seq(&author)?;
+            let older_cursor = self.older_cursor(&author)?;
+            let after_held = listing_after(&author, held);
+            let offset = match &older_cursor {
+                Some(cursor) if *cursor < after_held => cursor.clone(),
+                _ => after_held,
             };
             let skipped = self.skipped_segments().clone();
             let mut segments = self
                 .bucket()
-                .segments_after(&author, cursor.as_deref())
+                .segments_after(&author, &offset)
                 .await?
                 .without(&skipped);
+            let mut has_news_in_older_names = false;
             while let Some(segment) = segments.next().await? {
+                let held_before = self.state().store.last_seq(&author)?;
                 let read = self.receive_segment(&author, &segment.listed.key, &segment.envelopes)?;
-                if !read.is_resume_point && !read.is_stopped {
+                let is_older_name =
+                    parse_segment_name(&author, &segment.listed.key).is_some_and(|name| name.hash.is_none());
+                if is_older_name && self.state().store.last_seq(&author)? > held_before {
+                    has_news_in_older_names = true;
+                }
+                if !read.is_settled && !read.is_stopped {
                     let mut skipped = self.skipped_segments();
                     if skipped.len() < MAX_SKIPPED_SEGMENTS {
                         skipped.insert(segment.listed);
@@ -61,12 +64,35 @@ impl Workspace {
                     continue 'authors;
                 }
             }
+            // Older names sort by their first seq, so one we hold part of sorts
+            // before what we hold; until a pass from the older cursor finds
+            // nothing more in them, keep listing from it.
+            if older_cursor.is_some() && !has_news_in_older_names {
+                self.state().store.forget_cursor(&author)?;
+            }
         }
         local_failure.map_or(Ok(()), Err)
     }
 
+    /// Where an older version resumed reading `author`, if it was a segment;
+    /// anything else (junk an older version trusted) is dropped.
+    fn older_cursor(&self, author: &iroh::PublicKey) -> Result<Option<String>> {
+        let Some(cursor) = self.state().store.cursor(author)? else {
+            return Ok(None);
+        };
+        if parse_segment_name(author, &cursor).is_some() {
+            return Ok(Some(cursor));
+        }
+        warn!(
+            "reading {author}'s history again: an older version resumed after {cursor}, which isn't a segment"
+        );
+        self.state().store.forget_cursor(author)?;
+        Ok(None)
+    }
+
     /// Once per gap: if an author's next op went missing after we read past
-    /// it, read their segments again from the start.
+    /// it (a parked op pushed out by the cap), fetch their segments again
+    /// rather than skip the ones read this run.
     fn refetch_gaps(&self) -> Result<()> {
         let state = self.state();
         let mut refetched = self

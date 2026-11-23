@@ -2,7 +2,8 @@
 //! ciphertext (op envelopes, MLS messages) plus public ids.
 //!
 //! Layout under the workspace prefix:
-//!   ops/<author>/<first seq>-<last seq>   segments of envelopes
+//!   ops/<author>/<last seq>-<first seq>-<hash>   segments of envelopes
+//!                                         (older versions: <first>-<last>)
 //!   ops/forks/<author>/<seq>/<hash>       proof an author signed two versions of one op
 //!   mls/commit/<from epoch>               admin-signed commits, one per epoch
 //!   invites/<token>/request               a joiner's request (via presigned link)
@@ -312,17 +313,19 @@ pub fn fork_proof_path(author: &PublicKey, seq: u64, proof: &[u8]) -> String {
 pub struct SegmentName {
     pub first: u64,
     pub last: u64,
-    /// Newer names end in a hash of the segment's bytes.
+    /// Names since #137 end in a hash of the segment's bytes.
     pub hash: Option<blake3::Hash>,
 }
 
-/// Parses `key` if it is exactly a segment name of `author`'s:
-/// `ops/<author>/<first>-<last>`, both padded, optionally followed by
-/// `-<hash of the bytes, 64 lowercase hex digits>`.
+/// Parses `key` if it is exactly a segment name of `author`'s. Names since
+/// #137 are `ops/<author>/<last>-<first>-<hash of the bytes>`, so they sort by
+/// their last seq and a reader can list everything past what it holds; older
+/// names are `ops/<author>/<first>-<last>`. Numbers are padded, the hash is 64
+/// lowercase hex digits.
 pub fn parse_segment_name(author: &PublicKey, key: &str) -> Option<SegmentName> {
     let name = key.strip_prefix(&format!("ops/{}/", member_id(author)))?;
     let mut parts = name.split('-');
-    let (first, last) = (parts.next()?, parts.next()?);
+    let (leading, trailing) = (parse_padded(parts.next()?)?, parse_padded(parts.next()?)?);
     let hash = match parts.next() {
         None => None,
         Some(hex) => {
@@ -334,12 +337,24 @@ pub fn parse_segment_name(author: &PublicKey, key: &str) -> Option<SegmentName> 
     if parts.next().is_some() {
         return None;
     }
-    let parse = |number: &str| {
-        let is_padded = number.len() == padded(0).len() && number.bytes().all(|byte| byte.is_ascii_digit());
-        is_padded.then(|| number.parse::<u64>().ok()).flatten()
+    let (first, last) = match hash {
+        Some(_) => (trailing, leading),
+        None => (leading, trailing),
     };
-    let (first, last) = (parse(first)?, parse(last)?);
     (first <= last).then_some(SegmentName { first, last, hash })
+}
+
+fn parse_padded(number: &str) -> Option<u64> {
+    let is_padded = number.len() == padded(0).len() && number.bytes().all(|byte| byte.is_ascii_digit());
+    is_padded.then(|| number.parse().ok()).flatten()
+}
+
+/// Where to list `author`'s segments from to find every op past `held`: a
+/// newer name sorts by its last seq, so this skips exactly the ones holding
+/// nothing past it. The `a` sorts after every digit, and unlike most
+/// punctuation it isn't percent-encoded in a store path.
+pub fn listing_after(author: &PublicKey, held: u64) -> String {
+    format!("ops/{}/{}-a", member_id(author), padded(held))
 }
 
 /// Changes whenever the object is replaced: an overwrite always changes the
@@ -350,12 +365,13 @@ fn object_version(meta: &object_store::ObjectMeta) -> String {
         .unwrap_or_else(|| format!("{}@{}", meta.size, meta.last_modified))
 }
 
-fn segment_path(author: &PublicKey, first: u64, last: u64) -> Path {
+fn segment_path(author: &PublicKey, first: u64, last: u64, bytes: &[u8]) -> Path {
     Path::from(format!(
-        "ops/{}/{}-{}",
+        "ops/{}/{}-{}-{}",
         member_id(author),
+        padded(last),
         padded(first),
-        padded(last)
+        blake3::hash(bytes).to_hex()
     ))
 }
 
@@ -406,18 +422,16 @@ impl Bucket {
         let (Some(first), Some(last)) = (envelopes.first(), envelopes.last()) else {
             return Ok(());
         };
-        let path = segment_path(&first.author, first.seq, last.seq);
-        self.put(&path, postcard::to_stdvec(envelopes)?).await
+        let bytes = postcard::to_stdvec(envelopes)?;
+        let path = segment_path(&first.author, first.seq, last.seq, &bytes);
+        self.put(&path, bytes).await
     }
 
-    /// Segments by `author` after `cursor`, fetched a few at a time and
-    /// handed over in order, each with its key to resume from.
-    pub async fn segments_after(&self, author: &PublicKey, cursor: Option<&str>) -> Result<SegmentFetch> {
+    /// Objects under `author`'s segments whose keys sort after `offset`,
+    /// fetched a few at a time and handed over in order.
+    pub async fn segments_after(&self, author: &PublicKey, offset: &str) -> Result<SegmentFetch> {
         let prefix = Path::from(format!("ops/{}", member_id(author)));
-        let mut stream = match cursor {
-            Some(offset) => self.store.list_with_offset(Some(&prefix), &Path::from(offset)),
-            None => self.store.list(Some(&prefix)),
-        };
+        let mut stream = self.store.list_with_offset(Some(&prefix), &Path::from(offset));
         let mut listed = Vec::new();
         while let Some(meta) = stream.next().await {
             let meta = meta?;
@@ -706,7 +720,7 @@ mod tests {
     fn only_exact_segment_names_of_the_author_give_a_range() {
         let alice = iroh::SecretKey::generate().public();
         let bob = iroh::SecretKey::generate().public();
-        let real = segment_path(&alice, 3, 5).to_string();
+        let real = format!("ops/{}/{}-{}", member_id(&alice), padded(3), padded(5));
         let range = |author: &PublicKey, key: &str| {
             parse_segment_name(author, key).map(|named| (named.first, named.last))
         };
@@ -731,32 +745,45 @@ mod tests {
         }
     }
 
-    /// Newer segment names may end in a hash of the segment's bytes; older
-    /// readers must already take them, so mixed versions keep working.
+    /// Names since #137 lead with the last seq and end in a hash of the
+    /// bytes, so they sort by what they hold up to.
     #[test]
-    fn segment_names_may_end_in_a_hash_of_their_bytes() {
+    fn newer_segment_names_lead_with_the_last_seq_and_end_in_a_hash() {
         let alice = iroh::SecretKey::generate().public();
         let alice_ops = format!("ops/{}", member_id(&alice));
-        let hash = blake3::hash(b"segment bytes");
-        let range = format!("{}-{}", padded(3), padded(5));
-        let named = parse_segment_name(&alice, &format!("{alice_ops}/{range}-{}", hash.to_hex())).unwrap();
-        assert_eq!((named.first, named.last, named.hash), (3, 5, Some(hash)));
-        assert_eq!(
-            parse_segment_name(&alice, &format!("{alice_ops}/{range}"))
-                .unwrap()
-                .hash,
-            None
-        );
+        let written = segment_path(&alice, 3, 5, b"segment bytes").to_string();
+        let named = parse_segment_name(&alice, &written).unwrap();
+        assert_eq!((named.first, named.last), (3, 5));
+        assert_eq!(named.hash, Some(blake3::hash(b"segment bytes")));
+        let older = parse_segment_name(&alice, &format!("{alice_ops}/{}-{}", padded(3), padded(5))).unwrap();
+        assert_eq!((older.first, older.last, older.hash), (3, 5, None));
 
-        let upper = hash.to_hex().to_uppercase();
-        let short = &hash.to_hex()[..63];
-        for junk in [upper.as_str(), short, "", "not-hex"] {
+        let hash = blake3::hash(b"segment bytes").to_hex();
+        let backwards = format!("{alice_ops}/{}-{}-{hash}", padded(3), padded(5));
+        assert!(
+            parse_segment_name(&alice, &backwards).is_none(),
+            "first after last"
+        );
+        let range = format!("{}-{}", padded(5), padded(3));
+        let upper = hash.to_uppercase();
+        for junk in [upper.as_str(), &hash[..63], "", "not-hex"] {
             assert!(
                 parse_segment_name(&alice, &format!("{alice_ops}/{range}-{junk}")).is_none(),
                 "{junk}"
             );
         }
-        assert!(parse_segment_name(&alice, &format!("{alice_ops}/{range}-{}-more", hash.to_hex())).is_none());
+        assert!(parse_segment_name(&alice, &format!("{alice_ops}/{range}-{hash}-more")).is_none());
+    }
+
+    /// Listing past what a reader holds keeps every newer name that holds
+    /// more, and none that doesn't.
+    #[test]
+    fn listing_after_what_is_held_skips_exactly_the_names_holding_nothing_more() {
+        let alice = iroh::SecretKey::generate().public();
+        let offset = Path::from(listing_after(&alice, 7)).to_string();
+        let name = |first, last| segment_path(&alice, first, last, b"bytes").to_string();
+        assert!(name(8, 8) > offset && name(6, 8) > offset && name(8, 1000) > offset);
+        assert!(name(7, 7) < offset && name(1, 7) < offset && name(3, 5) < offset);
     }
 
     #[test]
@@ -893,12 +920,15 @@ mod tests {
         let empty = postcard::to_stdvec(&Vec::<Envelope>::new()).unwrap();
         let mut written = Vec::new();
         for segment in 0..20 {
-            let path = segment_path(&author, segment * 10 + 1, segment * 10 + 10);
+            let path = segment_path(&author, segment * 10 + 1, segment * 10 + 10, &empty);
             bucket.put(&path, empty.clone()).await.unwrap();
             written.push(path.to_string());
         }
 
-        let mut fetching = bucket.segments_after(&author, None).await.unwrap();
+        let mut fetching = bucket
+            .segments_after(&author, &listing_after(&author, 0))
+            .await
+            .unwrap();
         let mut fetched = Vec::new();
         while let Some(segment) = fetching.next().await.unwrap() {
             fetched.push(segment.listed.key);

@@ -76,7 +76,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 
 | Path | Content |
 |---|---|
-| `ops/<author>/<first seq>-<last seq>` | a segment of that author's envelopes |
+| `ops/<author>/<last seq>-<first seq>-<hash>` | a segment of that author's envelopes; the name leads with the last seq so a reader lists exactly what holds more than it has, and ends in a BLAKE3 hash of the bytes (older versions wrote `<first>-<last>`) |
 | `ops/forks/<author>/<seq>/<hash>` | proof that the author signed two versions of that op: both envelopes |
 | `mls/commit/<from epoch>` | admin-signed MLS commits |
 | `invites/<token>/request` | a joiner's request, written through a presigned link |

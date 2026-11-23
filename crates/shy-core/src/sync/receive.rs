@@ -45,8 +45,8 @@ impl std::fmt::Display for NotKept {
 
 /// The last seq of `key` if it looks like a real segment of `author`'s: its
 /// name matches the envelopes inside, all by `author`, in order with no
-/// gaps. Envelope headers aren't signed, so this alone proves nothing;
-/// reading resumes after it only once its last op has applied.
+/// gaps. Envelope headers aren't signed, so this alone proves nothing; the
+/// segment is settled only once its last op has applied.
 fn genuine_last_seq(author: &PublicKey, key: &str, envelopes: &[Envelope]) -> Option<u64> {
     let name = parse_segment_name(author, key)?;
     let is_in_order = envelopes.iter().enumerate().all(|(index, envelope)| {
@@ -58,24 +58,6 @@ fn genuine_last_seq(author: &PublicKey, key: &str, envelopes: &[Envelope]) -> Op
     let is_whole = envelopes.first().map(|envelope| envelope.seq) == Some(name.first)
         && envelopes.last().map(|envelope| envelope.seq) == Some(name.last);
     (is_in_order && is_whole).then_some(name.last)
-}
-
-/// Whether the segment at `key` starts no later than right after the one
-/// reading resumes from now (or at the log's start when there's none), and
-/// ends later. An honest upload always starts just after the last one;
-/// starting earlier is fine (a re-upload after a crash), starting later would
-/// skip ops, and ending no later would move reading back.
-fn continues_from_cursor(store: &crate::storage::Store, author: &PublicKey, key: &str) -> Result<bool> {
-    let Some(name) = parse_segment_name(author, key) else {
-        return Ok(false);
-    };
-    let Some(cursor) = store.cursor(author)? else {
-        return Ok(name.first == 1);
-    };
-    let Some(current) = parse_segment_name(author, &cursor) else {
-        return Ok(false);
-    };
-    Ok(name.first <= current.last.saturating_add(1) && name.last > current.last)
 }
 
 /// How many downloaded ops share one transaction: few enough that the
@@ -90,8 +72,8 @@ pub(super) struct SegmentRead {
     /// An op couldn't even be kept: the rest of the segment waits, and the
     /// cursor stays before it.
     pub is_stopped: bool,
-    /// Reading this author resumes after this segment from now on.
-    pub is_resume_point: bool,
+    /// A genuine segment whose ops all applied: nothing in it is waiting.
+    pub is_settled: bool,
 }
 
 /// What retrying parked ops found.
@@ -136,9 +118,9 @@ impl Workspace {
     /// one transaction each, so it costs a disk sync per batch rather than per
     /// op, while the state lock is let go between batches. Each op still
     /// applies on its own (a savepoint): one that breaks a rule or fails here
-    /// is skipped or kept for later as when received alone. The cursor moves
-    /// past the segment with the last batch, so if saving fails, the next
-    /// pull reads the segment again; ops already saved are then recognised.
+    /// is skipped or kept for later as when received alone. Reading resumes
+    /// from what we hold, so if saving fails, the next pull reads the segment
+    /// again; ops already saved are then recognised.
     pub(super) fn receive_segment(
         &self,
         author: &PublicKey,
@@ -148,7 +130,7 @@ impl Workspace {
         let mut read = SegmentRead::default();
         let genuine_last = genuine_last_seq(author, key, envelopes);
         if genuine_last.is_none() {
-            warn!("{key} isn't a genuine segment; reading its ops, but never resuming from it");
+            warn!("{key} isn't a genuine segment; reading its ops anyway");
         }
         let mut batches: Vec<&[Envelope]> = envelopes.chunks(OPS_PER_TRANSACTION).collect();
         if batches.is_empty() {
@@ -180,8 +162,8 @@ impl Workspace {
                     match received {
                         Ok(more) => changes.extend(more),
                         Err(error) if error.downcast_ref::<NotKept>().is_some() => {
-                            // The cursor stays before this segment, so the next
-                            // pull reads the op again.
+                            // We don't hold the op, so the next pull reads
+                            // it again.
                             read.local_failure.get_or_insert(error);
                             read.is_stopped = true;
                             return Ok(changes);
@@ -192,20 +174,13 @@ impl Workspace {
                         Err(error) => warn!("dropping op from {key}: {error:#}"),
                     }
                 }
-                // Reading resumes after a segment only once its last op
-                // verified and applied (logs have no gaps, so all of it did),
-                // and only if it carries on from where reading resumes now:
-                // we may hold ops from gossip that the bucket doesn't yet, and
-                // a copy of one put ahead would hide the author's next upload.
-                let is_resume_point = match genuine_last {
-                    Some(last_seq) if index == last => {
-                        continues_from_cursor(store, author, key)? && store.is_applied(author, last_seq)?
-                    }
-                    _ => false,
-                };
-                if is_resume_point {
-                    store.set_cursor(author, key)?;
-                    read.is_resume_point = true;
+                if index == last {
+                    // Settled once its last op verified and applied (logs
+                    // have no gaps, so all of it did).
+                    read.is_settled = match genuine_last {
+                        Some(last_seq) => store.is_applied(author, last_seq)?,
+                        None => false,
+                    };
                     #[cfg(test)]
                     if self
                         .inner

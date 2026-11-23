@@ -973,8 +973,8 @@ async fn junk_after_someones_last_segment_is_fetched_once_a_run() {
     assert!(pass.gets < junk_count, "{pass}");
 }
 
-/// A segment named with a hash of its bytes is read and resumed after; one
-/// whose bytes don't match that hash is ignored, ops and all.
+/// A segment named with a hash of its bytes is read; one whose bytes don't
+/// match that hash is ignored, ops and all.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_segment_named_by_its_hash_must_match_it() {
     let (_root, bucket, admin, bob) = admin_and_bob().await;
@@ -992,8 +992,8 @@ async fn a_segment_named_by_its_hash_must_match_it() {
         let envelopes = bob.state().store.unpushed(&bob.me()).unwrap();
         let range = format!(
             "{:020}-{:020}",
-            envelopes.first().unwrap().seq,
-            envelopes.last().unwrap().seq
+            envelopes.last().unwrap().seq,
+            envelopes.first().unwrap().seq
         );
         (range, postcard::to_stdvec(&envelopes).unwrap())
     };
@@ -1003,10 +1003,8 @@ async fn a_segment_named_by_its_hash_must_match_it() {
     let wrong_hash = blake3::hash(b"other bytes").to_hex();
     let tampered = format!("{bob_segments}/{range}-{wrong_hash}");
     bucket.put_raw(&tampered, bytes).await.unwrap();
-    let cursor_before = admin.state().store.cursor(&bob.me()).unwrap();
     admin.sync().await;
     assert!(!texts(&admin).contains(&"tampered".to_string()));
-    assert_eq!(admin.state().store.cursor(&bob.me()).unwrap(), cursor_before);
 
     bucket.delete_raw(&tampered).await.unwrap();
     let (range, bytes) = unpushed_segment(&bob);
@@ -1014,7 +1012,6 @@ async fn a_segment_named_by_its_hash_must_match_it() {
     bucket.put_raw(&named, bytes).await.unwrap();
     admin.sync().await;
     assert!(texts(&admin).contains(&"tampered".to_string()));
-    assert_eq!(admin.state().store.cursor(&bob.me()).unwrap(), Some(named));
 }
 
 /// Older versions resumed after any object, junk included. A resume point
@@ -1126,10 +1123,11 @@ async fn junk_at_the_authors_next_segment_name_cannot_hide_their_upload() {
     assert!(texts.contains(&"hidden".to_string()), "{texts:?}");
 }
 
-/// A copy of an op from inside a segment already read sorts after it, but
-/// must not move where reading resumes backwards, or it would never move on.
+/// A copy of an op from inside a segment already read sorts after it under
+/// an older name. It must not hold reading back: later uploads still arrive,
+/// and nothing is stored to resume from.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_copy_from_inside_a_read_segment_cannot_move_the_resume_point_back() {
+async fn a_copy_from_inside_a_read_segment_cannot_hold_reading_back() {
     let (_root, bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");
     for text in ["one", "two", "three"] {
@@ -1154,11 +1152,127 @@ async fn a_copy_from_inside_a_read_segment_cannot_move_the_resume_point_back() {
         admin.sync().await;
     }
 
-    let bob_last = bob.state().store.next_seq(&bob.me()).unwrap() - 1;
-    let cursor = admin.state().store.cursor(&bob.me()).unwrap().unwrap();
-    assert!(
-        cursor.ends_with(&format!("-{bob_last:020}")),
-        "resumes after {cursor}, not seq {bob_last}"
+    let bob_last = bob.state().store.last_seq(&bob.me()).unwrap();
+    assert_eq!(admin.state().store.last_seq(&bob.me()).unwrap(), bob_last);
+    assert_eq!(admin.state().store.cursor(&bob.me()).unwrap(), None);
+}
+
+/// A reader can hold an author's newest ops from gossip before their upload
+/// lands. Single-op copies of those, uploaded first and read in an earlier
+/// pass, must not hide the rest of the author's upload, even if the author
+/// never writes again (#209).
+#[tokio::test(flavor = "multi_thread")]
+async fn copies_uploaded_before_the_authors_own_upload_cannot_hide_its_last_ops() {
+    for has_copies in [false, true] {
+        let (_root, bucket, admin, bob) = admin_and_bob().await;
+        let general = channel_id(&admin, "general");
+        bob.send_message(&general, "first", None).unwrap();
+        sync_all(&[&bob, &admin]).await;
+        for text in ["one", "two", "three"] {
+            bob.send_message(&general, text, None).unwrap();
+        }
+        let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
+        let (heard_live, missed) = unpushed.split_at(unpushed.len() - 1);
+        for envelope in heard_live {
+            admin.receive(envelope.clone()).unwrap();
+        }
+        if has_copies {
+            for envelope in heard_live {
+                let seq = envelope.seq;
+                bucket
+                    .put_raw(
+                        &format!("ops/{}/{seq:020}-{seq:020}", bob.my_id()),
+                        postcard::to_stdvec(&vec![envelope.clone()]).unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            admin.sync().await;
+        }
+
+        bob.sync().await;
+        admin.sync().await;
+
+        assert!(
+            admin.state().store.is_applied(&bob.me(), missed[0].seq).unwrap(),
+            "copies: {has_copies}"
+        );
+    }
+}
+
+/// Removing someone freezes their log at what they really wrote, even when
+/// copies of ops the admin heard live were uploaded ahead of theirs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_freezes_at_the_true_last_op_despite_copies_uploaded_ahead() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    for text in ["one", "two", "three"] {
+        bob.send_message(&general, text, None).unwrap();
+    }
+    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
+    let (heard_live, _) = unpushed.split_at(unpushed.len() - 1);
+    for envelope in heard_live {
+        admin.receive(envelope.clone()).unwrap();
+        let seq = envelope.seq;
+        bucket
+            .put_raw(
+                &format!("ops/{}/{seq:020}-{seq:020}", bob.my_id()),
+                postcard::to_stdvec(&vec![envelope.clone()]).unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+    admin.sync().await;
+    bob.sync().await;
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+
+    let bob_last = bob.state().store.last_seq(&bob.me()).unwrap();
+    assert_eq!(
+        admin.state().store.frozen_last_seq(&bob.me()).unwrap(),
+        Some(bob_last)
+    );
+}
+
+/// Older versions name segments `<first>-<last>`, sorted by first. A reader
+/// that holds part of such a segment from gossip, and has an older version's
+/// resume point, still reads the rest of it; the resume point then goes.
+#[tokio::test(flavor = "multi_thread")]
+async fn segments_from_an_older_writer_are_read_even_when_partly_held() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let bob_segments = format!("ops/{}", bob.my_id());
+    let older_name = |envelopes: &[Envelope]| {
+        let (first, last) = (envelopes.first().unwrap().seq, envelopes.last().unwrap().seq);
+        format!("{bob_segments}/{first:020}-{last:020}")
+    };
+    // Where an older version had resumed reading Bob.
+    let held = admin.state().store.last_seq(&bob.me()).unwrap();
+    let older_cursor = format!("{bob_segments}/{:020}-{held:020}", 1);
+    admin.state().store.set_cursor(&bob.me(), &older_cursor).unwrap();
+
+    for text in ["one", "two", "three"] {
+        bob.send_message(&general, text, None).unwrap();
+    }
+    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
+    for envelope in &unpushed[..unpushed.len() - 1] {
+        admin.receive(envelope.clone()).unwrap();
+    }
+    bucket
+        .put_raw(&older_name(&unpushed), postcard::to_stdvec(&unpushed).unwrap())
+        .await
+        .unwrap();
+    let last = unpushed.last().unwrap().seq;
+    bob.state().store.mark_pushed(&bob.me(), last).unwrap();
+    admin.sync().await;
+    admin.sync().await;
+
+    let bob_last = bob.state().store.last_seq(&bob.me()).unwrap();
+    assert_eq!(admin.state().store.last_seq(&bob.me()).unwrap(), bob_last);
+    assert_eq!(
+        admin.state().store.cursor(&bob.me()).unwrap(),
+        None,
+        "the older resume point went"
     );
 }
 

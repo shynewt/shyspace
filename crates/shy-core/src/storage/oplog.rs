@@ -226,7 +226,7 @@ impl Store {
         Ok(missing)
     }
 
-    /// Makes the next pull read all of `author`'s segments again.
+    /// Drops where an older version resumed reading `author`.
     pub fn forget_cursor(&self, author: &PublicKey) -> Result<()> {
         self.db
             .execute("DELETE FROM cursors WHERE author = ?", [author.as_bytes()])?;
@@ -244,6 +244,9 @@ impl Store {
             .optional()?)
     }
 
+    /// Older versions stored where they resumed reading each author; tests
+    /// set one to act as a device upgraded from such a version.
+    #[cfg(test)]
     pub fn set_cursor(&self, author: &PublicKey, last_key: &str) -> Result<()> {
         self.db.execute(
             "INSERT INTO cursors (author, last_key) VALUES (?, ?)
