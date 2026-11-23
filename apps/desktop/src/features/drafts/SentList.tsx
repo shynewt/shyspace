@@ -41,8 +41,8 @@ export function SentList() {
   const sent = useLive(load, (change) => change.kind === "messages");
   const days = useMemo(() => groupByDay(sent ?? [], (item) => item.message.created_ms), [sent]);
 
-  if (!sent) return null;
-  if (sent.length === 0 && filter === "" && query === "") {
+  // The filter shows before the list loads, so the arrows can reach it at once.
+  if (sent?.length === 0 && filter === "" && query === "") {
     return (
       <EmptyState icon={<Send size={22} />} title="Nothing sent yet">
         Messages you send show up here, with how people responded.
@@ -62,7 +62,7 @@ export function SentList() {
           className="pl-8"
         />
       </div>
-      {sent.length === 0 && filter !== "" && (
+      {sent?.length === 0 && filter !== "" && (
         <p className="px-2 py-6 text-center text-sm text-muted">Nothing you sent matches “{filter}”.</p>
       )}
       {days.map((day) => (
@@ -75,7 +75,7 @@ export function SentList() {
           </ul>
         </section>
       ))}
-      {sent.length === limit && (
+      {sent?.length === limit && (
         <Button variant="ghost" size="sm" className="self-center" onClick={() => setLimit(limit + PAGE_SIZE)}>
           Show older messages
         </Button>

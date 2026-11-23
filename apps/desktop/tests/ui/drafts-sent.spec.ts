@@ -1,6 +1,13 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { allowClipboard } from "./support";
 
+declare global {
+  interface Window {
+    /** Lets a held-back sent list answer. */
+    releaseSent?: () => void;
+  }
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 test.beforeEach(async ({ page }) => {
@@ -286,6 +293,26 @@ test("in Sent, the arrows go from the tab to the filter to the rows, and enter o
   await expect(page.getByRole("tabpanel").getByRole("button", { name: /Older note/ })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByLabel("Message #general")).toBeVisible();
+});
+
+test("the arrows reach Sent's filter even before what you sent has loaded", async ({ page }) => {
+  // A slow machine: the sent list answers only when let go.
+  await page.evaluate(() => {
+    const answer = window.fake.handle.bind(window.fake);
+    const released = new Promise<void>((resolve) => {
+      window.releaseSent = resolve;
+    });
+    window.fake.handle = (command, args) =>
+      command === "sent_messages" ? released.then(() => answer(command, args)) : answer(command, args);
+  });
+  await page.keyboard.press("Control+Shift+D");
+  await expect(page.getByRole("tab", { name: "Drafts" })).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: "Sent" })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByLabel("Filter sent messages")).toBeFocused();
+  await page.evaluate(() => window.releaseSent?.());
+  await expect(page.getByRole("tabpanel")).toContainText("Nothing sent yet");
 });
 
 test("alt and the arrows still move through the sidebar from Drafts & sent", async ({ page }) => {
