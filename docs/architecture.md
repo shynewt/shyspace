@@ -16,6 +16,7 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
 - **`crates/shy-core`**: the whole engine. Every client (desktop app, CLI, agents) is a thin layer on top of it.
 - **`crates/shy-cli`**: the `shy` command. It runs a member without a UI and serves the workspace to AI agents over MCP.
 - **`crates/shy-demo`**: a development tool that fills a fresh workspace with demo people and content, through the same `Workspace` API.
+- **`vendor/yrs`**: a patched copy of the Yjs library the core merges pages with (see `vendor/README.md`).
 - **`apps/desktop`**: the desktop app. `src-tauri/src/lib.rs` maps each UI command to one `Workspace` call and forwards core changes to the UI as `change` events. The UI is React in `src/`.
 
 ## Core ideas
