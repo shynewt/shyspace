@@ -646,48 +646,72 @@ impl ItemPtr {
     }
 
     pub(crate) fn splice(&mut self, offset: u32, encoding: OffsetKind) -> Option<Box<Item>> {
-        let self_ptr = self.clone();
         if offset == 0 {
             None
         } else {
-            let item = self.deref_mut();
-            let client = item.id.client;
-            let clock = item.id.clock;
-            let len = item.len;
-            let content = item.content.splice(offset as usize, encoding).unwrap();
-            item.len = offset;
-            let mut new = Box::new(Item {
-                id: ID::new(client, clock + offset),
-                len: len - offset,
-                left: Some(self_ptr),
-                right: item.right.clone(),
-                origin: Some(ID::new(client, clock + offset - 1)),
-                right_origin: item.right_origin.clone(),
-                content,
-                parent: item.parent.clone(),
-                parent_sub: item.parent_sub.clone(),
-                info: item.info.clone(),
-                redone: item.redone.map(|id| ID::new(id.client, id.clock + offset)),
-            });
-            let new_ptr = ItemPtr::from(&mut new);
+            let content = self.content.splice(offset as usize, encoding).unwrap();
+            Some(self.splice_with(offset, content))
+        }
+    }
 
-            if let Some(right) = item.right.as_deref_mut() {
-                right.left = Some(new_ptr);
-            }
+    /// Splits this item at each of `offsets` (strictly increasing, each inside the item) like
+    /// calling [Self::splice] on it and then on each new right half would, but cuts the content
+    /// in a single pass. Returns the new items, in order.
+    pub(crate) fn splice_many(&mut self, offsets: &[u32], encoding: OffsetKind) -> Vec<Box<Item>> {
+        let offsets_in_content: Vec<usize> = offsets.iter().map(|&offset| offset as usize).collect();
+        let contents = self.content.splice_many(&offsets_in_content, encoding);
+        let mut rights = Vec::with_capacity(offsets.len());
+        let mut current = *self;
+        let mut current_offset = 0;
+        for (&offset, content) in offsets.iter().zip(contents) {
+            let mut right = current.splice_with(offset - current_offset, content);
+            current = ItemPtr::from(&mut right);
+            current_offset = offset;
+            rights.push(right);
+        }
+        rights
+    }
 
-            if let Some(parent_sub) = item.parent_sub.as_ref() {
-                if item.right.is_none() {
-                    // update parent.map
-                    if let TypePtr::Branch(mut branch) = item.parent {
-                        branch.map.insert(parent_sub.clone(), new_ptr);
-                    }
+    /// Splits this item at `offset`, its content having already been cut there: this item keeps
+    /// what it holds now, and the new right half gets `content`.
+    fn splice_with(&mut self, offset: u32, content: ItemContent) -> Box<Item> {
+        let self_ptr = self.clone();
+        let item = self.deref_mut();
+        let client = item.id.client;
+        let clock = item.id.clock;
+        let len = item.len;
+        item.len = offset;
+        let mut new = Box::new(Item {
+            id: ID::new(client, clock + offset),
+            len: len - offset,
+            left: Some(self_ptr),
+            right: item.right.clone(),
+            origin: Some(ID::new(client, clock + offset - 1)),
+            right_origin: item.right_origin.clone(),
+            content,
+            parent: item.parent.clone(),
+            parent_sub: item.parent_sub.clone(),
+            info: item.info.clone(),
+            redone: item.redone.map(|id| ID::new(id.client, id.clock + offset)),
+        });
+        let new_ptr = ItemPtr::from(&mut new);
+
+        if let Some(right) = item.right.as_deref_mut() {
+            right.left = Some(new_ptr);
+        }
+
+        if let Some(parent_sub) = item.parent_sub.as_ref() {
+            if item.right.is_none() {
+                // update parent.map
+                if let TypePtr::Branch(mut branch) = item.parent {
+                    branch.map.insert(parent_sub.clone(), new_ptr);
                 }
             }
-
-            item.right = Some(new_ptr);
-
-            Some(new)
         }
+
+        item.right = Some(new_ptr);
+
+        new
     }
 
     /// Squashes two blocks together. Returns true if it succeeded. Squashing is possible only if
@@ -1735,6 +1759,55 @@ pub(crate) fn split_str(
     (Cow::Borrowed(left), Cow::Borrowed(right))
 }
 
+/// Splits `str` at each of `offsets` (in UTF-16 code units, strictly increasing, each inside it)
+/// the way [split_str] would split it at the first offset, then split the right part at the next
+/// one, and so on, but in a single pass.
+fn split_str_utf16_many(str: &str, offsets: &[usize]) -> Vec<SplittableString> {
+    const REPLACEMENT: &str = "\u{FFFD}";
+    let part = |text: &str, starts_replaced: bool, ends_replaced: bool| {
+        if !starts_replaced && !ends_replaced {
+            return SplittableString::from(text);
+        }
+        let mut part = String::with_capacity(text.len() + 2 * REPLACEMENT.len());
+        if starts_replaced {
+            part.push_str(REPLACEMENT);
+        }
+        part.push_str(text);
+        if ends_replaced {
+            part.push_str(REPLACEMENT);
+        }
+        SplittableString::from(part.as_str())
+    };
+    let mut parts = Vec::with_capacity(offsets.len() + 1);
+    let mut offsets = offsets.iter().copied().peekable();
+    let mut part_start = 0;
+    // whether the current part starts with the second half of a cut surrogate pair
+    let mut starts_replaced = false;
+    let mut position = 0;
+    for (byte, c) in str.char_indices() {
+        while offsets.next_if(|&offset| offset <= position).is_some() {
+            parts.push(part(&str[part_start..byte], starts_replaced, false));
+            part_start = byte;
+            starts_replaced = false;
+        }
+        let units = c.len_utf16();
+        if offsets.next_if(|&offset| offset < position + units).is_some() {
+            // the offset points in the middle of a surrogate pair
+            parts.push(part(&str[part_start..byte], starts_replaced, true));
+            part_start = byte + c.len_utf8();
+            starts_replaced = true;
+        }
+        position += units;
+    }
+    for _ in offsets {
+        parts.push(part(&str[part_start..], starts_replaced, false));
+        part_start = str.len();
+        starts_replaced = false;
+    }
+    parts.push(part(&str[part_start..], starts_replaced, false));
+    parts
+}
+
 #[inline(never)]
 fn split_surrogate(str: &str, off: usize, c: char) -> (Cow<'_, str>, Cow<'_, str>) {
     const REPLACEMENT: char = '\u{FFFD}';
@@ -2133,6 +2206,34 @@ impl ItemContent {
                 | (ItemContent::JSON(_), ItemContent::JSON(_))
                 | (ItemContent::String(_), ItemContent::String(_))
         )
+    }
+
+    /// Splits this content at each of `offsets` (strictly increasing, each inside it) like calling
+    /// [Self::splice] on it and then on each new right part would. It keeps the first part and
+    /// returns the others, in order. A string is cut in a single pass; splicing it once per offset
+    /// would walk and copy the rest of it every time.
+    pub(crate) fn splice_many(&mut self, offsets: &[usize], encoding: OffsetKind) -> Vec<ItemContent> {
+        if offsets.is_empty() {
+            return Vec::new();
+        }
+        if let (ItemContent::String(string), OffsetKind::Utf16) = (&mut *self, encoding) {
+            let mut parts = split_str_utf16_many(string.as_str(), offsets).into_iter();
+            if let Some(first) = parts.next() {
+                *string = first;
+            }
+            return parts.map(ItemContent::String).collect();
+        }
+        let mut rights: Vec<ItemContent> = Vec::with_capacity(offsets.len());
+        let mut current_offset = 0;
+        for &offset in offsets {
+            let current = rights.last_mut().unwrap_or(&mut *self);
+            let right = current
+                .splice(offset - current_offset, encoding)
+                .expect("this content can be split");
+            rights.push(right);
+            current_offset = offset;
+        }
+        rights
     }
 
     /// Tries to squash two item content structures together.

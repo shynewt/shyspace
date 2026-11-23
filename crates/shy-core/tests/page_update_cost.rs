@@ -6,7 +6,7 @@
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use shy_core::pages::{merge, read};
+use shy_core::pages::{PageMerge, merge, read};
 
 /// Tests here run one at a time, so each measures only its own work. A
 /// failed test leaves the lock poisoned, which doesn't matter to the next.
@@ -225,5 +225,96 @@ fn deletions_that_split_many_pieces_merge_in_linear_time() {
     assert!(
         with_splits < without_splits * 2,
         "{with_splits:?} with splits, {without_splits:?} without"
+    );
+}
+
+#[test]
+fn deletions_inside_one_long_piece_merge_in_linear_time() {
+    let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    let deletions = 40_000;
+    let piece_length = 50;
+    let characters = deletions * piece_length;
+    let pasted = typed_pieces(1, &vec![b'a'; characters as usize], |_| (None, None));
+    // The same text as many short pieces, each typed at the start of the
+    // page, so none join.
+    let short = vec![b'a'; piece_length as usize];
+    let typed = typed_pieces(deletions, &short, |clock| (None, Some(clock - piece_length)));
+    let long_page = merge(None, &pasted).expect("the update is accepted");
+    let short_page = merge(None, &typed).expect("the update is accepted");
+    // One character inside every stretch of `piece_length`.
+    let ranges: Vec<(u64, u64)> = (0..deletions)
+        .map(|stretch| (stretch * piece_length + 1, 1))
+        .collect();
+    let scattered = deleting(&ranges);
+    let left = characters - deletions;
+
+    let mut fastest = (Duration::MAX, Duration::MAX);
+    for _ in 0..2 {
+        fastest.1 = fastest
+            .1
+            .min(time_to_merge_into(Some(&short_page), &scattered, left));
+        fastest.0 = fastest
+            .0
+            .min(time_to_merge_into(Some(&long_page), &scattered, left));
+    }
+    let (in_one_piece, in_many_pieces) = fastest;
+
+    // yrs 0.28.1 copied the rest of the piece's text at every split.
+    assert!(
+        in_one_piece < in_many_pieces * 2,
+        "{in_one_piece:?} in one piece, {in_many_pieces:?} in many"
+    );
+}
+
+/// One piece of `text` for the client, starting at `clock` and typed at the
+/// start of the page, whose first piece starts at `first_clock`.
+fn piece_typed_at_start(clock: u64, first_clock: u64, text: &[u8]) -> Vec<u8> {
+    let mut update = vec![1, 1];
+    var(&mut update, CLIENT);
+    var(&mut update, clock);
+    update.push(0x44);
+    var(&mut update, CLIENT);
+    var(&mut update, first_clock);
+    var(&mut update, text.len() as u64);
+    update.extend_from_slice(text);
+    update.push(0);
+    update
+}
+
+#[test]
+fn small_deletions_cost_nothing_for_text_they_leave_alone() {
+    let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    let edits = 1_000;
+    let short = typed_pieces(1, &vec![b'a'; 3 * edits], |_| (None, None));
+    let long = piece_typed_at_start(3 * edits as u64, 0, &vec![b'b'; 500_000]);
+    // Each takes out one character of the short piece, splitting it twice.
+    let deletions: Vec<Vec<u8>> = (0..edits as u64)
+        .map(|edit| deleting(&[(3 * edit + 1, 1)]))
+        .collect();
+    let time_to_replay = |with_long_piece: bool| {
+        let mut replay = PageMerge::default();
+        replay.add(&short).expect("the update is accepted");
+        if with_long_piece {
+            replay.add(&long).expect("the update is accepted");
+        }
+        let started = Instant::now();
+        for deletion in &deletions {
+            replay.add(deletion).expect("the update is accepted");
+        }
+        started.elapsed()
+    };
+
+    let mut fastest = (Duration::MAX, Duration::MAX);
+    for _ in 0..2 {
+        fastest.1 = fastest.1.min(time_to_replay(false));
+        fastest.0 = fastest.0.min(time_to_replay(true));
+    }
+    let (with_long_piece, without) = fastest;
+
+    // An earlier version of the patched yrs copied every piece after the
+    // first split, split or not.
+    assert!(
+        with_long_piece < without * 2 + Duration::from_millis(50),
+        "{with_long_piece:?} with a long piece after them, {without:?} without"
     );
 }

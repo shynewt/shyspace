@@ -113,24 +113,29 @@ impl ClientBlockList {
         let mut clocks = clocks.iter().peekable();
         let mut rights = Vec::with_capacity(clocks.len());
         for cell in rest {
-            let mut block = cell.into_inner();
-            while let Some(&clock) =
-                clocks.next_if(|&&clock| clock < block.clock_start() + block.len())
-            {
-                let Block::Item(item) = &mut block else {
-                    continue;
-                };
-                let mut left = ItemPtr::from(item);
-                let Some(offset) = clock.checked_sub(left.id.clock) else {
-                    continue;
-                };
-                if let Some(mut right) = left.splice(offset, OffsetKind::Utf16) {
-                    rights.push((clock, ItemPtr::from(&mut right)));
-                    self.inner.push(UnsafeCell::new(block));
-                    block = Block::Item(right);
+            let block = cell.into_inner();
+            let start = block.clock_start();
+            let end = start + block.len();
+            let mut clocks_here = Vec::new();
+            while let Some(&clock) = clocks.next_if(|&&clock| clock < end) {
+                if clock > start {
+                    clocks_here.push(clock);
                 }
             }
-            self.inner.push(UnsafeCell::new(block));
+            let mut item = match block {
+                Block::Item(item) if !clocks_here.is_empty() => item,
+                block => {
+                    self.inner.push(UnsafeCell::new(block));
+                    continue;
+                }
+            };
+            let offsets: Vec<u32> = clocks_here.iter().map(|&clock| clock - start).collect();
+            let new_items = ItemPtr::from(&mut item).splice_many(&offsets, OffsetKind::Utf16);
+            self.inner.push(UnsafeCell::new(Block::Item(item)));
+            for (clock, mut right) in clocks_here.into_iter().zip(new_items) {
+                rights.push((clock, ItemPtr::from(&mut right)));
+                self.inner.push(UnsafeCell::new(Block::Item(right)));
+            }
         }
         rights
     }

@@ -9,13 +9,14 @@
 - one long run of pieces typed one after another copied all the text joined so far at every join (100,000 pieces: 5 GB; 800,000: about 31 GB);
 - many short runs shifted the rest of the client's piece list after every run (400,000 pieces: 6 s);
 - pieces typed and deleted in the same update were joined one pair at a time, shifting the rest of the list after each pair, and copying text like the first case (400,000 pieces: 14 s, or many GB).
-- deletions that split pieces shifted the rest of the list after every split (1,120,000 pieces, then 100,000 splitting deletions: 89 s).
+- deletions that split pieces shifted the rest of the list after every split (1,120,000 pieces, then 100,000 splitting deletions: 89 s);
+- deletions inside one long piece walked and copied the rest of its text at every split (3,800,000 characters, then 100,000 deletions: 12 s).
 
 **What changed** (in `src/block.rs`, `src/block_store.rs`, `src/id_set.rs`, `src/transaction.rs`):
 
 - `Block::can_squash`, `Item::can_squash` and `ItemContent::can_squash` check whether two pieces would join, without changing them;
 - `ClientBlockList::squash_left` finds the start of the run first, then joins left to right, so each piece's text is appended once;
-- `TransactionMut::apply_delete` first makes the splits a client's deletions need with `TransactionMut::split_before_delete` and `ClientBlockList::split_items_at`, in one pass that rebuilds the list once. It only takes splits it is sure the deleting loop would make (sorted ranges with gaps, nothing nested under a deleted item); the loop still makes any others the old, slow way;
+- `TransactionMut::apply_delete` first makes the splits a client's deletions need with `TransactionMut::split_before_delete` and `ClientBlockList::split_items_at`, in one pass that rebuilds the list once. It only takes splits it is sure the deleting loop would make (sorted ranges with gaps, nothing nested under a deleted item); the loop still makes any others the old, slow way. An item split at several places has its text cut in one pass (`ItemPtr::splice_many`, `ItemContent::splice_many`);
 - the end of a transaction joins a client's new pieces with `ClientBlockList::squash_left_from`, and its deleted pieces with `ClientBlockList::squash_left_in` (replacing `squash_left_range_compaction`): each is one pass that compacts the list once.
 
 Pieces split and join exactly as before; only the cost changed. `crates/shy-core/tests/page_update_cost.rs` guards it, and yrs's own test suite (403 tests, run from the upstream repository at the same commit) passes before and after.
