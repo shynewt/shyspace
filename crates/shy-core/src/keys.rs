@@ -189,4 +189,21 @@ mod tests {
         assert_eq!(*created.database_key("shy"), *loaded.database_key("shy"));
         assert_ne!(*created.database_key("shy"), *created.database_key("mls"));
     }
+
+    #[test]
+    fn a_folder_is_named_the_same_before_and_after_it_is_made() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("real")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.path().join("real"), root.path().join("link")).unwrap();
+        let dir = root.path().join("link/workspaces/abc");
+        std::fs::create_dir_all(root.path().join("link/workspaces")).unwrap();
+        let before = keychain_account(&dir).unwrap();
+        std::fs::create_dir(&dir).unwrap();
+        assert_eq!(before, keychain_account(&dir).unwrap());
+        assert_eq!(
+            before,
+            keychain_account(&root.path().join("real/workspaces/abc")).unwrap()
+        );
+    }
 }

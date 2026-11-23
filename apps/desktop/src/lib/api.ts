@@ -340,7 +340,7 @@ export const api = {
   checkOldKeyDeleted: () => invoke<OldKeyCheck>("check_old_key_deleted"),
   /** Ends the change without proving the old key dead, and forgets which keys were compromised. */
   cancelStorageRotation: () => invoke<void>("cancel_storage_rotation"),
-  safetyCode: () => invoke<string>("safety_code"),
+  safetyCode: (invite: string) => invoke<string>("safety_code", { invite }),
   recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),
   createChannel: (name: string) => invoke<string>("create_channel", { name }),

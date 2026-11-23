@@ -38,16 +38,10 @@ pub(crate) struct AppState {
     single_folder: Option<DataDir>,
     /// Held while opening workspaces, so two opens don't race.
     opening: Mutex<()>,
-    /// The join in progress, if one is waiting for the admin.
-    joining: std::sync::Mutex<Option<Joining>>,
+    /// Stops the join in progress, if one is waiting for the admin.
+    joining: std::sync::Mutex<Option<JoinCancel>>,
     /// Huddle audio, shared by every workspace: one huddle at a time.
     media: ShyMedia,
-}
-
-struct Joining {
-    cancel: JoinCancel,
-    /// Where the joined workspace will live, for its safety code.
-    folder: DataDir,
 }
 
 /// A change in one workspace, or (with no id) in the set of workspaces.
@@ -183,15 +177,35 @@ fn workspaces(state: State<'_, AppState>) -> CommandResult<Vec<WorkspaceItem>> {
     state.workspaces.rail().map_err(failed)
 }
 
-/// Shows another workspace; it becomes the one every command acts on.
+/// Shows another workspace; it becomes the one every command acts on. One
+/// that is closed (a leave that couldn't finish) is opened first.
 #[tauri::command]
-fn select_workspace(
+async fn select_workspace(
     app: AppHandle,
     state: State<'_, AppState>,
     workspace_id: String,
 ) -> CommandResult<Session> {
+    if state.workspaces.find(&workspace_id).is_none() {
+        open_workspaces(&app, &state).await?;
+    }
     let workspace = state.workspaces.select(&workspace_id).map_err(failed)?;
     Ok(show_selected(&app, &workspace))
+}
+
+/// Marks everything read in any workspace, from the rail's menu.
+#[tauri::command]
+fn mark_workspace_read(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> CommandResult<()> {
+    let workspace = state
+        .workspaces
+        .find(&workspace_id)
+        .ok_or_else(|| "that workspace isn't open".to_owned())?;
+    workspace.mark_all_read().map_err(failed)?;
+    emit_workspaces_changed(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -217,11 +231,24 @@ async fn leave_workspace(
     state: State<'_, AppState>,
     workspace_id: String,
 ) -> CommandResult<Option<Session>> {
-    state.workspaces.leave(&workspace_id).await.map_err(failed)?;
-    Ok(state
+    let shown_before = state
         .workspaces
         .selected()
-        .map(|workspace| show_selected(&app, &workspace)))
+        .map(|workspace| workspace.workspace_id().to_owned());
+    {
+        // Not alongside an open, which could reopen the folder being deleted.
+        let _opening = state.opening.lock().await;
+        state.workspaces.leave(&workspace_id).await.map_err(failed)?;
+    }
+    let Some(shown) = state.workspaces.selected() else {
+        emit_workspaces_changed(&app);
+        return Ok(None);
+    };
+    if shown_before.as_deref() == Some(shown.workspace_id()) {
+        emit_workspaces_changed(&app);
+        return Ok(Some(session_of(&shown)));
+    }
+    Ok(Some(show_selected(&app, &shown)))
 }
 
 /// What each workspace's rail icon shows.
@@ -300,7 +327,6 @@ async fn join_workspace(
         is_bot: false,
     };
     let cancel = JoinCancel::new();
-    let folder = state.workspaces.folder_for_invite(&invite).map_err(failed)?;
     {
         let mut joining = state
             .joining
@@ -309,10 +335,7 @@ async fn join_workspace(
         if joining.is_some() {
             return Err("a join request is already waiting for the admin".to_owned());
         }
-        *joining = Some(Joining {
-            cancel: cancel.clone(),
-            folder,
-        });
+        *joining = Some(cancel.clone());
     }
     let joined = state
         .workspaces
@@ -338,23 +361,17 @@ fn cancel_join(state: State<'_, AppState>) -> CommandResult<()> {
         .joining
         .lock()
         .map_err(|_| "join state lock poisoned".to_owned())?;
-    if let Some(joining) = joining.as_ref() {
-        joining.cancel.cancel();
+    if let Some(cancel) = joining.as_ref() {
+        cancel.cancel();
     }
     Ok(())
 }
 
-/// Shown while waiting to join, for the admin to compare.
+/// Shown while waiting to join with `invite`, for the admin to compare:
+/// made in the folder that workspace will live in, before the join starts.
 #[tauri::command]
-async fn safety_code(state: State<'_, AppState>) -> CommandResult<String> {
-    let folder = {
-        let joining = state
-            .joining
-            .lock()
-            .map_err(|_| "join state lock poisoned".to_owned())?;
-        let joining = joining.as_ref().ok_or("no join is waiting for the admin")?;
-        DataDir::new(joining.folder.path.clone(), joining.folder.keys.clone())
-    };
+async fn safety_code(state: State<'_, AppState>, invite: String) -> CommandResult<String> {
+    let folder = state.workspaces.folder_for_invite(&invite).map_err(failed)?;
     folder.safety_code().await.map_err(failed)
 }
 
@@ -1061,6 +1078,7 @@ pub fn run() {
             select_workspace,
             move_workspace,
             leave_workspace,
+            mark_workspace_read,
             workspace_badges,
             set_workspace_muted,
             set_notifications_paused,

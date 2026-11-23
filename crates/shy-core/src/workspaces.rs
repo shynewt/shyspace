@@ -77,16 +77,22 @@ struct DeviceSettings {
     muted: Vec<String>,
     #[serde(default)]
     notifications_paused_until_ms: Option<i64>,
+    /// The single folder of earlier versions was moved (or there was none),
+    /// so start-up needn't look for it again.
+    #[serde(default)]
+    is_single_folder_handled: bool,
 }
 
 /// A workspace id names a folder, and comes from invites and recovery kits
-/// someone else made, so only plain names are accepted, never a path.
+/// someone else made, so only plain lowercase names are accepted: never a
+/// path, a device name like `CON`, or two ids one case-insensitive disk
+/// would take for the same folder.
 fn is_plain_id(workspace_id: &str) -> bool {
     !workspace_id.is_empty()
         && workspace_id.len() <= MAX_ID_LENGTH
         && workspace_id
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_')
 }
 
 /// Where the workspaces' folders are.
@@ -131,6 +137,8 @@ pub struct Workspaces {
     connect: Connector,
     /// The open workspaces, the selected one first, then by last use.
     open: Mutex<Vec<Workspace>>,
+    /// Held across each change to `workspaces.json`, so two can't interleave.
+    settings_lock: Mutex<()>,
 }
 
 impl Workspaces {
@@ -162,6 +170,7 @@ impl Workspaces {
             keys,
             connect,
             open: Mutex::default(),
+            settings_lock: Mutex::default(),
         }
     }
 
@@ -194,8 +203,17 @@ impl Workspaces {
         let mut found = Vec::new();
         for entry in entries {
             let path = entry?.path();
-            let Some((workspace_id, name)) = WorkspaceConfig::peek(&path)? else {
+            if !path.is_dir() {
                 continue;
+            }
+            // One broken folder mustn't hide the others.
+            let (workspace_id, name) = match WorkspaceConfig::peek(&path) {
+                Ok(Some(peeked)) => peeked,
+                Ok(None) => continue,
+                Err(error) => {
+                    tracing::error!("skipping {}: {error:#}", path.display());
+                    continue;
+                }
             };
             // A folder named after another workspace isn't one we made.
             if path.file_name().and_then(|name| name.to_str()) == Some(workspace_id.as_str()) {
@@ -221,9 +239,9 @@ impl Workspaces {
         ensure!(ids.iter().any(|id| id == workspace_id), "no such workspace here");
         ids.retain(|id| id != workspace_id);
         ids.insert(position.min(ids.len()), workspace_id.to_owned());
-        let mut settings = self.settings()?;
-        settings.workspace_ids = ids;
-        self.save_settings(&settings)
+        self.update_settings(|settings| {
+            settings.workspace_ids = ids;
+        })
     }
 
     /// Creates a workspace in a new folder of its own.
@@ -277,10 +295,16 @@ impl Workspaces {
 
     /// Deletes a workspace from this device for good, closing it first: its
     /// folder, then its device key (a key left by a crash in between opens
-    /// nothing). The next most recently used is then the selected one.
+    /// nothing). The next most recently used is then the selected one. If
+    /// the folder is still in use elsewhere, leaving fails and the workspace
+    /// stays here, closed; `open_all` opens it again.
     pub async fn leave(&self, workspace_id: &str) -> Result<()> {
         let data = self.folder(workspace_id)?;
-        ensure!(Workspace::exists(&data.path), "no such workspace here");
+        let stored_id = WorkspaceConfig::peek(&data.path)?.map(|(stored_id, _)| stored_id);
+        ensure!(
+            stored_id.as_deref() == Some(workspace_id),
+            "no such workspace here"
+        );
         let closing = {
             let mut open = self.open_lock();
             let index = open
@@ -289,25 +313,32 @@ impl Workspaces {
             index.map(|index| open.remove(index))
         };
         if let Some(workspace) = closing {
-            // Changes not uploaded yet are dropped anyway by leaving.
-            if let Err(error) = workspace.shutdown().await {
-                tracing::warn!("leaving a workspace with changes not uploaded: {error:#}");
+            // Leaving drops what wasn't uploaded anyway, so it doesn't wait long.
+            match tokio::time::timeout(CLOSING_WAIT, workspace.shutdown()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => tracing::warn!("leaving a workspace with changes not uploaded: {error:#}"),
+                Err(_) => tracing::warn!("leaving a workspace whose upload didn't finish in time"),
             }
         }
-        drop(self.wait_until_closed(&data).await?);
+        self.pace();
+        {
+            // While the folder is locked, nothing can open it; without its
+            // workspace.json, nothing will after.
+            let _lock = self.wait_until_closed(&data).await?;
+            let marker = data.path.join(crate::config::CONFIG_FILE);
+            std::fs::remove_file(&marker).with_context(|| format!("deleting {}", marker.display()))?;
+        }
         std::fs::remove_dir_all(&data.path).with_context(|| format!("deleting {}", data.path.display()))?;
         data.keys.forget(&data.path).await?;
-        let mut settings = self.settings()?;
-        for ids in [
-            &mut settings.workspace_ids,
-            &mut settings.recent,
-            &mut settings.muted,
-        ] {
-            ids.retain(|id| id != workspace_id);
-        }
-        self.save_settings(&settings)?;
-        self.pace();
-        Ok(())
+        self.update_settings(|settings| {
+            for ids in [
+                &mut settings.workspace_ids,
+                &mut settings.recent,
+                &mut settings.muted,
+            ] {
+                ids.retain(|id| id != workspace_id);
+            }
+        })
     }
 
     /// The folder's lock, once a closing workspace's tasks let go of it.
@@ -338,21 +369,31 @@ impl Workspaces {
         old: &DataDir,
         stop_after: MoveStep,
     ) -> Result<Option<String>> {
-        if matches!(self.layout, Layout::OneFolder(_)) {
+        if matches!(self.layout, Layout::OneFolder(_)) || self.settings()?.is_single_folder_handled {
             return Ok(None);
         }
         if !old.path.exists() {
-            // Nothing to move, or a move that already renamed the folder.
-            if old.path.parent().is_some_and(Path::exists) {
-                old.keys.forget(&old.path).await?;
+            // Nothing to move, or a move that already renamed the folder and
+            // may have left the old key. A keychain that can't be reached
+            // now is tried again at the next start rather than stopping this one.
+            let is_forgotten = match old.path.parent().is_some_and(Path::exists) {
+                true => old.keys.forget(&old.path).await,
+                false => Ok(()),
+            };
+            match is_forgotten {
+                Ok(()) => self.update_settings(|settings| settings.is_single_folder_handled = true)?,
+                Err(error) => tracing::warn!("couldn't forget an old device key: {error:#}"),
             }
             return Ok(None);
         }
         let Some((workspace_id, _)) = WorkspaceConfig::peek(&old.path)? else {
-            bail!(
-                "{} isn't a complete workspace; move or delete it by hand",
+            // A join that never finished: nothing in it to keep.
+            tracing::warn!(
+                "{} isn't a complete workspace, so it isn't moved; it can be deleted",
                 old.path.display()
             );
+            self.update_settings(|settings| settings.is_single_folder_handled = true)?;
+            return Ok(None);
         };
         let new = self.folder(&workspace_id)?;
         ensure!(
@@ -378,6 +419,7 @@ impl Workspaces {
         }
         old.keys.forget(&old.path).await?;
         self.place_last(&workspace_id)?;
+        self.update_settings(|settings| settings.is_single_folder_handled = true)?;
         Ok(Some(workspace_id))
     }
 
@@ -393,19 +435,35 @@ impl Workspaces {
     }
 
     fn place_last(&self, workspace_id: &str) -> Result<()> {
+        self.update_settings(|settings| {
+            if !settings.workspace_ids.iter().any(|id| id == workspace_id) {
+                settings.workspace_ids.push(workspace_id.to_owned());
+            }
+        })
+    }
+
+    /// Changes `workspaces.json` under the settings lock, so two changes
+    /// can't interleave or lose one another.
+    fn update_settings(&self, change: impl FnOnce(&mut DeviceSettings)) -> Result<()> {
+        let _changing = self
+            .settings_lock
+            .lock()
+            .expect("settings lock poisoned by an earlier panic");
         let mut settings = self.settings()?;
-        if !settings.workspace_ids.iter().any(|id| id == workspace_id) {
-            settings.workspace_ids.push(workspace_id.to_owned());
-        }
+        change(&mut settings);
         self.save_settings(&settings)
     }
 
+    /// This device's choices. A file that can't be read is reported and
+    /// treated as empty: it only holds the order, recency, mutes and a
+    /// pause, and losing those is better than opening no workspace.
     fn settings(&self) -> Result<DeviceSettings> {
         let path = self.layout.settings_file();
         match std::fs::read(&path) {
-            Ok(bytes) => {
-                serde_json::from_slice(&bytes).with_context(|| format!("reading {}", path.display()))
-            }
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+                tracing::error!("{} is unreadable, so it's ignored: {error}", path.display());
+                DeviceSettings::default()
+            })),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(DeviceSettings::default()),
             Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
         }
@@ -419,7 +477,11 @@ impl Workspaces {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&partial, serde_json::to_vec_pretty(settings)?)
+        let mut file =
+            std::fs::File::create(&partial).with_context(|| format!("writing {}", partial.display()))?;
+        std::io::Write::write_all(&mut file, &serde_json::to_vec_pretty(settings)?)
+            .with_context(|| format!("writing {}", partial.display()))?;
+        file.sync_all()
             .with_context(|| format!("writing {}", partial.display()))?;
         std::fs::rename(&partial, &path).with_context(|| format!("writing {}", path.display()))
     }
@@ -497,10 +559,10 @@ impl Workspaces {
             workspace
         };
         self.pace();
-        let mut settings = self.settings()?;
-        settings.recent.retain(|id| id != workspace_id);
-        settings.recent.insert(0, workspace_id.to_owned());
-        self.save_settings(&settings)?;
+        self.update_settings(|settings| {
+            settings.recent.retain(|id| id != workspace_id);
+            settings.recent.insert(0, workspace_id.to_owned());
+        })?;
         Ok(workspace)
     }
 
@@ -523,30 +585,30 @@ impl Workspaces {
     }
 
     pub fn mute(&self, workspace_id: &str) -> Result<()> {
-        let mut settings = self.settings()?;
-        if !settings.muted.iter().any(|id| id == workspace_id) {
-            settings.muted.push(workspace_id.to_owned());
-        }
-        self.save_settings(&settings)
+        self.update_settings(|settings| {
+            if !settings.muted.iter().any(|id| id == workspace_id) {
+                settings.muted.push(workspace_id.to_owned());
+            }
+        })
     }
 
     pub fn unmute(&self, workspace_id: &str) -> Result<()> {
-        let mut settings = self.settings()?;
-        settings.muted.retain(|id| id != workspace_id);
-        self.save_settings(&settings)
+        self.update_settings(|settings| {
+            settings.muted.retain(|id| id != workspace_id);
+        })
     }
 
     /// Holds every workspace's notifications until `until_ms`.
     pub fn pause_notifications(&self, until_ms: i64) -> Result<()> {
-        let mut settings = self.settings()?;
-        settings.notifications_paused_until_ms = Some(until_ms);
-        self.save_settings(&settings)
+        self.update_settings(|settings| {
+            settings.notifications_paused_until_ms = Some(until_ms);
+        })
     }
 
     pub fn resume_notifications(&self) -> Result<()> {
-        let mut settings = self.settings()?;
-        settings.notifications_paused_until_ms = None;
-        self.save_settings(&settings)
+        self.update_settings(|settings| {
+            settings.notifications_paused_until_ms = None;
+        })
     }
 
     /// Until when notifications are paused, if they are now.

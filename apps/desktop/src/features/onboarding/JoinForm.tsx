@@ -23,7 +23,7 @@ export function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
     isCancelling.current = false;
     setAsking(true);
     try {
-      setSafetyCode(await api.safetyCode());
+      setSafetyCode(await api.safetyCode(invite));
       onReady(await api.joinWorkspace(invite, name));
     } catch (error) {
       // A join you cancelled ends in an error too; it needs no message.

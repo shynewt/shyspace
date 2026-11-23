@@ -380,3 +380,88 @@ async fn one_workspace_folder_holds_just_that_workspace() {
         .await;
     assert!(another.is_err(), "the folder holds one workspace");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stray_file_beside_the_workspace_folders_doesnt_hide_them() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    drop(
+        workspaces
+            .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+            .await
+            .unwrap(),
+    );
+    std::fs::write(device.root.path().join("app/workspaces/.DS_Store"), b"finder").unwrap();
+
+    assert_eq!(device.workspaces().list().map(|list| list.len()).unwrap(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_join_abandoned_in_the_single_folder_doesnt_stop_the_app_starting() {
+    let device = Device::new();
+    let single = device.single_folder();
+    // The join screen shows the safety code first, making an identity.
+    single.safety_code().await.unwrap();
+
+    let adopted = device.workspaces().adopt_single_folder(&single).await;
+
+    assert!(adopted.is_ok(), "{:#}", adopted.unwrap_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn leaving_in_one_folder_refuses_an_id_that_isnt_its_workspace() {
+    let device = Device::new();
+    let dir = device.root.path().join("maya");
+    let keys = device.root.path().join("keys");
+    std::fs::create_dir_all(&keys).unwrap();
+    let in_one_folder = || {
+        Workspaces::in_one_folder_with_connector(
+            &dir,
+            DeviceKeys::Files(keys.clone()),
+            connector(&device.bucket),
+        )
+    };
+    drop(
+        in_one_folder()
+            .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+            .await
+            .unwrap(),
+    );
+
+    let left = in_one_folder().leave("some-other-workspace").await;
+
+    assert!(left.is_err());
+    assert!(dir.join("workspace.json").exists(), "Acme's folder was deleted");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leave_that_cant_finish_keeps_the_workspace_and_it_opens_again() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap();
+    let workspace_id = acme.workspace_id().to_owned();
+
+    assert!(
+        workspaces.leave(&workspace_id).await.is_err(),
+        "still held elsewhere"
+    );
+    assert!(
+        workspaces
+            .folder(&workspace_id)
+            .unwrap()
+            .path
+            .join("workspace.json")
+            .exists()
+    );
+    drop(acme);
+
+    workspaces.open_all(|| Networking::Offline.into()).await.unwrap();
+
+    assert!(
+        workspaces.find(&workspace_id).is_some(),
+        "still on this device, and it opens again"
+    );
+}
