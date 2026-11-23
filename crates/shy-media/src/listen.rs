@@ -26,10 +26,12 @@ const RETRY_AFTER: Duration = Duration::from_secs(1);
 /// How often the link's route is looked at.
 const LINK_EVERY: Duration = Duration::from_secs(1);
 /// After audio that won't decode, the pause before decoding the track
-/// afresh: doubled while it keeps failing, up to the most, so a peer
-/// sending garbage costs little.
+/// afresh: doubled while it keeps failing, up to the most, and back to the
+/// least only after a while of good audio, so a peer mixing garbage into
+/// good audio costs little.
 const REDECODE_AFTER: Duration = Duration::from_millis(100);
 const REDECODE_AFTER_MOST: Duration = Duration::from_secs(2);
+const GOOD_FOR: Duration = Duration::from_secs(1);
 
 /// Plays `peer`'s voice from `path` until dropped.
 pub(crate) async fn listen<S: Speaker>(
@@ -107,6 +109,7 @@ async fn play<S: Speaker>(subscription: &Subscription, speaker: &S, voice: &mut 
     let mut current = None;
     let mut redecode_at: Option<tokio::time::Instant> = None;
     let mut redecode_after = REDECODE_AFTER;
+    let mut last_failure: Option<tokio::time::Instant> = None;
     loop {
         tokio::select! {
             snapshot = catalog.next() => {
@@ -144,7 +147,10 @@ async fn play<S: Speaker>(subscription: &Subscription, speaker: &S, voice: &mut 
                 let Some(now_playing) = playing.as_mut() else { continue };
                 match read {
                     Ok(Some(decode::Read::Frame(frame))) => {
-                        redecode_after = REDECODE_AFTER;
+                        if last_failure.is_some_and(|failed| failed.elapsed() >= GOOD_FOR) {
+                            redecode_after = REDECODE_AFTER;
+                            last_failure = None;
+                        }
                         if let Err(error) = now_playing.play(&frame.data, voice) {
                             debug!(error = %error, "a huddle peer's audio can't be played");
                         }
@@ -158,6 +164,7 @@ async fn play<S: Speaker>(subscription: &Subscription, speaker: &S, voice: &mut 
                         debug!(error = %error, "a huddle peer's audio can't be decoded; starting it again");
                         playing = None;
                         voice.stopped();
+                        last_failure = Some(tokio::time::Instant::now());
                         redecode_at = Some(tokio::time::Instant::now() + redecode_after);
                         redecode_after = (redecode_after * 2).min(REDECODE_AFTER_MOST);
                     }

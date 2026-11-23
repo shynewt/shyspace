@@ -51,12 +51,13 @@ impl<B: Backend> DeviceListing<B> {
     }
 
     /// Lists the devices and waits for the answer, within the time limit;
-    /// while an earlier listing still hangs, gives up at once.
+    /// while an earlier listing still hangs, gives up at once (and takes its
+    /// answer once it came).
     pub(crate) async fn list_now(&mut self) -> Option<DeviceList> {
         if self
             .running
             .as_ref()
-            .is_some_and(|running| running.deadline.is_none())
+            .is_some_and(|running| running.deadline.is_none() && !running.task.is_finished())
         {
             return None;
         }
