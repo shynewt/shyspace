@@ -93,10 +93,9 @@ impl CountingStore {
         }
     }
 
-    /// How many times the object at `key` was downloaded.
-    pub fn downloads_of(&self, key: &str) -> usize {
-        let fetched = self.fetched_keys.lock().unwrap();
-        fetched.iter().filter(|fetched| fetched.as_str() == key).count()
+    /// The keys of every object downloaded so far, in order.
+    pub fn fetched_keys(&self) -> Vec<String> {
+        self.fetched_keys.lock().unwrap().clone()
     }
 
     /// How many listings were made under exactly `prefix`.

@@ -18,10 +18,11 @@ const PACK_WIDTHS: [u64; 3] = [16, 256, 4096];
 const PACKED_THROUGH_META: &str = "packed_through";
 /// A segment holds a count (at most 10 bytes) before its envelopes.
 const COUNT_BYTES: u64 = 10;
-/// Chain objects that may fail before the rest of the chain is fetched one
-/// object at a time, so names planted to look like wide packs can't each
-/// waste the downloads started after them.
-const CHAIN_FAILURES_BEFORE_ONE_AT_A_TIME: usize = 3;
+/// Chain objects that may fail before the chain is given up and the rest is
+/// read in listing order, several at a time. Names planted to claim wide
+/// ranges sort last there, after the honest segments, so they can't each
+/// cost a wait or waste the downloads started after them.
+const MAX_CHAIN_FAILURES: usize = 3;
 
 /// For each boundary of 16 ops pushed past `packed_through`, in order, the
 /// aligned ranges ending there, narrowest first.
@@ -54,7 +55,7 @@ fn covering_chain(
         let next = candidates
             .iter()
             .filter(|(object, name)| {
-                !tried.contains(&object.key) && name.first <= reached.saturating_add(1) && name.last > reached
+                name.first <= reached.saturating_add(1) && name.last > reached && !tried.contains(&object.key)
             })
             .max_by_key(|(_, name)| (name.last, name.first));
         let Some((object, name)) = next else {
@@ -90,40 +91,50 @@ impl Workspace {
         Ok(pushed)
     }
 
-    /// Uploads the packs due since `packed_through`, noting each boundary
-    /// once all its packs are up, so a failed upload is retried at the next
-    /// push. A range too large for one object isn't packed: readers use its
-    /// segments.
+    /// Uploads the packs due since `packed_through`. Packs only speed up
+    /// reading, so one that fails is reported (the first error is returned)
+    /// but not tried again: readers use the narrower packs or segments it
+    /// would have covered. A bucket that refuses large uploads therefore
+    /// can't make packs pile up or stop later ones.
     pub(super) async fn upload_due_packs(&self, packed_through: u64) -> Result<()> {
         let me = self.me();
         let pushed = self.state().store.last_pushed_seq(&me)?;
+        let mut first_failure = None;
         for (boundary, ranges) in packs_due(packed_through, pushed) {
             for (first, last) in ranges {
-                let size = self.state().store.envelope_bytes_between(&me, first, last)?;
-                if COUNT_BYTES + size > MAX_OBJECT_SIZE {
-                    continue;
+                if let Err(error) = self.upload_pack(&me, first, last).await {
+                    first_failure.get_or_insert(error);
                 }
-                let envelopes = self.state().store.envelopes_between(&me, first, last)?;
-                ensure!(
-                    u64::try_from(envelopes.len())? == last - first + 1,
-                    "our own log is missing ops between {first} and {last}"
-                );
-                self.bucket()
-                    .put_segment(&envelopes)
-                    .await
-                    .with_context(|| format!("uploading the pack of our ops {first} to {last}"))?;
             }
             self.state()
                 .store
                 .set_meta(PACKED_THROUGH_META, &boundary.to_le_bytes())?;
         }
-        Ok(())
+        first_failure.map_or(Ok(()), Err)
+    }
+
+    /// Uploads our ops `first` to `last` as one segment, unless they are too
+    /// large for one object: readers then use their segments.
+    async fn upload_pack(&self, me: &PublicKey, first: u64, last: u64) -> Result<()> {
+        let size = self.state().store.envelope_bytes_between(me, first, last)?;
+        if COUNT_BYTES + size > MAX_OBJECT_SIZE {
+            return Ok(());
+        }
+        let envelopes = self.state().store.envelopes_between(me, first, last)?;
+        ensure!(
+            u64::try_from(envelopes.len())? == last - first + 1,
+            "our own log is missing ops between {first} and {last}"
+        );
+        self.bucket()
+            .put_segment(&envelopes)
+            .await
+            .with_context(|| format!("uploading the pack of our ops {first} to {last}"))
     }
 
     /// Reads `author`'s log past what we hold along the covering chain of
     /// `candidates`, before anything else is fetched. An object that doesn't
     /// settle (junk, or ops that can't apply yet) is left out and the chain
-    /// planned again from where reading got to.
+    /// planned again from where reading got to, up to `MAX_CHAIN_FAILURES`.
     pub(super) async fn read_covering_chain(
         &self,
         author: &PublicKey,
@@ -135,14 +146,11 @@ impl Workspace {
             is_stopped: false,
         };
         let mut failures = 0;
-        loop {
+        while failures < MAX_CHAIN_FAILURES {
             let held = self.state().store.last_seq(author)?;
-            let mut chain = covering_chain(held, candidates, &chain_read.tried);
-            if failures >= CHAIN_FAILURES_BEFORE_ONE_AT_A_TIME {
-                chain.truncate(1);
-            }
+            let chain = covering_chain(held, candidates, &chain_read.tried);
             if chain.is_empty() {
-                return Ok(chain_read);
+                break;
             }
             let mut fetch = self.bucket().fetch_segments(author, chain);
             while let Some(segment) = fetch.next().await? {
@@ -158,6 +166,7 @@ impl Workspace {
                 }
             }
         }
+        Ok(chain_read)
     }
 }
 
