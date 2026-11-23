@@ -2,6 +2,13 @@
 import { expect, type Page, test } from "@playwright/test";
 import type { Channel } from "../../src/lib/api";
 
+declare global {
+  interface Window {
+    /** Timed read-position saves a test held back. */
+    heldSaves?: number;
+  }
+}
+
 function log(page: Page, channel = "general") {
   return page.getByRole("log", { name: `Messages in #${channel}` });
 }
@@ -195,7 +202,25 @@ test("ten fast channel switches leave the counts equal to a recount", async ({ p
   }
 });
 
+/**
+ * Stops the read position's timed save (`SAVE_WITHIN_MS` in useReadPosition),
+ * so only leaving can save it; `window.heldSaves` counts what it held.
+ */
+async function holdTimedSaves(page: Page) {
+  await page.evaluate(() => {
+    window.heldSaves = 0;
+    window.setTimeout = new Proxy(window.setTimeout, {
+      apply(setTimeout, thisArg, [handler, delay, ...rest]) {
+        if (delay !== 300) return Reflect.apply(setTimeout, thisArg, [handler, delay, ...rest]);
+        window.heldSaves = (window.heldSaves ?? 0) + 1;
+        return Reflect.apply(setTimeout, thisArg, [() => {}, 2 ** 31 - 1]);
+      },
+    });
+  });
+}
+
 test("unread you read or cleared is saved before you leave, so a restart can't bring it back", async ({ page }) => {
+  await holdTimedSaves(page);
   await page.evaluate(() => window.fake.handle("create_channel", { name: "random" }));
   await graceSays(page, "random", "One", "Two");
   await sidebarChannel(page, /^random, 2 unread/).click();
@@ -207,14 +232,16 @@ test("unread you read or cleared is saved before you leave, so a restart can't b
   await sidebarChannel(page, /^random, 1 unread/).click();
   await expect(log(page, "random").getByText("Three")).toBeInViewport();
   await setWindowFocused(page, false);
-  await expect.poll(() => unreadIn(page, "random"), { timeout: 200 }).toBe(0);
+  await expect.poll(() => unreadIn(page, "random")).toBe(0);
 
   await setWindowFocused(page, true);
   await graceSays(page, "random", "Four");
   await setWindowFocused(page, false);
   await graceSays(page, "random", "Five");
   await page.keyboard.press("Escape");
-  await expect.poll(() => unreadIn(page, "random"), { timeout: 200 }).toBe(0);
+  await expect.poll(() => unreadIn(page, "random")).toBe(0);
+  // The timed saves were really held, so leaving is what saved.
+  expect(await page.evaluate(() => window.heldSaves)).toBeGreaterThan(0);
 });
 
 test("coming straight back to a channel you just read shows no new-messages line", async ({ page }) => {
