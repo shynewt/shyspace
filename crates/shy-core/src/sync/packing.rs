@@ -3,7 +3,7 @@
 //! few wide objects instead of one per upload. A pack is only a container:
 //! every op in it is checked like any other, and nothing is overwritten.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result, ensure};
 use iroh::PublicKey;
@@ -66,13 +66,74 @@ fn covering_chain(
     }
 }
 
+/// Splits `objects`, each reaching past `held`, into those whose part past
+/// `held` no strictly narrower ones cover, and those covered. Names only
+/// order the reading: a covered object is still read if the others turn out
+/// not to hold its ops.
+fn split_covered(
+    held: u64,
+    mut objects: Vec<(ListedObject, SegmentName)>,
+) -> (Vec<ListedObject>, Vec<(ListedObject, SegmentName)>) {
+    objects.sort_by_key(|(_, name)| name.last - name.first);
+    let mut covered_ranges = BTreeMap::new();
+    let (mut uncovered, mut covered) = (Vec::new(), Vec::new());
+    while let Some((_, narrowest)) = objects.first() {
+        let width = narrowest.last - narrowest.first;
+        let same_width = objects
+            .iter()
+            .take_while(|(_, name)| name.last - name.first == width)
+            .count();
+        let group: Vec<_> = objects.drain(..same_width).collect();
+        let ranges: Vec<(u64, u64)> = group
+            .iter()
+            .map(|(_, name)| (name.first.max(held.saturating_add(1)), name.last))
+            .collect();
+        for ((object, name), (first, last)) in group.into_iter().zip(&ranges) {
+            if is_covered(&covered_ranges, *first, *last) {
+                covered.push((object, name));
+            } else {
+                uncovered.push(object);
+            }
+        }
+        for (first, last) in ranges {
+            add_range(&mut covered_ranges, first, last);
+        }
+    }
+    uncovered.sort_by(|left, right| left.key.cmp(&right.key));
+    covered.sort_by(|(left, _), (right, _)| left.key.cmp(&right.key));
+    (uncovered, covered)
+}
+
+/// Whether `ranges` (disjoint, not touching, by first seq) cover `first..=last`.
+fn is_covered(ranges: &BTreeMap<u64, u64>, first: u64, last: u64) -> bool {
+    ranges
+        .range(..=first)
+        .next_back()
+        .is_some_and(|(_, &end)| end >= last)
+}
+
+fn add_range(ranges: &mut BTreeMap<u64, u64>, first: u64, last: u64) {
+    let (mut first, mut last) = (first, last);
+    if let Some((&start, &end)) = ranges.range(..=first).next_back()
+        && end.saturating_add(1) >= first
+    {
+        ranges.remove(&start);
+        (first, last) = (start, last.max(end));
+    }
+    while let Some((&start, &end)) = ranges.range(first..).next()
+        && start <= last.saturating_add(1)
+    {
+        ranges.remove(&start);
+        last = last.max(end);
+    }
+    ranges.insert(first, last);
+}
+
 /// What reading along the covering chain found.
 pub(super) struct ChainRead {
     pub read: SegmentsRead,
     /// Keys of the objects fetched, which the rest of the read leaves out.
     pub tried: HashSet<String>,
-    /// An op couldn't even be kept, so reading stops for this author.
-    pub is_stopped: bool,
 }
 
 impl Workspace {
@@ -143,7 +204,6 @@ impl Workspace {
         let mut chain_read = ChainRead {
             read: SegmentsRead::default(),
             tried: HashSet::new(),
-            is_stopped: false,
         };
         let mut failures = 0;
         while failures < MAX_CHAIN_FAILURES {
@@ -157,7 +217,7 @@ impl Workspace {
                 chain_read.tried.insert(segment.listed.key.clone());
                 let read = self.take_segment(author, segment, &mut chain_read.read)?;
                 if read.is_stopped {
-                    chain_read.is_stopped = true;
+                    chain_read.read.is_stopped = true;
                     return Ok(chain_read);
                 }
                 if !read.is_settled {
@@ -167,6 +227,31 @@ impl Workspace {
             }
         }
         Ok(chain_read)
+    }
+
+    /// Reads `objects` of `author`'s, each reaching past what we hold: first
+    /// those no narrower ones cover, then each covered one only if it still
+    /// holds ops we lack. Honest packs repeat what segments hold, so when the
+    /// chain was given up this reads the log about once, not several times.
+    pub(super) async fn read_rest(
+        &self,
+        author: &PublicKey,
+        objects: Vec<(ListedObject, SegmentName)>,
+    ) -> Result<SegmentsRead> {
+        let held = self.state().store.last_seq(author)?;
+        let (uncovered, covered) = split_covered(held, objects);
+        let mut read = self.read_segments(author, uncovered).await?;
+        if read.is_stopped {
+            return Ok(read);
+        }
+        let held = self.state().store.last_seq(author)?;
+        let still_needed = covered
+            .into_iter()
+            .filter(|(_, name)| name.last > held)
+            .map(|(object, _)| object)
+            .collect();
+        read.absorb(self.read_segments(author, still_needed).await?);
+        Ok(read)
     }
 }
 
@@ -198,6 +283,34 @@ mod tests {
             hash: blake3::hash(b""),
         };
         (object, name)
+    }
+
+    #[test]
+    fn objects_that_narrower_ones_cover_are_read_last() {
+        let objects = vec![
+            listed(1, 16),
+            listed(1, 3),
+            listed(4, 9),
+            listed(10, 16),
+            listed(17, 32),
+            listed(17, 20),
+            listed(1, 1_000_000),
+            listed(10, 16),
+        ];
+        let (uncovered, covered) = split_covered(0, objects);
+        let covered: Vec<_> = covered.into_iter().map(|(object, _)| object).collect();
+
+        assert_eq!(
+            keys(&uncovered),
+            ["1-1000000", "1-3", "10-16", "10-16", "17-20", "17-32", "4-9"]
+        );
+        assert_eq!(keys(&covered), ["1-16"]);
+        let (_, covered_past_held) = split_covered(5, vec![listed(1, 16), listed(6, 9), listed(10, 16)]);
+        assert_eq!(
+            covered_past_held.len(),
+            1,
+            "only the part past what is held counts"
+        );
     }
 
     fn keys(chain: &[ListedObject]) -> Vec<&str> {

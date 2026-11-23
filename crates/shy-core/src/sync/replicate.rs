@@ -29,6 +29,18 @@ pub(super) struct SegmentsRead {
     pub local_failure: Option<anyhow::Error>,
     /// The (first, last) ranges of segments read that hold exactly our log.
     pub matching: Vec<(u64, u64)>,
+    /// An op couldn't even be kept, so reading stopped for this author.
+    pub is_stopped: bool,
+}
+
+impl SegmentsRead {
+    pub(super) fn absorb(&mut self, other: SegmentsRead) {
+        self.matching.extend(other.matching);
+        if let Some(error) = other.local_failure {
+            self.local_failure.get_or_insert(error);
+        }
+        self.is_stopped |= other.is_stopped;
+    }
 }
 
 fn checked_key(author: &PublicKey) -> String {
@@ -97,18 +109,17 @@ impl Workspace {
             .list_segments(author, Some(&listing_after(author, held)))
             .await?;
         let candidates = self.named_unskipped(author, listed);
-        let chain = self.read_covering_chain(author, &candidates).await?;
-        if chain.is_stopped {
+        let mut chain = self.read_covering_chain(author, &candidates).await?;
+        if chain.read.is_stopped {
             return Ok(chain.read.local_failure);
         }
         let held = self.state().store.last_seq(author)?;
         let rest = candidates
             .into_iter()
             .filter(|(object, name)| !chain.tried.contains(&object.key) && name.last > held)
-            .map(|(object, _)| object)
             .collect();
-        let read = self.read_segments(author, rest).await?;
-        Ok(chain.read.local_failure.or(read.local_failure))
+        chain.read.absorb(self.read_rest(author, rest).await?);
+        Ok(chain.read.local_failure)
     }
 
     /// The listed objects whose names are `author`'s segments, with those
@@ -146,26 +157,33 @@ impl Workspace {
             .await?;
         let candidates = self.named_unskipped(author, listed);
         let chain = self.read_covering_chain(author, &candidates).await?;
-        let mut matching = chain.read.matching;
-        let held = self.state().store.last_seq(author)?;
-        let mut worth_fetching = Vec::new();
-        for (object, name) in candidates {
-            if chain.is_stopped || chain.tried.contains(&object.key) {
-                continue;
+        let mut read = chain.read;
+        if !read.is_stopped {
+            let held = self.state().store.last_seq(author)?;
+            let mut differing = Vec::new();
+            let mut past_held = Vec::new();
+            for (object, name) in candidates {
+                if chain.tried.contains(&object.key) {
+                    continue;
+                }
+                if name.last > held {
+                    past_held.push((object, name));
+                } else if self.is_same_as_ours(author, &name)? {
+                    read.matching.push((name.first, name.last));
+                } else {
+                    differing.push(object);
+                }
             }
-            if name.last <= held && self.is_same_as_ours(author, &name)? {
-                matching.push((name.first, name.last));
-            } else {
-                worth_fetching.push(object);
+            read.absorb(self.read_segments(author, differing).await?);
+            if !read.is_stopped {
+                read.absorb(self.read_rest(author, past_held).await?);
             }
         }
-        let read = self.read_segments(author, worth_fetching).await?;
-        matching.extend(read.matching);
-        let checked_now = checked_through(checked, matching);
+        let checked_now = checked_through(checked, read.matching);
         if checked_now > checked {
             self.save_checked(author, checked_now)?;
         }
-        Ok(chain.read.local_failure.or(read.local_failure))
+        Ok(read.local_failure)
     }
 
     /// Whether our copy of `name`'s range encodes to exactly the bytes its
@@ -255,11 +273,16 @@ impl Workspace {
 
     /// Fetches and applies `listed` segments of `author`'s. Unsettled ones
     /// are skipped for the rest of the run.
-    async fn read_segments(&self, author: &PublicKey, listed: Vec<ListedObject>) -> Result<SegmentsRead> {
+    pub(super) async fn read_segments(
+        &self,
+        author: &PublicKey,
+        listed: Vec<ListedObject>,
+    ) -> Result<SegmentsRead> {
         let mut segments = self.bucket().fetch_segments(author, listed);
         let mut read_all = SegmentsRead::default();
         while let Some(segment) = segments.next().await? {
             if self.take_segment(author, segment, &mut read_all)?.is_stopped {
+                read_all.is_stopped = true;
                 break;
             }
         }
@@ -318,50 +341,6 @@ impl Workspace {
             .set_meta(LAST_SWEEP_META, &last_ms.to_le_bytes())
             .expect("the store is writable in tests");
     }
-
-    /// Gaps not yet repaired: an author's next op went missing after we
-    /// read past it (a parked op pushed out by the cap). What was skipped of
-    /// their segments this run is fetched again. A gap counts as repaired
-    /// once a read of its author succeeds (`mark_gap_repaired`), so one the
-    /// bucket can't fill isn't read again at every pass, and one a network
-    /// error interrupted is.
-    pub(super) fn gaps_to_repair(&self) -> Result<Vec<(PublicKey, u64)>> {
-        let missing = self.state().store.authors_missing_next_op()?;
-        let repaired = self
-            .inner
-            .refetched_gaps
-            .lock()
-            .expect("gap list lock poisoned by an earlier panic")
-            .clone();
-        let mut to_repair = Vec::new();
-        for (author, next_seq) in missing {
-            if repaired.contains(&(author, next_seq)) {
-                continue;
-            }
-            warn!("op {next_seq} from {author} went missing; reading their history again");
-            let author_prefix = format!("ops/{}/", member_id(&author));
-            self.skipped_segments()
-                .retain(|listed| !listed.key.starts_with(&author_prefix));
-            to_repair.push((author, next_seq));
-        }
-        Ok(to_repair)
-    }
-
-    pub(super) fn mark_gap_repaired(&self, gap: (PublicKey, u64)) {
-        self.inner
-            .refetched_gaps
-            .lock()
-            .expect("gap list lock poisoned by an earlier panic")
-            .insert(gap);
-    }
-
-    fn skipped_segments(&self) -> std::sync::MutexGuard<'_, std::collections::HashSet<ListedObject>> {
-        self.inner
-            .skipped_segments
-            .lock()
-            .expect("skipped segments lock poisoned by an earlier panic")
-    }
-
     /// Uploads our ops that aren't in the bucket yet, in as few segments as
     /// others can still read, then any packs due (see `packing`).
     pub(crate) async fn push(&self) -> Result<()> {

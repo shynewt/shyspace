@@ -3357,3 +3357,115 @@ async fn a_forged_parked_op_doesnt_make_gap_repair_fetch_junk_again() {
     let junk_downloads = store.fetched_keys().iter().filter(|key| **key == junk).count();
     assert_eq!(junk_downloads, 1, "fetched once per run");
 }
+
+/// Three names planted as wide packs shouldn't make a newcomer fall back to
+/// downloading every honest pack as well as every segment: that is several
+/// times the bytes the log takes, more than before packs existed.
+#[tokio::test(flavor = "multi_thread")]
+async fn three_planted_names_dont_make_a_newcomer_download_every_pack_too() {
+    let (with_planted, ops_in_log) = honest_ops_downloaded_by_a_newcomer(3).await;
+    let (without, _) = honest_ops_downloaded_by_a_newcomer(0).await;
+    assert!(
+        with_planted <= ops_in_log + ops_in_log / 2,
+        "{with_planted} ops downloaded for a log of {ops_in_log} (without planted names: {without})"
+    );
+}
+
+/// How many of Bob's ops (summed over the ranges of his honest objects) a
+/// newcomer downloads with `planted` junk names claiming his whole log, and
+/// how long his log is.
+async fn honest_ops_downloaded_by_a_newcomer(planted: u8) -> (u64, u64) {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let general = channel_id(&admin, "general");
+    for number in 0..128 {
+        bob.send_message(&general, &format!("message {number}"), None)
+            .unwrap();
+        bob.push().await.unwrap();
+    }
+    admin.sync().await;
+    let mut planted_names = Vec::new();
+    for number in 0..planted {
+        let name = segment_name_for(&bob.me(), 1, 1_000_000, &[number; 16], b"other");
+        bucket.put_raw(&name, b"junk".to_vec()).await.unwrap();
+        planted_names.push(name);
+    }
+    let fetched_before = store.fetched_keys().len();
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    carol.sync().await;
+    let ops_in_log = bob.state().store.last_seq(&bob.me()).unwrap();
+    assert_eq!(carol.state().store.last_seq(&bob.me()).unwrap(), ops_in_log);
+    let downloaded = store.fetched_keys()[fetched_before..]
+        .iter()
+        .filter(|key| !planted_names.contains(key))
+        .filter_map(|key| parse_segment_name(&bob.me(), key))
+        .map(|name| name.last - name.first + 1)
+        .sum();
+    (downloaded, ops_in_log)
+}
+
+/// Once the chain is given up (here, after three names planted as wide
+/// packs), objects that narrower ones cover are read last, but names alone
+/// never leave one out: junk named as narrower segments over an honest one
+/// can't stand in for it, and the honest one is still read in the same pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_named_as_narrower_segments_cant_stand_in_for_an_honest_one() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let held = bob.state().store.last_seq(&bob.me()).unwrap();
+    for number in 0..3 {
+        bob.send_message(&general, &format!("together {number}"), None)
+            .unwrap();
+    }
+    bob.push().await.unwrap();
+    for seq in held + 1..=held + 3 {
+        let nonce = [u8::try_from(seq).unwrap(); 16];
+        let name = segment_name_for(&bob.me(), seq, seq, &nonce, b"junk");
+        bucket.put_raw(&name, b"junk".to_vec()).await.unwrap();
+    }
+    for number in 0..3u8 {
+        let name = segment_name_for(&bob.me(), 1, 1_000_000, &[200 + number; 16], b"wide");
+        bucket.put_raw(&name, b"junk".to_vec()).await.unwrap();
+    }
+
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    carol.sync().await;
+
+    assert_eq!(
+        carol.state().store.last_seq(&bob.me()).unwrap(),
+        bob.state().store.last_seq(&bob.me()).unwrap()
+    );
+}
+
+/// An op that waited for its epoch key sits in an object skipped as
+/// unsettled. Once a commit brings a new key, skipped objects are read again
+/// (junk too, once per new key), so such an op isn't left until a restart
+/// even if forged parked ops pushed every real one out.
+#[tokio::test(flavor = "multi_thread")]
+async fn skipped_objects_are_read_again_once_a_new_epoch_key_arrives() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let held = bob.state().store.last_seq(&admin.me()).unwrap();
+    let junk = segment_name_for(&admin.me(), held + 1_000, held + 1_000, &[4; 16], b"other");
+    bucket.put_raw(&junk, b"junk".to_vec()).await.unwrap();
+    let junk_downloads_by_bob = async || {
+        let before = store.fetched_keys().len();
+        bob.sync().await;
+        store.fetched_keys()[before..]
+            .iter()
+            .filter(|key| **key == junk)
+            .count()
+    };
+    assert_eq!(junk_downloads_by_bob().await, 1);
+    assert_eq!(junk_downloads_by_bob().await, 0, "skipped while nothing changes");
+
+    admin.remove_member(&dave.my_id()).await.unwrap();
+
+    assert_eq!(junk_downloads_by_bob().await, 1);
+}

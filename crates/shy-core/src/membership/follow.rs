@@ -47,6 +47,7 @@ impl Workspace {
                 state.record_epoch()?;
                 outcome
             };
+            self.forget_skipped_segments();
             if outcome.removed_self {
                 self.mark_removed();
                 self.emit(Change::Removed);
