@@ -138,6 +138,26 @@ const editorTheme = EditorView.theme({
   ".cm-md-page:hover": { backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent)" },
   ".cm-md-page-missing": { cursor: "default", color: "var(--text-muted)", backgroundColor: "var(--surface-2)" },
   ".cm-md-mention[role=button]": { cursor: "pointer" },
+  ".cm-upload": {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4em",
+    fontSize: "0.875em",
+    color: "var(--text-muted)",
+  },
+  ".cm-upload-bar": {
+    display: "inline-block",
+    width: "6em",
+    height: "2px",
+    overflow: "hidden",
+    backgroundColor: "var(--surface-2)",
+  },
+  ".cm-upload-bar > span": {
+    display: "block",
+    height: "100%",
+    transformOrigin: "left",
+    backgroundColor: "var(--accent)",
+  },
   ".cm-md-mention": {
     color: "var(--accent-text)",
     backgroundColor: "color-mix(in srgb, var(--accent) 10%, transparent)",

@@ -3,11 +3,12 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
-import { api, onChange, type PageEditorSession } from "../../lib/api";
+import { api, onChange, onFilesDropped, type PageEditorSession } from "../../lib/api";
 import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
+import { activeDropTarget, addDropTarget, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
 import { reportError, showToast } from "../../lib/toast";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
@@ -18,7 +19,9 @@ import { livePreview, setKnownMembers, setPageTitles } from "./editor/livePrevie
 import type { CardAnchor } from "./editor/openLinks";
 import { type MenuKey, type Suggestion, suggestions } from "./editor/suggestions";
 import { pageTheme } from "./editor/theme";
+import { pageUploads } from "./editor/uploads";
 import { PAGE_TEXT } from "./pageText";
+import { stagePastedForPage, uploadIntoPage } from "./pageUploads";
 import { SuggestionMenu } from "./SuggestionMenu";
 
 type OpenMemberCard = { memberId: string; anchor: CardAnchor; openedBy: "pointer" | "keyboard" };
@@ -63,6 +66,9 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
   const [memberCard, setMemberCard] = useState<OpenMemberCard | null>(null);
   const [misleadingLink, setMisleadingLink] = useState<{ text: string; url: string } | null>(null);
   const menuKeys = useRef<(key: MenuKey, view: EditorView) => boolean>(() => false);
+  const dropTarget = useId();
+  const titleRef = useRef("");
+  titleRef.current = pages.find((page) => page.id === pageId)?.title ?? "";
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -165,6 +171,19 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
             // Yjs undo only reverts your own edits, never a teammate's.
             yCollab(text, null, { undoManager }),
             pageTheme,
+            pageUploads,
+            EditorView.domEventHandlers({
+              focus: () => markDropTargetUsed(dropTarget),
+              paste: (event, editor) => {
+                const files = [...(event.clipboardData?.files ?? [])];
+                if (files.length === 0) return false;
+                event.preventDefault();
+                stagePastedForPage(files, pageId, titleRef.current)
+                  .then((staged) => uploadIntoPage(editor, pageId, staged))
+                  .catch(reportError);
+                return true;
+              },
+            }),
           ],
         }),
       });
@@ -180,7 +199,19 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
       created?.destroy();
       doc.destroy();
     };
-  }, [pageId]);
+  }, [pageId, dropTarget]);
+
+  useEffect(() => {
+    if (!view) return;
+    addDropTarget(dropTarget);
+    const stopListening = onFilesDropped((files) => {
+      if (activeDropTarget() === dropTarget) uploadIntoPage(view, pageId, files).catch(reportError);
+    });
+    return () => {
+      stopListening();
+      removeDropTarget(dropTarget);
+    };
+  }, [view, pageId, dropTarget]);
 
   useEffect(() => {
     view?.dispatch({ effects: setPageTitles.of(new Map(pages.map((page) => [page.id, page.title]))) });

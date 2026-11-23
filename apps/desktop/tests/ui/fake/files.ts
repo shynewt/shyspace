@@ -44,8 +44,11 @@ export class FakeFiles {
   pickNext: FileForTest[] = [];
   /** File ids the person saved, in order. */
   readonly saved: string[] = [];
-  /** Makes the next send fail, like a bucket that can't be reached. */
+  /** Makes the next send (or share into a page) fail, like a bucket that can't be reached. */
   failNextSend = false;
+  /** Makes the next share into a page wait until `releaseShare` is called. */
+  holdNextShare = false;
+  releaseShare: (() => void) | null = null;
 
   constructor(context: FilesContext) {
     this.context = context;
@@ -77,8 +80,14 @@ export class FakeFiles {
         );
       case "file_bytes":
         return new Uint8Array(this.find(requireString(args, "file")).bytes).buffer;
-      case "share_page_file":
-        return this.shareInPage(requireString(args, "page"), requireString(args, "token"));
+      case "share_page_file": {
+        const share = () => this.shareInPage(requireString(args, "page"), requireString(args, "token"));
+        if (!this.holdNextShare) return share();
+        this.holdNextShare = false;
+        return new Promise((resolve) => {
+          this.releaseShare = () => resolve(share());
+        });
+      }
       case "page_files":
         return this.filesOfPage(requireString(args, "page")).map((file) => this.present(file));
       case "page_file_bytes":
@@ -194,6 +203,10 @@ export class FakeFiles {
   }
 
   private shareInPage(page: string, token: string): string {
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      throw new Error("couldn't reach the bucket");
+    }
     const file = this.staged.get(token);
     if (!file) throw new Error("that file is no longer waiting to be sent");
     if (!this.context.isPage(page)) throw new Error("no such page here");

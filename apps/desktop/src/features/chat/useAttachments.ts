@@ -1,32 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, onChange, onFileDrag, onFilesDropped, type StagedFile } from "../../lib/api";
+import { activeDropTarget, addDropTarget, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { formatSize } from "../../lib/files";
 import { MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, MAX_PASTED_BYTES } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
-
-/**
- * Message boxes on screen, the one used last at the end: files dropped on
- * the window go there, and when it closes, to the one used before it.
- */
-const boxes: string[] = [];
-const activeBox = () => boxes.at(-1) ?? null;
-
-function forgetBox(box: string) {
-  const index = boxes.indexOf(box);
-  if (index !== -1) boxes.splice(index, 1);
-}
-let isFallbackListening = false;
-
-/** Drops with no message box on screen (a page, the Files view) are let go, and say why. */
-function listenForUnclaimedDrops() {
-  if (isFallbackListening) return;
-  isFallbackListening = true;
-  onFilesDropped((files) => {
-    if (activeBox() !== null) return;
-    for (const file of files) api.unstageFile(file.token).catch(reportError);
-    reportError("Open a channel or direct message to attach files.");
-  });
-}
 
 export type Upload = { sent: number; total: number };
 
@@ -43,25 +20,21 @@ export function useAttachments(channelId: string) {
   const isMounted = useRef(true);
 
   useEffect(() => {
-    listenForUnclaimedDrops();
     isMounted.current = true;
     // A box focused while mounting has already put itself last.
-    if (!boxes.includes(boxId)) boxes.unshift(boxId);
+    addDropTarget(boxId);
     return () => {
       isMounted.current = false;
-      forgetBox(boxId);
+      removeDropTarget(boxId);
       // Leaving the box lets its files go; a send already under way has its own copy.
       for (const file of stagedNow.current) api.unstageFile(file.token).catch(reportError);
     };
   }, [boxId]);
-  const markActive = useCallback(() => {
-    forgetBox(boxId);
-    boxes.push(boxId);
-  }, [boxId]);
+  const markActive = useCallback(() => markDropTargetUsed(boxId), [boxId]);
 
   const add = useCallback((files: StagedFile[]) => setStaged((current) => [...current, ...files]), []);
-  useEffect(() => onFilesDropped((files) => activeBox() === boxId && add(files)), [boxId, add]);
-  useEffect(() => onFileDrag((isDragging) => setDragTarget(isDragging && activeBox() === boxId)), [boxId]);
+  useEffect(() => onFilesDropped((files) => activeDropTarget() === boxId && add(files)), [boxId, add]);
+  useEffect(() => onFileDrag((isDragging) => setDragTarget(isDragging && activeDropTarget() === boxId)), [boxId]);
   useEffect(
     () =>
       onChange((change) => {
