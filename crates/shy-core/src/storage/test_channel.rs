@@ -42,9 +42,19 @@ impl TestChannel {
     /// Applies `op` as the same op as the last one applied, as when it
     /// arrives a second time.
     pub fn apply_again(&mut self, op: Op) {
+        self.apply_by(self.author, op);
+    }
+
+    /// Applies `op` as another member's, next after everything so far.
+    pub fn apply_as(&mut self, author: PublicKey, op: Op) {
+        self.seq += 1;
+        self.apply_by(author, op);
+    }
+
+    fn apply_by(&self, author: PublicKey, op: Op) {
         self.store
             .apply(&VerifiedOp {
-                author: self.author,
+                author,
                 seq: self.seq,
                 epoch: 1,
                 body: OpBody {

@@ -211,7 +211,12 @@ impl Store {
         .transpose()
     }
 
-    fn request_blob_removal(&self, author: &[u8], blob_id: &str, requested_by: &[u8]) -> Result<()> {
+    pub(super) fn request_blob_removal(
+        &self,
+        author: &[u8],
+        blob_id: &str,
+        requested_by: &[u8],
+    ) -> Result<()> {
         self.db.execute(
             "INSERT OR IGNORE INTO blob_removals (author, blob_id, requested_by) VALUES (?1, ?2, ?3)",
             params![author, blob_id, requested_by],
@@ -261,7 +266,66 @@ fn stored_file(row: &Row<'_>) -> rusqlite::Result<StoredFile> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{files::blob, ops::Op, storage::test_channel::TestChannel};
+    use iroh::SecretKey;
+
+    use crate::{
+        files::{SharedFile, blob},
+        ops::{Op, new_owned_id},
+        storage::test_channel::TestChannel,
+    };
+
+    fn shared_file(channel: &TestChannel, message: Option<String>) -> SharedFile {
+        let content = b"notes".to_vec();
+        SharedFile {
+            id: new_owned_id(&channel.author),
+            place: channel.id.clone(),
+            message,
+            name: "notes.txt".into(),
+            media_type: "text/plain".into(),
+            blob: blob::seal(&mut content.as_slice(), content.len() as u64, |_, _, _| Ok(())).unwrap(),
+        }
+    }
+
+    /// The delete can apply before the file: a rebuild or restore reads the
+    /// bucket in a new order. The deleter's device still removes the pieces.
+    #[test]
+    fn a_file_that_arrives_after_its_delete_still_leaves_the_bucket() {
+        let mut channel = TestChannel::new();
+        let admin = SecretKey::generate().public();
+        let file = shared_file(&channel, None);
+        let message = new_owned_id(&channel.author);
+        let file_of_message = shared_file(&channel, Some(message.clone()));
+        channel.apply_as(admin, Op::Delete { id: file.id.clone() });
+        channel.apply_as(admin, Op::Delete { id: message });
+
+        channel.apply(Op::File { file: file.clone() });
+        channel.apply(Op::File {
+            file: file_of_message.clone(),
+        });
+
+        let mut removals: Vec<(Vec<u8>, String, Vec<u8>)> = channel
+            .store
+            .blob_removals()
+            .unwrap()
+            .into_iter()
+            .map(|removal| (removal.author, removal.blob_id, removal.requested_by))
+            .collect();
+        removals.sort();
+        let bob = channel.author.as_bytes().to_vec();
+        let mut expected = vec![
+            (bob.clone(), file.blob.id, admin.as_bytes().to_vec()),
+            (bob, file_of_message.blob.id, admin.as_bytes().to_vec()),
+        ];
+        expected.sort();
+        assert_eq!(removals, expected);
+        assert!(
+            channel
+                .store
+                .files_of_message(&file_of_message.message.unwrap(), &channel.id)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn applying_a_picture_twice_changes_nothing() {

@@ -66,7 +66,7 @@ impl Store {
     /// out of order), so every member keeps the same one. A message posted
     /// into a deleted channel is marked deleted itself, so it can't later
     /// reappear elsewhere.
-    pub(super) fn has_no_effect(&self, op: &Op, seq: u64) -> Result<bool> {
+    pub(super) fn has_no_effect(&self, op: &Op, author: &[u8], seq: u64) -> Result<bool> {
         if let Op::Message { id, channel, .. } = op {
             let is_earlier_kept = self.message_seq(id)?.is_some_and(|kept| kept <= seq);
             if self.is_deleted(id)? || is_earlier_kept {
@@ -78,20 +78,20 @@ impl Store {
             }
         }
         if let Op::File { file } = op {
-            let is_earlier_kept = self.file_seq(&file.id)?.is_some_and(|kept| kept <= seq);
-            if self.is_deleted(&file.id)? || is_earlier_kept {
+            if self.file_seq(&file.id)?.is_some_and(|kept| kept <= seq) {
                 return Ok(true);
             }
-            let is_home_deleted = self.is_deleted(&file.place)?
-                || file
-                    .message
-                    .as_deref()
-                    .map(|message| self.is_deleted(message))
-                    .transpose()?
-                    .unwrap_or(false);
-            if is_home_deleted {
-                self.mark_deleted(&file.id)?;
+            if self.is_deleted(&file.id)? {
+                self.remove_late_file(&file.id, author, &file.blob.id)?;
                 return Ok(true);
+            }
+            let homes = [Some(&file.place), file.message.as_ref()];
+            for home in homes.into_iter().flatten() {
+                if self.is_deleted(home)? {
+                    self.mark_deleted(&file.id)?;
+                    self.remove_late_file(home, author, &file.blob.id)?;
+                    return Ok(true);
+                }
             }
             return Ok(false);
         }
@@ -166,7 +166,10 @@ impl Store {
     /// thing; purging every kind keeps replicas in step whatever it is.
     /// `deleter` may remove the deleted files' blobs from the bucket.
     pub(super) fn apply_delete(&self, id: &str, deleter: &[u8]) -> Result<Option<Change>> {
-        self.mark_deleted(id)?;
+        self.db.execute(
+            "INSERT OR IGNORE INTO deleted (id, deleter) VALUES (?, ?)",
+            params![id, deleter],
+        )?;
         let kind = self.item_kind(id)?;
         let message_channel = self.message_channel(id)?;
         let places_with_files = self.purge_files_of(id, deleter)?;
@@ -194,6 +197,23 @@ impl Store {
             |row| row.get(0),
         )?;
         self.index_for_search("message", id, "", &text)
+    }
+
+    /// A file that arrives after `deleted` (it or its home) was deleted: its
+    /// pieces leave the bucket through whoever deleted it, as if it had been
+    /// there then.
+    fn remove_late_file(&self, deleted: &str, author: &[u8], blob_id: &str) -> Result<()> {
+        let deleter: Option<Vec<u8>> = self
+            .db
+            .query_row("SELECT deleter FROM deleted WHERE id = ?", [deleted], |row| {
+                row.get(0)
+            })
+            .optional()?
+            .flatten();
+        if let Some(deleter) = deleter {
+            self.request_blob_removal(author, blob_id, &deleter)?;
+        }
+        Ok(())
     }
 
     pub(super) fn mark_deleted(&self, id: &str) -> Result<()> {

@@ -188,6 +188,10 @@ DELETE FROM search WHERE rowid NOT IN (SELECT search_rowid FROM search_rows);
 ",
     // Finding a message's replies walked the whole channel at every step.
     "CREATE INDEX messages_by_reply_to ON messages (reply_to, channel);",
+    // Who deleted an item, so a file that arrives after its delete (a
+    // rebuild reads in a new order) still leaves the bucket through them.
+    // Rows from before stay without one until the next rebuild.
+    "ALTER TABLE deleted ADD COLUMN deleter BLOB;",
 ];
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {

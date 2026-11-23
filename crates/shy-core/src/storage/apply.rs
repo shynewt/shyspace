@@ -118,7 +118,7 @@ impl Store {
             return Err(rule_violation("op names an id far longer than any real one"));
         }
         self.observe_lamport(lamport)?;
-        if self.has_no_effect(&verified.body.op, verified.seq)? {
+        if self.has_no_effect(&verified.body.op, verified.author.as_bytes(), verified.seq)? {
             return Ok(None);
         }
         Ok(Some(match &verified.body.op {
