@@ -1142,3 +1142,39 @@ async fn a_check_lists_each_log_once_whatever_the_reasons() {
     assert_eq!(store.listings_of(&bob_log) - listed_before, 1);
     assert!(texts(&admin, &general).contains(&"third".to_string()));
 }
+
+/// A newcomer downloads each object of the history once across joining and
+/// the passes after it: what is read is kept and then compared, not fetched
+/// again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_downloads_the_history_once_across_joining_and_the_first_passes() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let general = channel_id(&admin, "general");
+    for number in 0..40 {
+        bob.send_message(&general, &format!("message {number}"), None)
+            .unwrap();
+        bob.push().await.unwrap();
+    }
+    sync_all(&[&admin, &bob]).await;
+    let fetched_before = store.fetched_keys().len();
+
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    carol.sync().await;
+    carol.sync().await;
+
+    assert_eq!(
+        carol.state().store.last_seq(&bob.me()).unwrap(),
+        bob.state().store.last_seq(&bob.me()).unwrap()
+    );
+    let bob_log = format!("ops/{}/", crate::views::member_id(&bob.me()));
+    let fetched = &store.fetched_keys()[fetched_before..];
+    let mut downloads: std::collections::HashMap<&String, usize> = std::collections::HashMap::new();
+    for key in fetched.iter().filter(|key| key.starts_with(&bob_log)) {
+        *downloads.entry(key).or_default() += 1;
+    }
+    let repeated: Vec<_> = downloads.iter().filter(|(_, count)| **count > 1).collect();
+    assert!(repeated.is_empty(), "downloaded again: {repeated:?}");
+}
