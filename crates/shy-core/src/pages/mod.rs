@@ -4,14 +4,38 @@
 mod update_check;
 
 use anyhow::{Context, Result, ensure};
+use iroh::PublicKey;
 use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update, updates::decoder::Decode};
 
-use update_check::{ClientEnds, check_update};
+use update_check::{ClientEnds, MAX_CLIENT_ID, check_update};
 
 const CONTENT: &str = "content";
 
+const CLIENT_ID_CONTEXT: &str = "shyspace page client id v1";
+pub const CLIENT_ID_NONCE_BYTES: usize = 16;
+
+/// The Yjs client id `author` writes `page` with in an editing session that
+/// started with `nonce`. Every device can work it out from the op, so a
+/// member can't write under someone else's id: finding a nonce that lands on
+/// a given id takes about 2^53 tries.
+pub fn client_id(author: &PublicKey, page: &str, nonce: &[u8; CLIENT_ID_NONCE_BYTES]) -> u64 {
+    // The author and nonce have fixed lengths, so the page between them
+    // can't shift bytes from one into the other.
+    let mut hasher = blake3::Hasher::new_derive_key(CLIENT_ID_CONTEXT);
+    hasher.update(author.as_bytes());
+    hasher.update(page.as_bytes());
+    hasher.update(nonce);
+    let hash = hasher.finalize();
+    let mut first_bytes = [0; 8];
+    first_bytes.copy_from_slice(&hash.as_bytes()[..8]);
+    u64::from_le_bytes(first_bytes) & MAX_CLIENT_ID
+}
+
 fn load(state: Option<&[u8]>) -> Result<Doc> {
-    let doc = Doc::new();
+    load_into(Doc::new(), state)
+}
+
+fn load_into(doc: Doc, state: Option<&[u8]>) -> Result<Doc> {
     if let Some(state) = state {
         doc.transact_mut().apply_update(Update::decode_v1(state)?)?;
     }
@@ -27,13 +51,14 @@ fn text(doc: &Doc) -> String {
 }
 
 /// Applies a Yjs update from anyone to a page's state and returns the new
-/// state.
-pub fn merge(state: Option<&[u8]>, update: &[u8]) -> Result<Vec<u8>> {
+/// state. The update may only add pieces for Yjs client `client`, its
+/// author's [`client_id`].
+pub fn merge(state: Option<&[u8]>, update: &[u8], client: u64) -> Result<Vec<u8>> {
     let ends = match state {
         Some(state) => ClientEnds::of_state(state).context("reading the page state")?,
         None => ClientEnds::default(),
     };
-    check_update(update, &ends)?;
+    check_update(update, &ends, client)?;
     let doc = load(state)?;
     doc.transact_mut().apply_update(Update::decode_v1(update)?)?;
     Ok(encode(&doc))
@@ -51,8 +76,8 @@ pub struct PageMerge {
 impl PageMerge {
     /// Takes and refuses the same updates as [`merge`] would, one after
     /// another; a refused one leaves the page as it was.
-    pub fn add(&mut self, update: &[u8]) -> Result<()> {
-        let new_ends = check_update(update, &self.ends)?;
+    pub fn add(&mut self, update: &[u8], client: u64) -> Result<()> {
+        let new_ends = check_update(update, &self.ends, client)?;
         let decoded = Update::decode_v1(update)?;
         let applied = self.doc.transact_mut().apply_update(decoded);
         if let Err(error) = applied {
@@ -88,8 +113,9 @@ pub enum Edit<'a> {
     Replace { find: &'a str, with: &'a str },
 }
 
-pub fn edit(state: Option<&[u8]>, edit: Edit) -> Result<Vec<u8>> {
-    let doc = load(state)?;
+/// Makes the update for `edit`, written as Yjs client `client`.
+pub fn edit(state: Option<&[u8]>, edit: Edit, client: u64) -> Result<Vec<u8>> {
+    let doc = load_into(Doc::with_client_id(client), state)?;
     let content = doc.get_or_insert_text(CONTENT);
     let current = content.get_string(&doc.transact());
     let mut txn = doc.transact_mut();
@@ -150,19 +176,25 @@ mod tests {
 
     #[test]
     fn concurrent_edits_converge() {
-        let base = merge(None, &edit(None, Edit::Append("# Plan\n\nShip it.")).unwrap()).unwrap();
-        let ours = edit(Some(&base), Edit::Append("- step one")).unwrap();
+        let base = merge(
+            None,
+            &edit(None, Edit::Append("# Plan\n\nShip it."), 1).unwrap(),
+            1,
+        )
+        .unwrap();
+        let ours = edit(Some(&base), Edit::Append("- step one"), 2).unwrap();
         let theirs = edit(
             Some(&base),
             Edit::Replace {
                 find: "Ship it.",
                 with: "Ship it soon.",
             },
+            3,
         )
         .unwrap();
 
-        let left = merge(Some(&merge(Some(&base), &ours).unwrap()), &theirs).unwrap();
-        let right = merge(Some(&merge(Some(&base), &theirs).unwrap()), &ours).unwrap();
+        let left = merge(Some(&merge(Some(&base), &ours, 2).unwrap()), &theirs, 3).unwrap();
+        let right = merge(Some(&merge(Some(&base), &theirs, 3).unwrap()), &ours, 2).unwrap();
         assert_eq!(read(Some(&left)).unwrap(), read(Some(&right)).unwrap());
         assert_eq!(
             read(Some(&left)).unwrap(),
@@ -172,9 +204,64 @@ mod tests {
 
     #[test]
     fn replace_requires_a_unique_match() {
-        let state = merge(None, &edit(None, Edit::Append("a b a")).unwrap()).unwrap();
-        assert!(edit(Some(&state), Edit::Replace { find: "a", with: "c" }).is_err());
-        assert!(edit(Some(&state), Edit::Replace { find: "z", with: "c" }).is_err());
+        let state = merge(None, &edit(None, Edit::Append("a b a"), 1).unwrap(), 1).unwrap();
+        assert!(edit(Some(&state), Edit::Replace { find: "a", with: "c" }, 1).is_err());
+        assert!(edit(Some(&state), Edit::Replace { find: "z", with: "c" }, 1).is_err());
+    }
+
+    #[test]
+    fn client_ids_depend_on_author_page_and_nonce() {
+        let alice = iroh::SecretKey::from_bytes(&[1; 32]).public();
+        let bob = iroh::SecretKey::from_bytes(&[2; 32]).public();
+        let nonce = [7; CLIENT_ID_NONCE_BYTES];
+        let id = client_id(&alice, "page", &nonce);
+        assert_eq!(id, client_id(&alice, "page", &nonce));
+        assert!(id <= MAX_CLIENT_ID);
+        assert_ne!(id, client_id(&bob, "page", &nonce));
+        assert_ne!(id, client_id(&alice, "other page", &nonce));
+        assert_ne!(id, client_id(&alice, "page", &[8; CLIENT_ID_NONCE_BYTES]));
+    }
+
+    #[test]
+    fn a_bound_update_adds_pieces_only_for_its_own_client() {
+        let first = edit(None, Edit::Append("Hello world"), 5).unwrap();
+        assert!(merge(None, &first, 6).is_err());
+        let state = merge(None, &first, 5).unwrap();
+
+        // Another editor may delete the first one's text and write next to it.
+        let reply = edit(
+            Some(&state),
+            Edit::Replace {
+                find: "world",
+                with: "there",
+            },
+            6,
+        )
+        .unwrap();
+        let state = merge(Some(&state), &reply, 6).unwrap();
+        assert_eq!(read(Some(&state)).unwrap(), "Hello there");
+
+        let deletion_only = edit(
+            Some(&state),
+            Edit::Replace {
+                find: "Hello ",
+                with: "",
+            },
+            7,
+        )
+        .unwrap();
+        let state = merge(Some(&state), &deletion_only, 7).unwrap();
+        assert_eq!(read(Some(&state)).unwrap(), "there");
+    }
+
+    #[test]
+    fn a_bound_update_cannot_carry_two_clients() {
+        let first = edit(None, Edit::Append("one"), 5).unwrap();
+        let state = merge(None, &first, 5).unwrap();
+        let second = edit(Some(&state), Edit::Append("two"), 6).unwrap();
+        let both = yrs::merge_updates_v1([first.as_slice(), second.as_slice()]).unwrap();
+        assert!(merge(None, &both, 5).is_err());
+        assert!(merge(None, &both, 6).is_err());
     }
 
     #[test]

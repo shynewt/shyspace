@@ -6,7 +6,7 @@ import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view
 import { useEffect, useRef, useState } from "react";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
-import { api, onChange } from "../../lib/api";
+import { api, onChange, type PageEditorSession } from "../../lib/api";
 import { useMembers } from "../../lib/members";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
@@ -23,6 +23,10 @@ type OpenMemberCard = { memberId: string; anchor: CardAnchor; openedBy: "pointer
 
 /** Local keystrokes are batched before being sealed and sent. */
 const SEND_DELAY_MS = 120;
+/** A long-open editor gets a fresh client id this often, which limits how long anyone has to find a nonce that lands on it. */
+const SESSION_RENEW_MS = 24 * 60 * 60 * 1000;
+/** A due renewal waits while you're typing, checking again this often. */
+const RENEW_RETRY_MS = 60 * 1000;
 const REMOTE = "remote";
 
 /**
@@ -40,18 +44,18 @@ export function Editor({ pageId }: { pageId: string }) {
       }),
     [pageId],
   );
-  return <PageEditor key={resets} pageId={pageId} onSaveFailed={() => setResets((count) => count + 1)} />;
+  return <PageEditor key={resets} pageId={pageId} restart={() => setResets((count) => count + 1)} />;
 }
 
-/** `onSaveFailed` must start a fresh editor from the saved page. */
-function PageEditor({ pageId, onSaveFailed }: { pageId: string; onSaveFailed: () => void }) {
+/** `restart` must start a fresh editor, with a new session, from the saved page. */
+function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const { pages, navigate } = useWorkspace();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
-  const onSaveFailedRef = useRef(onSaveFailed);
-  onSaveFailedRef.current = onSaveFailed;
+  const restartRef = useRef(restart);
+  restartRef.current = restart;
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const members = useMembers();
   const [memberCard, setMemberCard] = useState<OpenMemberCard | null>(null);
@@ -60,31 +64,56 @@ function PageEditor({ pageId, onSaveFailed }: { pageId: string; onSaveFailed: ()
   useEffect(() => {
     const doc = new Y.Doc();
     const text = doc.getText(PAGE_TEXT);
+    let session: PageEditorSession | undefined;
     let pending: Uint8Array[] = [];
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Later updates build on earlier ones, so nobody else could apply them
     // without those: updates go out one at a time, and once one fails this
     // doc sends nothing more and a fresh editor starts from the saved page.
     let isSending = false;
-    let hasFailed = false;
+    let hasStopped = false;
+    const startOver = () => {
+      hasStopped = true;
+      restartRef.current();
+    };
     const flush = () => {
       timer = undefined;
-      if (pending.length === 0 || isSending || hasFailed) return;
+      if (pending.length === 0 || isSending || hasStopped || !session) return;
+      // Yjs picks a new client id when a remote update uses this doc's own;
+      // edits under it would be refused, so start over with a new session.
+      if (doc.clientID !== session.client_id) {
+        reportError(
+          new Error(
+            "Your last change clashed with another edit and wasn't saved, so the page was reloaded. Please make it again.",
+          ),
+        );
+        startOver();
+        return;
+      }
       const update = Y.mergeUpdates(pending);
       pending = [];
       isSending = true;
-      api.applyDocUpdate(pageId, update).then(
+      api.applyDocUpdate(pageId, session.nonce, update).then(
         () => {
           isSending = false;
           flush();
         },
         (error: unknown) => {
-          hasFailed = true;
           reportError(error);
-          onSaveFailedRef.current();
+          startOver();
         },
       );
     };
+    let created: EditorView | undefined;
+    // Restarting drops the cursor and undo history, so it waits until you're
+    // not in the editor and nothing is being saved.
+    let renewal = setTimeout(function renew() {
+      if (pending.length > 0 || isSending || created?.hasFocus) {
+        renewal = setTimeout(renew, RENEW_RETRY_MS);
+        return;
+      }
+      startOver();
+    }, SESSION_RENEW_MS);
     doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === REMOTE) return;
       pending.push(update);
@@ -96,10 +125,11 @@ function PageEditor({ pageId, onSaveFailed }: { pageId: string; onSaveFailed: ()
       if (change.kind === "doc" && change.page === pageId) Y.applyUpdate(doc, Uint8Array.from(change.update), REMOTE);
     });
 
-    let created: EditorView | undefined;
     let disposed = false;
-    api.pageState(pageId).then((state) => {
+    Promise.all([api.pageEditorSession(pageId), api.pageState(pageId)]).then(([started, state]) => {
       if (disposed || !host.current) return;
+      session = started;
+      doc.clientID = started.client_id;
       if (state.length > 0) Y.applyUpdate(doc, state, REMOTE);
       const undoManager = new Y.UndoManager(text);
       created = new EditorView({
@@ -136,6 +166,7 @@ function PageEditor({ pageId, onSaveFailed }: { pageId: string; onSaveFailed: ()
       disposed = true;
       unsubscribe();
       if (timer) clearTimeout(timer);
+      clearTimeout(renewal);
       flush();
       created?.destroy();
       doc.destroy();

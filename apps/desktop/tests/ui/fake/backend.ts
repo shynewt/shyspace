@@ -16,6 +16,7 @@ import type {
   MemberStatus,
   MessageCursor,
   Page,
+  PageEditorSession,
   ProfileDetails,
   ProtectionCheck,
   SectionSort,
@@ -60,6 +61,10 @@ export class FakeBackend {
   private pendingJoin: { approve: () => void; cancel: () => void } | null = null;
   private members: Member[] = [];
   private pages: StoredPage[] = [];
+  /** Each page editor session's page and Yjs client id, by its nonce. */
+  private editorSessions = new Map<string, { page: string; client: number }>();
+  /** The client id of the editor session started last. */
+  latestEditorClient: number | null = null;
   private chat = new FakeChat({
     me: () => this.me(),
     isAdmin: () => Boolean(this.session?.is_admin),
@@ -305,6 +310,22 @@ export class FakeBackend {
     this.notify({ kind: "doc", page: page.id, update: Array.from(update) });
   }
 
+  /** Another member's edit written under your editor's client id, as a forged update would be. */
+  receiveEditUnderMyEditorsId(title: string, insert: string): void {
+    const page = this.pageTitled(title);
+    if (this.latestEditorClient === null) throw new Error("fake backend: no editor session yet");
+    const forged = new Y.Doc();
+    Y.applyUpdate(forged, Y.encodeStateAsUpdate(page.doc));
+    // Set after loading: Yjs drops a client id it finds in an update it receives.
+    forged.clientID = this.latestEditorClient;
+    const before = Y.encodeStateVector(forged);
+    const text = forged.getText("content");
+    text.insert(text.length, insert);
+    const update = Y.encodeStateAsUpdate(forged, before);
+    Y.applyUpdate(page.doc, update);
+    this.notify({ kind: "doc", page: page.id, update: Array.from(update) });
+  }
+
   private pageTitled(title: string): StoredPage {
     const page = this.pages.find((candidate) => candidate.title === title);
     if (!page) throw new Error(`fake backend: no page titled "${title}"`);
@@ -477,8 +498,14 @@ export class FakeBackend {
         return this.renamePage(requireString(args, "page"), requireString(args, "title"));
       case "page_state":
         return Y.encodeStateAsUpdate(this.page(requireString(args, "page")).doc);
+      case "page_editor_session":
+        return this.pageEditorSession(requireString(args, "page"));
       case "apply_doc_update":
-        return this.applyDocUpdate(requireString(args, "page"), argument(args, "update") as number[]);
+        return this.applyDocUpdate(
+          requireString(args, "page"),
+          requireString(args, "nonce"),
+          argument(args, "update") as number[],
+        );
       case "members":
         return this.members;
       case "remove_member":
@@ -644,9 +671,25 @@ export class FakeBackend {
     this.notify({ kind: "pages" });
   }
 
-  private applyDocUpdate(id: string, update: number[]): void {
+  private pageEditorSession(page: string): PageEditorSession {
+    const session = { client_id: Number.parseInt(randomHex(6), 16), nonce: randomHex(16) };
+    this.editorSessions.set(session.nonce, { page, client: session.client_id });
+    this.latestEditorClient = session.client_id;
+    return session;
+  }
+
+  /** Like the core, takes pieces only for the session's own client id. */
+  private applyDocUpdate(id: string, nonce: string, update: number[]): void {
+    const session = this.editorSessions.get(nonce);
+    // The core binds a client id to its page too, so another page's nonce gives another id.
+    if (session?.page !== id) throw new Error("fake backend: no editor session for this page");
+    const { client } = session;
+    const bytes = Uint8Array.from(update);
+    if (Y.decodeUpdate(bytes).structs.some((struct) => struct.id.client !== client)) {
+      throw new Error("damaged page update: page update adds pieces for another editor's client id");
+    }
     const page = this.page(id);
-    Y.applyUpdate(page.doc, Uint8Array.from(update));
+    Y.applyUpdate(page.doc, bytes);
     page.updated_ms = Date.now();
     this.tick();
     this.notify({ kind: "doc", page: id, update });

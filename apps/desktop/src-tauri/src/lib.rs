@@ -15,8 +15,8 @@ use shy_core::{
     sync::SyncStatus,
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
-        Page, PrivateMembers, ProtectionCheck, SearchHit, SectionSort, SidebarSection, StatusUpdate,
-        StorageSettings,
+        Page, PageEditorSession, PrivateMembers, ProtectionCheck, SearchHit, SectionSort, SidebarSection,
+        StatusUpdate, StorageSettings,
     },
     workspace::StorageUpdate,
 };
@@ -667,10 +667,20 @@ async fn page_state(state: State<'_, AppState>, page: String) -> CommandResult<R
 }
 
 #[tauri::command]
-async fn apply_doc_update(state: State<'_, AppState>, page: String, update: Vec<u8>) -> CommandResult<()> {
+async fn page_editor_session(state: State<'_, AppState>, page: String) -> CommandResult<PageEditorSession> {
+    Ok(current(&state).await?.page_editor_session(&page))
+}
+
+#[tauri::command]
+async fn apply_doc_update(
+    state: State<'_, AppState>,
+    page: String,
+    nonce: String,
+    update: Vec<u8>,
+) -> CommandResult<()> {
     current(&state)
         .await?
-        .apply_doc_update(&page, update)
+        .apply_doc_update(&page, &nonce, update)
         .map_err(failed)
 }
 
@@ -872,6 +882,7 @@ pub fn run() {
             rename_page,
             delete_page,
             page_state,
+            page_editor_session,
             apply_doc_update,
             members,
             remove_member,

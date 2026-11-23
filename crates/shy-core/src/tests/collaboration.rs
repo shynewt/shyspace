@@ -595,6 +595,7 @@ async fn a_rule_broken_halfway_leaves_nothing_in_a_downloaded_segment() {
         forger.seal(message("before")),
         forger.seal(crate::ops::Op::DocUpdate {
             page: page.clone(),
+            nonce: NONCE,
             update: b"not a page update".to_vec(),
         }),
         forger.seal(message("after")),

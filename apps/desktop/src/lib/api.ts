@@ -108,6 +108,8 @@ export type Page = {
   can_delete: boolean;
   is_saved: boolean;
 };
+/** One editing session's Yjs client id, bound to this member; `nonce` goes back with each of its updates. */
+export type PageEditorSession = { client_id: number; nonce: string };
 export type PresenceState = "online" | "away" | "unreachable";
 export type MemberStatus = { emoji: string; text: string; until_ms: number | null; alerts: NotifyLevel };
 /** One working interval in their time zone. `days`: bit 0 is Monday, bit 6 Sunday. An end not after the start crosses midnight. */
@@ -299,8 +301,9 @@ export const api = {
   renamePage: (page: string, title: string) => invoke<void>("rename_page", { page, title }),
   deletePage: (page: string) => invoke<void>("delete_page", { page }),
   pageState: async (page: string) => new Uint8Array(await invoke<ArrayBuffer>("page_state", { page })),
-  applyDocUpdate: (page: string, update: Uint8Array) =>
-    invoke<void>("apply_doc_update", { page, update: Array.from(update) }),
+  pageEditorSession: (page: string) => invoke<PageEditorSession>("page_editor_session", { page }),
+  applyDocUpdate: (page: string, nonce: string, update: Uint8Array) =>
+    invoke<void>("apply_doc_update", { page, nonce, update: Array.from(update) }),
   members: () => invoke<Member[]>("members"),
   setProfile: (name: string) => invoke<void>("set_profile", { name }),
   setProfileDetails: (details: ProfileDetails) => invoke<void>("set_profile_details", { details }),

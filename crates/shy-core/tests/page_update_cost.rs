@@ -94,7 +94,7 @@ fn a_long_run_of_typed_pieces_merges_in_linear_memory() {
 
     reset_peak_resident_bytes();
     let before = peak_resident_bytes();
-    let state = merge(None, &typed_one_after_another).expect("the update is accepted");
+    let state = merge(None, &typed_one_after_another, CLIENT).expect("the update is accepted");
     let grown = peak_resident_bytes().saturating_sub(before);
 
     // yrs 0.28.1 needed about 0.9 GB here: every join copied all the text
@@ -122,7 +122,7 @@ fn time_to_merge(update: &[u8], characters: u64) -> Duration {
 
 fn time_to_merge_into(page: Option<&[u8]>, update: &[u8], characters: u64) -> Duration {
     let started = Instant::now();
-    let state = merge(page, update).expect("the update is accepted");
+    let state = merge(page, update, CLIENT).expect("the update is accepted");
     let took = started.elapsed();
     assert_eq!(
         read(Some(&state)).expect("the page reads").len(),
@@ -203,7 +203,7 @@ fn deletions_that_split_many_pieces_merge_in_linear_time() {
     let pieces = 280_000;
     // Two characters each, each typed at the start of the page, so none join.
     let typed = typed_pieces(pieces, b"ab", |clock| (None, Some(clock - 2)));
-    let page = merge(None, &typed).expect("the update is accepted");
+    let page = merge(None, &typed, CLIENT).expect("the update is accepted");
     let deletions = 100_000;
     // One character of every other piece, so each deletion splits a piece.
     let splitting = deleting(&(0..deletions).map(|piece| (4 * piece + 1, 1)).collect::<Vec<_>>());
@@ -239,8 +239,8 @@ fn deletions_inside_one_long_piece_merge_in_linear_time() {
     // page, so none join.
     let short = vec![b'a'; piece_length as usize];
     let typed = typed_pieces(deletions, &short, |clock| (None, Some(clock - piece_length)));
-    let long_page = merge(None, &pasted).expect("the update is accepted");
-    let short_page = merge(None, &typed).expect("the update is accepted");
+    let long_page = merge(None, &pasted, CLIENT).expect("the update is accepted");
+    let short_page = merge(None, &typed, CLIENT).expect("the update is accepted");
     // One character inside every stretch of `piece_length`.
     let ranges: Vec<(u64, u64)> = (0..deletions)
         .map(|stretch| (stretch * piece_length + 1, 1))
@@ -293,13 +293,13 @@ fn small_deletions_cost_nothing_for_text_they_leave_alone() {
         .collect();
     let time_to_replay = |with_long_piece: bool| {
         let mut replay = PageMerge::default();
-        replay.add(&short).expect("the update is accepted");
+        replay.add(&short, CLIENT).expect("the update is accepted");
         if with_long_piece {
-            replay.add(&long).expect("the update is accepted");
+            replay.add(&long, CLIENT).expect("the update is accepted");
         }
         let started = Instant::now();
         for deletion in &deletions {
-            replay.add(deletion).expect("the update is accepted");
+            replay.add(deletion, CLIENT).expect("the update is accepted");
         }
         started.elapsed()
     };

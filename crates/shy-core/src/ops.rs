@@ -74,8 +74,12 @@ pub enum Op {
         id: EntityId,
         title: String,
     },
+    /// A Yjs update from one page editing session. It may only add pieces
+    /// for Yjs client `pages::client_id(author, page, nonce)`, so nobody can
+    /// write under someone else's editor.
     DocUpdate {
         page: EntityId,
+        nonce: [u8; crate::pages::CLIENT_ID_NONCE_BYTES],
         update: Vec<u8>,
     },
     /// New bucket settings (for example rotated keys). Admin only; members

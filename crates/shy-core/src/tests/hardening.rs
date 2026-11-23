@@ -282,11 +282,12 @@ async fn ops_applied_just_before_a_removal_arrives_are_undone() {
     // a new message, a delete of his earlier one, and a page edit.
     let mut forger = Forger::new(&bob);
     let last_word = crate::ops::new_owned_id(&bob.me());
-    let late_edit = crate::pages::edit(
+    let late_edit = page_update(
+        &bob,
+        &page,
         carol.page_state(&page).unwrap().as_deref(),
         crate::Edit::Append("SNEAKED-INTO-PAGE"),
-    )
-    .unwrap();
+    );
     for op in [
         Op::Message {
             id: last_word.clone(),
@@ -295,10 +296,7 @@ async fn ops_applied_just_before_a_removal_arrives_are_undone() {
             reply_to: None,
         },
         Op::Delete { id: earlier.clone() },
-        Op::DocUpdate {
-            page: page.clone(),
-            update: late_edit,
-        },
+        late_edit,
     ] {
         carol.receive(forger.seal(op)).unwrap();
     }
@@ -344,6 +342,7 @@ async fn a_damaged_page_update_cannot_stop_a_device_following_a_removal() {
     // Planted earlier, so it is part of Bob's log that everyone keeps.
     let damaged = forger.seal(Op::DocUpdate {
         page: crate::ops::new_owned_id(&bob.me()),
+        nonce: NONCE,
         update: b"not a yjs update".to_vec(),
     });
     for member in [&admin, &carol] {
@@ -403,6 +402,7 @@ async fn crafted_page_updates_cannot_crash_or_exhaust_a_device() {
         admin
             .receive(forger.seal(Op::DocUpdate {
                 page: page.clone(),
+                nonce: NONCE,
                 update,
             }))
             .unwrap();
@@ -410,13 +410,13 @@ async fn crafted_page_updates_cannot_crash_or_exhaust_a_device() {
     assert_eq!(admin.page_text(&page).unwrap(), before);
 
     let state = admin.page_state(&page).unwrap();
-    let honest = crate::pages::edit(state.as_deref(), crate::pages::Edit::Append("still editable")).unwrap();
-    admin
-        .receive(forger.seal(Op::DocUpdate {
-            page: page.clone(),
-            update: honest,
-        }))
-        .unwrap();
+    let honest = page_update(
+        &bob,
+        &page,
+        state.as_deref(),
+        crate::pages::Edit::Append("still editable"),
+    );
+    admin.receive(forger.seal(honest)).unwrap();
     assert!(admin.page_text(&page).unwrap().ends_with("still editable"));
 }
 
@@ -425,11 +425,16 @@ async fn page_updates_kept_before_the_page_rules_are_dropped_once() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let page = admin.pages().unwrap()[0].id.clone();
     let state = admin.page_state(&page).unwrap();
-    let mut with_trailing_bytes =
-        crate::pages::edit(state.as_deref(), crate::pages::Edit::Append("PLANTED")).unwrap();
+    let mut with_trailing_bytes = page_update_bytes(
+        &bob,
+        &page,
+        state.as_deref(),
+        crate::pages::Edit::Append("PLANTED"),
+    );
     with_trailing_bytes.push(0);
     let kept = Forger::new(&bob).seal(Op::DocUpdate {
         page: page.clone(),
+        nonce: NONCE,
         update: with_trailing_bytes,
     });
     admin.state().store.insert_applied(&kept, true).unwrap();
@@ -2740,16 +2745,9 @@ async fn claimed_times_cant_date_a_message_ahead_or_reorder_lists() {
     let made_second = crate::ops::new_owned_id(&bob.me());
     let page = admin.pages().unwrap()[0].id.clone();
     let state = admin.page_state(&page).unwrap();
-    let page_edit = crate::pages::edit(state.as_deref(), crate::pages::Edit::Append("later")).unwrap();
+    let page_edit = page_update(&bob, &page, state.as_deref(), crate::pages::Edit::Append("later"));
     let ops = [
-        seal(
-            9_003,
-            a_year_ahead,
-            Op::DocUpdate {
-                page: page.clone(),
-                update: page_edit,
-            },
-        ),
+        seal(9_003, a_year_ahead, page_edit),
         seal(
             9_000,
             a_year_ahead,
@@ -2956,4 +2954,56 @@ async fn heads_of_strangers_are_not_read() {
         "{}",
         store.requests().since(&before)
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn members_cannot_write_under_another_editors_client_id() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    let page = admin.pages().unwrap()[0].id.clone();
+    let state = admin.page_state(&page).unwrap();
+
+    // Bob's editor writes " good"; Carol writes " EVIL" at the same place
+    // under Bob's client id, with a nonce of her own and with Bob's.
+    let session = bob.page_editor_session(&page);
+    let bobs_nonce: [u8; 16] = hex::decode(&session.nonce).unwrap().try_into().unwrap();
+    let edit = |text: &str| {
+        crate::pages::edit(state.as_deref(), crate::Edit::Append(text), session.client_id).unwrap()
+    };
+    let good = Forger::new(&bob).seal(Op::DocUpdate {
+        page: page.clone(),
+        nonce: bobs_nonce,
+        update: edit(" good"),
+    });
+    let mut forger = Forger::new(&carol);
+    let with_her_nonce = forger.seal(Op::DocUpdate {
+        page: page.clone(),
+        nonce: [9; 16],
+        update: edit(" EVIL"),
+    });
+    let with_his_nonce = forger.seal(Op::DocUpdate {
+        page: page.clone(),
+        nonce: bobs_nonce,
+        update: edit(" EVIL"),
+    });
+
+    for envelope in [&with_her_nonce, &with_his_nonce, &good] {
+        admin.receive(envelope.clone()).unwrap();
+    }
+    for envelope in [&good, &with_her_nonce, &with_his_nonce] {
+        dave.receive(envelope.clone()).unwrap();
+    }
+    let text = admin.page_text(&page).unwrap();
+    assert!(text.ends_with(" good"), "{text}");
+    assert!(!text.contains("EVIL"));
+    assert_eq!(dave.page_text(&page).unwrap(), text);
+
+    // A rebuild judges them the same way, even kept whole in the log.
+    for envelope in [&with_her_nonce, &with_his_nonce] {
+        admin.state().store.insert_applied(envelope, true).unwrap();
+    }
+    admin.state().store.rebuild_views(admin.apply_context()).unwrap();
+    assert_eq!(admin.page_text(&page).unwrap(), text);
 }

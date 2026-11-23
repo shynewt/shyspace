@@ -12,7 +12,7 @@ use tracing::warn;
 use super::{ApplyContext, Settling, Store};
 use crate::{
     ops::{MAX_ID_CHARS, MAX_STORED_NUMBER, Op, RuleViolation, VerifiedOp},
-    pages::PageMerge,
+    pages::{self, PageMerge},
     private::ids::is_private_id,
     views::Change,
 };
@@ -159,8 +159,10 @@ impl Store {
                 continue;
             };
             match &verified.body.op {
-                Op::DocUpdate { page, update } => {
-                    self.gather_page_update(&mut pages, page, update, super::apply::shown_time(&verified)?)?;
+                Op::DocUpdate { page, nonce, update } => {
+                    let client = pages::client_id(&verified.author, page, nonce);
+                    let timestamp_ms = super::apply::shown_time(&verified)?;
+                    self.gather_page_update(&mut pages, page, update, client, timestamp_ms)?;
                 }
                 _ => self.replay(&verified, context)?,
             }
@@ -211,6 +213,7 @@ impl Store {
         pages: &mut HashMap<String, PageReplay>,
         page: &str,
         update: &[u8],
+        client: u64,
         timestamp_ms: i64,
     ) -> Result<()> {
         // The rules apply_permitted holds ordinary ops to, for page updates
@@ -219,7 +222,7 @@ impl Store {
             return Ok(());
         }
         let mut replay = pages.remove(page).unwrap_or_default();
-        let added = replay.merge.add(update);
+        let added = replay.merge.add(update, client);
         if added.is_ok() {
             replay.updated_ms = replay.updated_ms.max(timestamp_ms);
         }

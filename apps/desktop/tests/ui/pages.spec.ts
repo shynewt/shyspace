@@ -82,6 +82,55 @@ test("edits typed while a save is still going out wait for it, and are dropped i
   expect(await sends.evaluate((held) => held.count)).toBe(1);
 });
 
+test("an edit under this editor's client id from someone else reloads the page with a new one", async ({ page }) => {
+  await page.goto("");
+  await page.getByRole("button", { name: "New page" }).click();
+  const title = page.getByLabel("Page title");
+  await title.fill("Notes");
+  await title.press("Enter");
+  await page.locator(".cm-content").click();
+  await page.keyboard.type("mine");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Notes"))).toBe("mine");
+  const firstClient = await page.evaluate(() => window.fake.latestEditorClient);
+
+  await page.evaluate(() => window.fake.receiveEditUnderMyEditorsId("Notes", " forged"));
+  await expect(page.locator(".cm-content")).toHaveText("mine forged");
+  await page.keyboard.type(" lost");
+
+  await expect(page.getByText("Your last change clashed with another edit")).toBeVisible();
+  await expect(page.locator(".cm-content")).toHaveText("mine forged");
+  expect(await page.evaluate(() => window.fake.pageText("Notes"))).toBe("mine forged");
+  await expect.poll(() => page.evaluate(() => window.fake.latestEditorClient)).not.toBe(firstClient);
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" again");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Notes"))).toBe("mine forged again");
+});
+
+test("a long-open editor renews its client id only once you're out of it", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("");
+  await page.getByRole("button", { name: "New page" }).click();
+  const title = page.getByLabel("Page title");
+  await title.fill("Notes");
+  await title.press("Enter");
+  await page.locator(".cm-content").click();
+  await page.keyboard.type("still typing");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Notes"))).toBe("still typing");
+  const firstClient = await page.evaluate(() => window.fake.latestEditorClient);
+
+  await page.clock.fastForward("25:00:00");
+  await page.keyboard.type(" a day later");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Notes"))).toBe("still typing a day later");
+  expect(await page.evaluate(() => window.fake.latestEditorClient)).toBe(firstClient);
+  await expect(page.locator(".cm-content")).toBeFocused();
+
+  await title.click();
+  await page.clock.fastForward("00:02:00");
+  await expect.poll(() => page.evaluate(() => window.fake.latestEditorClient)).not.toBe(firstClient);
+  await expect(page.locator(".cm-content")).toHaveText("still typing a day later");
+});
+
 test("the header shows the page's path, and each part opens", async ({ page }) => {
   await page.goto("");
   await page.evaluate(() => {

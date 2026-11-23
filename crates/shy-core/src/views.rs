@@ -234,6 +234,15 @@ pub struct Page {
     pub is_saved: bool,
 }
 
+/// One editing session's Yjs client id, and the nonce that proves it is
+/// this member's.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PageEditorSession {
+    pub client_id: u64,
+    /// Hex; sent back with each update of the session.
+    pub nonce: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Member {
     pub id: String,

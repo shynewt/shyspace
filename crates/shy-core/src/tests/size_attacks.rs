@@ -5,7 +5,7 @@ use super::support::*;
 use crate::{
     Workspace,
     ops::{Envelope, MAX_ID_CHARS, MAX_MESSAGE_CHARS, MAX_OP_BYTES, MAX_PAGE_UPDATE_BYTES, Op, new_owned_id},
-    pages::{self, Edit},
+    pages::Edit,
     private::{
         crypto::{CHANNEL_KEY_LEN, Granting, SealedPayload, new_sealing_key_pair, wrap_key},
         ids::MAX_DM_MEMBERS,
@@ -147,16 +147,13 @@ async fn an_oversized_page_update_is_refused_and_later_edits_still_apply() {
     let page = admin.create_page("Notes", None).unwrap();
     sync_all(&[&admin, &bob]).await;
     let mut forger = Forger::new(&bob);
-    let huge = pages::edit(None, Edit::Append(&"y".repeat(MAX_PAGE_UPDATE_BYTES))).unwrap();
-    let huge = forger.seal(Op::DocUpdate {
-        page: page.clone(),
-        update: huge,
-    });
-    let small = pages::edit(None, Edit::Append("small edit")).unwrap();
-    let small = forger.seal(Op::DocUpdate {
-        page: page.clone(),
-        update: small,
-    });
+    let huge = forger.seal(page_update(
+        &bob,
+        &page,
+        None,
+        Edit::Append(&"y".repeat(MAX_PAGE_UPDATE_BYTES)),
+    ));
+    let small = forger.seal(page_update(&bob, &page, None, Edit::Append("small edit")));
 
     admin.receive(huge.clone()).unwrap();
     admin.receive(small).unwrap();

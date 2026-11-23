@@ -10,6 +10,7 @@ use crate::{
     BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace, crypto,
     membership::invite::{Invite, JoinMailbox},
     ops::{Envelope, Op, OpBody, now_ms},
+    pages::{self, CLIENT_ID_NONCE_BYTES, Edit},
     private::{
         self,
         crypto::Slot,
@@ -281,5 +282,24 @@ pub fn encrypted_again(envelope: &Envelope, epoch_key: &crypto::EpochKey, extra:
         nonce: nonce.into(),
         ciphertext,
         ..envelope.clone()
+    }
+}
+
+/// A nonce for an editor session; `page_update` uses this one.
+pub const NONCE: [u8; CLIENT_ID_NONCE_BYTES] = [7; CLIENT_ID_NONCE_BYTES];
+
+/// The bytes of `author`'s update making `edit` to `state`, written as the
+/// Yjs client [`NONCE`] binds to them on `page`.
+pub fn page_update_bytes(author: &Workspace, page: &str, state: Option<&[u8]>, edit: Edit) -> Vec<u8> {
+    pages::edit(state, edit, pages::client_id(&author.me(), page, &NONCE)).unwrap()
+}
+
+/// `author`'s page update making `edit` to `state`, as their editor would
+/// send it.
+pub fn page_update(author: &Workspace, page: &str, state: Option<&[u8]>, edit: Edit) -> Op {
+    Op::DocUpdate {
+        page: page.to_owned(),
+        nonce: NONCE,
+        update: page_update_bytes(author, page, state, edit),
     }
 }

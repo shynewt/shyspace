@@ -27,7 +27,7 @@ const DELETED: u8 = 1;
 const STRING: u8 = 4;
 const PARENT_IS_NAMED: u64 = 1;
 /// yrs keeps client ids in 53 bits (JavaScript's safe integers).
-const MAX_CLIENT_ID: u64 = (1 << 53) - 1;
+pub(super) const MAX_CLIENT_ID: u64 = (1 << 53) - 1;
 /// yrs panics on pieces past clock 2^31, though it stores clocks in 32
 /// bits. A client's clock grows by one per character it ever wrote, so
 /// honest editors stay far below this.
@@ -78,11 +78,17 @@ impl ClientEnds {
 
 /// Fails, saying why, unless `update` only appends text or deleted text to
 /// the page's text, each client's pieces right after its last ones in
-/// `ends`, with a well-formed list of deletions. Returns the clients' new
+/// `ends`, with a well-formed list of deletions, and adds pieces only for
+/// Yjs client `client`. Its pieces may still name any client's as
+/// neighbours, and it may delete anyone's text. Returns the clients' new
 /// ends, to record once the update applies.
-pub(super) fn check_update(update: &[u8], ends: &ClientEnds) -> Result<Vec<(u64, u32)>> {
+pub(super) fn check_update(update: &[u8], ends: &ClientEnds, client: u64) -> Result<Vec<(u64, u32)>> {
     let mut reader = UpdateReader::new(update);
     let new_ends = reader.blocks(ends).context("page update blocks")?;
+    ensure!(
+        new_ends.iter().all(|&(written, _)| written == client),
+        "page update adds pieces for another editor's client id"
+    );
     reader.delete_set().context("page update deletions")?;
     ensure!(reader.remaining() == 0, "page update has bytes after its end");
     Ok(new_ends)
@@ -287,14 +293,62 @@ mod tests {
         update
     }
 
+    /// The client an update adds pieces for first, as if its author were
+    /// that client, so the checks other than the client's own get tested.
+    fn first_client(update: &[u8]) -> u64 {
+        let mut cursor = Cursor::new(update);
+        let mut first = || -> Result<u64> {
+            if cursor.read_var::<u64>()? == 0 {
+                return Ok(0);
+            }
+            cursor.read_var::<u64>()?;
+            Ok(cursor.read_var::<u64>()?)
+        };
+        first().unwrap_or(0)
+    }
+
+    /// `update` split into one update per client, each with its deletions,
+    /// as its authors would each have to send it now. One the checker can't
+    /// even read stays whole: it is refused for that.
+    fn one_update_per_client(update: &[u8]) -> Vec<Vec<u8>> {
+        let split = || -> Result<Vec<Vec<u8>>> {
+            let mut reader = UpdateReader::new(update);
+            let clients = reader.count()?;
+            if clients == 0 {
+                return Ok(vec![update.to_vec()]);
+            }
+            let mut sections = Vec::new();
+            for _ in 0..clients {
+                let start = reader.cursor.next;
+                let blocks = reader.count()?;
+                reader.client()?;
+                reader.number()?;
+                for _ in 0..blocks {
+                    reader.piece()?;
+                }
+                sections.push(&update[start..reader.cursor.next]);
+            }
+            let deletions = &update[reader.cursor.next..];
+            Ok(sections
+                .into_iter()
+                .map(|section| [&[1][..], section, deletions].concat())
+                .collect())
+        };
+        split().unwrap_or_else(|_| vec![update.to_vec()])
+    }
+
     fn check_on_empty_page(update: &[u8]) -> Result<Vec<(u64, u32)>> {
-        check_update(update, &ClientEnds::default())
+        check_update(update, &ClientEnds::default(), first_client(update))
+    }
+
+    fn merge_as_its_client(state: Option<&[u8]>, update: &[u8]) -> Result<Vec<u8>> {
+        merge(state, update, first_client(update))
     }
 
     fn merge_in_order(updates: &[Vec<u8>]) -> Result<Vec<u8>> {
         let mut state = None;
         for update in updates {
-            state = Some(merge(state.as_deref(), update)?);
+            state = Some(merge_as_its_client(state.as_deref(), update)?);
         }
         Ok(state.unwrap_or_default())
     }
@@ -313,40 +367,77 @@ mod tests {
         .collect()
     }
 
-    const TEXT_FROM_YJS: &str = " Roadmap\n\nShip it 🚀 soon.\n- step é";
+    /// Made by Yjs 13.6.33, editors setting `doc.clientID` as the desktop
+    /// editor does: client 777 starts the page, then client 4242 types a
+    /// batch merged with `Y.mergeUpdates`, deletes text of both, undoes and
+    /// redoes that, and types around 777's next edit before undoing twice.
+    fn edits_from_bound_yjs_editors() -> Vec<(u64, Vec<u8>)> {
+        [
+            (777, "0101890600040107636f6e74656e7414506c616e3a207368697020f09f9a8020736f6f6e00"),
+            (
+                4242,
+                "010992210084890611012084922100016184922101016e84922102016484922103012084922104017484922105016584922106017384922107017400",
+            ),
+            (4242, "00018906010006"),
+            (4242, "01019221094489060006506c616e3a2000"),
+            (4242, "00019221010906"),
+            (777, "0101890612c489060889060902585900"),
+            (4242, "010292210fc489060789060802c3a984922108012100"),
+            (4242, "00019221010f02"),
+        ]
+        .iter()
+        .map(|(client, hex)| (*client, from_hex(hex)))
+        .collect()
+    }
 
-    /// The same page's whole state, as Yjs encodes it.
-    const STATE_FROM_YJS: &str = "0205fef9b3b40800010107636f6e74656e740184fef9b3b40800012081fef9b3b408010484fef9b3b40805140a0a5368697020697420f09f9a8020736f6f6e2ec4fef9b3b40805fef9b3b4080607526f61646d617001bd96a08f080084fef9b3b408170a0a2d207374657020c3a901fef9b3b4080200010204";
+    const TEXT_FROM_YJS: &str = " Roadmap\n\nShip it 🚀 soon.\n- step é";
 
     #[test]
     fn accepts_honest_edits_in_order() {
         let state = merge_in_order(&edits_from_yjs()).unwrap();
         assert_eq!(read(Some(&state)).unwrap(), TEXT_FROM_YJS);
-        let whole = merge(None, &from_hex(STATE_FROM_YJS)).unwrap();
-        assert_eq!(read(Some(&whole)).unwrap(), TEXT_FROM_YJS);
 
-        let first = edit(None, Edit::Append("# Plan\n\nShip it 🚀.")).unwrap();
-        let state = merge(None, &first).unwrap();
+        let first = edit(None, Edit::Append("# Plan\n\nShip it 🚀."), 1).unwrap();
+        let state = merge_as_its_client(None, &first).unwrap();
         let second = edit(
             Some(&state),
             Edit::Replace {
                 find: "Ship it",
                 with: "Ship é",
             },
+            1,
         )
         .unwrap();
-        let state = merge(Some(&state), &second).unwrap();
+        let state = merge_as_its_client(Some(&state), &second).unwrap();
         assert_eq!(read(Some(&state)).unwrap(), "# Plan\n\nShip é 🚀.");
+    }
+
+    #[test]
+    fn honest_yjs_editors_add_pieces_only_for_their_own_client() {
+        let mut state = None;
+        for (client, update) in edits_from_bound_yjs_editors() {
+            state = Some(merge(state.as_deref(), &update, client).unwrap());
+        }
+        assert_eq!(read(state.as_deref()).unwrap(), "shiXYp 🚀 soon and test");
     }
 
     #[test]
     fn refuses_pieces_that_do_not_continue_their_client() {
         let edits = edits_from_yjs();
-        let once = merge(None, &edits[0]).unwrap();
-        assert!(merge(Some(&once), &edits[0]).is_err(), "the same positions again");
-        assert!(merge(None, &edits[2]).is_err(), "a hole before them");
+        let once = merge_as_its_client(None, &edits[0]).unwrap();
+        assert!(
+            merge_as_its_client(Some(&once), &edits[0]).is_err(),
+            "the same positions again"
+        );
+        assert!(
+            merge_as_its_client(None, &edits[2]).is_err(),
+            "a hole before them"
+        );
         let one_then_three = "0103d2d5e5b00500040107636f6e74656e74036f6e650a0384d2d5e5b0050505746872656500";
-        assert!(merge(None, &from_hex(one_then_three)).is_err(), "a skipped run");
+        assert!(
+            merge_as_its_client(None, &from_hex(one_then_three)).is_err(),
+            "a skipped run"
+        );
     }
 
     #[test]
@@ -446,16 +537,16 @@ mod tests {
         nearly_full.record(1, u32::MAX - 1);
         let past_the_end = pieces(1, u64::from(u32::MAX) - 1, &[text_item("ab")]);
         assert!(
-            check_update(&past_the_end, &nearly_full).is_err(),
+            check_update(&past_the_end, &nearly_full, 1).is_err(),
             "clock plus length"
         );
         let mut near_the_limit = ClientEnds::default();
         near_the_limit.record(1, MAX_CLOCK - 2);
         let up_to_the_limit = pieces(1, u64::from(MAX_CLOCK) - 2, &[text_item("a")]);
-        assert!(check_update(&up_to_the_limit, &near_the_limit).is_ok());
+        assert!(check_update(&up_to_the_limit, &near_the_limit, 1).is_ok());
         let to_the_limit = pieces(1, u64::from(MAX_CLOCK) - 2, &[text_item("ab")]);
         assert!(
-            check_update(&to_the_limit, &near_the_limit).is_err(),
+            check_update(&to_the_limit, &near_the_limit, 1).is_err(),
             "past clock 2^30"
         );
         assert!(
@@ -565,7 +656,10 @@ mod tests {
             ],
         ];
         for updates in reported {
-            let updates: Vec<Vec<u8>> = updates.iter().map(|hex| from_hex(hex)).collect();
+            let updates: Vec<Vec<u8>> = updates
+                .iter()
+                .flat_map(|hex| one_update_per_client(&from_hex(hex)))
+                .collect();
             assert!(merge_in_order(&updates).is_err());
         }
 
@@ -701,10 +795,10 @@ mod tests {
         let mut random = Random(0x5eed_cafe);
         let mut accepted = 0;
         for _ in 0..1_500 {
-            let opening = edit(None, Edit::Append("Hello 🚀 world")).unwrap();
-            let mut state = merge(None, &opening).unwrap();
+            let opening = edit(None, Edit::Append("Hello 🚀 world"), 1).unwrap();
+            let mut state = merge_as_its_client(None, &opening).unwrap();
             let mut replay = PageMerge::default();
-            replay.add(&opening).unwrap();
+            replay.add(&opening, first_client(&opening)).unwrap();
             let mut sent = vec![opening];
             let mut is_hostile_accepted = false;
             for _ in 0..1 + random.below(6) {
@@ -715,13 +809,13 @@ mod tests {
                     } else {
                         Edit::Replace { find: "w", with: "W" }
                     };
-                    edit(Some(&state), change)
-                        .unwrap_or_else(|_| edit(Some(&state), Edit::Append("z")).unwrap())
+                    edit(Some(&state), change, 1)
+                        .unwrap_or_else(|_| edit(Some(&state), Edit::Append("z"), 1).unwrap())
                 } else {
                     hostile_update(&mut random, &ClientEnds::of_state(&state).unwrap())
                 };
-                let live = merge(Some(&state), &update);
-                let replayed = replay.add(&update);
+                let live = merge_as_its_client(Some(&state), &update);
+                let replayed = replay.add(&update, first_client(&update));
                 assert_eq!(live.is_ok(), replayed.is_ok(), "update {update:02x?}");
                 if let Ok(next) = live {
                     state = next;

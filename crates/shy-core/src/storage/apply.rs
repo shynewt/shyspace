@@ -206,11 +206,12 @@ impl Store {
                 self.set_title(id, title, lamport, author, now)?;
                 Change::Pages
             }
-            Op::DocUpdate { page, update } => {
+            Op::DocUpdate { page, nonce, update } => {
                 self.db
                     .execute("INSERT OR IGNORE INTO pages (id) VALUES (?)", [page])?;
                 let state = self.page_state(page)?;
-                let merged = pages::merge(state.as_deref(), update)
+                let client = pages::client_id(&verified.author, page, nonce);
+                let merged = pages::merge(state.as_deref(), update, client)
                     .map_err(|error| rule_violation(format!("damaged page update: {error:#}")))?;
                 self.db.execute(
                     "UPDATE pages SET doc = ?, updated_ms = MAX(updated_ms, ?) WHERE id = ?",

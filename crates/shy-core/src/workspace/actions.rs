@@ -11,11 +11,11 @@ use crate::{
         MAX_PAGE_UPDATE_BYTES, MAX_PROFILE_NAME_CHARS, Op, OpBody, VerifiedOp, clean_display_name,
         clean_emoji, clean_page_title, new_owned_id, normalize_channel_name, now_ms,
     },
-    pages::{self, Edit},
+    pages::{self, CLIENT_ID_NONCE_BYTES, Edit},
     private::ids::{new_private_message_id, private_channel_of, private_kind},
     profile::ProfileDetails,
     storage::{ItemKind, Store},
-    views::{Change, Draft, Message, NotifyLevel},
+    views::{Change, Draft, Message, NotifyLevel, PageEditorSession},
 };
 
 const MAX_MENTION_SCAN: u32 = 500;
@@ -421,18 +421,35 @@ impl Workspace {
         Ok(())
     }
 
-    /// A Yjs update produced by an editor.
-    pub fn apply_doc_update(&self, page: &str, update: Vec<u8>) -> Result<()> {
+    /// A fresh Yjs client id for one editing session of `page`, bound to
+    /// this member. The editor sends the session's nonce with every update,
+    /// so others can check the id is this member's.
+    pub fn page_editor_session(&self, page: &str) -> PageEditorSession {
+        let nonce: [u8; CLIENT_ID_NONCE_BYTES] = rand::random();
+        PageEditorSession {
+            client_id: pages::client_id(&self.me(), page, &nonce),
+            nonce: hex::encode(nonce),
+        }
+    }
+
+    /// A Yjs update from an editor session of [`Workspace::page_editor_session`].
+    pub fn apply_doc_update(&self, page: &str, nonce: &str, update: Vec<u8>) -> Result<()> {
+        let nonce = hex::decode(nonce)
+            .context("reading the page editor's nonce")?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("a page editor nonce has {CLIENT_ID_NONCE_BYTES} bytes"))?;
         self.write(Op::DocUpdate {
             page: page.to_owned(),
+            nonce,
             update,
         })
     }
 
     pub fn edit_page(&self, page: &str, edit: Edit) -> Result<()> {
+        let session = self.page_editor_session(page);
         let state = self.state().store.page_state(page)?;
-        let update = pages::edit(state.as_deref(), edit)?;
-        self.apply_doc_update(page, update)
+        let update = pages::edit(state.as_deref(), edit, session.client_id)?;
+        self.apply_doc_update(page, &session.nonce, update)
     }
 
     pub fn set_profile(&self, profile: Profile<'_>) -> Result<()> {

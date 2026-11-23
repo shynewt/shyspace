@@ -105,3 +105,7 @@ The store (one SQLite connection) and the MLS group sit together behind a single
 
 ## A patched copy of yrs, until upstream has the fix (2026-11)
 yrs split and joined text pieces at a cost that grew with the square of their number, so one valid page update could freeze every device or exhaust its memory (#185). We couldn't work around it on our side: capping pieces per update refuses honest edits, splitting updates sends the pieces through yrs's slow pending queue, and joining pieces ourselves would place text differently from the editor. So `vendor/yrs` is yrs 0.28.1 with a small fix, used through `[patch.crates-io]` with the version pinned; `vendor/README.md` says what changed and how to drop the copy once a release has the fix. A git fork would hide the change outside the repo; keeping the copy here keeps it reviewed with the rest.
+
+## Page editor ids bound to authors (2026-11)
+A member could write page updates under another editor's Yjs client id, so devices disagreed and the victim's edits were refused (#187). Each update now carries a nonce, and its client id is a hash of the author, page and nonce, which every device can check from the op alone. We didn't use random ids, or let the first member to use an id own it: both depend on arrival order, which was the bug. The id has 53 bits because Yjs keeps client ids as JavaScript-safe integers, which leaves room for a precomputed attack (#210).
+
