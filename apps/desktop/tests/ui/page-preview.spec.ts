@@ -56,6 +56,23 @@ test("markdown marks stay hidden until you edit their line", async ({ page }) =>
   await expect(lines(page).nth(1)).toHaveText("Ship fast and well with care");
 });
 
+test("releasing the mouse outside the window lets lines show their marks again", async ({ page }) => {
+  await seedAndOpen(page, "Plan", "# Goals\nShip **fast**");
+  await lines(page).nth(1).click();
+  await expect(lines(page).nth(1)).toHaveText("Ship **fast**");
+
+  // Pressed on the heading, then released outside the window: no mouseup
+  // ever arrives, and the pointer comes back with no button held.
+  const heading = await lines(page).first().boundingBox();
+  await page.mouse.move((heading?.x ?? 0) + 40, (heading?.y ?? 0) + 5);
+  await page.mouse.down();
+  await expect(lines(page).first()).toHaveText("Goals");
+  await page.evaluate(() => document.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, buttons: 0 })));
+
+  await expect(lines(page).first()).toHaveText("# Goals");
+  await expect(lines(page).nth(1)).toHaveText("Ship fast");
+});
+
 test("list text has the body color; only the marker stands apart", async ({ page }) => {
   await seedAndOpen(page, "Lists", "Plain words\n\n- listed words\n\n7. numbered words");
   await expect(lines(page).nth(4)).toHaveText("7. numbered words");

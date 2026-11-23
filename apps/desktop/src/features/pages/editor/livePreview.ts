@@ -88,6 +88,8 @@ const previewPlugin = ViewPlugin.fromClass(
     /** While a mouse button is down, lines keep their look so text doesn't jump under the pointer. */
     private isPointerDown = false;
     private readonly onPointerUp: () => void;
+    /** A button released outside the window sends no mouseup here; the pointer comes back with none held. */
+    private readonly onPointerMove: (event: MouseEvent) => void;
 
     constructor(private readonly view: EditorView) {
       this.revealed = revealedLines(view);
@@ -97,7 +99,14 @@ const previewPlugin = ViewPlugin.fromClass(
         this.isPointerDown = false;
         view.dispatch({});
       };
-      view.dom.ownerDocument.addEventListener("mouseup", this.onPointerUp);
+      this.onPointerMove = (event) => {
+        if (event.buttons === 0) this.onPointerUp();
+      };
+      const page = view.dom.ownerDocument;
+      page.addEventListener("mouseup", this.onPointerUp);
+      page.addEventListener("pointercancel", this.onPointerUp);
+      page.addEventListener("mousemove", this.onPointerMove);
+      page.defaultView?.addEventListener("blur", this.onPointerUp);
     }
 
     pointerDown() {
@@ -121,7 +130,11 @@ const previewPlugin = ViewPlugin.fromClass(
     }
 
     destroy() {
-      this.view.dom.ownerDocument.removeEventListener("mouseup", this.onPointerUp);
+      const page = this.view.dom.ownerDocument;
+      page.removeEventListener("mouseup", this.onPointerUp);
+      page.removeEventListener("pointercancel", this.onPointerUp);
+      page.removeEventListener("mousemove", this.onPointerMove);
+      page.defaultView?.removeEventListener("blur", this.onPointerUp);
     }
 
     private build() {
