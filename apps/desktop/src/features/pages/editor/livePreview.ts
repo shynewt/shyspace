@@ -16,16 +16,18 @@ import {
 } from "@codemirror/view";
 import { MOD_LABEL } from "../../../lib/shortcuts";
 import { CalloutLabelWidget } from "./callouts";
-import { pageIcon } from "./icons";
+import { messageIcon, pageIcon } from "./icons";
 import { externalUrl, linkAt } from "./links";
 import { previewItems } from "./markdownPreview";
 import {
   type MemberOpener,
   type MisleadingLinkAsker,
   memberOpener,
+  messageOpener,
   misleadingLinkAsker,
   openLink,
   openMember,
+  openMessage,
   openPage,
   pageOpener,
 } from "./openLinks";
@@ -58,10 +60,12 @@ export const knownMembers = StateField.define<ReadonlySet<string>>({
 
 export function livePreview({
   onOpenPage,
+  onOpenMessage,
   onOpenMember,
   onMisleadingLink,
 }: {
   onOpenPage: (pageId: string) => void;
+  onOpenMessage: (messageId: string) => void;
   onOpenMember: MemberOpener;
   onMisleadingLink: MisleadingLinkAsker;
 }) {
@@ -69,6 +73,7 @@ export function livePreview({
     pageTitles,
     knownMembers,
     pageOpener.of(onOpenPage),
+    messageOpener.of(onOpenMessage),
     memberOpener.of(onOpenMember),
     misleadingLinkAsker.of(onMisleadingLink),
     previewPlugin,
@@ -176,6 +181,12 @@ const previewPlugin = ViewPlugin.fromClass(
             break;
           case "page": {
             const chip = Decoration.replace({ widget: new PageChipWidget(item.pageId, titles.get(item.pageId)) });
+            decorations.push(chip.range(item.from, item.to));
+            chips.push(chip.range(item.from, item.to));
+            break;
+          }
+          case "message": {
+            const chip = Decoration.replace({ widget: new MessageChipWidget(item.messageId, item.label) });
             decorations.push(chip.range(item.from, item.to));
             chips.push(chip.range(item.from, item.to));
             break;
@@ -312,6 +323,32 @@ class PageChipWidget extends WidgetType {
   }
 }
 
+class MessageChipWidget extends WidgetType {
+  constructor(
+    readonly messageId: string,
+    readonly label: string,
+  ) {
+    super();
+  }
+
+  eq(other: MessageChipWidget) {
+    return other.messageId === this.messageId && other.label === this.label;
+  }
+
+  toDOM(view: EditorView) {
+    const chip = document.createElement("span");
+    chip.className = "cm-md-page";
+    chip.setAttribute("role", "link");
+    chip.append(messageIcon(), this.label);
+    chip.addEventListener("mousedown", (event) => event.preventDefault());
+    chip.addEventListener("click", (event) => {
+      event.preventDefault();
+      openMessage(view, this.messageId);
+    });
+    return chip;
+  }
+}
+
 class MentionWidget extends WidgetType {
   /** `memberId` is null for @channel, @here and people who aren't members: those open nothing. */
   constructor(
@@ -347,7 +384,7 @@ class MentionWidget extends WidgetType {
 const linkTooltip = hoverTooltip(
   (view, position) => {
     const link = linkAt(view.state, position);
-    if (!link || link.pageId) return null;
+    if (!link || link.pageId || link.messageId) return null;
     return {
       pos: link.from,
       end: link.to,

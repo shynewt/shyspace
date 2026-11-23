@@ -441,6 +441,7 @@ impl Workspace {
                 seen_heads: Mutex::new(std::collections::HashMap::new()),
                 confirmed_head_seq: Default::default(),
                 heard_hints: Mutex::new(std::collections::HashMap::new()),
+                relays: Mutex::new(Default::default()),
                 seen_fork_proofs: Mutex::new(std::collections::HashMap::new()),
                 last_dialed_ms: Mutex::new(std::collections::HashMap::new()),
                 presence: Mutex::new(Default::default()),

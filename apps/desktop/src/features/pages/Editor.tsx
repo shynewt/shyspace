@@ -9,8 +9,8 @@ import * as Y from "yjs";
 import { api, onChange, type PageEditorSession } from "../../lib/api";
 import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
 import { useMembers } from "../../lib/members";
-import { reportError } from "../../lib/toast";
-import { useWorkspace } from "../../lib/workspace";
+import { reportError, showToast } from "../../lib/toast";
+import { linkedMessageView, useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog } from "../../ui";
 import { ProfileCardAt } from "../members/ProfileCardAt";
 import { formattingKeymap } from "./editor/commands";
@@ -145,6 +145,11 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
             markdown({ base: markdownLanguage, codeLanguages: languages }),
             livePreview({
               onOpenPage: (id) => navigateRef.current({ kind: "page", id }),
+              onOpenMessage: (id) =>
+                api.linkedMessage(id).then((linked) => {
+                  if (!linked) return showToast("That message was deleted.", "info");
+                  navigateRef.current(linkedMessageView(linked));
+                }, reportError),
               onOpenMember: (memberId, anchor, openedBy) => setMemberCard({ memberId, anchor, openedBy }),
               onMisleadingLink: (linkText, url) => setMisleadingLink({ text: linkText, url }),
             }),

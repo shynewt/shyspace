@@ -202,7 +202,7 @@ impl Workspace {
     /// Whether our copy of `name`'s range encodes to exactly the bytes its
     /// hash names, as an honest upload of the same ops does. A range bigger
     /// than any segment can't be, so it isn't loaded.
-    fn is_same_as_ours(&self, author: &PublicKey, name: &SegmentName) -> Result<bool> {
+    pub(super) fn is_same_as_ours(&self, author: &PublicKey, name: &SegmentName) -> Result<bool> {
         let size = self
             .state()
             .store
@@ -313,6 +313,11 @@ impl Workspace {
         let mut read = self.receive_segment(author, &segment.listed.key, &segment.envelopes)?;
         let name = parse_segment_name(author, &segment.listed.key);
         let is_checked = read.is_settled && self.is_all_in_our_log(author, &segment.envelopes)?;
+        if let Some(name) = &name
+            && is_checked
+        {
+            self.note_found_in_bucket(author, name.first, name.last)?;
+        }
         match name {
             Some(name) if is_checked => read_all.matching.push((name.first, name.last)),
             _ if !read.is_stopped => {

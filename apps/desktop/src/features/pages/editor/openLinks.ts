@@ -1,4 +1,4 @@
-/** Opening a page's links: web and mail links in their apps, page links in shyspace, mentions as profile cards. */
+/** Opening a page's links: web and mail links in their apps, page and message links in shyspace, mentions as profile cards. */
 import { Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { isMisleadingLink, openExternal } from "../../../lib/contact";
@@ -7,6 +7,11 @@ import { externalUrl, type LinkTarget } from "./links";
 
 /** How the editor opens another page; given by the screen that hosts it. */
 export const pageOpener = Facet.define<(pageId: string) => void, ((pageId: string) => void) | undefined>({
+  combine: (openers) => openers[0],
+});
+
+/** How the editor opens a linked message; given by the screen that hosts it. */
+export const messageOpener = Facet.define<(messageId: string) => void, ((messageId: string) => void) | undefined>({
   combine: (openers) => openers[0],
 });
 
@@ -38,6 +43,10 @@ export function openLink(view: EditorView, link: LinkTarget): void {
     openPage(view, link.pageId);
     return;
   }
+  if (link.messageId) {
+    openMessage(view, link.messageId);
+    return;
+  }
   const url = externalUrl(link.url);
   if (!url) {
     reportError(new Error(`only web and email links open from a page, not "${link.url}"`));
@@ -50,6 +59,12 @@ export function openLink(view: EditorView, link: LinkTarget): void {
     return;
   }
   openExternal(url);
+}
+
+export function openMessage(view: EditorView, messageId: string): void {
+  const open = view.state.facet(messageOpener);
+  if (!open) throw new Error("the page editor was set up without a way to open messages");
+  open(messageId);
 }
 
 export function openPage(view: EditorView, pageId: string): void {

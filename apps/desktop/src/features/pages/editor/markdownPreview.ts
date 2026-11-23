@@ -8,7 +8,7 @@ import type { syntaxTree } from "@codemirror/language";
 import type { Text } from "@codemirror/state";
 import { type CalloutKind, calloutMarker } from "../../../lib/callouts";
 import { isMentionLink, mentionedMemberId } from "../../../lib/mentions";
-import { BARE_PAGE_LINK, pageIdOf } from "./links";
+import { BARE_MESSAGE_LINK, BARE_PAGE_LINK, messageIdOf, pageIdOf } from "./links";
 
 export type SyntaxTree = ReturnType<typeof syntaxTree>;
 type SyntaxNode = SyntaxTree["topNode"];
@@ -25,26 +25,21 @@ export type PreviewItem =
   /** A callout's `[!KIND]` marker, drawn as its label. */
   | { kind: "callout"; from: number; to: number; callout: CalloutKind }
   | { kind: "page"; from: number; to: number; pageId: string }
+  /** `label` is the link's own text, or "a message" for a bare link, as in chat. */
+  | { kind: "message"; from: number; to: number; messageId: string; label: string }
   /** `memberId` is null for @channel and @here. */
   | { kind: "mention"; from: number; to: number; label: string; memberId: string | null };
 
-/** Where a bare `shy://page/…` link is plain text, not a link to draw as a chip. */
-const NOT_PAGE_CHIP = new Set([
-  "Link",
-  "Image",
-  "Autolink",
-  "URL",
-  "InlineCode",
-  "FencedCode",
-  "CodeBlock",
-  "HTMLBlock",
-]);
+const BARE_MESSAGE_LABEL = "a message";
+
+/** Where a bare `shy://page/…` or `shy://message/…` link is plain text, not a link to draw as a chip. */
+const NOT_A_CHIP = new Set(["Link", "Image", "Autolink", "URL", "InlineCode", "FencedCode", "CodeBlock", "HTMLBlock"]);
 
 /**
  * The preview for the parts of `doc` in `ranges` (the visible ones, so
  * long pages stay fast), from its syntax `tree` as far as it's parsed. Marks
  * on `revealedLines` stay visible, so the line being edited reads as
- * markdown; page links and mentions are chips always.
+ * markdown; page and message links and mentions are chips always.
  */
 export function previewItems(
   doc: Text,
@@ -55,7 +50,7 @@ export function previewItems(
   const builder = new PreviewBuilder(doc, revealedLines);
   for (const range of ranges) {
     tree.iterate({ from: range.from, to: range.to, enter: (node) => builder.visit(node.node, range) });
-    builder.addBarePageLinks(tree.topNode, range);
+    builder.addBareAppLinks(tree.topNode, range);
   }
   return builder.items();
 }
@@ -141,12 +136,18 @@ class PreviewBuilder {
     }
   }
 
-  addBarePageLinks(top: SyntaxNode, range: { from: number; to: number }) {
+  addBareAppLinks(top: SyntaxNode, range: { from: number; to: number }) {
     const text = this.doc.sliceString(range.from, range.to);
     for (const match of text.matchAll(BARE_PAGE_LINK)) {
       const from = range.from + match.index;
-      if (isInside(top, from, NOT_PAGE_CHIP)) continue;
+      if (isInside(top, from, NOT_A_CHIP)) continue;
       this.add({ kind: "page", from, to: from + match[0].length, pageId: match[1] });
+    }
+    for (const match of text.matchAll(BARE_MESSAGE_LINK)) {
+      const from = range.from + match.index;
+      if (isInside(top, from, NOT_A_CHIP)) continue;
+      const to = from + match[0].length;
+      this.add({ kind: "message", from, to, messageId: match[1], label: BARE_MESSAGE_LABEL });
     }
   }
 
@@ -198,6 +199,12 @@ class PreviewBuilder {
     const pageId = pageIdOf(href);
     if (pageId && isOneLine) {
       this.add({ kind: "page", from: link.from, to: link.to, pageId });
+      return false;
+    }
+    const messageId = messageIdOf(href);
+    if (messageId && isOneLine) {
+      const label = plainText(this.doc.sliceString(labelFrom, labelTo)).trim() || BARE_MESSAGE_LABEL;
+      this.add({ kind: "message", from: link.from, to: link.to, messageId, label });
       return false;
     }
     if (isMentionLink(href) && isOneLine) {

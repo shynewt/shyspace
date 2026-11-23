@@ -1,4 +1,4 @@
-/** Finding the links in a page: web and mail links, and links to other pages. */
+/** Finding the links in a page: web and mail links, and links to other pages and to messages. */
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import { isMentionLink, mentionedMemberId } from "../../../lib/mentions";
@@ -7,14 +7,29 @@ type SyntaxNode = ReturnType<typeof syntaxTree>["topNode"];
 
 export const BARE_PAGE_LINK = /shy:\/\/page\/([0-9a-f]+)/g;
 const PAGE_LINK = /^shy:\/\/page\/([0-9a-f]+)$/;
+/** A message id; in a private channel or DM it starts with the channel, like `p:…/…`. */
+const MESSAGE_ID = "(?:(?:p|dm):[0-9a-f]+/)?[0-9a-f]+";
+export const BARE_MESSAGE_LINK = new RegExp(`shy://message/(${MESSAGE_ID})`, "g");
+const MESSAGE_LINK = new RegExp(`^shy://message/(${MESSAGE_ID})$`);
 const SAFE_EXTERNAL = /^(https?:|mailto:)/i;
 const EMAIL = /^[\w.+-]+@[\w-]+(\.[\w.-]+)+$/;
 
 /** `text` is what the link shows: its label, or the address itself. */
-export type LinkTarget = { from: number; to: number; url: string; text: string; pageId: string | null };
+export type LinkTarget = {
+  from: number;
+  to: number;
+  url: string;
+  text: string;
+  pageId: string | null;
+  messageId: string | null;
+};
 
 export function pageIdOf(url: string): string | null {
   return url.match(PAGE_LINK)?.[1] ?? null;
+}
+
+export function messageIdOf(url: string): string | null {
+  return url.match(MESSAGE_LINK)?.[1] ?? null;
 }
 
 /** The address a link opens in the browser or mail app, or null when it isn't one we open. */
@@ -48,10 +63,21 @@ export function linkAt(state: EditorState, position: number): LinkTarget | null 
     }
   }
   const line = state.doc.lineAt(position);
-  for (const match of line.text.matchAll(BARE_PAGE_LINK)) {
-    const from = line.from + match.index;
-    const to = from + match[0].length;
-    if (from <= position && position <= to) return { from, to, url: match[0], text: match[0], pageId: match[1] };
+  for (const pattern of [BARE_PAGE_LINK, BARE_MESSAGE_LINK]) {
+    for (const match of line.text.matchAll(pattern)) {
+      const from = line.from + match.index;
+      const to = from + match[0].length;
+      if (from <= position && position <= to) {
+        return {
+          from,
+          to,
+          url: match[0],
+          text: match[0],
+          pageId: pageIdOf(match[0]),
+          messageId: messageIdOf(match[0]),
+        };
+      }
+    }
   }
   return null;
 }
@@ -62,5 +88,5 @@ function linkOf(state: EditorState, node: SyntaxNode, url: SyntaxNode | null): L
   if (isMentionLink(href)) return null;
   const marks = node.getChildren("LinkMark");
   const text = marks.length >= 2 ? state.sliceDoc(marks[0].to, marks[1].from) : href;
-  return { from: node.from, to: node.to, url: href, text, pageId: pageIdOf(href) };
+  return { from: node.from, to: node.to, url: href, text, pageId: pageIdOf(href), messageId: messageIdOf(href) };
 }
