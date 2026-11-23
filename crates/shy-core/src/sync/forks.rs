@@ -18,7 +18,7 @@ use crate::{
     crypto,
     ops::Envelope,
     storage::CheckedFork,
-    transport::bucket::{ListedProof, MAX_FORK_PROOF_BYTES, fork_proof_path},
+    transport::bucket::{ListedObject, ListedProof, MAX_FORK_PROOF_BYTES, fork_proof_path},
     views::Change,
     workspace::{State, Workspace},
 };
@@ -98,8 +98,22 @@ impl Workspace {
             if !should_fetch {
                 continue;
             }
-            let Some(proof) = bucket.fork_proof(path).await? else {
-                continue;
+            let proof = match bucket.fork_proof(path).await {
+                Ok(Some(proof)) => proof,
+                Ok(None) => continue,
+                // Anyone with the bucket keys can put one a plain GET is
+                // refused; given up after a few tries, until it changes.
+                Err(error) => {
+                    warn!("passing over the fork proof {path} for now: it can't be fetched: {error:#}");
+                    let object = ListedObject {
+                        key: path.clone(),
+                        version: listing.version.clone(),
+                    };
+                    if self.is_given_up_after_failing(&object) {
+                        self.mark_seen(listing);
+                    }
+                    continue;
+                }
             };
             // Someone overwrote it: not the proof its name promises. Its
             // holders put it back, which makes a new version to look at.
@@ -131,11 +145,14 @@ impl Workspace {
         self.put_back_fork_proofs(&listed).await
     }
 
-    /// Puts our proofs in the bucket where they're missing or were
-    /// overwritten. Each version of an object is fetched at most once.
+    /// Puts our proofs in the bucket where they're missing, were
+    /// overwritten or can't be read. Each version of an object is fetched at
+    /// most once. One that can't be put back doesn't stop the others; the
+    /// first error is returned at the end.
     async fn put_back_fork_proofs(&self, listed: &[ListedProof]) -> Result<()> {
         let bucket = self.bucket();
         let known = self.state().store.fork_proofs()?;
+        let mut first_failure = None;
         for (author, seq, proof) in known {
             let path = fork_proof_path(&author, seq, &proof);
             let listing = listed.iter().find(|listing| listing.path == path);
@@ -143,21 +160,24 @@ impl Workspace {
                 None => false,
                 Some(listing) if self.is_seen(listing) => true,
                 Some(listing) => {
-                    let is_ours = bucket
-                        .fork_proof(&path)
-                        .await?
-                        .is_some_and(|stored| *stored == proof);
+                    let is_ours = match bucket.fork_proof(&path).await {
+                        Ok(stored) => stored.is_some_and(|stored| *stored == proof),
+                        Err(error) => {
+                            warn!("our fork proof {path} can't be read, so it is put back: {error:#}");
+                            false
+                        }
+                    };
                     if is_ours {
                         self.mark_seen(listing);
                     }
                     is_ours
                 }
             };
-            if !is_intact {
-                bucket.put_fork_proof(&author, seq, proof).await?;
+            if !is_intact && let Err(error) = bucket.put_fork_proof(&author, seq, proof).await {
+                first_failure.get_or_insert(error);
             }
         }
-        Ok(())
+        first_failure.map_or(Ok(()), Err)
     }
 
     fn is_seen(&self, listing: &ListedProof) -> bool {

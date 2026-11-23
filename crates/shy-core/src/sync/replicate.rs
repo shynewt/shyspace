@@ -23,6 +23,29 @@ const MAX_SKIPPED_SEGMENTS: usize = 10_000;
 /// to ride out a network blip, few enough that objects a key holder made
 /// unreadable cost little.
 const MAX_FETCH_FAILURES: u32 = 3;
+/// Reads of a member's log before their removal freezes it: as many as it
+/// takes to give up an object that keeps failing.
+const REMOVAL_READS: u32 = MAX_FETCH_FAILURES;
+const REMOVAL_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A read left out an object that couldn't be downloaded and may hold ops
+/// we lack.
+#[derive(Debug)]
+struct Unfetched {
+    key: String,
+}
+
+impl std::fmt::Display for Unfetched {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "couldn't download {}, which may hold ops we lack",
+            self.key
+        )
+    }
+}
+
+impl std::error::Error for Unfetched {}
 /// How often a sweep reads every author past what we hold, at most.
 const SWEEP_EVERY_MS: i64 = 60 * 60 * 1000;
 const LAST_SWEEP_META: &str = "last_sweep_ms";
@@ -148,6 +171,29 @@ impl Workspace {
             .collect()
     }
 
+    /// Reads all of `member`'s log that can be read, before their removal
+    /// freezes it there. What was given up earlier gets fresh tries, and a
+    /// download that fails is tried again, so a network blip can't cut
+    /// their last messages off on every device. One that still fails is
+    /// left out: the member could plant a fresh one before every attempt.
+    pub(crate) async fn collect_removed_log(&self, member: &PublicKey) -> Result<()> {
+        self.forget_given_up_segments_of(member);
+        for read in 1..=REMOVAL_READS {
+            let Some(error) = self.pull_author(member).await? else {
+                return Ok(());
+            };
+            if !error.is::<Unfetched>() {
+                return Err(error);
+            }
+            if read == REMOVAL_READS {
+                warn!("removing a member without part of their log, which can't be downloaded: {error:#}");
+                return Ok(());
+            }
+            tokio::time::sleep(REMOVAL_RETRY_PAUSE).await;
+        }
+        Ok(())
+    }
+
     /// Like `pull_author`, but lists past what we have checked against the
     /// bucket rather than past what we hold, so ops we got only over gossip
     /// are compared with the bucket's copy (#109): a segment whose range we
@@ -222,7 +268,7 @@ impl Workspace {
             .unfetched
             .into_iter()
             .find(|(_, last)| *last > held)
-            .map(|(key, _)| anyhow::anyhow!("couldn't download {key}, which may hold ops we lack")))
+            .map(|(key, _)| anyhow::Error::new(Unfetched { key })))
     }
 
     /// Whether our copy of `name`'s range encodes to exactly the bytes its
@@ -371,19 +417,7 @@ impl Workspace {
     /// still given up). Past the cap on what is counted, a failure is given
     /// up at once.
     fn note_unfetched(&self, author: &PublicKey, listed: ListedObject, read_all: &mut SegmentsRead) {
-        let failures = {
-            let mut failures = self.fetch_failures();
-            let is_counted = failures.contains_key(&listed) || failures.len() < MAX_SKIPPED_SEGMENTS;
-            match is_counted {
-                true => {
-                    let count = failures.entry(listed.clone()).or_insert(0);
-                    *count = count.saturating_add(1);
-                    *count
-                }
-                false => MAX_FETCH_FAILURES,
-            }
-        };
-        if failures < MAX_FETCH_FAILURES {
+        if !self.is_given_up_after_failing(&listed) {
             if let Some(name) = parse_segment_name(author, &listed.key) {
                 read_all.unfetched.push((listed.key, name.last));
             }
@@ -393,6 +427,19 @@ impl Workspace {
         if skipped.len() < MAX_SKIPPED_SEGMENTS {
             skipped.insert(listed);
         }
+    }
+
+    /// Counts a failed download of `listed`, and says whether it has now
+    /// failed too often to try again this run (also once the count is full).
+    pub(super) fn is_given_up_after_failing(&self, listed: &ListedObject) -> bool {
+        let mut failures = self.fetch_failures();
+        let is_counted = failures.contains_key(listed) || failures.len() < MAX_SKIPPED_SEGMENTS;
+        if !is_counted {
+            return true;
+        }
+        let count = failures.entry(listed.clone()).or_insert(0);
+        *count = count.saturating_add(1);
+        *count >= MAX_FETCH_FAILURES
     }
 
     fn fetch_failures(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<ListedObject, u32>> {

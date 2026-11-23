@@ -2974,6 +2974,8 @@ struct FlakyStore {
     refuse_puts_under: Mutex<Option<String>>,
     listed_prefixes: Mutex<Vec<String>>,
     unreadable: Mutex<std::collections::HashSet<String>>,
+    /// Keys whose next download fails, as a network blip would.
+    unreadable_once: Mutex<std::collections::HashSet<String>>,
     refused_reads: std::sync::atomic::AtomicUsize,
 }
 
@@ -3065,7 +3067,8 @@ impl ObjectStore for FlakyStore {
         self.inner.put_multipart_opts(location, opts).await
     }
     async fn get_opts(&self, location: &Path, options: GetOptions) -> object_store::Result<GetResult> {
-        if self.unreadable.lock().unwrap().contains(location.as_ref()) {
+        let is_blip = self.unreadable_once.lock().unwrap().remove(location.as_ref());
+        if is_blip || self.unreadable.lock().unwrap().contains(location.as_ref()) {
             self.refused_reads
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             return Err(object_store::Error::PermissionDenied {
@@ -3289,6 +3292,149 @@ async fn a_restore_that_cant_download_the_admins_log_is_refused() {
 
     let error = format!("{:#}", restored.err().expect("refused"));
     assert!(error.contains("couldn't catch up"), "{error}");
+}
+
+/// A member being removed can plant a fresh unreadable object among their
+/// segments before each attempt, so it is never given up. The removal goes
+/// on anyway, freezing their log at what could be read.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_cant_block_their_removal_with_unreadable_objects() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "last words", None).unwrap();
+    bob.sync().await;
+    plant_far_ahead(&store, &bob).await;
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+
+    assert!(!admin.current_members().unwrap().contains(&bob.me()));
+    assert!(texts_in(&admin, &general).contains(&"last words".to_owned()));
+}
+
+/// A network blip on the member's last segment during their removal is
+/// ridden out: the removal doesn't freeze their log short of messages
+/// others already have, which every device would then undo.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_blip_during_a_removal_keeps_the_members_last_messages() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "last words", None).unwrap();
+    bob.sync().await;
+    carol.sync().await;
+    let last = newest_segment(&store, &bob).await;
+    store.unreadable_once.lock().unwrap().insert(last);
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    carol.sync().await;
+
+    assert!(texts_in(&admin, &general).contains(&"last words".to_owned()));
+    assert!(texts_in(&carol, &general).contains(&"last words".to_owned()));
+}
+
+/// A segment of the member's given up earlier in the run gets fresh tries
+/// when they are removed, rather than being left out without a word.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_tries_again_what_was_given_up_earlier() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "last words", None).unwrap();
+    bob.sync().await;
+    let last = newest_segment(&store, &bob).await;
+    store.unreadable.lock().unwrap().insert(last.clone());
+    for _ in 0..3 {
+        admin.check().await;
+    }
+    store.unreadable.lock().unwrap().remove(&last);
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+
+    assert!(texts_in(&admin, &general).contains(&"last words".to_owned()));
+}
+
+/// Two versions of Bob's next op, proved a fork on the admin's device and
+/// shared to the bucket. Returns the seq and the proof's path.
+async fn a_shared_fork(admin: &Workspace, bob: &Workspace, store: &FlakyStore) -> (u64, String) {
+    let general = channel_id(admin, "general");
+    let message = |text: &str| crate::ops::Op::Message {
+        id: crate::ops::new_owned_id(&bob.me()),
+        channel: general.clone(),
+        text: text.into(),
+        reply_to: None,
+    };
+    let one = Forger::new(bob).seal(message("one version"));
+    let other = Forger::new(bob).seal(message("another version"));
+    admin.receive(one.clone()).unwrap();
+    admin.receive(other).unwrap();
+    assert!(admin.state().store.is_forked(&bob.me(), one.seq).unwrap());
+    admin.sync().await;
+    let proof = store
+        .keys_under(&format!("ops/forks/{}/", bob.my_id()))
+        .await
+        .pop()
+        .expect("the proof went up");
+    (one.seq, proof)
+}
+
+/// One unreadable object among the fork proofs doesn't stop the others
+/// being learned, and it's given up after a few tries rather than
+/// downloaded on every pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_fork_proof_doesnt_stop_the_others() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+    let (seq, _) = a_shared_fork(&admin, &bob, &store).await;
+    // At another seq, listed first, so learning the real fork doesn't
+    // settle it.
+    store
+        .plant_unreadable(
+            &format!("ops/forks/{}/{:020}/{}", bob.my_id(), 0, "0".repeat(64)),
+            b"junk",
+        )
+        .await;
+
+    carol.sync().await;
+    assert!(carol.state().store.is_forked(&bob.me(), seq).unwrap());
+    for _ in 0..4 {
+        carol.sync().await;
+    }
+
+    let downloads = store.refused_reads.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(downloads <= 3, "downloaded {downloads} times");
+}
+
+/// Our own fork proof made unreadable in the bucket is put back, without
+/// first needing to read what's there.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_copy_of_our_fork_proof_is_put_back() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    let (_, proof) = a_shared_fork(&admin, &bob, &store).await;
+    store.plant_unreadable(&proof, b"junk").await;
+
+    admin.sync().await;
+
+    assert!(bucket.fork_proof(&proof).await.is_ok(), "readable again");
+}
+
+/// A head that can't be read is settled once its author's log is read, not
+/// downloaded again at every check until it changes.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_head_is_read_once_its_log_is() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    store
+        .plant_unreadable(&format!("heads/{}", bob.my_id()), b"junk")
+        .await;
+
+    for _ in 0..4 {
+        admin.check().await;
+    }
+
+    let downloads = store.refused_reads.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(downloads, 1);
 }
 
 /// One log that can't be listed doesn't stop the sweep reading the others.

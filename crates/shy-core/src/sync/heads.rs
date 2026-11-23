@@ -228,10 +228,11 @@ impl Workspace {
                     queue_read(&mut to_read, head.author, |read| read.with_head(head.version));
                 }
                 Ok(_) => self.note_seen_head(&head.author, &head.version),
-                // It may have moved: read the log, and the head again next check.
+                // It may have moved: read the log, which settles this
+                // version of the head once the read is complete.
                 Err(error) => {
                     warn!("{}'s head can't be read: {error:#}", head.author);
-                    queue_read(&mut to_read, head.author, |read| read);
+                    queue_read(&mut to_read, head.author, |read| read.with_head(head.version));
                 }
             }
         }

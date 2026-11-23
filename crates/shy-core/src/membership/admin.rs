@@ -340,9 +340,9 @@ impl Workspace {
         }
         // No pass may upload the commit before the snapshot below covers it.
         let _no_pass = self.inner.sync_lock.lock().await;
-        self.pull()
+        self.collect_removed_log(&member)
             .await
-            .context("can't reach the bucket to collect the member's last messages")?;
+            .context("can't collect the member's last messages")?;
         let (from_epoch, signed, view_changes) = {
             let mut state = self.state();
             let frozen = FrozenAuthor {

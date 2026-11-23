@@ -52,6 +52,19 @@ impl Workspace {
         self.skipped_segments().clear();
     }
 
+    /// Gives `author`'s segments that were given up this run (junk, or ones
+    /// that kept failing to download) fresh tries.
+    pub(super) fn forget_given_up_segments_of(&self, author: &PublicKey) {
+        let author_prefix = format!("ops/{}/", member_id(author));
+        self.skipped_segments()
+            .retain(|listed| !listed.key.starts_with(&author_prefix));
+        self.inner
+            .fetch_failures
+            .lock()
+            .expect("fetch failures lock poisoned by an earlier panic")
+            .retain(|listed, _| !listed.key.starts_with(&author_prefix));
+    }
+
     pub(super) fn skipped_segments(
         &self,
     ) -> std::sync::MutexGuard<'_, std::collections::HashSet<ListedObject>> {
