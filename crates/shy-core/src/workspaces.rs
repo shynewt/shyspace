@@ -97,6 +97,16 @@ fn is_plain_id(workspace_id: &str) -> bool {
         && workspace_id
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_')
+        && !is_windows_device_name(workspace_id)
+}
+
+/// Names Windows keeps for devices in every folder, whatever their case.
+fn is_windows_device_name(name: &str) -> bool {
+    if matches!(name, "con" | "prn" | "aux" | "nul") {
+        return true;
+    }
+    let numbered = name.strip_prefix("com").or_else(|| name.strip_prefix("lpt"));
+    matches!(numbered, Some(digit) if digit.len() == 1 && digit.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 /// Where the workspaces' folders are.
@@ -736,10 +746,14 @@ mod tests {
 
     #[test]
     fn only_plain_names_are_workspace_ids() {
-        for id in ["3f2a9c", "workspace-id", "a_b"] {
+        for id in ["3f2a9c", "workspace-id", "a_b", "console", "com10", "nul-1"] {
             assert!(is_plain_id(id), "{id}");
         }
-        for id in ["", "../x", "a/b", "..", "a b", &"x".repeat(65)] {
+        let device_names = ["con", "prn", "aux", "nul", "com0", "com9", "lpt0", "lpt9"];
+        for id in ["", "../x", "a/b", "..", "a b", &"x".repeat(65)]
+            .into_iter()
+            .chain(device_names)
+        {
             assert!(!is_plain_id(id), "{id}");
         }
     }
