@@ -9,7 +9,6 @@ use tracing::warn;
 use super::Workspace;
 use crate::{
     config,
-    ops::Op,
     transport::bucket::{BucketConfig, MAX_RECOVERY_SNAPSHOT_BYTES},
     views::{Change, StorageSettings},
 };
@@ -62,8 +61,7 @@ impl Workspace {
             .check_access()
             .await
             .context("checking the new storage settings")?;
-        Workspace::keep_replaced_key(&self.state().store, &current, &next)?;
-        self.write(Op::StorageSettings { bucket: next })?;
+        self.replace_bucket_key(&current, next)?;
         Workspace::mark_recovery_snapshot_stale(&self.state().store)?;
         self.refresh_recovery_snapshot().await
     }

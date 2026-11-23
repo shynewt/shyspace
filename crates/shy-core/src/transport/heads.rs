@@ -57,6 +57,17 @@ impl Bucket {
         Ok(written.e_tag.unwrap_or(fallback))
     }
 
+    /// Proves these keys can still read the bucket, with one request for
+    /// `member`'s head (never writing, so it is safe with a key meant to be
+    /// deleted). A single-object request, as S3 clients report a refused
+    /// key as such only for those; a missing head still proves access.
+    pub async fn probe_access(&self, member: &PublicKey) -> Result<()> {
+        match self.store().head(&head_path(member)).await {
+            Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+            Err(error) => Err(anyhow::Error::new(error).context("reading the bucket")),
+        }
+    }
+
     /// Every head in the bucket. Names that aren't a member id are skipped.
     pub async fn heads(&self) -> Result<Vec<ListedHead>> {
         let mut listing = self.store().list(Some(&Path::from(HEADS_PREFIX)));

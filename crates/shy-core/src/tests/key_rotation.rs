@@ -106,6 +106,8 @@ impl KeyedStore {
             })
     }
 
+    /// As the S3 client reports a refused listing: a plain error, not a
+    /// refusal (only single-object requests carry the status).
     fn refused_listing(
         &self,
         prefix: Option<&Path>,
@@ -113,7 +115,10 @@ impl KeyedStore {
         let path = prefix.map(Path::to_string).unwrap_or_default();
         self.refusal(&path)
             .map(|error| -> stream::Boxed<object_store::Result<ObjectMeta>> {
-                Box::pin(stream::once(Err(error)))
+                Box::pin(stream::once(Err(object_store::Error::Generic {
+                    store: "keyed",
+                    source: error.into(),
+                })))
             })
     }
 }
@@ -362,4 +367,77 @@ async fn every_key_replaced_during_a_rotation_must_be_dead_before_it_ends() {
     provider.delete_key("second-key");
     assert_eq!(admin.check_old_key_deleted().await.unwrap(), OldKeyCheck::Dead);
     assert_eq!(admin.kept_old_keys().unwrap(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_during_a_rotation_asks_for_a_key_the_removed_member_never_had() {
+    let provider = Provider::new();
+    let (_root, admin, bob, carol) = admin_bob_carol(&provider).await;
+    change_key(&admin, "second-key").await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    assert_eq!(carol.bucket_config().unwrap().access_key_id, "second-key");
+
+    admin.remove_member(&carol.my_id()).await.unwrap();
+
+    let rotation = admin.storage_rotation().await.unwrap().unwrap();
+    assert!(
+        !rotation.has_new_key,
+        "Carol holds the current key, so no new key is saved since her removal"
+    );
+    provider.delete_key(FIRST_KEY);
+    admin.check_old_key_deleted().await.ok();
+    assert!(
+        admin.storage_rotation().await.unwrap().is_some(),
+        "the rotation can't end while the current key is one Carol had"
+    );
+}
+
+/// A key a removed member had can't be put back in use.
+#[tokio::test(flavor = "multi_thread")]
+async fn going_back_to_a_key_a_removed_member_had_is_refused() {
+    let provider = Provider::new();
+    let (_root, admin, _bob, carol) = admin_bob_carol(&provider).await;
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    change_key(&admin, "new-key").await;
+
+    let going_back = admin
+        .update_storage(StorageUpdate {
+            region: "us-east-1",
+            access_key_id: FIRST_KEY,
+            secret_access_key: "test-bucket-secret",
+        })
+        .await;
+
+    assert!(going_back.is_err());
+    assert_eq!(admin.bucket_config().unwrap().access_key_id, "new-key");
+}
+
+/// The old secrets are in the admin's recovery snapshot while they are
+/// kept, so the snapshot is redone once they are erased: a restore doesn't
+/// bring them back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_after_a_rotation_ended_has_no_old_secret() {
+    let provider = Provider::new();
+    let (root, admin, _bob, carol) = admin_bob_carol(&provider).await;
+    admin.recovery_kit().await.unwrap();
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    change_key(&admin, "new-key").await;
+    // The kit holds the bucket key, so the app gives a new one with it.
+    let kit = admin.recovery_kit().await.unwrap();
+    provider.delete_key(FIRST_KEY);
+    assert_eq!(admin.check_old_key_deleted().await.unwrap(), OldKeyCheck::Dead);
+    admin.sync().await;
+    drop(admin);
+
+    let restored = Workspace::restore_with(
+        &data_dir(&root.path().join("ada-new-laptop")),
+        &kit,
+        provider.connector(),
+        crate::Networking::Offline,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(restored.kept_old_keys().unwrap(), 0);
+    assert!(restored.storage_rotation().await.unwrap().is_none());
 }

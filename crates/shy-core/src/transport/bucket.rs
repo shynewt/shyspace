@@ -686,16 +686,6 @@ impl Bucket {
         self.delete(&path).await.context("can't delete from the bucket")
     }
 
-    /// Proves these keys can still read the bucket, with one listing request
-    /// (never writing, so it is safe with a key meant to be deleted).
-    pub async fn probe_access(&self) -> Result<()> {
-        let mut listing = self.store().list(Some(&Path::from("heads")));
-        if let Some(listed) = listing.next().await {
-            listed.context("listing the bucket")?;
-        }
-        Ok(())
-    }
-
     /// Whether deleted or overwritten data can be brought back, proved
     /// rather than asked. Locked: the bucket refuses to delete this member's
     /// probe among the ops (a retention lock on the write-once `ops/` and

@@ -364,7 +364,7 @@ pub struct StorageSettings {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct StorageRotation {
     pub provider: StorageProvider,
-    /// A new key was saved since the rotation began.
+    /// The key in use is one no removed member had.
     pub has_new_key: bool,
     /// Current members other than the admin, and whether each now uses the
     /// new key (as their head in the bucket says: a hint only).
@@ -391,9 +391,10 @@ pub struct MemberMove {
 }
 
 /// What the last check of the old key found, while it isn't proved dead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OldKeyState {
+    #[default]
     NotChecked,
     StillWorks,
     /// The check couldn't tell (the bucket was unreachable); tried again.
@@ -476,6 +477,8 @@ pub enum Change {
     Storage,
     /// A new result from checking whether the bucket keeps deleted data.
     StorageProtection,
+    /// The bucket key rotation (`storage_rotation`) changed.
+    KeyRotation,
     /// How far this device's upload of files into `channel` (or a page) has
     /// got, in bytes of the files themselves.
     Upload {
