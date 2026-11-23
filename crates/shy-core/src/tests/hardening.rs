@@ -794,10 +794,9 @@ async fn ops_from_a_newer_version_wait_instead_of_being_dropped() {
     let general = channel_id(&admin, "general");
     let (epoch, key) = current_key(&bob);
     let seq = bob.state().store.next_seq(&bob.me()).unwrap();
-    // An op body whose kind of change this version doesn't know.
-    let mut unknown_kind = postcard::to_stdvec(&(9_000u64, 0i64)).unwrap();
-    unknown_kind.push(100);
-    let from_the_future = crypto::seal_bytes(&bob.inner.identity, &key, epoch, seq, unknown_kind).unwrap();
+    // An op body in a format this version doesn't know.
+    let unknown_format = postcard::to_stdvec(&(crypto::OP_FORMAT + 1, "a new kind of change")).unwrap();
+    let from_the_future = crypto::seal_bytes(&bob.inner.identity, &key, epoch, seq, unknown_format).unwrap();
     let next = OpBody {
         lamport: 9_001,
         timestamp_ms: 0,
@@ -831,13 +830,52 @@ async fn ops_from_a_newer_version_wait_instead_of_being_dropped() {
     assert_eq!(status.needs_update_from, [bob.my_id()], "and whose app sent it");
 }
 
+/// Every op says which format it's in. One signed in our own format that
+/// still doesn't decode is junk, not a newer version: it raises no update
+/// notice, and it's recorded as handled so its author's later ops apply.
+#[tokio::test(flavor = "multi_thread")]
+async fn signed_junk_in_our_format_is_skipped_not_announced() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let (epoch, key) = current_key(&bob);
+    let next = bob.state().store.next_seq(&bob.me()).unwrap();
+    let junk = postcard::to_stdvec(&(crypto::OP_FORMAT, "not an op")).unwrap();
+    let after = OpBody {
+        lamport: 9_001,
+        timestamp_ms: 0,
+        op: Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: "after the junk".into(),
+            reply_to: None,
+        },
+    };
+
+    admin
+        .receive(crypto::seal_bytes(&bob.inner.identity, &key, epoch, next, junk).unwrap())
+        .unwrap();
+    admin
+        .receive(crypto::seal(&bob.inner.identity, &key, epoch, next + 1, &after).unwrap())
+        .unwrap();
+    admin.sync().await;
+
+    let status = admin.status();
+    assert!(!status.needs_update, "no update notice for junk");
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(texts.contains(&"after the junk".to_string()), "{texts:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unreadable_op_far_ahead_raises_no_update_alarm() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let (epoch, key) = current_key(&bob);
     let far_ahead = bob.state().store.next_seq(&bob.me()).unwrap() + 500;
-    let mut junk = postcard::to_stdvec(&(9_000u64, 0i64)).unwrap();
-    junk.push(100);
+    let junk = postcard::to_stdvec(&(crypto::OP_FORMAT + 1, "a new kind of change")).unwrap();
     admin
         .receive(crypto::seal_bytes(&bob.inner.identity, &key, epoch, far_ahead, junk).unwrap())
         .unwrap();
@@ -2132,10 +2170,9 @@ async fn the_update_notice_clears_once_its_source_is_removed() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let (epoch, key) = current_key(&bob);
     let next = bob.state().store.next_seq(&bob.me()).unwrap();
-    let mut junk = postcard::to_stdvec(&(9_000u64, 0i64)).unwrap();
-    junk.push(100);
+    let newer = postcard::to_stdvec(&(crypto::OP_FORMAT + 1, "a new kind of change")).unwrap();
     admin
-        .receive(crypto::seal_bytes(&bob.inner.identity, &key, epoch, next, junk).unwrap())
+        .receive(crypto::seal_bytes(&bob.inner.identity, &key, epoch, next, newer).unwrap())
         .unwrap();
     admin.sync().await;
     assert_eq!(admin.status().needs_update_from, [bob.my_id()]);

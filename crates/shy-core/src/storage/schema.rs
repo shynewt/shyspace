@@ -1,8 +1,8 @@
 //! The database schema. Until the first release it changes in place: there
 //! are no migrations, and a store made by a different build is refused
 //! ("recreate this workspace") rather than upgraded. That holds for the ops
-//! in the log too: changing how an op is encoded (adding, removing or
-//! reordering kinds) also needs a fresh workspace, so raise `VIEW_RULES`.
+//! in the log too: the store version includes `crypto::OP_FORMAT`, raised
+//! whenever how ops are encoded changes.
 
 use anyhow::{Context, Result, bail};
 use rusqlite::Connection;
@@ -120,16 +120,18 @@ INSERT INTO sidebar_sections (id, name, position) VALUES ('channels', 'Channels'
 "#;
 
 /// Raised when the rules for showing ops change (what a view holds, not its
-/// tables) or how ops are encoded, so a store made under other rules is
-/// refused like one with another schema.
+/// tables), so a store built under other rules is refused like one with
+/// another schema.
 const VIEW_RULES: u8 = 1;
 
 /// What a store records about the build that made it: changes whenever the
-/// schema or the view rules do. Never 0, which means a new store.
+/// schema, the view rules or the op format do. Never 0, which means a new
+/// store.
 fn store_version() -> i32 {
     let hash = blake3::Hasher::new()
         .update(SCHEMA.as_bytes())
         .update(&[VIEW_RULES])
+        .update(&crate::crypto::OP_FORMAT.to_le_bytes())
         .finalize();
     let mut first = [0; 4];
     first.copy_from_slice(&hash.as_bytes()[..4]);

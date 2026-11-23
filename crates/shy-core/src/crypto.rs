@@ -25,9 +25,13 @@ pub(crate) fn header_bytes(author: &PublicKey, seq: u64, epoch: u64) -> Vec<u8> 
     header
 }
 
-/// A validly signed op this version can't read: a teammate's newer version
-/// added a kind of change. It should wait, not be dropped, so it applies
-/// once this app is updated.
+/// The format every op body is signed in, written before the op itself so
+/// any version can read it. Raised whenever how ops are encoded changes.
+pub const OP_FORMAT: u32 = 1;
+
+/// A validly signed op in a newer format than this version's: a teammate's
+/// newer version. It should wait, not be dropped, so it applies once this
+/// app is updated.
 #[derive(Debug)]
 pub struct NewerFormat;
 
@@ -39,6 +43,19 @@ impl std::fmt::Display for NewerFormat {
 
 impl std::error::Error for NewerFormat {}
 
+/// A validly signed op in our format (or an older one) that doesn't decode:
+/// junk its author signed, not a newer version.
+#[derive(Debug)]
+pub struct Unreadable;
+
+impl std::fmt::Display for Unreadable {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a signed op that no version of shyspace can read")
+    }
+}
+
+impl std::error::Error for Unreadable {}
+
 /// Sign-then-encrypt. The signature covers the cleartext header too, so an
 /// envelope cannot be replayed under another author, sequence or epoch.
 pub fn seal(
@@ -48,7 +65,13 @@ pub fn seal(
     seq: u64,
     body: &OpBody,
 ) -> Result<Envelope> {
-    seal_bytes(identity, epoch_key, epoch, seq, postcard::to_stdvec(body)?)
+    seal_bytes(
+        identity,
+        epoch_key,
+        epoch,
+        seq,
+        postcard::to_stdvec(&(OP_FORMAT, body))?,
+    )
 }
 
 pub(crate) fn seal_bytes(
@@ -99,7 +122,15 @@ pub fn signed_body(envelope: &Envelope, epoch_key: &EpochKey) -> Result<Vec<u8>>
 }
 
 fn parse_body(envelope: &Envelope, body_bytes: Vec<u8>) -> Result<VerifiedOp> {
-    let body: OpBody = postcard::from_bytes(&body_bytes).map_err(|_| anyhow::Error::new(NewerFormat))?;
+    let (format, rest) =
+        postcard::take_from_bytes::<u32>(&body_bytes).map_err(|_| anyhow::Error::new(Unreadable))?;
+    if format > OP_FORMAT {
+        return Err(anyhow::Error::new(NewerFormat));
+    }
+    let body = match postcard::take_from_bytes::<OpBody>(rest) {
+        Ok((body, [])) if format == OP_FORMAT => body,
+        _ => return Err(anyhow::Error::new(Unreadable)),
+    };
     ensure!(body.lamport > 0, "lamport clock must start at 1");
     Ok(VerifiedOp {
         author: envelope.author,

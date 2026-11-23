@@ -7,7 +7,7 @@ use tracing::warn;
 
 use super::forks::SecondLook;
 use crate::{
-    crypto::{self, EpochKey, NewerFormat},
+    crypto::{self, EpochKey, NewerFormat, Unreadable},
     ops::{Envelope, MAX_PAGE_UPDATE_BYTES, MAX_STORED_NUMBER, RuleViolation, VerifiedOp},
     storage::{Applied, ApplyContext},
     transport::bucket::parse_segment_name,
@@ -205,7 +205,13 @@ impl Workspace {
 
     /// An op for a place in its author's log we haven't filled yet.
     fn receive_new(&self, state: &State, envelope: &Envelope) -> Result<Vec<Change>> {
-        Ok(match verify_or_wait(state, envelope)? {
+        let verified = match verify_or_wait(state, envelope) {
+            Err(error) if error.downcast_ref::<Unreadable>().is_some() => {
+                return skip_unreadable(state, envelope);
+            }
+            verified => verified?,
+        };
+        Ok(match verified {
             Some(verified) if is_ready(state, &verified)? => {
                 match self.apply_with_alert(state, envelope, &verified) {
                     Ok(changes) => changes,
@@ -329,6 +335,18 @@ impl Workspace {
             local_failure,
         })
     }
+}
+
+/// Signed junk its author can't take back: recorded as handled with only its
+/// header in its turn, so their later ops aren't held up; before its turn
+/// it isn't kept, and gap repair reads it again once they're waiting.
+fn skip_unreadable(state: &State, envelope: &Envelope) -> Result<Vec<Change>> {
+    let is_next = envelope.seq == 1 || state.store.is_applied(&envelope.author, envelope.seq - 1)?;
+    if is_next {
+        warn!("skipping a signed op that no version can read");
+        state.store.insert_refused(envelope)?;
+    }
+    Ok(Vec::new())
 }
 
 /// Like `verify`, but an op from a newer version also waits (`Ok(None)`).
