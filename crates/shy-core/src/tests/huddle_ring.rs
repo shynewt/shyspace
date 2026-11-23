@@ -143,3 +143,43 @@ async fn a_second_call_replaces_the_first_ring() {
     carry(&ada.workspace, &[&bob.workspace], Via::Direct(ada.workspace.me()));
     assert_eq!(bob.media.rings_playing(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ring_says_who_is_calling_while_it_lasts() {
+    let (_root, [ada, bob, _carol]) = three_members().await;
+    let dm = dm_between(&ada, &bob).await;
+    let mut changes = bob.workspace.subscribe();
+    call(&ada, &bob, &dm);
+
+    let mut ringing = Vec::new();
+    while let Ok(change) = changes.try_recv() {
+        if let Change::HuddleRinging {
+            channel,
+            member,
+            member_name,
+        } = change
+        {
+            ringing.push((channel, member, member_name));
+        }
+    }
+    assert_eq!(ringing, [(dm.clone(), ada.workspace.my_id(), "Ada".to_owned())]);
+    let incoming = bob.workspace.huddle_ringing().expect("ringing");
+    assert_eq!((incoming.channel, incoming.member), (dm, ada.workspace.my_id()));
+
+    bob.workspace.decline_huddle();
+    assert_eq!(bob.workspace.huddle_ringing(), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_that_doesnt_ring_doesnt_say_it_rings() {
+    let (_root, [ada, bob, _carol]) = three_members().await;
+    let dm = dm_between(&ada, &bob).await;
+    bob.workspace.set_notify_level(&dm, NotifyLevel::Nothing).unwrap();
+    let mut changes = bob.workspace.subscribe();
+    call(&ada, &bob, &dm);
+
+    while let Ok(change) = changes.try_recv() {
+        assert!(!matches!(change, Change::HuddleRinging { .. }), "{change:?}");
+    }
+    assert_eq!(bob.workspace.huddle_ringing(), None);
+}

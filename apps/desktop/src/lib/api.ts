@@ -217,6 +217,8 @@ export type Change =
   | { kind: "my_huddle" }
   /** Someone started a huddle in a DM you're in; raised once, and only if the DM may alert you. */
   | { kind: "huddle_started"; channel: string; member: string; member_name: string }
+  /** An incoming huddle started ringing on this device; exactly one `huddle_ring_stopped` follows. */
+  | { kind: "huddle_ringing"; channel: string; member: string; member_name: string }
   /** The ring for an incoming huddle stopped: answered, declined, the caller left, or nobody answered in time. */
   | { kind: "huddle_ring_stopped"; channel: string }
   /** Someone in this device's huddle started or stopped speaking; your own member id for your voice. */
@@ -252,6 +254,8 @@ export type MyHuddle = {
   output: OutputState;
   peers: HuddlePeer[];
 };
+/** The incoming huddle ringing on this device. */
+export type IncomingHuddle = { channel: string; member: string; member_name: string };
 export type AudioDevice = {
   id: string;
   name: string;
@@ -395,6 +399,8 @@ export const api = {
   leaveHuddle: () => invoke<void>("leave_huddle"),
   /** Stops the ring for an incoming huddle without joining it. */
   declineHuddle: () => invoke<void>("decline_huddle"),
+  /** The incoming huddle ringing now, if any. */
+  huddleRinging: () => invoke<IncomingHuddle | null>("huddle_ringing"),
   setHuddleMuted: (muted: boolean) => invoke<void>("set_huddle_muted", { muted }),
   huddleDevices: () => invoke<AudioDevices>("huddle_devices"),
   setHuddleDevices: (choice: AudioDeviceChoice) => invoke<void>("set_huddle_devices", { choice }),

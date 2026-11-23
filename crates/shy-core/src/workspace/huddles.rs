@@ -546,12 +546,13 @@ impl Workspace {
         self.emit(Change::HuddleStarted {
             channel: channel.to_owned(),
             member: member_id(starter),
-            member_name,
+            member_name: member_name.clone(),
         });
         let am_in_a_huddle = self.huddles().is_in_a_huddle();
         self.ring_for(
             channel,
             starter,
+            &member_name,
             IncomingHuddle {
                 is_dm: true,
                 is_first_beacon,

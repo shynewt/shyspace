@@ -11,6 +11,7 @@ import type {
   Change,
   Huddle,
   HuddleLink,
+  IncomingHuddle,
   Member,
   MicState,
   MyHuddle,
@@ -64,8 +65,8 @@ export class FakeHuddles {
   chosenDevices: AudioDeviceChoice = { input: null, output: null };
   /** Whether join and leave sounds are on, as `set_huddle_sounds` left it. */
   soundsOn = true;
-  /** The DM whose incoming huddle is ringing, as the core would ring it. */
-  ringing: string | null = null;
+  /** The incoming huddle ringing, as the core would ring it. */
+  ringing: IncomingHuddle | null = null;
 
   constructor(context: HuddlesContext) {
     this.context = context;
@@ -87,14 +88,17 @@ export class FakeHuddles {
     if (isStart && this.isMyDm(channel)) {
       const memberName = this.context.members().find((candidate) => candidate.id === member)?.name ?? "";
       this.context.notify({ kind: "huddle_started", channel, member, member_name: memberName });
-      if (this.mine === null) this.ringing = channel;
+      if (this.mine === null) {
+        this.ringing = { channel, member, member_name: memberName };
+        this.context.notify({ kind: "huddle_ringing", channel, member, member_name: memberName });
+      }
     }
   }
 
   /** The ring stops, as answering, declining or the caller leaving would stop it. */
   private stopRinging(): void {
     if (this.ringing === null) return;
-    const channel = this.ringing;
+    const { channel } = this.ringing;
     this.ringing = null;
     this.context.notify({ kind: "huddle_ring_stopped", channel });
   }
@@ -181,6 +185,8 @@ export class FakeHuddles {
       case "decline_huddle":
         this.stopRinging();
         return null;
+      case "huddle_ringing":
+        return this.ringing;
       case "set_huddle_muted":
         this.setMuted(argument(args, "muted") === true);
         return null;

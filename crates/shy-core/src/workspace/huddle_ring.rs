@@ -10,20 +10,37 @@ use crate::{
         media::Ringing,
         ring::{IncomingHuddle, RING_MS, ring_ends, rings},
     },
-    views::Change,
+    views::{self, Change, member_id},
 };
 
 pub(crate) struct Ring {
     channel: String,
     caller: PublicKey,
+    caller_name: String,
     started_ms: u64,
     _sound: Ringing,
+}
+
+impl Ring {
+    fn view(&self) -> views::IncomingHuddle {
+        views::IncomingHuddle {
+            channel: self.channel.clone(),
+            member: member_id(&self.caller),
+            member_name: self.caller_name.clone(),
+        }
+    }
 }
 
 impl Workspace {
     /// Rings for `caller`'s new huddle in `channel`, if `incoming` should.
     /// A ring already sounding is replaced.
-    pub(super) fn ring_for(&self, channel: &str, caller: &PublicKey, incoming: IncomingHuddle) {
+    pub(super) fn ring_for(
+        &self,
+        channel: &str,
+        caller: &PublicKey,
+        caller_name: &str,
+        incoming: IncomingHuddle,
+    ) {
         let Some(media) = &self.inner.huddle_media else {
             return;
         };
@@ -31,19 +48,33 @@ impl Workspace {
             return;
         }
         let sound = media.ring();
-        let replaced = {
+        let (replaced, ringing) = {
             let mut huddles = self.huddles();
             let started_ms = huddles.now();
-            huddles.ringing.replace(Ring {
+            let ring = Ring {
                 channel: channel.to_owned(),
                 caller: *caller,
+                caller_name: caller_name.to_owned(),
                 started_ms,
                 _sound: sound,
-            })
+            };
+            let ringing = ring.view();
+            (huddles.ringing.replace(ring), ringing)
         };
         if let Some(replaced) = replaced {
             self.end_ring(replaced);
         }
+        self.emit(Change::HuddleRinging {
+            channel: ringing.channel,
+            member: ringing.member,
+            member_name: ringing.member_name,
+        });
+    }
+
+    /// The incoming huddle ringing now, if any: for a window that opens or
+    /// reloads mid-ring.
+    pub fn huddle_ringing(&self) -> Option<views::IncomingHuddle> {
+        self.huddles().ringing.as_ref().map(Ring::view)
     }
 
     /// Stops the ring: this member doesn't want to take the call.

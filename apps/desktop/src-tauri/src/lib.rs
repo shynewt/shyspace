@@ -813,6 +813,7 @@ pub fn run() {
             huddles::join_huddle,
             huddles::leave_huddle,
             huddles::decline_huddle,
+            huddles::huddle_ringing,
             huddles::set_huddle_muted,
             huddles::huddle_devices,
             huddles::set_huddle_devices,

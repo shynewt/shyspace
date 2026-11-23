@@ -424,6 +424,14 @@ pub enum Change {
         member: String,
         member_name: String,
     },
+    /// An incoming huddle started ringing on this device. Exactly one
+    /// `HuddleRingStopped` follows.
+    HuddleRinging {
+        channel: EntityId,
+        /// Member id (hex) of the caller.
+        member: String,
+        member_name: String,
+    },
     /// The ring for an incoming huddle stopped: answered, declined, the
     /// caller left, or nobody answered in time.
     HuddleRingStopped {
@@ -467,6 +475,15 @@ pub struct Devices {
     pub outputs: Vec<crate::huddle::media::AudioDevice>,
     /// `None` (the system's default) also when the chosen one went away.
     pub chosen: crate::huddle::media::DeviceChoice,
+}
+
+/// The incoming huddle ringing on this device.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct IncomingHuddle {
+    pub channel: EntityId,
+    /// Member id (hex) of the caller.
+    pub member: String,
+    pub member_name: String,
 }
 
 /// This device's own huddle.

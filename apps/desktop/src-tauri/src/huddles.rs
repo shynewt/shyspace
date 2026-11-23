@@ -2,7 +2,7 @@
 
 use shy_core::{
     huddle::media::DeviceChoice,
-    views::{Devices, Huddle, MyHuddle},
+    views::{Devices, Huddle, IncomingHuddle, MyHuddle},
 };
 use tauri::State;
 
@@ -29,6 +29,11 @@ pub async fn join_huddle(state: State<'_, AppState>, channel: String, muted: boo
 #[tauri::command]
 pub async fn leave_huddle(state: State<'_, AppState>) -> CommandResult<()> {
     current(&state).await?.leave_huddle().map_err(failed)
+}
+
+#[tauri::command]
+pub async fn huddle_ringing(state: State<'_, AppState>) -> CommandResult<Option<IncomingHuddle>> {
+    Ok(current(&state).await?.huddle_ringing())
 }
 
 #[tauri::command]
