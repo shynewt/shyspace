@@ -12,6 +12,7 @@
 //! size. Each probe checks its results are right at that size; timings are
 //! printed, not asserted, because they depend on the machine.
 
+mod budget;
 mod catch_up;
 pub(super) mod counting_store;
 mod files;
