@@ -10,7 +10,8 @@ const PAGE_LINK = /^shy:\/\/page\/([0-9a-f]+)$/;
 const SAFE_EXTERNAL = /^(https?:|mailto:)/i;
 const EMAIL = /^[\w.+-]+@[\w-]+(\.[\w.-]+)+$/;
 
-export type LinkTarget = { from: number; to: number; url: string; pageId: string | null };
+/** `text` is what the link shows: its label, or the address itself. */
+export type LinkTarget = { from: number; to: number; url: string; text: string; pageId: string | null };
 
 export function pageIdOf(url: string): string | null {
   return url.match(PAGE_LINK)?.[1] ?? null;
@@ -50,7 +51,7 @@ export function linkAt(state: EditorState, position: number): LinkTarget | null 
   for (const match of line.text.matchAll(BARE_PAGE_LINK)) {
     const from = line.from + match.index;
     const to = from + match[0].length;
-    if (from <= position && position <= to) return { from, to, url: match[0], pageId: match[1] };
+    if (from <= position && position <= to) return { from, to, url: match[0], text: match[0], pageId: match[1] };
   }
   return null;
 }
@@ -59,5 +60,7 @@ function linkOf(state: EditorState, node: SyntaxNode, url: SyntaxNode | null): L
   if (!url) return null;
   const href = state.sliceDoc(url.from, url.to);
   if (isMentionLink(href)) return null;
-  return { from: node.from, to: node.to, url: href, pageId: pageIdOf(href) };
+  const marks = node.getChildren("LinkMark");
+  const text = marks.length >= 2 ? state.sliceDoc(marks[0].to, marks[1].from) : href;
+  return { from: node.from, to: node.to, url: href, text, pageId: pageIdOf(href) };
 }

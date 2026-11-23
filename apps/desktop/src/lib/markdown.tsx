@@ -16,7 +16,7 @@ import { ConfirmDialog, cx, ErrorBoundary, IconButton, Tooltip } from "../ui";
 import { PAGE_LINK_PREFIX } from "./api";
 import { CALLOUTS, type CalloutKind, isCalloutKind, rehypeCallouts } from "./callouts";
 import { type CodeSegment, highlight } from "./codeHighlight";
-import { openExternalUrl } from "./contact";
+import { isMisleadingLink, misleadingLinkWarning, openExternalUrl } from "./contact";
 import { isCheapToFormat, remarkSizeLimits, withPlainLineEnds } from "./markdownBudget";
 import { isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
 import { reportError } from "./toast";
@@ -189,35 +189,6 @@ function textOf(node: MarkdownNode | MarkdownNode["children"][number]): string {
   return "";
 }
 
-/** One word that reads as a web address, in any script: "paypal.com", "https://bank.example/login". */
-const ADDRESS_WORD = /^(?:https?:\/\/)?(?:[\p{L}\p{N}-]+\.)+\p{L}{2,}(?:[:/?#]\S*)?$/iu;
-const WORD_EDGE_PUNCTUATION = /^[("'«“]+|[.,;:!?)"'»”]+$/gu;
-
-/** A URL's host as the system opens it: look-alike letters in punycode, no "www.", and null if it isn't a URL. */
-function hostOf(url: string): string | null {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    // Not an address at all; callers treat an unknown host as one to ask about.
-    return null;
-  }
-}
-
-/** The hosts of the addresses written in a link's text, like "Log in at paypal.com." */
-function shownHosts(text: string): (string | null)[] {
-  return text
-    .split(/\s+/)
-    .map((word) => word.replace(WORD_EDGE_PUNCTUATION, ""))
-    .filter((word) => ADDRESS_WORD.test(word))
-    .map((word) => hostOf(/^https?:\/\//i.test(word) ? word : `http://${word}`));
-}
-
-/** Link text that shows a web address other than the one the link opens: a common phishing trick. */
-function isMisleading(text: string, href: string): boolean {
-  const opened = hostOf(href);
-  return shownHosts(text).some((shown) => shown === null || shown !== opened);
-}
-
 /** A web or mail link: shows where it goes on hover, and asks first when its text shows somewhere else. */
 function ExternalLink({ href, text, children }: { href: string; text: string; children: ReactNode }) {
   const [isConfirming, setConfirming] = useState(false);
@@ -229,7 +200,7 @@ function ExternalLink({ href, text, children }: { href: string; text: string; ch
           href={href}
           onClick={(event) => {
             event.preventDefault();
-            if (isMisleading(text, href)) setConfirming(true);
+            if (isMisleadingLink(text, href)) setConfirming(true);
             else open().catch(reportError);
           }}
         >
@@ -240,7 +211,7 @@ function ExternalLink({ href, text, children }: { href: string; text: string; ch
         open={isConfirming}
         onOpenChange={setConfirming}
         title="Open this link?"
-        description={`Its text shows ${text.trim()}, but it opens ${href}. Open it only if you trust where it goes.`}
+        description={misleadingLinkWarning(text, href)}
         confirmLabel="Open link"
         onConfirm={open}
       />

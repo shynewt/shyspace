@@ -1,7 +1,7 @@
 /** Opening a page's links: web and mail links in their apps, page links in shyspace, mentions as profile cards. */
 import { Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import { openExternal } from "../../../lib/contact";
+import { isMisleadingLink, openExternal } from "../../../lib/contact";
 import { reportError } from "../../../lib/toast";
 import { externalUrl, type LinkTarget } from "./links";
 
@@ -20,6 +20,13 @@ export const memberOpener = Facet.define<MemberOpener, MemberOpener | undefined>
   combine: (openers) => openers[0],
 });
 
+/** How the editor asks before opening a link whose text could mislead about where it goes; given by the screen that hosts it. */
+export type MisleadingLinkAsker = (text: string, url: string) => void;
+
+export const misleadingLinkAsker = Facet.define<MisleadingLinkAsker, MisleadingLinkAsker | undefined>({
+  combine: (askers) => askers[0],
+});
+
 export function openMember(view: EditorView, memberId: string, anchor: CardAnchor, openedBy: "pointer" | "keyboard") {
   const open = view.state.facet(memberOpener);
   if (!open) throw new Error("the page editor was set up without a way to show members");
@@ -34,6 +41,12 @@ export function openLink(view: EditorView, link: LinkTarget): void {
   const url = externalUrl(link.url);
   if (!url) {
     reportError(new Error(`only web and email links open from a page, not "${link.url}"`));
+    return;
+  }
+  if (isMisleadingLink(link.text, url)) {
+    const ask = view.state.facet(misleadingLinkAsker);
+    if (!ask) throw new Error("the page editor was set up without a way to ask about misleading links");
+    ask(link.text, url);
     return;
   }
   openExternal(url);

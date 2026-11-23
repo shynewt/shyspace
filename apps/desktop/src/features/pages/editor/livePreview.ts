@@ -19,7 +19,16 @@ import { CalloutLabelWidget } from "./callouts";
 import { pageIcon } from "./icons";
 import { externalUrl, linkAt } from "./links";
 import { previewItems } from "./markdownPreview";
-import { type MemberOpener, memberOpener, openLink, openMember, openPage, pageOpener } from "./openLinks";
+import {
+  type MemberOpener,
+  type MisleadingLinkAsker,
+  memberOpener,
+  misleadingLinkAsker,
+  openLink,
+  openMember,
+  openPage,
+  pageOpener,
+} from "./openLinks";
 import { tablePreview } from "./tables";
 import { toggleTaskAt } from "./tasks";
 
@@ -50,15 +59,18 @@ export const knownMembers = StateField.define<ReadonlySet<string>>({
 export function livePreview({
   onOpenPage,
   onOpenMember,
+  onMisleadingLink,
 }: {
   onOpenPage: (pageId: string) => void;
   onOpenMember: MemberOpener;
+  onMisleadingLink: MisleadingLinkAsker;
 }) {
   return [
     pageTitles,
     knownMembers,
     pageOpener.of(onOpenPage),
     memberOpener.of(onOpenMember),
+    misleadingLinkAsker.of(onMisleadingLink),
     previewPlugin,
     tablePreview,
     EditorView.atomicRanges.of((view) => view.plugin(previewPlugin)?.chips ?? Decoration.none),

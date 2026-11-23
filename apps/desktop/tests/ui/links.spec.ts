@@ -122,6 +122,8 @@ for (const [label, text] of [
   ["a trailing period", "[paypal.com.](https://evil.example/login)"],
   ["a look-alike letter", "[p\u0430ypal.com](https://evil.example/login)"],
   ["an address inside a sentence", "[Log in at paypal.com](https://evil.example/login)"],
+  ["a name before the host, written out", "https://accounts.google.com@evil.example/login"],
+  ["an invisible character in its text", "[pay\u200Bpal.com](https://evil.example/login)"],
 ]) {
   test(`a misleading link with ${label} still asks first`, async ({ page }) => {
     await recordOpenedLinks(page);

@@ -7,9 +7,11 @@ import { useEffect, useRef, useState } from "react";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import { api, onChange, type PageEditorSession } from "../../lib/api";
+import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
 import { useMembers } from "../../lib/members";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
+import { ConfirmDialog } from "../../ui";
 import { ProfileCardAt } from "../members/ProfileCardAt";
 import { formattingKeymap } from "./editor/commands";
 import { livePreview, setKnownMembers, setPageTitles } from "./editor/livePreview";
@@ -59,6 +61,7 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const members = useMembers();
   const [memberCard, setMemberCard] = useState<OpenMemberCard | null>(null);
+  const [misleadingLink, setMisleadingLink] = useState<{ text: string; url: string } | null>(null);
   const menuKeys = useRef<(key: MenuKey, view: EditorView) => boolean>(() => false);
 
   useEffect(() => {
@@ -143,6 +146,7 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
             livePreview({
               onOpenPage: (id) => navigateRef.current({ kind: "page", id }),
               onOpenMember: (memberId, anchor, openedBy) => setMemberCard({ memberId, anchor, openedBy }),
+              onMisleadingLink: (linkText, url) => setMisleadingLink({ text: linkText, url }),
             }),
             suggestions({ onKey: (key, editor) => menuKeys.current(key, editor), onChange: setSuggestion }),
             placeholder("Type / for blocks, @ to mention someone, [[ to link a page"),
@@ -185,6 +189,14 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
     <div className="relative">
       <div ref={host} className="selectable min-h-[50vh]" />
       <SuggestionMenu view={view} suggestion={suggestion} pageId={pageId} keys={menuKeys} />
+      <ConfirmDialog
+        open={misleadingLink !== null}
+        onOpenChange={(open) => !open && setMisleadingLink(null)}
+        title="Open this link?"
+        description={misleadingLink ? misleadingLinkWarning(misleadingLink.text, misleadingLink.url) : ""}
+        confirmLabel="Open link"
+        onConfirm={() => (misleadingLink ? openExternalUrl(misleadingLink.url) : Promise.resolve())}
+      />
       {memberCard && (
         <ProfileCardAt
           {...memberCard}

@@ -227,3 +227,41 @@ test("code in a page is coloured by its language, with the fences hidden", async
   await expect(lines(page).nth(2).locator(".tok-keyword").first()).toHaveText("fn");
   await expect(lines(page).nth(2).locator(".tok-number")).toHaveText("3");
 });
+
+for (const [label, text, opens, says] of [
+  [
+    "text that shows another address",
+    "[paypal.com](https://evil.example/login)",
+    "https://evil.example/login",
+    "Its text shows paypal.com, but it opens https://evil.example/login.",
+  ],
+  [
+    "a name before the host",
+    "[Google](https://accounts.google.com@evil.example/login)",
+    "https://accounts.google.com@evil.example/login",
+    "This link goes to evil.example, not accounts.google.com.",
+  ],
+]) {
+  test(`a page link with ${label} asks before opening`, async ({ page }) => {
+    await seedAndOpen(page, "Links", `Sign in: ${text} today`);
+    await page.evaluate(() => {
+      window.openedUrls = [];
+      const answer = window.fake.handle.bind(window.fake);
+      window.fake.handle = (command, args) => {
+        if (command !== "plugin:opener|open_url") return answer(command, args);
+        if (args && "url" in args && typeof args.url === "string") window.openedUrls.push(args.url);
+        return null;
+      };
+    });
+    const label = text.slice(1, text.indexOf("]"));
+    const link = page.locator(".cm-content").getByText(label);
+
+    await link.click({ modifiers: ["ControlOrMeta"] });
+    const dialog = page.getByRole("dialog", { name: "Open this link?" });
+    await expect(dialog).toContainText(says);
+    expect(await page.evaluate(() => window.openedUrls)).toEqual([]);
+
+    await dialog.getByRole("button", { name: "Open link" }).click();
+    await expect.poll(() => page.evaluate(() => window.openedUrls)).toEqual([opens]);
+  });
+}
