@@ -40,10 +40,10 @@ export function HuddleButton({ channel }: { channel: Channel }) {
 
   if (isHere && mine?.phase === "joining") {
     return (
-      <span className={cx(PILL, "bg-surface-2 text-muted")}>
+      <Pill tooltip="Joining…" className="cursor-default bg-surface-2 text-muted">
         <Spinner size={13} />
         <Label>Joining…</Label>
-      </span>
+      </Pill>
     );
   }
   if (isHere) {
@@ -98,6 +98,11 @@ function Label({ children }: { children: string }) {
   return <span className="@max-header-labels/header:hidden">{children}</span>;
 }
 
+/**
+ * Every state renders this one button, so keyboard focus stays on it as the
+ * huddle changes. Without `onClick` it has no action for now, and says so
+ * while staying focusable.
+ */
 function Pill({
   tooltip,
   onClick,
@@ -105,7 +110,7 @@ function Pill({
   children,
 }: {
   tooltip: string;
-  onClick: () => void;
+  onClick?: () => void;
   className: string;
   children: ReactNode;
 }) {
@@ -122,7 +127,8 @@ function Pill({
       <motion.button
         type="button"
         aria-label={tooltip}
-        whileTap={{ scale: 0.95 }}
+        aria-disabled={onClick ? undefined : true}
+        whileTap={onClick ? { scale: 0.95 } : undefined}
         transition={springs.snappy}
         onClick={onClick}
         className={cx(PILL, className)}

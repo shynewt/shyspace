@@ -85,6 +85,39 @@ test("joining shows a brief spinner, then everyone connecting, then the call", a
   await expect(bar(page).getByRole("button", { name: "In the huddle: You and Grace. Show details" })).toBeVisible();
 });
 
+test("keyboard focus stays on the huddle and mute buttons while they wait", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => {
+    window.fake.huddles.holdJoining = true;
+  });
+  const start = page.getByRole("button", { name: "Start a huddle" });
+  await start.focus();
+  await page.keyboard.press("Enter");
+  const joining = page.getByRole("button", { name: "Joining…" });
+  await expect(joining).toHaveAttribute("aria-disabled", "true");
+  await expect(joining).toBeFocused();
+  await page.keyboard.press("Enter");
+  expect(await page.evaluate(() => window.fake.huddles.joinedMuted.length)).toBe(1);
+  await page.evaluate(() => window.fake.huddles.connect());
+  await expect(page.getByRole("button", { name: "Leave the huddle" })).toBeFocused();
+
+  const mute = bar(page).getByRole("button", { name: "Mute", exact: true });
+  await mute.focus();
+  await page.keyboard.press("Enter");
+  await expect(mute).toHaveAttribute("aria-pressed", "true");
+  await page.evaluate(() => {
+    window.fake.huddles.holdMicOpening = true;
+  });
+  await page.keyboard.press("Enter");
+  await expect(mute).toHaveText("Unmuting…");
+  await expect(mute).toHaveAttribute("aria-disabled", "true");
+  await expect(mute).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => window.fake.huddles.releaseMic());
+  await expect(mute).toHaveText("Mute");
+  await expect(mute).toBeFocused();
+});
+
 test("a full huddle says so and can't be joined", async ({ page }) => {
   await openApp(page);
   const general = await generalId(page);

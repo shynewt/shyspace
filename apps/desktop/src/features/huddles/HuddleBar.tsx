@@ -246,6 +246,8 @@ export function MuteButton({
   const isBlocked = mic === "permission_denied";
   const isOpening = mic === "opening" && !isMuted;
   const label = isOpening ? "Unmuting…" : isMuted ? "Unmute" : "Mute";
+  // Not `disabled`, which would drop keyboard focus to the page.
+  const isUnavailable = isBlocked || isOpening || isJoining;
   return (
     <Tooltip
       label={
@@ -259,12 +261,12 @@ export function MuteButton({
         type="button"
         aria-pressed={isMuted}
         aria-label="Mute"
-        disabled={isBlocked || isOpening || isJoining}
-        whileTap={{ scale: 0.96 }}
+        aria-disabled={isUnavailable || undefined}
+        whileTap={isUnavailable ? undefined : { scale: 0.96 }}
         transition={springs.snappy}
-        onClick={onToggle}
+        onClick={isUnavailable ? undefined : onToggle}
         className={cx(
-          "flex h-7 items-center gap-1.5 rounded-l-md border px-2.5 text-sm transition-colors disabled:cursor-default disabled:opacity-60",
+          "flex h-7 items-center gap-1.5 rounded-l-md border px-2.5 text-sm transition-colors aria-disabled:cursor-default aria-disabled:opacity-60",
           isMuted
             ? "border-danger/30 bg-danger/8 text-danger-text hover:bg-danger/12"
             : "border-line bg-surface text-ink hover:bg-surface-2",
