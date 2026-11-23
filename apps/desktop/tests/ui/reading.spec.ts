@@ -238,6 +238,8 @@ test("unread you read or cleared is saved before you leave, so a restart can't b
   await graceSays(page, "random", "Four");
   await setWindowFocused(page, false);
   await graceSays(page, "random", "Five");
+  // Esc clears what's shown, so it must be there first (on a loaded machine it can lag).
+  await expect(log(page, "random").getByText("Five")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect.poll(() => unreadIn(page, "random")).toBe(0);
   // The timed saves were really held, so leaving is what saved.
