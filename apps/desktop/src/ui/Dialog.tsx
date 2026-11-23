@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { Dialog as RadixDialog } from "radix-ui";
-import { type ReactNode, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { cx } from "./cx";
 import { IconButton } from "./IconButton";
 import { fade, pop } from "./motion";
@@ -34,7 +34,9 @@ type DialogProps = {
 
 /**
  * A modal surface. Radix handles focus trapping, Escape and outside clicks.
- * It never grows taller than the window: longer content scrolls inside.
+ * It never grows taller than the window: longer content scrolls inside. It
+ * leaves at once, with no exit animation: one that never finished (as on a
+ * loaded WebKit) left an invisible dialog blocking every click.
  */
 export function Dialog({
   open,
@@ -53,73 +55,71 @@ export function Dialog({
 }: DialogProps) {
   const isInstant = entrance === "instant";
   const opener = useRef<HTMLElement | null>(null);
+  // Kept from while it was open: callers often clear it in the same update that closes the dialog.
+  const returnTarget = useRef(returnFocusTo);
+  useEffect(() => {
+    if (open) returnTarget.current = returnFocusTo;
+  }, [open, returnFocusTo]);
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
-      <AnimatePresence>
-        {open && (
-          <RadixDialog.Portal forceMount>
-            <RadixDialog.Overlay asChild>
-              <motion.div {...(isInstant ? {} : fade)} className="fixed inset-0 z-40 bg-scrim" />
-            </RadixDialog.Overlay>
-            <div
+      <RadixDialog.Portal>
+        <RadixDialog.Overlay asChild>
+          <motion.div {...(isInstant ? {} : fade)} className="fixed inset-0 z-40 bg-scrim" />
+        </RadixDialog.Overlay>
+        <div
+          className={cx(
+            "pointer-events-none fixed inset-0 z-40 flex justify-center px-4",
+            placement === "top" ? "items-start pt-[14vh]" : "items-center",
+          )}
+        >
+          <RadixDialog.Content
+            asChild
+            onOpenAutoFocus={(event) => {
+              opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              if (initialFocus !== "dialog") return;
+              event.preventDefault();
+              if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+            }}
+            onCloseAutoFocus={(event) => {
+              // Radix only returns focus to its own Trigger, which these
+              // dialogs, opened from state, don't use.
+              event.preventDefault();
+              if (hasFocusOutside(event.currentTarget)) return;
+              const back = returnTarget.current;
+              const target = back?.isConnected ? back : opener.current;
+              if (target?.isConnected) target.focus();
+            }}
+          >
+            <motion.div
+              {...(isInstant ? {} : pop)}
+              style={{ width }}
               className={cx(
-                "pointer-events-none fixed inset-0 z-40 flex justify-center px-4",
-                placement === "top" ? "items-start pt-[14vh]" : "items-center",
+                "pointer-events-auto relative max-w-full overflow-y-auto rounded-2xl border border-line bg-surface shadow-float outline-none",
+                placement === "top" ? "max-h-[calc(86dvh-1rem)]" : "max-h-[calc(100dvh-2rem)]",
               )}
             >
-              <RadixDialog.Content
-                asChild
-                onOpenAutoFocus={(event) => {
-                  opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-                  if (initialFocus !== "dialog") return;
-                  event.preventDefault();
-                  if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
-                }}
-                onCloseAutoFocus={(event) => {
-                  // Radix only returns focus to its own Trigger, which these
-                  // dialogs, opened from state, don't use.
-                  event.preventDefault();
-                  if (hasFocusOutside(event.currentTarget)) return;
-                  const target = returnFocusTo?.isConnected ? returnFocusTo : opener.current;
-                  if (target?.isConnected) target.focus();
-                }}
-              >
-                <motion.div
-                  {...(isInstant ? {} : pop)}
-                  style={{ width }}
-                  className={cx(
-                    "pointer-events-auto relative max-w-full overflow-y-auto rounded-2xl border border-line bg-surface shadow-float outline-none",
-                    placement === "top" ? "max-h-[calc(86dvh-1rem)]" : "max-h-[calc(100dvh-2rem)]",
-                  )}
-                >
-                  <RadixDialog.Title className={hideTitle ? "sr-only" : "px-5 pt-5 text-lg font-semibold"}>
-                    {title}
-                  </RadixDialog.Title>
-                  {description ? (
-                    <RadixDialog.Description className="px-5 pt-1 text-sm leading-relaxed text-muted">
-                      {description}
-                    </RadixDialog.Description>
-                  ) : (
-                    <RadixDialog.Description className="sr-only">{title}</RadixDialog.Description>
-                  )}
-                  {padding === "standard" ? (
-                    <div className="flex flex-col gap-4 px-5 pt-4 pb-5">{children}</div>
-                  ) : (
-                    children
-                  )}
-                  {/* After the content, so opening the dialog focuses the content
+              <RadixDialog.Title className={hideTitle ? "sr-only" : "px-5 pt-5 text-lg font-semibold"}>
+                {title}
+              </RadixDialog.Title>
+              {description ? (
+                <RadixDialog.Description className="px-5 pt-1 text-sm leading-relaxed text-muted">
+                  {description}
+                </RadixDialog.Description>
+              ) : (
+                <RadixDialog.Description className="sr-only">{title}</RadixDialog.Description>
+              )}
+              {padding === "standard" ? <div className="flex flex-col gap-4 px-5 pt-4 pb-5">{children}</div> : children}
+              {/* After the content, so opening the dialog focuses the content
                       rather than this button (whose tooltip would take the first Escape). */}
-                  {hasCloseButton && (
-                    <RadixDialog.Close asChild>
-                      <IconButton label="Close" icon={<X size={16} />} className="absolute top-3.5 right-3.5" />
-                    </RadixDialog.Close>
-                  )}
-                </motion.div>
-              </RadixDialog.Content>
-            </div>
-          </RadixDialog.Portal>
-        )}
-      </AnimatePresence>
+              {hasCloseButton && (
+                <RadixDialog.Close asChild>
+                  <IconButton label="Close" icon={<X size={16} />} className="absolute top-3.5 right-3.5" />
+                </RadixDialog.Close>
+              )}
+            </motion.div>
+          </RadixDialog.Content>
+        </div>
+      </RadixDialog.Portal>
     </RadixDialog.Root>
   );
 }

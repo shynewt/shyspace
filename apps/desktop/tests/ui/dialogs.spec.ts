@@ -84,3 +84,40 @@ test("closing a dialog puts focus back on the button that opened it", async ({ p
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(opener).toBeFocused();
 });
+
+// A dialog that waited for its exit animation stayed on screen, blocking every
+// click, whenever that animation never finished (seen on a loaded WebKit). So
+// a closed dialog leaves at once: checked right after the key, long before
+// any exit animation could have run.
+
+/** Presses Esc where focus is and counts the dialogs left a moment later. */
+function dialogsJustAfterEscape(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return document.querySelectorAll("[role=dialog]").length;
+  });
+}
+
+test.describe("closing without an exit to wait on", () => {
+  test.use({ reducedMotion: "no-preference" });
+
+  test("a dialog is gone the moment it closes", async ({ page }) => {
+    await openApp(page);
+    await page.getByRole("button", { name: "Message someone privately" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    expect(await dialogsJustAfterEscape(page)).toBe(0);
+  });
+
+  test("the sidebar drawer is gone the moment it closes", async ({ page }) => {
+    await openApp(page);
+    await page.setViewportSize({ width: 720, height: 800 });
+    await page.getByRole("button", { name: "Show sidebar" }).click();
+    const drawer = page.getByRole("dialog", { name: "Sidebar" });
+    await expect.poll(() => drawer.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    expect(await dialogsJustAfterEscape(page)).toBe(0);
+  });
+});

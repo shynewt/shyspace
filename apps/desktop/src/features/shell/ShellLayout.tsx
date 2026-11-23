@@ -1,5 +1,5 @@
 import { PanelLeft } from "lucide-react";
-import { AnimatePresence, motion, type Transition, useIsPresent } from "motion/react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { Dialog as RadixDialog } from "radix-ui";
 import { createContext, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef } from "react";
 import { layoutWidth, useElementWidth } from "../../lib/layout";
@@ -103,53 +103,45 @@ function SidebarDrawer({
   }, [sidebar.drawer]);
   return (
     <RadixDialog.Root open={isOpen} onOpenChange={(open) => !open && sidebar.closeDrawer()}>
-      {/* The drawer leaving takes how to leave from here: it doesn't render again itself. */}
-      <AnimatePresence custom={instantAfterAKey(tweens.fast)}>
-        {isOpen && (
-          <RadixDialog.Portal forceMount>
-            <RadixDialog.Overlay asChild>
-              <motion.div {...fade} className="fixed inset-0 z-30 bg-scrim" />
-            </RadixDialog.Overlay>
-            <RadixDialog.Content
-              asChild
-              aria-describedby={undefined}
-              onOpenAutoFocus={() => {
-                opener.current = document.activeElement;
-              }}
-              onCloseAutoFocus={(event) => {
-                event.preventDefault();
-                const focused = document.activeElement;
-                const isFocusLost = !focused || focused === document.body;
-                const back = opener.current;
-                // An opener that's gone or going (the header toggle, once the sidebar docks) can't take focus.
-                if (!isLeaving.current && back instanceof HTMLElement && back.isConnected && !back.closest("[inert]")) {
-                  back.focus();
-                } else if (isFocusLost) {
-                  // Where you went keeps focus (a channel focuses its message box); otherwise the content takes it.
-                  main.current?.focus({ preventScroll: true });
-                }
-              }}
-            >
-              <motion.div
-                initial={{ x: "-100%" }}
-                animate={{ x: 0, transition: instantAfterAKey(springs.move) }}
-                exit="leaving"
-                variants={DRAWER_VARIANTS}
-                data-sidebar
-                className="fixed inset-y-0 left-0 z-30 w-sidebar max-w-[calc(100%-3rem)] border-r border-line bg-bg shadow-float outline-none"
-              >
-                <RadixDialog.Title className="sr-only">Sidebar</RadixDialog.Title>
-                {children}
-              </motion.div>
-            </RadixDialog.Content>
-          </RadixDialog.Portal>
-        )}
-      </AnimatePresence>
+      {/* No exit animation: one that never finished would leave the drawer blocking clicks. */}
+      <RadixDialog.Portal>
+        <RadixDialog.Overlay asChild>
+          <motion.div {...fade} className="fixed inset-0 z-30 bg-scrim" />
+        </RadixDialog.Overlay>
+        <RadixDialog.Content
+          asChild
+          aria-describedby={undefined}
+          onOpenAutoFocus={() => {
+            opener.current = document.activeElement;
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const focused = document.activeElement;
+            const isFocusLost = !focused || focused === document.body;
+            const back = opener.current;
+            // An opener that's gone or going (the header toggle, once the sidebar docks) can't take focus.
+            if (!isLeaving.current && back instanceof HTMLElement && back.isConnected && !back.closest("[inert]")) {
+              back.focus();
+            } else if (isFocusLost) {
+              // Where you went keeps focus (a channel focuses its message box); otherwise the content takes it.
+              main.current?.focus({ preventScroll: true });
+            }
+          }}
+        >
+          <motion.div
+            initial={{ x: "-100%" }}
+            animate={{ x: 0, transition: instantAfterAKey(springs.move) }}
+            data-sidebar
+            className="fixed inset-y-0 left-0 z-30 w-sidebar max-w-[calc(100%-3rem)] border-r border-line bg-bg shadow-float outline-none"
+          >
+            <RadixDialog.Title className="sr-only">Sidebar</RadixDialog.Title>
+            {children}
+          </motion.div>
+        </RadixDialog.Content>
+      </RadixDialog.Portal>
     </RadixDialog.Root>
   );
 }
-
-const DRAWER_VARIANTS = { leaving: (transition: Transition) => ({ x: "-100%", transition }) };
 
 /**
  * The button that shows or hides the sidebar: in the sidebar's top row while
