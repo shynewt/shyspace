@@ -111,3 +111,6 @@ A member could write page updates under another editor's Yjs client id, so devic
 
 ## No migrations before the first release (2026-11)
 shyspace has no users yet, so the database schema (`storage/schema.rs`) is one base schema changed in place, and nothing carries data from older builds forward. A store records a fingerprint of its schema and view rules; one made by a different build is refused with "recreate this workspace" rather than upgraded or misread. This keeps upgrade code from piling up while the format still changes weekly. Migrations start with the first release.
+
+## Search indexes visible words, with a markdown parser (2026-11)
+Search used to index the raw markdown, so a query like "shy" or "member" matched link and mention addresses nobody sees (#76). The core now indexes only what a reader sees, using `pulldown-cmark` set to the flavour the desktop renders. A few regular expressions would have been smaller but get nesting, code and escapes wrong. Bare page links show as chips titled by the page, which can be renamed, so they are left out rather than indexed under a title that goes stale.

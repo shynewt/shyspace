@@ -9,6 +9,7 @@ use super::Store;
 use crate::{
     config,
     files::MAX_PICTURE_BYTES,
+    markdown::visible_text,
     ops::{
         MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, Op, VerifiedOp, clean_display_name,
         clean_emoji, clean_page_title, cut_to, is_owned_by, is_valid_channel_name, is_valid_status, now_ms,
@@ -349,6 +350,7 @@ impl Store {
                     Ok((row.get(0)?, row.get(1)?))
                 })?;
         let text = pages::read(state.as_deref())?;
-        self.index_for_search("page", id, &title, cut_to(&text, MAX_INDEXED_PAGE_CHARS))
+        let visible = visible_text(cut_to(&text, MAX_INDEXED_PAGE_CHARS));
+        self.index_for_search("page", id, &title, &visible)
     }
 }

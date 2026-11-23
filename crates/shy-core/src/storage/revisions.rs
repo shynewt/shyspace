@@ -7,6 +7,7 @@ use rusqlite::{OptionalExtension, params};
 
 use super::Store;
 use crate::{
+    markdown::visible_text,
     ops::{Op, is_valid_channel_name, rule_violation},
     views::Change,
 };
@@ -196,7 +197,7 @@ impl Store {
             [id],
             |row| row.get(0),
         )?;
-        self.index_for_search("message", id, "", &text)
+        self.index_for_search("message", id, "", &visible_text(&text))
     }
 
     /// A file that arrives after `deleted` (it or its home) was deleted: its

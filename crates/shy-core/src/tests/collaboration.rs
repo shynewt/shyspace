@@ -1023,3 +1023,44 @@ async fn search_hits_say_who_wrote_them_and_when() {
         .unwrap();
     assert_eq!(page_hit.time_ms, edited.updated_ms);
 }
+
+#[tokio::test]
+async fn search_matches_only_the_text_people_see() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let plan = admin.create_page("Plan", None).unwrap();
+    let markdown = format!(
+        "**Budget** for [@Bob](shy://member/{bob_id}): see shy://page/{plan} and [the sheet](https://sheets.example/q3)",
+        bob_id = bob.my_id(),
+    );
+    let message = bob.send_message(&general, &markdown, None).unwrap();
+    let page = admin.create_page("Notes", None).unwrap();
+    admin
+        .edit_page(
+            &page,
+            Edit::Append("## Agenda\n\n- [x] ship the [release](shy://page/abc)"),
+        )
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let found = |query: &str| -> Vec<String> {
+        admin
+            .search(query, 10)
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.id)
+            .filter(|id| *id == message || *id == page)
+            .collect()
+    };
+    for query in ["budget", "bob", "sheet"] {
+        assert_eq!(found(query), [message.as_str()], "{query}");
+    }
+    for query in ["agenda", "release"] {
+        assert_eq!(found(query), [page.as_str()], "{query}");
+    }
+    for query in ["shy", "member", "sheets", "https", "abc", "x"] {
+        assert_eq!(found(query), Vec::<String>::new(), "{query}");
+    }
+    let snippet = &admin.search("budget", 10).unwrap()[0].snippet;
+    assert!(!snippet.contains("**") && !snippet.contains("]("), "{snippet}");
+}

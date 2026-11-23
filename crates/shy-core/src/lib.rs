@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod files;
 pub mod identity;
 pub mod keys;
+mod markdown;
 pub mod membership;
 pub mod mentions;
 pub mod ops;
