@@ -85,3 +85,106 @@ test("files dropped on the window while a page is open land at its cursor", asyn
     .poll(() => page.evaluate(() => window.fake.pageText("Plan")))
     .toBe(`Intro\n[notes.pdf](shy://file/${file.id})`);
 });
+
+/** A page whose text is `text(fileId)` around one PNG of its own, shared by Grace. */
+async function pageWithImage(page: Page, text: (fileId: string) => string): Promise<string> {
+  await page.goto("");
+  const fileId = await page.evaluate(
+    ([png, template]) => {
+      const pageId = window.fake.seedPage("Plan", "");
+      const grace = window.fake.addMember("Grace");
+      const id = window.fake.files.receiveInPage(grace, pageId, { name: "team.png", type: "image/png", bytes: png });
+      window.fake.receivePageEdit("Plan", { at: 0, insert: template.replace("FILE", id) });
+      return id;
+    },
+    [TINY_PNG, text("FILE")] as const,
+  );
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Plan", exact: true }).click();
+  await expect(page.getByLabel("Page title")).toHaveValue("Plan");
+  return fileId;
+}
+
+/** Selects the image on line 2 with the keyboard, as Shift+arrow over it does. */
+async function selectImageOnSecondLine(page: Page) {
+  await lines(page).first().click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Shift+End");
+}
+
+test("an image in a page shows with its caption and opens large", async ({ page }) => {
+  await pageWithImage(page, (id) => `Intro\n![Team photo](shy://file/${id})`);
+
+  const image = page.locator(".cm-content").getByRole("img", { name: "Team photo" });
+  await expect(image).toBeVisible();
+  await expect(page.locator(".cm-content").getByRole("button", { name: "Team photo" })).toBeVisible();
+  await image.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+});
+
+test("an image of a file from elsewhere shows as unavailable, never loaded", async ({ page }) => {
+  await page.goto("");
+  await page.evaluate((png) => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "photo");
+    const chatFile = window.fake.files.receive(grace, message, { name: "x.png", type: "image/png", bytes: png });
+    window.fake.seedPage("Plan", `![Stolen](shy://file/${chatFile})`);
+  }, TINY_PNG);
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Plan", exact: true }).click();
+
+  await expect(page.locator(".cm-content").getByText("Image unavailable")).toBeVisible();
+  await expect(page.locator(".cm-content").getByRole("img")).toHaveCount(0);
+});
+
+test("Alt+arrows resize a selected image by tens, and Alt+0 takes the width away", async ({ page }) => {
+  const fileId = await pageWithImage(page, (id) => `Intro\n![Team photo](shy://file/${id})`);
+  await expect(page.locator(".cm-content").getByRole("img", { name: "Team photo" })).toBeVisible();
+  await selectImageOnSecondLine(page);
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect
+    .poll(() => page.evaluate(() => window.fake.pageText("Plan")))
+    .toBe(`Intro\n![Team photo](shy://file/${fileId}#width=80)`);
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Plan"))).toContain("#width=90)");
+  await page.keyboard.press("Alt+0");
+  await expect
+    .poll(() => page.evaluate(() => window.fake.pageText("Plan")))
+    .toBe(`Intro\n![Team photo](shy://file/${fileId})`);
+});
+
+test("a caption is edited in place and written back escaped", async ({ page }) => {
+  const fileId = await pageWithImage(page, (id) => `Intro\n![](shy://file/${id})`);
+  await expect(page.locator(".cm-content").getByRole("img")).toBeVisible();
+  await selectImageOnSecondLine(page);
+
+  await page.keyboard.press("Enter");
+  const caption = page.getByRole("textbox", { name: "Caption" });
+  await expect(caption).toBeFocused();
+  await caption.fill("Our [team]");
+  await caption.press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => window.fake.pageText("Plan")))
+    .toBe(`Intro\n![Our \\[team\\]](shy://file/${fileId})`);
+  await expect(page.locator(".cm-content").getByRole("button", { name: "Our [team]" })).toBeVisible();
+});
+
+test("dragging an image's handle sets its width", async ({ page }) => {
+  await pageWithImage(page, (id) => `Intro\n![Team photo](shy://file/${id}#width=80)`);
+  const image = page.locator(".cm-content").getByRole("img", { name: "Team photo" });
+  await expect(image).toBeVisible();
+  await image.hover();
+  const handle = page.locator(".cm-image-handle[data-side=right]");
+  const box = await handle.boundingBox();
+  if (!box) throw new Error("the handle isn't on screen");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 60, box.y + box.height / 2, { steps: 4 });
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => Number((await page.evaluate(() => window.fake.pageText("Plan"))).match(/#width=(\d+)/)?.[1]))
+    .toBeLessThan(80);
+});

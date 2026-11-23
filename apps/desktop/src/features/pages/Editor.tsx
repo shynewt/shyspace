@@ -1,9 +1,10 @@
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Prec } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import { api, onChange, onFilesDropped, type PageEditorSession } from "../../lib/api";
@@ -11,17 +12,42 @@ import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
 import { activeDropTarget, addDropTarget, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
 import { reportError, showToast } from "../../lib/toast";
+import { useLive } from "../../lib/useLive";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog } from "../../ui";
 import { ProfileCardAt } from "../members/ProfileCardAt";
 import { formattingKeymap } from "./editor/commands";
+import {
+  type ImageHost,
+  type ImageProps,
+  type ImageRange,
+  MAX_IMAGE_WIDTH,
+  selectedImage,
+  setImageWidth,
+} from "./editor/images";
 import { livePreview, setKnownMembers, setPageTitles } from "./editor/livePreview";
 import type { CardAnchor } from "./editor/openLinks";
 import { type MenuKey, type Suggestion, suggestions } from "./editor/suggestions";
 import { pageTheme } from "./editor/theme";
 import { pageUploads } from "./editor/uploads";
+import { PageImage } from "./PageImage";
 import { PAGE_TEXT } from "./pageText";
 import { stagePastedForPage, uploadIntoPage } from "./pageUploads";
+
+/** How far Alt+arrow resizes an image, in percent of the column. */
+const IMAGE_WIDTH_STEP = 10;
+const portalKeys = new WeakMap<HTMLElement, string>();
+let nextPortalKey = 0;
+
+function portalKey(element: HTMLElement): string {
+  let key = portalKeys.get(element);
+  if (key === undefined) {
+    key = `image-${nextPortalKey++}`;
+    portalKeys.set(element, key);
+  }
+  return key;
+}
+
 import { SuggestionMenu } from "./SuggestionMenu";
 
 type OpenMemberCard = { memberId: string; anchor: CardAnchor; openedBy: "pointer" | "keyboard" };
@@ -69,6 +95,24 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
   const dropTarget = useId();
   const titleRef = useRef("");
   titleRef.current = pages.find((page) => page.id === pageId)?.title ?? "";
+  const [images, setImages] = useState<ReadonlyMap<HTMLElement, ImageProps>>(new Map());
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const imageHost = useRef<ImageHost>({
+    show: (element, props) => setImages((current) => new Map(current).set(element, props)),
+    hide: (element) =>
+      setImages((current) => {
+        const next = new Map(current);
+        next.delete(element);
+        return next;
+      }),
+  });
+  // Bumped when the selection moves while images are shown, to redraw which is selected.
+  const [, setSelectionMoves] = useState(0);
+  const [captionEditing, setCaptionEditing] = useState<HTMLElement | null>(null);
+  const loadFiles = useCallback(() => api.pageFiles(pageId), [pageId]);
+  const files = useLive(loadFiles, (change) => change.kind === "page_files" && change.page === pageId);
+  const filesById = useMemo(() => new Map((files ?? []).map((file) => [file.id, file])), [files]);
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -158,6 +202,35 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
                 }, reportError),
               onOpenMember: (memberId, anchor, openedBy) => setMemberCard({ memberId, anchor, openedBy }),
               onMisleadingLink: (linkText, url) => setMisleadingLink({ text: linkText, url }),
+              images: imageHost.current,
+            }),
+            Prec.highest(
+              keymap.of([
+                {
+                  key: "Alt-ArrowLeft",
+                  run: (editor) => resizeSelected(editor, -IMAGE_WIDTH_STEP),
+                  stopPropagation: true,
+                },
+                {
+                  key: "Alt-ArrowRight",
+                  run: (editor) => resizeSelected(editor, IMAGE_WIDTH_STEP),
+                  stopPropagation: true,
+                },
+                { key: "Alt-0", run: (editor) => resetSelected(editor), stopPropagation: true },
+                {
+                  key: "Enter",
+                  run: (editor) => {
+                    const image = selectedImage(editor.state);
+                    const element = image && elementOf(editor, imagesRef.current, image);
+                    if (!element) return false;
+                    setCaptionEditing(element);
+                    return true;
+                  },
+                },
+              ]),
+            ),
+            EditorView.updateListener.of((update) => {
+              if (update.selectionSet && imagesRef.current.size > 0) setSelectionMoves((count) => count + 1);
             }),
             suggestions({ onKey: (key, editor) => menuKeys.current(key, editor), onChange: setSuggestion }),
             placeholder("Type / for blocks, @ to mention someone, [[ to link a page"),
@@ -221,9 +294,27 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
     if (members) view?.dispatch({ effects: setKnownMembers.of(new Set(members.map((member) => member.id))) });
   }, [view, members]);
 
+  const selected = view ? selectedImage(view.state) : null;
   return (
     <div className="relative">
       <div ref={host} className="selectable min-h-[50vh]" />
+      {view &&
+        [...images].map(([element, props]) =>
+          createPortal(
+            <PageImage
+              view={view}
+              element={element}
+              pageId={pageId}
+              {...props}
+              file={filesById.get(props.fileId)}
+              isSelected={selected !== null && isAt(view, element, selected)}
+              isEditingCaption={captionEditing === element}
+              onCaptionEditEnd={() => setCaptionEditing(null)}
+            />,
+            element,
+            portalKey(element),
+          ),
+        )}
       <SuggestionMenu view={view} suggestion={suggestion} pageId={pageId} keys={menuKeys} />
       <ConfirmDialog
         open={misleadingLink !== null}
@@ -245,4 +336,38 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
       )}
     </div>
   );
+}
+
+/** Alt+arrows: the selected image, a step narrower or wider. */
+function resizeSelected(view: EditorView, step: number): boolean {
+  const image = selectedImage(view.state);
+  if (!image) return false;
+  setImageWidth(view, image, (image.width ?? MAX_IMAGE_WIDTH) + step);
+  return true;
+}
+
+/** Alt+0: the selected image back to its own size, at most the column's. */
+function resetSelected(view: EditorView): boolean {
+  const image = selectedImage(view.state);
+  if (!image) return false;
+  setImageWidth(view, image, null);
+  return true;
+}
+
+function elementOf(
+  view: EditorView,
+  images: ReadonlyMap<HTMLElement, ImageProps>,
+  image: ImageRange,
+): HTMLElement | null {
+  for (const element of images.keys()) {
+    if (isAt(view, element, image)) return element;
+  }
+  return null;
+}
+
+/** Whether a widget's element draws `image`: its spot in the document falls inside the image's markdown. */
+function isAt(view: EditorView, element: HTMLElement, image: ImageRange): boolean {
+  if (!element.isConnected) return false;
+  const position = view.posAtDOM(element);
+  return position >= image.from && position <= image.to;
 }

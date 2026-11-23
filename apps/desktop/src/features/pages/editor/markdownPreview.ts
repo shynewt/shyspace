@@ -8,6 +8,7 @@ import type { syntaxTree } from "@codemirror/language";
 import type { Text } from "@codemirror/state";
 import { type CalloutKind, calloutMarker } from "../../../lib/callouts";
 import { isMentionLink, mentionedMemberId } from "../../../lib/mentions";
+import { parseFileImageUrl, unescapeLinkText } from "./images";
 import { BARE_MESSAGE_LINK, BARE_PAGE_LINK, messageIdOf, pageIdOf } from "./links";
 
 export type SyntaxTree = ReturnType<typeof syntaxTree>;
@@ -28,7 +29,9 @@ export type PreviewItem =
   /** `label` is the link's own text, or "a message" for a bare link, as in chat. */
   | { kind: "message"; from: number; to: number; messageId: string; label: string }
   /** `memberId` is null for @channel and @here. */
-  | { kind: "mention"; from: number; to: number; label: string; memberId: string | null };
+  | { kind: "mention"; from: number; to: number; label: string; memberId: string | null }
+  /** An image of one of the page's files; `width` is a percent of the column, or null for its own size. */
+  | { kind: "image"; from: number; to: number; fileId: string; width: number | null; caption: string };
 
 const BARE_MESSAGE_LABEL = "a message";
 
@@ -130,6 +133,8 @@ class PreviewBuilder {
         if (!this.isRevealed(node.from)) this.add({ kind: "divider", from: node.from, to: node.to });
         return;
       case "Image":
+        this.addImage(node);
+        return false;
       case "HTMLBlock":
       case "CommentBlock":
         return false;
@@ -186,6 +191,17 @@ class PreviewBuilder {
       return;
     }
     this.add({ kind: "bullet", from: mark.from, to: mark.to, depth: depthIn(mark, "BulletList") - 1 });
+  }
+
+  private addImage(image: SyntaxNode) {
+    const url = image.getChild("URL");
+    const marks = image.getChildren("LinkMark");
+    if (!url || marks.length < 2) return;
+    if (this.doc.lineAt(image.from).number !== this.doc.lineAt(image.to).number) return;
+    const parsed = parseFileImageUrl(this.doc.sliceString(url.from, url.to));
+    if (!parsed) return;
+    const caption = unescapeLinkText(this.doc.sliceString(marks[0].to, marks[1].from)).trim();
+    this.add({ kind: "image", from: image.from, to: image.to, ...parsed, caption });
   }
 
   private addLink(link: SyntaxNode): false | undefined {

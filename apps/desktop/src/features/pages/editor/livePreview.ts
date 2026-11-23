@@ -17,6 +17,7 @@ import {
 import { MOD_LABEL } from "../../../lib/shortcuts";
 import { CalloutLabelWidget } from "./callouts";
 import { messageIcon, pageIcon } from "./icons";
+import { type ImageHost, type ImageProps, imageHost } from "./images";
 import { externalUrl, linkAt } from "./links";
 import { previewItems } from "./markdownPreview";
 import {
@@ -63,15 +64,19 @@ export function livePreview({
   onOpenMessage,
   onOpenMember,
   onMisleadingLink,
+  images,
 }: {
   onOpenPage: (pageId: string) => void;
   onOpenMessage: (messageId: string) => void;
   onOpenMember: MemberOpener;
   onMisleadingLink: MisleadingLinkAsker;
+  /** Draws a page's images into their widgets. */
+  images: ImageHost;
 }) {
   return [
     pageTitles,
     knownMembers,
+    imageHost.of(images),
     pageOpener.of(onOpenPage),
     messageOpener.of(onOpenMessage),
     memberOpener.of(onOpenMember),
@@ -187,6 +192,13 @@ const previewPlugin = ViewPlugin.fromClass(
           }
           case "message": {
             const chip = Decoration.replace({ widget: new MessageChipWidget(item.messageId, item.label) });
+            decorations.push(chip.range(item.from, item.to));
+            chips.push(chip.range(item.from, item.to));
+            break;
+          }
+          case "image": {
+            const { fileId, width, caption } = item;
+            const chip = Decoration.replace({ widget: new ImageWidget({ fileId, width, caption }) });
             decorations.push(chip.range(item.from, item.to));
             chips.push(chip.range(item.from, item.to));
             break;
@@ -321,6 +333,47 @@ class PageChipWidget extends WidgetType {
     });
     return chip;
   }
+}
+
+/** A page's image: a block the screen hosting the editor draws into. */
+class ImageWidget extends WidgetType {
+  constructor(readonly props: ImageProps) {
+    super();
+  }
+
+  eq(other: ImageWidget) {
+    return (
+      other.props.fileId === this.props.fileId &&
+      other.props.width === this.props.width &&
+      other.props.caption === this.props.caption
+    );
+  }
+
+  toDOM(view: EditorView) {
+    const element = document.createElement("span");
+    element.className = "cm-page-image";
+    this.host = view.state.facet(imageHost);
+    this.host?.show(element, this.props);
+    return element;
+  }
+
+  updateDOM(element: HTMLElement, view: EditorView) {
+    this.host = view.state.facet(imageHost);
+    this.host?.show(element, this.props);
+    return true;
+  }
+
+  destroy(element: HTMLElement) {
+    this.host?.hide(element);
+  }
+
+  /** The handles, caption and viewer handle their own pointer and keys. */
+  ignoreEvent() {
+    return true;
+  }
+
+  /** Remembered for `destroy`, which gets no view. */
+  private host: ImageHost | undefined;
 }
 
 class MessageChipWidget extends WidgetType {

@@ -44,6 +44,8 @@ function shownAs(item: PreviewItem): string | null {
       return `<page ${item.pageId}>`;
     case "message":
       return `<message ${item.messageId}: ${item.label}>`;
+    case "image":
+      return `<image ${item.fileId} ${item.width ?? "auto"} "${item.caption}">`;
     case "mention":
       return item.label;
     case "callout":
@@ -112,6 +114,23 @@ test("a mention chip knows who it names; @channel names no one", () => {
 
 test("a page link inside code stays text", () => {
   expect(rendered("`shy://page/ab12`")).toBe("shy://page/ab12");
+});
+
+test("a page file's image becomes an image, with its caption and width", () => {
+  expect(rendered("![Team photo](shy://file/ab12#width=60)")).toBe('<image ab12 60 "Team photo">');
+  expect(rendered("![](shy://file/ab12)")).toBe('<image ab12 auto "">');
+  expect(rendered("![a \\[b\\] \\`c\\`](shy://file/ab12)")).toBe('<image ab12 auto "a [b] `c`">');
+});
+
+test("widths outside 10 to 100 and other fragments are ignored", () => {
+  for (const fragment of ["#width=5", "#width=101", "#width=60.5", "#w=60", "#width=60&x=1"]) {
+    expect(rendered(`![x](shy://file/ab12${fragment})`)).toBe('<image ab12 auto "x">');
+  }
+});
+
+test("images from elsewhere, and in code, stay text", () => {
+  expect(rendered("![x](https://example.com/a.png)")).toBe("![x](https://example.com/a.png)");
+  expect(rendered("`![x](shy://file/ab12)`")).toBe("![x](shy://file/ab12)");
 });
 
 test("message links become chips, labeled or not; inside code they stay text", () => {
