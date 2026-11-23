@@ -61,7 +61,8 @@ test("an approved agent's message arrives live in the app", () =>
 
       const agent = new CliMember(agentDir);
       const joined = agent.join(inviteCode, "Robot");
-      await app.$("aria/Requests").click();
+      // The tab, not its panel, which takes the tab's name.
+      await app.$("button*=Requests").click();
       await app.$("button=Codes match, let in").waitForClickable(TIMEOUT);
       await app.$("button=Codes match, let in").click();
       await joined;
