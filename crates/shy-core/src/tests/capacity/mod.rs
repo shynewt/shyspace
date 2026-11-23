@@ -18,6 +18,7 @@ pub(super) mod counting_store;
 mod files;
 mod history;
 mod members;
+mod pages;
 
 use std::{
     path::Path,

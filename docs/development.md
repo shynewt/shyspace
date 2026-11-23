@@ -70,7 +70,7 @@ python3 scripts/e2e_mcp.py
 
 ## Capacity probes
 
-`crates/shy-core/src/tests/capacity/` builds large workspaces (years of messages, a newcomer catching up, many members, many files and one at the size limit) and prints how time, disk and bucket requests grow. The bucket is in memory, counts every request and can add a delay to each, as a bucket over the internet would. The probes are slow, so `cargo test` skips them; run one at a time, with temporary files on disk rather than in `/tmp` (RAM on many machines):
+`crates/shy-core/src/tests/capacity/` builds large workspaces (years of messages, a newcomer catching up, hours of typing in pages next to chat, many members, many files and one at the size limit) and prints how time, disk and bucket requests grow. The bucket is in memory, counts every request and can add a delay to each, as a bucket over the internet would. The probes are slow, so `cargo test` skips them; run one at a time, with temporary files on disk rather than in `/tmp` (RAM on many machines):
 
 ```sh
 TMPDIR=/var/tmp/shyspace-capacity nice cargo test --release -p shy-core \
