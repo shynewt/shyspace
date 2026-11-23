@@ -124,6 +124,9 @@ pub(crate) enum Settling {
     Everything,
 }
 
+/// Set in every recovery snapshot's store; see [`Store::is_catching_up`].
+pub(crate) const CATCHING_UP_META: &str = "catching_up_after_restore";
+
 pub struct Store {
     db: Connection,
     /// Which sealed ops may apply now. A rebuild settles the owner logs first,
@@ -226,6 +229,16 @@ impl Store {
     pub fn delete_meta(&self, key: &str) -> Result<()> {
         self.db.execute("DELETE FROM meta WHERE key = ?", [key])?;
         Ok(())
+    }
+
+    /// Restored from a snapshot, without this device's own log read back
+    /// yet: writing now would reuse sequence numbers the bucket holds.
+    pub fn is_catching_up(&self) -> Result<bool> {
+        Ok(self.meta(CATCHING_UP_META)?.is_some())
+    }
+
+    pub fn mark_caught_up(&self) -> Result<()> {
+        self.delete_meta(CATCHING_UP_META)
     }
 
     fn exists(&self, sql: &str, args: impl Params) -> Result<bool> {

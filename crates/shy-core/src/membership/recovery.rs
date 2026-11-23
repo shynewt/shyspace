@@ -7,7 +7,7 @@
 //! Only restore when the old device is truly gone: two live copies of the
 //! admin would make conflicting membership changes.
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
@@ -21,6 +21,7 @@ use zeroize::Zeroizing;
 use super::commit;
 use crate::{
     config::{CONFIG_FILE, write_private_file},
+    crypto,
     keys::DeviceKey,
     storage::{snapshot_database, snapshot_store_without_content},
     transport::bucket::{Bucket, BucketConfig, Connector, MAX_RECOVERY_SNAPSHOT_BYTES, s3_connector},
@@ -293,6 +294,38 @@ impl Workspace {
         connect: Connector,
         options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
+        let restored = Self::restore_without_catching_up(data, recovery_kit, connect, options).await?;
+        // Our own log must be read back, so our sequence numbers continue
+        // where the lost device left off; what's left of others' logs is read
+        // like on any other day, and one unreadable object there can't block
+        // the restore.
+        restored.sync().await;
+        let checked = restored.state().store.is_catching_up();
+        let is_catching_up = match checked {
+            Ok(is_catching_up) => is_catching_up,
+            Err(error) => {
+                Self::undo_restore(data, restored).await;
+                return Err(error.context("checking the restore caught up"));
+            }
+        };
+        if is_catching_up {
+            let reason = restored.status().error.unwrap_or_default();
+            Self::undo_restore(data, restored).await;
+            return Err(anyhow!(
+                "restored, but couldn't catch up with this device's own changes in the bucket: {reason}"
+            ));
+        }
+        Ok(restored)
+    }
+
+    /// Restores the snapshot into `data` and opens it, without reading the
+    /// bucket yet. Undone if it fails.
+    pub(crate) async fn restore_without_catching_up(
+        data: &DataDir,
+        recovery_kit: &str,
+        connect: Connector,
+        options: impl Into<WorkspaceOptions>,
+    ) -> Result<Self> {
         let kit = RecoveryKit::decode(recovery_kit)?;
         let bucket = connect(&kit.workspace_id, &kit.bucket)?;
         ensure_new_empty_dir(&data.path)?;
@@ -316,10 +349,7 @@ impl Workspace {
         }
         let restored = Self::install_snapshot(data, &kit, snapshot, connect, options).await;
         if restored.is_err() {
-            // Undo everything this restore did, so it can simply be retried.
-            // The key goes first: its keychain slot is named after the folder.
-            let _ = data.keys.forget(&data.path).await;
-            let _ = std::fs::remove_dir_all(&data.path);
+            Self::forget_restored_files(data).await;
         }
         restored
     }
@@ -337,13 +367,67 @@ impl Workspace {
 
         let workspace = Self::open_with(data, connect, options).await?;
         ensure!(workspace.me() == kit.admin, "the snapshot is not the admin's");
-        // Catch up before anyone writes, so our own sequence numbers continue
-        // where the lost device left off.
-        workspace.sync().await;
-        if let Some(error) = workspace.status().error {
-            anyhow::bail!("restored, but couldn't catch up from the bucket: {error}");
-        }
         Ok(workspace)
+    }
+
+    /// Once this device's own log is read back after a restore, writes what
+    /// opening held back; until then nothing is written. A restore cut short
+    /// finishes here too, on the next sync.
+    pub(crate) async fn finish_catching_up(&self) -> Result<()> {
+        if !self.state().store.is_catching_up()? {
+            return Ok(());
+        }
+        let me = self.me();
+        self.forget_skipped_segments_of(&me);
+        if let Some(error) = self.pull_author(&me).await? {
+            return Err(error.context("reading this device's changes back after a restore"));
+        }
+        if let Some(seq) = self.parked_own_change()? {
+            bail!(
+                "this device's change {seq} came back from the bucket, but this version can't apply it yet; update shyspace"
+            );
+        }
+        self.state().store.mark_caught_up()?;
+        self.finish_writes_left_over()
+    }
+
+    /// The seq of one of our own changes that came back but waits, unapplied
+    /// (one from a newer version, say): a write now would take its place.
+    /// Only one we signed counts, so nobody can plant one to hold us up.
+    fn parked_own_change(&self) -> Result<Option<u64>> {
+        let me = self.me();
+        let state = self.state();
+        let applied_through = state.store.last_seq(&me)?;
+        for envelope in state.store.pending()? {
+            if envelope.author != me || envelope.seq <= applied_through {
+                continue;
+            }
+            let Some(key) = state.store.epoch_key(envelope.epoch)? else {
+                continue;
+            };
+            if crypto::signed_body(&envelope, &key).is_ok() {
+                return Ok(Some(envelope.seq));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Closes a restore that failed and removes all it did, so it can simply
+    /// be tried again. Its background work stops first, and a sync pass under
+    /// way is waited out, so nothing of it carries on beside the retry.
+    async fn undo_restore(data: &DataDir, restored: Self) {
+        if let Err(error) = restored.shutdown().await {
+            warn!("closing a restore that failed: {error:#}");
+        }
+        drop(restored.inner.sync_lock.lock().await);
+        drop(restored);
+        Self::forget_restored_files(data).await;
+    }
+
+    /// The key goes first: its keychain slot is named after the folder.
+    async fn forget_restored_files(data: &DataDir) {
+        let _ = data.keys.forget(&data.path).await;
+        let _ = std::fs::remove_dir_all(&data.path);
     }
 }
 

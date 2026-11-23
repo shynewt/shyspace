@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rusqlite::backup::Backup;
 
-use super::{open_encrypted, private::PRIVATE_STATE_TABLES, rebuild::SHARED_VIEW_TABLES};
+use super::{CATCHING_UP_META, open_encrypted, private::PRIVATE_STATE_TABLES, rebuild::SHARED_VIEW_TABLES};
 
 /// The op log and how far we've read the bucket: a restore reads them again.
 const OP_LOG_TABLES: &[&str] = &["ops", "pending_ops", "forks", "fork_proofs_checked"];
@@ -52,6 +52,11 @@ pub fn snapshot_store_without_content(source: &Path, key: &str, destination: &Pa
     for table in tables_left_out() {
         copy.execute(&format!("DELETE FROM {table}"), [])?;
     }
+    // Without its op log, a restored store must read its own back first.
+    copy.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![CATCHING_UP_META, [1u8].as_slice()],
+    )?;
     copy.execute_batch("VACUUM")?;
     Ok(())
 }

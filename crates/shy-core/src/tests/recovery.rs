@@ -1,8 +1,22 @@
 //! Restoring a lost admin from their recovery kit.
 
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
+
+use async_trait::async_trait;
+use futures_lite::stream;
+use object_store::{
+    CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
+    PutMultipartOptions, PutOptions, PutPayload, PutResult, memory::InMemory, path::Path,
+};
+
 use super::support::*;
 use crate::{
     Networking, Workspace,
+    transport::bucket::Bucket,
+    views::member_id,
     workspace::{FileSource, NewFile},
 };
 
@@ -67,6 +81,206 @@ async fn a_lost_admin_is_restored_from_the_recovery_kit() {
             .unwrap()
             .iter()
             .any(|member| member.name == "Dave" && member.active)
+    );
+}
+
+/// Whether anyone in `members` holds two versions of one of `author`'s ops.
+fn has_fork(members: &[&Workspace], author: &iroh::PublicKey) -> bool {
+    members.iter().any(|member| {
+        let last = member.state().store.last_seq(author).unwrap();
+        (1..=last + 5).any(|seq| member.state().store.is_forked(author, seq).unwrap())
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_never_reuses_the_admins_sequence_numbers() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let general = channel_id(&admin, "general");
+    admin.send_message(&general, "before", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let admin_id = admin.me();
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let restored = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+    restored.send_message(&general, "after", None).unwrap();
+    sync_all(&[&restored, &bob]).await;
+
+    assert!(!has_fork(&[&restored, &bob], &admin_id));
+    let bob_sees: Vec<_> = bob
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(bob_sees.contains(&"after".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_cut_short_writes_nothing_until_it_has_caught_up() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let general = channel_id(&admin, "general");
+    admin.send_message(&general, "before", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let admin_id = admin.me();
+    drop(admin);
+
+    // The app quits after laying out the restored files, before catching up.
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let cut_short =
+        Workspace::restore_without_catching_up(&new_device, &kit, connector(&bucket), Networking::Offline)
+            .await
+            .unwrap();
+    drop(cut_short);
+
+    let reopened = Workspace::open_with(&new_device, connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+    assert!(
+        reopened.send_message(&general, "too early", None).is_err(),
+        "nothing is written before the device has its own changes back"
+    );
+    reopened.sync().await;
+    reopened.send_message(&general, "after", None).unwrap();
+    sync_all(&[&reopened, &bob]).await;
+    assert!(!has_fork(&[&reopened, &bob], &admin_id));
+}
+
+/// A bucket in which listing keys under one prefix always fails, and so
+/// does reading objects under another, as objects nobody can read would.
+#[derive(Debug, Default)]
+struct UnlistableStore {
+    inner: InMemory,
+    unlistable: Mutex<Option<String>>,
+    unreadable: Mutex<Option<String>>,
+}
+
+impl UnlistableStore {
+    fn is_unlistable(&self, prefix: Option<&Path>) -> bool {
+        let unlistable = self.unlistable.lock().unwrap();
+        matches!((unlistable.as_deref(), prefix), (Some(unlistable), Some(prefix)) if prefix.as_ref().starts_with(unlistable))
+    }
+
+    fn is_unreadable(&self, location: &Path) -> bool {
+        let unreadable = self.unreadable.lock().unwrap();
+        unreadable
+            .as_deref()
+            .is_some_and(|unreadable| location.as_ref().starts_with(unreadable))
+    }
+
+    fn refused() -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        Box::pin(stream::once(Err(object_store::Error::Generic {
+            store: "unlistable",
+            source: "this listing can't be read".into(),
+        })))
+    }
+}
+
+impl fmt::Display for UnlistableStore {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("unlistable store")
+    }
+}
+
+#[async_trait]
+impl ObjectStore for UnlistableStore {
+    async fn put_opts(
+        &self,
+        location: &Path,
+        payload: PutPayload,
+        opts: PutOptions,
+    ) -> object_store::Result<PutResult> {
+        self.inner.put_opts(location, payload, opts).await
+    }
+    async fn put_multipart_opts(
+        &self,
+        location: &Path,
+        opts: PutMultipartOptions,
+    ) -> object_store::Result<Box<dyn MultipartUpload>> {
+        self.inner.put_multipart_opts(location, opts).await
+    }
+    async fn get_opts(&self, location: &Path, options: GetOptions) -> object_store::Result<GetResult> {
+        if self.is_unreadable(location) {
+            return Err(object_store::Error::Generic {
+                store: "unlistable",
+                source: "this object can't be read".into(),
+            });
+        }
+        self.inner.get_opts(location, options).await
+    }
+    fn delete_stream(
+        &self,
+        locations: stream::Boxed<object_store::Result<Path>>,
+    ) -> stream::Boxed<object_store::Result<Path>> {
+        self.inner.delete_stream(locations)
+    }
+    fn list(&self, prefix: Option<&Path>) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        match self.is_unlistable(prefix) {
+            true => Self::refused(),
+            false => self.inner.list(prefix),
+        }
+    }
+    fn list_with_offset(
+        &self,
+        prefix: Option<&Path>,
+        offset: &Path,
+    ) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        match self.is_unlistable(prefix) {
+            true => Self::refused(),
+            false => self.inner.list_with_offset(prefix, offset),
+        }
+    }
+    async fn list_with_delimiter(&self, prefix: Option<&Path>) -> object_store::Result<ListResult> {
+        self.inner.list_with_delimiter(prefix).await
+    }
+    async fn copy_opts(&self, from: &Path, to: &Path, options: CopyOptions) -> object_store::Result<()> {
+        self.inner.copy_opts(from, to, options).await
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn someone_elses_unreadable_log_doesnt_block_a_restore() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(UnlistableStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob]).await;
+    let bobs_log = format!("ops/{}", member_id(&bob.me()));
+    *store.unlistable.lock().unwrap() = Some(bobs_log);
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let restored = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+    restored.send_message(&general, "back", None).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_that_cant_read_its_own_log_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(UnlistableStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let kit = admin.recovery_kit().await.unwrap();
+    admin.sync().await;
+    let own_log = format!("ops/{}", member_id(&admin.me()));
+    *store.unlistable.lock().unwrap() = Some(own_log);
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let refused = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Offline).await;
+    assert!(refused.is_err());
+    assert!(
+        !new_device.path.exists(),
+        "a refused restore leaves nothing behind"
     );
 }
 
@@ -270,4 +484,88 @@ async fn a_restored_admin_gets_their_sidebar_sections_with_their_channels() {
         .find(|candidate| candidate.id == section)
         .expect("the section came back");
     assert_eq!(daily.channels, [general]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_waits_for_an_own_change_it_cant_apply_yet() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    // The lost device ran a newer version: its last change is in a newer format.
+    let (epoch, key) = current_key(&admin);
+    let seq = admin.state().store.next_seq(&admin.me()).unwrap();
+    let newer = postcard::to_stdvec(&(crate::crypto::OP_FORMAT + 1, "a new kind of change")).unwrap();
+    let envelope = crate::crypto::seal_bytes(&admin.inner.identity, &key, epoch, seq, newer).unwrap();
+    admin.state().store.insert_applied(&envelope, false).unwrap();
+    admin.sync().await;
+    bob.sync().await;
+    let admin_id = admin.me();
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let refused = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Offline).await;
+    let error = format!(
+        "{:#}",
+        refused.err().expect("the restore can't continue the log yet")
+    );
+    assert!(error.contains("update"), "{error}");
+    assert!(!new_device.path.exists());
+    assert!(!has_fork(&[&bob], &admin_id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_tried_again_after_failing_online_doesnt_fork() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(UnlistableStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob]).await;
+    let admin_id = admin.me();
+    *store.unlistable.lock().unwrap() = Some(format!("ops/{}", member_id(&admin_id)));
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    assert!(
+        Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Online)
+            .await
+            .is_err()
+    );
+    *store.unlistable.lock().unwrap() = None;
+    let restored = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Online)
+        .await
+        .unwrap();
+    restored.send_message(&general, "back", None).unwrap();
+    sync_all(&[&restored, &bob]).await;
+    assert!(!has_fork(&[&restored, &bob], &admin_id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_never_gives_up_on_its_own_log() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(UnlistableStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let general = channel_id(&admin, "general");
+    admin.sync().await;
+    let admin_id = admin.me();
+    *store.unreadable.lock().unwrap() = Some(format!("ops/{}", member_id(&admin_id)));
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let restored =
+        Workspace::restore_without_catching_up(&new_device, &kit, connector(&bucket), Networking::Offline)
+            .await
+            .unwrap();
+    for _ in 0..5 {
+        restored.sync().await;
+    }
+    assert!(restored.state().store.is_catching_up().unwrap());
+    assert!(restored.send_message(&general, "too early", None).is_err());
+    assert!(
+        restored.status().error.is_some(),
+        "the unread log shows as an error"
+    );
 }

@@ -259,7 +259,7 @@ impl Workspace {
         {
             bail!("a simulated crash while creating");
         }
-        workspace.finish_pending_profile()?;
+        workspace.finish_writes_left_over()?;
         workspace.write(Op::ChannelCreate {
             id: new_owned_id(&workspace.me()),
             name: "general".into(),
@@ -332,7 +332,7 @@ impl Workspace {
             .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
         config.mark_complete(&data.path)?;
         let workspace = Self::start(data, local, mls, config, connect, options).await?;
-        workspace.finish_pending_profile()?;
+        workspace.finish_writes_left_over()?;
         Ok(workspace)
     }
 
@@ -357,8 +357,19 @@ impl Workspace {
         )?;
         let mls = local.open_mls(data, Some(config.workspace_id.as_bytes()))?;
         let workspace = Self::start(data, local, mls, config, connect, options).await?;
-        workspace.finish_pending_profile()?;
+        workspace.finish_writes_left_over()?;
         Ok(workspace)
+    }
+
+    /// Writes what opening owes (this device's sealing key, a name chosen when
+    /// joining), unless a restore is still reading this device's log back:
+    /// then catching up writes them.
+    pub(crate) fn finish_writes_left_over(&self) -> Result<()> {
+        if self.state().store.is_catching_up()? {
+            return Ok(());
+        }
+        self.announce_sealing_key()?;
+        self.finish_pending_profile()
     }
 
     /// Writes the Profile op a join or create chose, if it didn't get
@@ -478,7 +489,6 @@ impl Workspace {
             }),
         };
         workspace.rebuild_views_if_rules_changed()?;
-        workspace.announce_sealing_key()?;
         if let Some(net) = &workspace.inner.net {
             net.set_members(&workspace.current_members()?);
             workspace.spawn_background(incoming);

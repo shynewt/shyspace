@@ -383,7 +383,7 @@ impl Workspace {
         read_all: &mut SegmentsRead,
     ) -> Result<SegmentRead> {
         if segment.is_unfetched {
-            self.note_unfetched(author, segment.listed, read_all);
+            self.note_unfetched(author, segment.listed, read_all)?;
             return Ok(SegmentRead::default());
         }
         self.fetch_failures().remove(&segment.listed);
@@ -416,17 +416,26 @@ impl Workspace {
     /// no longer keeps reads from finishing (one a gap repair puts back is
     /// still given up). Past the cap on what is counted, a failure is given
     /// up at once.
-    fn note_unfetched(&self, author: &PublicKey, listed: ListedObject, read_all: &mut SegmentsRead) {
-        if !self.is_given_up_after_failing(&listed) {
+    fn note_unfetched(
+        &self,
+        author: &PublicKey,
+        listed: ListedObject,
+        read_all: &mut SegmentsRead,
+    ) -> Result<()> {
+        // A restore continues our log from the bucket, so an object of ours
+        // is never given up while it does: a write could take its seqs.
+        let is_never_given_up = *author == self.me() && self.state().store.is_catching_up()?;
+        if is_never_given_up || !self.is_given_up_after_failing(&listed) {
             if let Some(name) = parse_segment_name(author, &listed.key) {
                 read_all.unfetched.push((listed.key, name.last));
             }
-            return;
+            return Ok(());
         }
         let mut skipped = self.skipped_segments();
         if skipped.len() < MAX_SKIPPED_SEGMENTS {
             skipped.insert(listed);
         }
+        Ok(())
     }
 
     /// Counts a failed download of `listed`, and says whether it has now

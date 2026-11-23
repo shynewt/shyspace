@@ -71,6 +71,10 @@ impl Workspace {
             if !state.mls.is_active() {
                 bail!("you are no longer a member of this workspace");
             }
+            ensure!(
+                !state.store.is_catching_up()?,
+                "this device is still reading its changes back after a restore; try again in a moment"
+            );
             let epoch = state.mls.epoch()?;
             let key = state
                 .store

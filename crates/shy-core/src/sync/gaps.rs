@@ -28,9 +28,7 @@ impl Workspace {
                 continue;
             }
             warn!("op {next_seq} from {author} went missing; reading their history again");
-            let author_prefix = format!("ops/{}/", member_id(&author));
-            self.skipped_segments()
-                .retain(|listed| !listed.key.starts_with(&author_prefix));
+            self.forget_skipped_segments_of(&author);
             to_repair.push((author, next_seq));
         }
         Ok(to_repair)
@@ -63,6 +61,14 @@ impl Workspace {
             .lock()
             .expect("fetch failures lock poisoned by an earlier panic")
             .retain(|listed, _| !listed.key.starts_with(&author_prefix));
+    }
+
+    /// Forgets which of `author`'s objects didn't settle this run, so the
+    /// next read of their log lists them all again.
+    pub(crate) fn forget_skipped_segments_of(&self, author: &PublicKey) {
+        let author_prefix = format!("ops/{}/", member_id(author));
+        self.skipped_segments()
+            .retain(|listed| !listed.key.starts_with(&author_prefix));
     }
 
     pub(super) fn skipped_segments(

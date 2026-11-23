@@ -372,6 +372,9 @@ impl Workspace {
         if let Err(error) = self.follow_admin_commits().await {
             errors.push(error);
         }
+        if let Err(error) = self.finish_catching_up().await {
+            errors.push(error);
+        }
         match self.apply_pending() {
             Ok(pending) => {
                 let mut status = self.status_lock();
