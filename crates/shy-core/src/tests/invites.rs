@@ -1,9 +1,9 @@
 //! Invites: single use, approved by the admin, expiring, revocable.
 
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 use super::support::*;
-use crate::{JoinCancel, views::InviteState};
+use crate::{JoinCancel, Workspace, transport::bucket::Bucket, views::InviteState};
 
 fn invite_state(admin: &crate::Workspace, token: &str) -> InviteState {
     admin
@@ -376,4 +376,65 @@ async fn a_create_cut_short_finishes_the_admins_name_on_the_next_open() {
             .iter()
             .any(|member| member.name == "Ada")
     );
+}
+
+/// Lets `name` in through a new invite; they take the answer but don't sync
+/// yet, so their answer is still owed. Returns them and the invite's token.
+async fn approved_but_unsynced(
+    admin: &Workspace,
+    root: &Path,
+    bucket: &Bucket,
+    name: &str,
+) -> (Workspace, String) {
+    let invite = admin.create_test_invite(name, Duration::from_secs(600)).unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &root.join(name), bucket, name, false);
+    wait_for_request(admin, &token).await;
+    admin.approve_invite(&token).await.unwrap();
+    (joining.await.unwrap().unwrap(), token)
+}
+
+/// Someone removed before they ever post doesn't keep their answer in the
+/// bucket, uploaded again and again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_joiners_answer_is_taken_down() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let (bob, token) = approved_but_unsynced(&admin, root.path(), &bucket, "Bob").await;
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    admin.sync().await;
+
+    assert_eq!(bucket.invite_answer(&token).await.unwrap(), None);
+    assert!(admin.state().store.deliveries().unwrap().is_empty());
+}
+
+/// One answer that fails to upload doesn't hold back the others in the
+/// same pass; the failure is still reported.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_failed_answer_upload_doesnt_skip_the_rest() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let (_bob, bob_token) = approved_but_unsynced(&admin, root.path(), &bucket, "Bob").await;
+    let (_cyd, cyd_token) = approved_but_unsynced(&admin, root.path(), &bucket, "Cyd").await;
+    for token in [&bob_token, &cyd_token] {
+        bucket.delete_invite_answer(token).await.unwrap();
+    }
+    // As if the refresh time had come for both.
+    admin.inner.answers_sent.lock().unwrap().clear();
+
+    admin
+        .inner
+        .fail_next_answer_upload
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.sync().await;
+
+    let mut answers_up = 0;
+    for token in [&bob_token, &cyd_token] {
+        answers_up += usize::from(bucket.invite_answer(token).await.unwrap().is_some());
+    }
+    assert_eq!(answers_up, 1, "the answer after the failed one still went up");
+    assert!(admin.status().error.is_some());
 }

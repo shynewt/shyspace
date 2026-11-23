@@ -236,44 +236,74 @@ impl Workspace {
             .record_join_request(token, &joiner, &name, request.is_bot, bytes)
     }
 
-    /// Uploads owed answers until each joiner posts their first op, then
-    /// clears the invite's slots in the bucket. An answer goes up once, and
-    /// again only every few minutes, in case someone with the bucket keys
-    /// removed it.
+    /// Uploads owed answers until each joiner posts their first op (or is
+    /// removed first), then clears the invite's slots in the bucket. An
+    /// answer goes up once, and again only every few minutes, in case
+    /// someone with the bucket keys removed it. One failure doesn't hold
+    /// back the other answers; the first is returned at the end.
     async fn deliver_answers(&self) -> Result<()> {
         let deliveries = self.state().store.deliveries()?;
+        let mut first_error = None;
         for (joiner, token, payload) in deliveries {
-            if self.state().store.has_ops_from(&joiner)? {
-                self.bucket().delete_invite_answer(&token).await?;
-                self.bucket().delete_invite_request(&token).await?;
-                self.state().store.delete_delivery(&joiner)?;
-                self.answers_sent().remove(&joiner);
-                continue;
+            if let Err(error) = self.deliver_answer(joiner, &token, &payload).await {
+                first_error.get_or_insert(error);
             }
-            let is_recent = self
-                .answers_sent()
-                .get(&joiner)
-                .is_some_and(|sent| sent.elapsed() < ANSWER_REFRESH);
-            if is_recent {
-                continue;
-            }
-            let delivery: Delivery = postcard::from_bytes(&payload)?;
-            let Some(sealed_grant) = delivery.sealed_grant else {
-                warn!("no grant sealed for {joiner}; they need a new invite");
-                self.state().store.delete_delivery(&joiner)?;
-                self.answers_sent().remove(&joiner);
-                continue;
-            };
-            let answer = Answer::Accepted {
-                welcome: delivery.welcome,
-                sealed_grant,
-            };
-            self.bucket()
-                .put_invite_answer(&token, postcard::to_stdvec(&answer)?)
-                .await?;
-            self.answers_sent().insert(joiner, tokio::time::Instant::now());
         }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    async fn deliver_answer(&self, joiner: iroh::PublicKey, token: &str, payload: &[u8]) -> Result<()> {
+        if self.state().store.has_ops_from(&joiner)? {
+            return self.end_delivery(joiner, token).await;
+        }
+        let delivery: Delivery = postcard::from_bytes(payload)?;
+        let Some(sealed_grant) = delivery.sealed_grant else {
+            warn!("no grant sealed for {joiner}; they need a new invite");
+            self.state().store.delete_delivery(&joiner)?;
+            self.answers_sent().remove(&joiner);
+            return Ok(());
+        };
+        // A sealed grant means they were added, so not being a member now
+        // means they were removed before they ever posted.
+        if !self.state().mls.is_member(&joiner)? {
+            return self.end_delivery(joiner, token).await;
+        }
+        let is_recent = self
+            .answers_sent()
+            .get(&joiner)
+            .is_some_and(|sent| sent.elapsed() < ANSWER_REFRESH);
+        if is_recent {
+            return Ok(());
+        }
+        let answer = Answer::Accepted {
+            welcome: delivery.welcome,
+            sealed_grant,
+        };
+        self.upload_answer(token, &answer).await?;
+        self.answers_sent().insert(joiner, tokio::time::Instant::now());
         Ok(())
+    }
+
+    async fn end_delivery(&self, joiner: iroh::PublicKey, token: &str) -> Result<()> {
+        self.bucket().delete_invite_answer(token).await?;
+        self.bucket().delete_invite_request(token).await?;
+        self.state().store.delete_delivery(&joiner)?;
+        self.answers_sent().remove(&joiner);
+        Ok(())
+    }
+
+    async fn upload_answer(&self, token: &str, answer: &Answer) -> Result<()> {
+        #[cfg(test)]
+        if self
+            .inner
+            .fail_next_answer_upload
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            bail!("a simulated failed upload");
+        }
+        self.bucket()
+            .put_invite_answer(token, postcard::to_stdvec(answer)?)
+            .await
     }
 
     fn answers_sent(

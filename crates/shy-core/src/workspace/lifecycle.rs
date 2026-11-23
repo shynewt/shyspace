@@ -452,6 +452,8 @@ impl Workspace {
                 fail_segment_save: Default::default(),
                 #[cfg(test)]
                 drop_segment_transaction: Default::default(),
+                #[cfg(test)]
+                fail_next_answer_upload: Default::default(),
             }),
         };
         workspace

@@ -150,6 +150,9 @@ pub(crate) struct Inner {
     /// it is applying an op, as a full disk can.
     #[cfg(test)]
     pub drop_segment_transaction: std::sync::atomic::AtomicBool,
+    /// Makes the next join answer upload fail as an unreachable bucket would.
+    #[cfg(test)]
+    pub fail_next_answer_upload: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]
