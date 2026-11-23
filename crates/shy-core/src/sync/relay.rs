@@ -65,6 +65,16 @@ fn distance(member: &PublicKey, author: &PublicKey) -> [u8; 32] {
 }
 
 impl Workspace {
+    /// Notes that we read `author`'s ops `first` to `last` from the bucket.
+    /// It counts only if it continues what we knew the bucket has: ops
+    /// before it may have come only live.
+    pub(super) fn note_found_in_bucket(&self, author: &PublicKey, first: u64, last: u64) -> Result<()> {
+        if first <= self.known_uploaded(author)?.saturating_add(1) {
+            self.note_uploaded(author, last);
+        }
+        Ok(())
+    }
+
     /// Notes that `author` says the bucket has their log through `seq`.
     pub(super) fn note_uploaded(&self, author: &PublicKey, seq: u64) {
         let mut relays = self.relays();
@@ -75,7 +85,9 @@ impl Workspace {
     /// Relays, for each author, the ops we applied that the bucket has
     /// lacked for a while. Our turn comes after the members online whose
     /// keys are closer to the author's, and we look in the bucket first, so
-    /// usually one member uploads and the rest find it there.
+    /// usually one member uploads and the rest find it there. A relay that
+    /// fails waits its turn again, so after a long outage members don't all
+    /// go at once; the first error is returned once every author was tried.
     pub(super) async fn relay_live_only_ops(&self) -> Result<()> {
         let me = self.me();
         let now = now_ms()?;
@@ -84,6 +96,7 @@ impl Workspace {
             return Ok(());
         }
         let authors = self.state().store.everyone_ever()?;
+        let mut first_failure = None;
         for author in authors {
             if author == me {
                 continue;
@@ -100,11 +113,18 @@ impl Workspace {
             if now.saturating_sub(waiting_since) < wait {
                 continue;
             }
-            self.relay(&author, known, held).await?;
-            self.note_uploaded(&author, held);
-            self.relays().waiting_since_ms.remove(&author);
+            match self.relay(&author, known, held).await {
+                Ok(()) => {
+                    self.note_uploaded(&author, held);
+                    self.relays().waiting_since_ms.remove(&author);
+                }
+                Err(error) => {
+                    self.relays().waiting_since_ms.insert(author, now);
+                    first_failure.get_or_insert(error);
+                }
+            }
         }
-        Ok(())
+        first_failure.map_or(Ok(()), Err)
     }
 
     fn known_uploaded(&self, author: &PublicKey) -> Result<u64> {
@@ -133,8 +153,11 @@ impl Workspace {
 
     /// Uploads `author`'s ops after `known` up to `held` that no listed
     /// segment holds exactly as we do (a name's hash is checked against our
-    /// copy, so junk names can't stand in for them). Ops kept without their
-    /// content (refused for size) aren't relayed.
+    /// copy, so junk names can't stand in for them). Only names starting
+    /// after `known` are checked, so names claiming the whole log can't make
+    /// each relay hash it; missing a pack that covers more only costs a
+    /// duplicate upload. Ops kept without their content (refused for size)
+    /// aren't relayed.
     async fn relay(&self, author: &PublicKey, known: u64, held: u64) -> Result<()> {
         let listed = self
             .bucket()
@@ -143,6 +166,7 @@ impl Workspace {
         let mut covered = Vec::new();
         for object in listed {
             if let Some(name) = parse_segment_name(author, &object.key)
+                && name.first > known
                 && name.last <= held
                 && self.is_same_as_ours(author, &name)?
             {

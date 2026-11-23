@@ -312,6 +312,11 @@ impl Workspace {
     ) -> Result<SegmentRead> {
         let mut read = self.receive_segment(author, &segment.listed.key, &segment.envelopes)?;
         let name = parse_segment_name(author, &segment.listed.key);
+        if let Some(name) = &name
+            && read.is_settled
+        {
+            self.note_found_in_bucket(author, name.first, name.last)?;
+        }
         let is_checked = read.is_settled && self.is_all_in_our_log(author, &segment.envelopes)?;
         match name {
             Some(name) if is_checked => read_all.matching.push((name.first, name.last)),

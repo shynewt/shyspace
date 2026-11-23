@@ -3735,3 +3735,117 @@ async fn ops_kept_without_their_content_are_not_relayed() {
         .collect();
     assert_eq!(relayed, [(after.seq, after.seq)]);
 }
+
+/// Ops a member read from the bucket are there already: missing their hint
+/// (asleep, or gossip down) must not make it look for them again.
+#[tokio::test(flavor = "multi_thread")]
+async fn ops_read_from_the_bucket_are_not_looked_for_again() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+
+    bob.send_message(&general, "uploaded as usual", None).unwrap();
+    bob.check().await;
+    carol.check().await;
+    assert!(texts_in(&carol, &general).contains(&"uploaded as usual".to_string()));
+
+    let bob_log = format!("ops/{}", crate::views::member_id(&bob.me()));
+    let listed_before = store.listings_of(&bob_log);
+    let_relays_happen(&[&carol]).await;
+    assert_eq!(store.listings_of(&bob_log), listed_before);
+}
+
+/// Reading a later op from the bucket shows the bucket has that op, not the
+/// ones before it, which may have come only live: those are still relayed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_segment_read_past_a_live_only_op_doesnt_stop_its_relay() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let live_only = send_live_then_die(&store, &bob, &[&carol], "only sent live").await;
+    let mut forger = Forger::new(&bob);
+    let later = forger.seal(Op::Message {
+        id: crate::ops::new_owned_id(&bob.me()),
+        channel: general.clone(),
+        text: "in the bucket".into(),
+        reply_to: None,
+    });
+    assert_eq!(later.seq, live_only.seq + 1);
+    bucket.put_segment(std::slice::from_ref(&later)).await.unwrap();
+    carol.sync().await;
+    assert_eq!(carol.state().store.last_seq(&bob.me()).unwrap(), later.seq);
+
+    let_relays_happen(&[&carol]).await;
+
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    dave.sync().await;
+    assert!(texts_in(&dave, &general).contains(&"only sent live".to_string()));
+}
+
+/// A relay that fails (the bucket is down) waits its turn again, so after
+/// a long outage the members in line don't all upload at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_relay_waits_its_turn_again() {
+    use crate::sync::relay::RELAY_AFTER_MS;
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let bob_objects = async || objects_of(&bucket.list_segments(&bob.me(), None).await.unwrap(), &bob);
+    send_live_then_die(&store, &bob, &[&carol], "only sent live").await;
+    let before = bob_objects().await;
+    let bob_log = format!("ops/{}/", crate::views::member_id(&bob.me()));
+
+    *store.refuse_puts_under.lock().unwrap() = Some(bob_log.clone());
+    let_relays_happen(&[&carol]).await;
+    *store.refuse_puts_under.lock().unwrap() = None;
+    carol.check().await;
+    assert_eq!(bob_objects().await, before, "not straight after the outage");
+
+    carol.backdate_relay_waits(RELAY_AFTER_MS);
+    carol.check().await;
+    assert_eq!(bob_objects().await, before + 1);
+}
+
+/// One author's relay failing doesn't hold up relaying the others'.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_failing_relay_doesnt_stop_the_others() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let erin = join(&admin, &root.path().join("erin"), &bucket, "Erin", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &erin, &carol]).await;
+    send_live_then_die(&store, &bob, &[&carol], "bob's").await;
+    send_live_then_die(&store, &erin, &[&carol], "erin's").await;
+    // Whichever of the two is relayed first fails, every time.
+    let authors = carol.state().store.everyone_ever().unwrap();
+    let position = |member: &Workspace| authors.iter().position(|author| *author == member.me()).unwrap();
+    let (failing, other) = match position(&bob) < position(&erin) {
+        true => (&bob, &erin),
+        false => (&erin, &bob),
+    };
+    let before = objects_of(&bucket.list_segments(&other.me(), None).await.unwrap(), other);
+    *store.refuse_puts_under.lock().unwrap() =
+        Some(format!("ops/{}/", crate::views::member_id(&failing.me())));
+
+    let_relays_happen(&[&carol]).await;
+
+    let after = objects_of(&bucket.list_segments(&other.me(), None).await.unwrap(), other);
+    assert_eq!(after, before + 1);
+}
