@@ -113,7 +113,8 @@ function topOf(page: Page, text: string): Promise<number> {
 
 test.beforeEach(async ({ page }) => {
   await page.goto("");
-  await expect(page.getByLabel("Message #general")).toBeVisible();
+  // Messages added before #general has loaded would arrive as unread history.
+  await expect(log(page)).toHaveAttribute("aria-busy", "false");
 });
 
 test("a message that arrives while the window is unfocused stays unread, even on screen", async ({ page }) => {

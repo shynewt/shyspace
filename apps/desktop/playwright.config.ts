@@ -22,6 +22,7 @@ if (unknown.length > 0) throw new Error(`UI_TEST_BROWSERS names unknown browsers
 
 export default defineConfig({
   testDir: "tests/ui",
+  globalSetup: "./tests/ui/warm-up.ts",
   fullyParallel: true,
   // Each worker is a browser. GitHub's 2-core machines would get one by
   // default; tests mostly wait, so three fit. Four locally keeps a laptop cool.

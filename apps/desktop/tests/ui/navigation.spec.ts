@@ -2,6 +2,13 @@ import { expect, type Page, test } from "@playwright/test";
 
 const MESSAGE_COUNT = 60;
 
+declare global {
+  interface Window {
+    /** Lets the held first load of messages through. */
+    releaseMessages?: () => void;
+  }
+}
+
 function messages(page: Page, channel: string) {
   return page.getByRole("log", { name: `Messages in #${channel}` });
 }
@@ -81,7 +88,8 @@ function pressMouseButton(page: Page, button: 3 | 4) {
 test.describe("in a session", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("");
-    await expect(page.getByLabel("Message #general")).toBeVisible();
+    // Messages added before #general has loaded would arrive as unread history.
+    await expect(messages(page, "general")).toHaveAttribute("aria-busy", "false");
   });
 
   test("back returns to the channel you were in, at the same message", async ({ page }) => {
@@ -377,6 +385,27 @@ test("launching reopens the thread you had open", async ({ page }) => {
 
   await page.reload();
   await expect(thread.getByText("Lisbon?")).toBeVisible();
+});
+
+test("a channel's messages read as loading until they're there", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.prepareFake = (fake) => {
+      const answer = fake.handle.bind(fake);
+      let release = () => {};
+      const loaded = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      window.releaseMessages = release;
+      fake.handle = (command, args) =>
+        command === "messages" ? loaded.then(() => answer(command, args)) : answer(command, args);
+    };
+  });
+  await page.goto("");
+  const log = messages(page, "general");
+  await expect(log).toHaveAttribute("aria-busy", "true");
+
+  await page.evaluate(() => window.releaseMessages?.());
+  await expect(log).toHaveAttribute("aria-busy", "false");
 });
 
 test("launching reopens the last channel where you left it", async ({ page }) => {
