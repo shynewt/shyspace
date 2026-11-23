@@ -299,15 +299,15 @@ impl Workspace {
         state.mls.members()
     }
 
-    /// Stops the background work, uploads what wasn't sent yet (so a message
-    /// written just before quitting isn't held back until the next start),
-    /// then closes the network.
     /// Stops this workspace's background tasks at once, as `shutdown` does,
     /// without waiting for anything: for when shutting down took too long.
     pub fn stop_background(&self) {
         self.inner.stopped.send_replace(true);
     }
 
+    /// Stops the background work, uploads what wasn't sent yet (so a message
+    /// written just before quitting isn't held back until the next start),
+    /// then closes the network.
     pub async fn shutdown(&self) -> Result<()> {
         let left = self.leave_huddle();
         self.finish_huddle_sends().await;

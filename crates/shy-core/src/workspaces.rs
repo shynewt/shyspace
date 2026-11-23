@@ -355,16 +355,13 @@ impl Workspaces {
         let mut first_failure = None;
         for workspace_id in self.settings()?.leaving {
             let data = self.folder(&workspace_id)?;
-            let deleted = match std::fs::remove_dir_all(&data.path) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(error) => {
-                    Err(anyhow::Error::new(error).context(format!("deleting {}", data.path.display())))
-                }
-            };
-            let finished = match deleted {
-                Ok(()) => data.keys.forget(&data.path).await,
-                Err(error) => Err(error),
+            // In one folder, another workspace may have been made there since:
+            // it isn't the one being left, so only the record goes.
+            let is_someone_elses =
+                WorkspaceConfig::peek(&data.path)?.is_some_and(|(stored_id, _)| stored_id != workspace_id);
+            let finished = match is_someone_elses {
+                true => Ok(()),
+                false => self.delete_folder_and_key(&data).await,
             };
             match finished {
                 Ok(()) => self.update_settings(|settings| {
@@ -465,6 +462,20 @@ impl Workspaces {
         self.place_last(&workspace_id)?;
         self.update_settings(|settings| settings.is_single_folder_handled = true)?;
         Ok(Some(workspace_id))
+    }
+
+    /// Deletes a folder (off the async threads: it may be large), then the
+    /// device key it was locked with.
+    async fn delete_folder_and_key(&self, data: &DataDir) -> Result<()> {
+        let path = data.path.clone();
+        let deleted = tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(anyhow::Error::new(error).context(format!("deleting {}", path.display()))),
+        })
+        .await?;
+        deleted?;
+        data.keys.forget(&data.path).await
     }
 
     /// A folder for a new workspace, refused if this device already has it,

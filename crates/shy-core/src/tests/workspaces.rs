@@ -506,3 +506,49 @@ async fn a_leave_cut_short_while_deleting_finishes_later() {
     );
     workspaces.restore(&kit, Networking::Offline).await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn finishing_a_leave_in_one_folder_spares_a_workspace_made_there_since() {
+    use crate::workspaces::LeaveStep;
+    let device = Device::new();
+    let dir = device.root.path().join("maya");
+    let keys = device.root.path().join("keys");
+    std::fs::create_dir_all(&keys).unwrap();
+    let in_one_folder = || {
+        Workspaces::in_one_folder_with_connector(
+            &dir,
+            DeviceKeys::Files(keys.clone()),
+            connector(&device.bucket),
+        )
+    };
+    let workspaces = in_one_folder();
+    let old_id = workspaces
+        .create("Old", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap()
+        .workspace_id()
+        .to_owned();
+    workspaces
+        .leave_until(&old_id, LeaveStep::MarkerDeleted)
+        .await
+        .unwrap();
+    // The folder went, but the leave stopped before it was recorded as done.
+    std::fs::remove_dir_all(&dir).unwrap();
+    drop(
+        workspaces
+            .create("New", profile(), test_bucket_config(), Networking::Offline)
+            .await
+            .unwrap(),
+    );
+    drop(workspaces);
+
+    in_one_folder()
+        .open_all(|| Networking::Offline.into())
+        .await
+        .unwrap();
+
+    assert!(
+        dir.join("workspace.json").exists(),
+        "the new workspace was deleted"
+    );
+}
