@@ -1,6 +1,7 @@
 //! A page update must cost memory and time in proportion to its size, even
-//! when it is made of many tiny text pieces that yrs joins (#185). Lives in its own test
-//! binary because it measures the whole process's memory.
+//! when it is made of many tiny text pieces that yrs splits or joins (#185).
+//! Lives in its own test binary because it measures the whole process's
+//! memory.
 
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -21,29 +22,48 @@ fn var(out: &mut Vec<u8>, mut value: u64) {
     out.push(value as u8);
 }
 
-/// Pieces of one character for one client, in Yjs's v1 encoding. The first
-/// starts the page text; `origins(clock)` names the left and right
-/// neighbours of every later one.
-fn one_character_pieces(count: u64, origins: impl Fn(u64) -> (u64, Option<u64>)) -> Vec<u8> {
+/// Pieces of `text` for one client, in Yjs's v1 encoding. The first starts
+/// the page text; `origins(clock)` names the left and right neighbours of
+/// every later one.
+fn typed_pieces(count: u64, text: &[u8], origins: impl Fn(u64) -> (Option<u64>, Option<u64>)) -> Vec<u8> {
     let mut update = vec![1];
     var(&mut update, count);
     var(&mut update, CLIENT);
     var(&mut update, 0);
     update.extend_from_slice(&[4, 1, 7]);
     update.extend_from_slice(b"content");
-    update.extend_from_slice(&[1, b'a']);
-    for clock in 1..count {
-        let (origin, right_origin) = origins(clock);
-        update.push(if right_origin.is_some() { 0xc4 } else { 0x84 });
-        var(&mut update, CLIENT);
-        var(&mut update, origin);
-        if let Some(right_origin) = right_origin {
+    var(&mut update, text.len() as u64);
+    update.extend_from_slice(text);
+    for piece in 1..count {
+        let (origin, right_origin) = origins(piece * text.len() as u64);
+        update.push(4 | origin.map_or(0, |_| 0x80) | right_origin.map_or(0, |_| 0x40));
+        for neighbour in [origin, right_origin].into_iter().flatten() {
             var(&mut update, CLIENT);
-            var(&mut update, right_origin);
+            var(&mut update, neighbour);
         }
-        update.extend_from_slice(&[1, b'a']);
+        var(&mut update, text.len() as u64);
+        update.extend_from_slice(text);
     }
     update.push(0);
+    update
+}
+
+fn one_character_pieces(count: u64, origins: impl Fn(u64) -> (u64, Option<u64>)) -> Vec<u8> {
+    typed_pieces(count, b"a", |clock| {
+        let (origin, right_origin) = origins(clock);
+        (Some(origin), right_origin)
+    })
+}
+
+/// An update deleting the client's characters in `ranges` (start, length).
+fn deleting(ranges: &[(u64, u64)]) -> Vec<u8> {
+    let mut update = vec![0, 1];
+    var(&mut update, CLIENT);
+    var(&mut update, ranges.len() as u64);
+    for &(start, length) in ranges {
+        var(&mut update, start);
+        var(&mut update, length);
+    }
     update
 }
 
@@ -97,8 +117,12 @@ fn deleting_own_pieces(mut update: Vec<u8>, clocks: std::ops::Range<u64>) -> Vec
 
 /// Time to merge `update` into an empty page and check its text's length.
 fn time_to_merge(update: &[u8], characters: u64) -> Duration {
+    time_to_merge_into(None, update, characters)
+}
+
+fn time_to_merge_into(page: Option<&[u8]>, update: &[u8], characters: u64) -> Duration {
     let started = Instant::now();
-    let state = merge(None, update).expect("the update is accepted");
+    let state = merge(page, update).expect("the update is accepted");
     let took = started.elapsed();
     assert_eq!(
         read(Some(&state)).expect("the page reads").len(),
@@ -170,5 +194,36 @@ fn pieces_typed_and_deleted_in_one_update_merge_in_linear_time() {
     assert!(
         with_deletion < without_deletion * 2,
         "{with_deletion:?} with the deletion, {without_deletion:?} without"
+    );
+}
+
+#[test]
+fn deletions_that_split_many_pieces_merge_in_linear_time() {
+    let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    let pieces = 280_000;
+    // Two characters each, each typed at the start of the page, so none join.
+    let typed = typed_pieces(pieces, b"ab", |clock| (None, Some(clock - 2)));
+    let page = merge(None, &typed).expect("the update is accepted");
+    let deletions = 100_000;
+    // One character of every other piece, so each deletion splits a piece.
+    let splitting = deleting(&(0..deletions).map(|piece| (4 * piece + 1, 1)).collect::<Vec<_>>());
+    // The same pieces whole: nothing splits.
+    let whole = deleting(&(0..deletions).map(|piece| (4 * piece, 2)).collect::<Vec<_>>());
+    let left = 2 * pieces - deletions;
+
+    let mut fastest = (Duration::MAX, Duration::MAX);
+    for _ in 0..2 {
+        fastest.1 = fastest
+            .1
+            .min(time_to_merge_into(Some(&page), &whole, left - deletions));
+        fastest.0 = fastest.0.min(time_to_merge_into(Some(&page), &splitting, left));
+    }
+    let (with_splits, without_splits) = fastest;
+
+    // yrs 0.28.1 shifted the rest of the client's piece list after every
+    // split.
+    assert!(
+        with_splits < without_splits * 2,
+        "{with_splits:?} with splits, {without_splits:?} without"
     );
 }

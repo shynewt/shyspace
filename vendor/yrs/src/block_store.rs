@@ -97,6 +97,44 @@ impl ClientBlockList {
         ClientBlockListIter(self.inner.iter())
     }
 
+    /// Splits items at each of `clocks` (strictly increasing, each strictly inside an item),
+    /// rebuilding the list from the first split onwards once. Returns each split's clock and right
+    /// half, in order.
+    pub(crate) fn split_items_at(&mut self, clocks: &[u32]) -> Vec<(u32, ItemPtr)> {
+        debug_assert!(
+            clocks.windows(2).all(|pair| pair[0] < pair[1]),
+            "clocks are strictly increasing"
+        );
+        let Some(start) = clocks.first().and_then(|&first| self.find_index(first)) else {
+            return Vec::new();
+        };
+        let rest = self.inner.split_off(start);
+        self.inner.reserve(rest.len() + clocks.len());
+        let mut clocks = clocks.iter().peekable();
+        let mut rights = Vec::with_capacity(clocks.len());
+        for cell in rest {
+            let mut block = cell.into_inner();
+            while let Some(&clock) =
+                clocks.next_if(|&&clock| clock < block.clock_start() + block.len())
+            {
+                let Block::Item(item) = &mut block else {
+                    continue;
+                };
+                let mut left = ItemPtr::from(item);
+                let Some(offset) = clock.checked_sub(left.id.clock) else {
+                    continue;
+                };
+                if let Some(mut right) = left.splice(offset, OffsetKind::Utf16) {
+                    rights.push((clock, ItemPtr::from(&mut right)));
+                    self.inner.push(UnsafeCell::new(block));
+                    block = Block::Item(right);
+                }
+            }
+            self.inner.push(UnsafeCell::new(block));
+        }
+        rights
+    }
+
     /// Squashes every block whose index is in one of `ranges` into its left neighbor where
     /// possible, in a single pass that compacts the list once. `ranges` must be sorted, must not
     /// overlap and must not include index 0.
@@ -417,6 +455,18 @@ impl BlockStore {
 
     pub(crate) fn split_block_inner(&mut self, block: ItemPtr, offset: u32) -> Option<ItemPtr> {
         self.split_block(block, offset, OffsetKind::Utf16)
+    }
+
+    /// Splits `client`'s items at each of `clocks` like [ClientBlockList::split_items_at].
+    pub(crate) fn split_items_at(
+        &mut self,
+        client: &ClientID,
+        clocks: &[u32],
+    ) -> Vec<(u32, ItemPtr)> {
+        match self.clients.get_mut(client) {
+            Some(blocks) => blocks.split_items_at(clocks),
+            None => Vec::new(),
+        }
     }
 }
 
