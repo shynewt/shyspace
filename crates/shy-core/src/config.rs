@@ -3,7 +3,7 @@
 
 use std::{io::Write, path::Path};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +11,9 @@ use crate::{ops::rule_violation, storage::Store, transport::bucket::BucketConfig
 
 pub(crate) const CONFIG_FILE: &str = "workspace.json";
 const BUCKET_META: &str = "bucket_config";
+/// The workspace id and admin, kept in the encrypted store as well as in the
+/// plain workspace.json, so an edited file can't name a new admin.
+const IDENTITY_META: &str = "workspace_identity";
 const BUCKET_LAMPORT_META: &str = "bucket_config_lamport";
 
 #[derive(Debug, Clone)]
@@ -48,6 +51,16 @@ impl WorkspaceConfig {
         let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
         let settings: PublicSettings =
             serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))?;
+        let identity = serde_json::to_vec(&(&settings.workspace_id, settings.admin))?;
+        match store.meta(IDENTITY_META)? {
+            Some(kept) => ensure!(
+                kept == identity,
+                "{} was changed outside the app: it no longer matches this workspace's encrypted settings",
+                path.display()
+            ),
+            // Workspaces from before the copy was kept take the file as it is once.
+            None => store.set_meta(IDENTITY_META, &identity)?,
+        }
         let bucket = store.meta(BUCKET_META)?.context("bucket settings are missing")?;
         Ok(Self {
             workspace_id: settings.workspace_id,
@@ -57,9 +70,14 @@ impl WorkspaceConfig {
         })
     }
 
-    /// Keeps the bucket settings in the store, where syncing reads them.
-    pub fn store_bucket(&self, store: &Store) -> Result<()> {
-        store.set_meta(BUCKET_META, &serde_json::to_vec(&self.bucket)?)
+    /// Keeps the bucket settings (syncing reads them there) and the
+    /// workspace id and admin in the encrypted store.
+    pub fn save_in_store(&self, store: &Store) -> Result<()> {
+        store.set_meta(BUCKET_META, &serde_json::to_vec(&self.bucket)?)?;
+        store.set_meta(
+            IDENTITY_META,
+            &serde_json::to_vec(&(&self.workspace_id, self.admin))?,
+        )
     }
 
     /// Writes `workspace.json`, which marks the directory as a complete

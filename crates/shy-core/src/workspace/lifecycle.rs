@@ -242,7 +242,7 @@ impl Workspace {
             admin: local.identity.public(),
             bucket: bucket_config,
         };
-        config.store_bucket(&local.store)?;
+        config.save_in_store(&local.store)?;
         config.mark_complete(&data.path)?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
@@ -310,7 +310,7 @@ impl Workspace {
             admin: invite.admin,
             bucket: grant.bucket,
         };
-        config.store_bucket(&local.store)?;
+        config.save_in_store(&local.store)?;
         config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
         let pending = PendingProfile {
             name,

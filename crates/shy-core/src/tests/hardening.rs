@@ -2005,3 +2005,23 @@ async fn settings_that_cannot_connect_say_what_is_wrong_on_open() {
     assert!(error.contains("ask the workspace admin"), "{error}");
     assert!(error.contains("https://"), "the reason stays: {error}");
 }
+
+/// workspace.json is a plain file; someone who can write to the data folder
+/// mustn't make themselves admin on that device by editing it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edited_workspace_json_is_refused() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let bob_dir = root.path().join("bob");
+    bob.shutdown().await.unwrap();
+    let bob_key = bob.me();
+    drop(bob);
+    let path = bob_dir.join("workspace.json");
+    let mut settings: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    settings["admin"] = serde_json::to_value(bob_key).unwrap();
+    std::fs::write(&path, serde_json::to_vec(&settings).unwrap()).unwrap();
+
+    let opened = Workspace::open_with(&data_dir(&bob_dir), connector(&bucket), Networking::Offline).await;
+
+    let error = format!("{:#}", opened.err().unwrap());
+    assert!(error.contains("changed outside the app"), "{error}");
+}
