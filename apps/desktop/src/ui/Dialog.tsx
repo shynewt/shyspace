@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { motion } from "motion/react";
 import { Dialog as RadixDialog } from "radix-ui";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef } from "react";
 import { cx } from "./cx";
 import { IconButton } from "./IconButton";
 import { fade, pop } from "./motion";
@@ -26,9 +26,11 @@ type DialogProps = {
   entrance?: "pop" | "instant";
   /**
    * "dialog" focuses the dialog itself on opening, for viewers whose first
-   * control is an icon button: its tooltip would take the first Escape.
+   * control is an icon button: its tooltip would take the first Escape. A
+   * field focuses that field without selecting its text, so the field can
+   * select what it wants (like a name without its extension).
    */
-  initialFocus?: "first" | "dialog";
+  initialFocus?: "first" | "dialog" | RefObject<HTMLElement | null>;
   children: ReactNode;
 };
 
@@ -76,9 +78,10 @@ export function Dialog({
             asChild
             onOpenAutoFocus={(event) => {
               opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-              if (initialFocus !== "dialog") return;
+              if (initialFocus === "first") return;
               event.preventDefault();
-              if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+              const target = initialFocus === "dialog" ? event.currentTarget : initialFocus.current;
+              if (target instanceof HTMLElement) target.focus();
             }}
             onCloseAutoFocus={(event) => {
               // Radix only returns focus to its own Trigger, which these

@@ -401,6 +401,24 @@ test("you can rename a file you shared; the name before the extension is selecte
   await expect(page.getByRole("article").last().getByText("Whiteboard.png")).toBeVisible();
 });
 
+test("the name is selected as the rename dialog opens, even on a machine too busy to draw", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.files.pickNext = [{ name: "IMG_4821.png", type: "image/png", bytes: [1, 2] }];
+  });
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "More actions for IMG_4821.png" }).click();
+  // No animation frame arrives from here on, as on a machine too loaded to draw in time.
+  await page.evaluate(() => {
+    window.requestAnimationFrame = () => 0;
+  });
+  await page.getByRole("menuitem", { name: "Rename…" }).click();
+  const field = page.getByRole("dialog", { name: "Rename file" }).getByLabel("Name");
+  await expect(field).toBeFocused();
+  await page.keyboard.type("Whiteboard");
+  await expect(field).toHaveValue("Whiteboard.png");
+});
+
 test("someone else's file has no rename", async ({ page }) => {
   await page.evaluate(() => {
     const grace = window.fake.addMember("Grace");
