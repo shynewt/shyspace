@@ -549,10 +549,10 @@ async fn writes_go_up_while_a_catch_up_is_still_reading() {
     )
     .await
     .unwrap();
-    let segments = || async {
-        let prefix = object_store::path::Path::from("ops");
-        store.inner.list(Some(&prefix)).count().await
-    };
+    // Only the admin's own segments: the storage protection check puts a
+    // probe beside them and deletes it again.
+    let own_segments = object_store::path::Path::from(format!("ops/{}", admin.my_id()));
+    let segments = || async { store.inner.list(Some(&own_segments)).count().await };
     let wait_for_more_than = |count: usize| async move {
         for _ in 0..200 {
             if segments().await > count {
@@ -566,12 +566,23 @@ async fn writes_go_up_while_a_catch_up_is_still_reading() {
     let before = segments().await;
 
     store.gate.send_replace(true);
+    let catching_up = tokio::spawn({
+        let admin = admin.clone();
+        async move { admin.sync().await }
+    });
+    let mut waited = 0;
+    while store.gate.receiver_count() == 0 {
+        assert!(waited < 1000, "the catch-up never started reading");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        waited += 1;
+    }
     let general = channel_id(&admin, "general");
     admin
         .send_message(&general, "written during a catch-up", None)
         .unwrap();
     let went_up = wait_for_more_than(before).await;
     store.gate.send_replace(false);
+    catching_up.await.unwrap();
 
     assert!(went_up, "the message went up while the pull was still reading");
     admin.shutdown().await.unwrap();
