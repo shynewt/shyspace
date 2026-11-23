@@ -2922,3 +2922,165 @@ async fn a_store_missing_its_identity_does_not_open() {
     let error = format!("{:#}", opened.err().expect("refused"));
     assert!(error.contains("id and admin are missing"), "{error}");
 }
+
+/// A store whose next listing under a prefix fails, as a network blip would.
+#[derive(Debug, Default)]
+struct FlakyStore {
+    inner: InMemory,
+    fail_next_list_under: Mutex<Option<String>>,
+}
+
+impl fmt::Display for FlakyStore {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("flaky store")
+    }
+}
+
+impl FlakyStore {
+    fn is_failing(&self, prefix: Option<&Path>) -> bool {
+        let mut armed = self.fail_next_list_under.lock().unwrap();
+        let is_hit = matches!((armed.as_deref(), prefix), (Some(armed), Some(prefix)) if prefix.as_ref().starts_with(armed));
+        if is_hit {
+            *armed = None;
+        }
+        is_hit
+    }
+
+    fn failure() -> object_store::Error {
+        object_store::Error::Generic {
+            store: "flaky",
+            source: "a network blip".into(),
+        }
+    }
+}
+
+#[async_trait]
+impl ObjectStore for FlakyStore {
+    async fn put_opts(
+        &self,
+        location: &Path,
+        payload: PutPayload,
+        opts: PutOptions,
+    ) -> object_store::Result<PutResult> {
+        self.inner.put_opts(location, payload, opts).await
+    }
+    async fn put_multipart_opts(
+        &self,
+        location: &Path,
+        opts: PutMultipartOptions,
+    ) -> object_store::Result<Box<dyn MultipartUpload>> {
+        self.inner.put_multipart_opts(location, opts).await
+    }
+    async fn get_opts(&self, location: &Path, options: GetOptions) -> object_store::Result<GetResult> {
+        self.inner.get_opts(location, options).await
+    }
+    fn delete_stream(
+        &self,
+        locations: stream::Boxed<object_store::Result<Path>>,
+    ) -> stream::Boxed<object_store::Result<Path>> {
+        self.inner.delete_stream(locations)
+    }
+    fn list(&self, prefix: Option<&Path>) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        match self.is_failing(prefix) {
+            true => Box::pin(stream::once(Err(Self::failure()))),
+            false => self.inner.list(prefix),
+        }
+    }
+    fn list_with_offset(
+        &self,
+        prefix: Option<&Path>,
+        offset: &Path,
+    ) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        match self.is_failing(prefix) {
+            true => Box::pin(stream::once(Err(Self::failure()))),
+            false => self.inner.list_with_offset(prefix, offset),
+        }
+    }
+    async fn list_with_delimiter(&self, prefix: Option<&Path>) -> object_store::Result<ListResult> {
+        self.inner.list_with_delimiter(prefix).await
+    }
+    async fn copy_opts(&self, from: &Path, to: &Path, options: CopyOptions) -> object_store::Result<()> {
+        self.inner.copy_opts(from, to, options).await
+    }
+}
+
+/// A gap whose repair failed on a network blip is tried again at the next
+/// check, not only at the hourly sweep.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_gap_repair_cut_short_by_the_network_is_tried_again() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "second", None).unwrap();
+    bob.send_message(&general, "third", None).unwrap();
+    bob.sync().await;
+    admin
+        .inner
+        .fail_next_apply
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.check().await;
+    // As if the parked ops were pushed out by the cap.
+    admin.state().store.execute_for_test("DELETE FROM pending_ops");
+    // Bob's head counts as seen once a check reads past it, so only the gap
+    // repair can bring the lost ops back.
+    admin.check().await;
+    bob.send_message(&general, "fourth", None).unwrap();
+    let fourth = bob
+        .state()
+        .store
+        .unpushed(&bob.me())
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    admin.receive(fourth).unwrap();
+
+    *store.fail_next_list_under.lock().unwrap() = Some(format!("ops/{}", bob.my_id()));
+    admin.check().await;
+    assert!(
+        store.fail_next_list_under.lock().unwrap().is_none(),
+        "the repair hit the blip"
+    );
+    assert!(admin.status().error.is_some(), "and failed");
+    admin.check().await;
+
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(texts.contains(&"second".to_string()), "{texts:?}");
+}
+
+/// A removed member's frozen log can end with ops they only ever sent live,
+/// which the bucket never gets. Readers missing them stop listing that
+/// member at every check once nothing new has come; the hourly sweep still
+/// looks.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_that_cannot_be_finished_is_not_read_at_every_check() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "only live", None).unwrap();
+    for envelope in bob.state().store.unpushed(&bob.me()).unwrap() {
+        admin.receive(envelope).unwrap();
+    }
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    carol.check().await;
+    carol.check().await;
+
+    let before = store.requests();
+    carol.check().await;
+    let settled_check = store.requests().since(&before);
+
+    assert_eq!(settled_check.list_pages(), 1, "only heads: {settled_check}");
+}

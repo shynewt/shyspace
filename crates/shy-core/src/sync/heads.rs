@@ -13,6 +13,50 @@ use tracing::warn;
 use crate::{transport::heads::Head, workspace::Workspace};
 
 const SIGNATURE_DOMAIN: &str = "shyspace head hint v1";
+
+/// An author's log a check reads, and why.
+struct ToRead {
+    author: PublicKey,
+    /// Their head moved to this version.
+    head_version: Option<String>,
+    /// The seq of their op that went missing.
+    gap: Option<u64>,
+    /// They were removed and we haven't their whole frozen log yet.
+    is_removal: bool,
+}
+
+impl ToRead {
+    fn new(author: PublicKey) -> Self {
+        Self {
+            author,
+            head_version: None,
+            gap: None,
+            is_removal: false,
+        }
+    }
+
+    fn with_head(self, head_version: String) -> Self {
+        Self {
+            head_version: Some(head_version),
+            ..self
+        }
+    }
+
+    fn with_gap(self, next_seq: u64) -> Self {
+        Self {
+            gap: Some(next_seq),
+            ..self
+        }
+    }
+
+    fn for_removal(self) -> Self {
+        Self {
+            is_removal: true,
+            ..self
+        }
+    }
+}
+
 /// ETags are short; a longer version is junk.
 const MAX_VERSION_LENGTH: usize = 256;
 
@@ -131,7 +175,7 @@ impl Workspace {
                 .map(|head| head.version.clone()),
         )
         .await?;
-        let mut to_read: Vec<(PublicKey, Option<String>)> = Vec::new();
+        let mut to_read: Vec<ToRead> = Vec::new();
         for head in listed {
             if head.author == me || self.seen_heads().get(&head.author) == Some(&head.version) {
                 continue;
@@ -147,44 +191,53 @@ impl Workspace {
             }
             match self.bucket().head(&head.author).await? {
                 Some(head_now) if head_now.last_seq > held => {
-                    to_read.push((head.author, Some(head.version)));
+                    to_read.push(ToRead::new(head.author).with_head(head.version));
                 }
                 _ => self.note_seen_head(&head.author, &head.version),
             }
         }
-        for author in self.refetch_gaps()? {
-            to_read.push((author, None));
+        for (author, next_seq) in self.gaps_to_repair()? {
+            to_read.push(ToRead::new(author).with_gap(next_seq));
         }
         for author in &everyone {
             let held = self.state().store.last_seq(author)?;
             // A removed member can't fix their own head, but the removal
-            // commit says how far their log goes.
-            if self
+            // commit says how far their log goes. Ops they only ever sent
+            // live never reach the bucket, so read again only once something
+            // new came; the sweep still looks every hour.
+            let is_unfinished = self
                 .state()
                 .store
                 .frozen_last_seq(author)?
-                .is_some_and(|last| last > held)
-            {
-                to_read.push((*author, None));
+                .is_some_and(|last| last > held);
+            if is_unfinished && self.removal_reads().get(author) != Some(&held) {
+                to_read.push(ToRead::new(*author).for_removal());
             }
         }
         let mut has_found_new = false;
         let mut local_failure = None;
-        for (author, head_version) in to_read {
-            let held = self.state().store.last_seq(&author)?;
-            match self.pull_author(&author).await? {
-                // A head counts as seen only once its log was read, so a
-                // failed read is tried again at the next check.
+        for read in to_read {
+            let held = self.state().store.last_seq(&read.author)?;
+            match self.pull_author(&read.author).await? {
+                // A head, gap or removal counts as read only once the read
+                // succeeded, so a failed one is tried again at the next check.
                 None => {
-                    if let Some(version) = head_version {
-                        self.note_seen_head(&author, &version);
+                    if let Some(version) = &read.head_version {
+                        self.note_seen_head(&read.author, version);
+                    }
+                    if let Some(next_seq) = read.gap {
+                        self.mark_gap_repaired((read.author, next_seq));
+                    }
+                    if read.is_removal {
+                        let held_now = self.state().store.last_seq(&read.author)?;
+                        self.removal_reads().insert(read.author, held_now);
                     }
                 }
                 Some(error) => {
                     local_failure.get_or_insert(error);
                 }
             }
-            has_found_new |= self.state().store.last_seq(&author)? > held;
+            has_found_new |= self.state().store.last_seq(&read.author)? > held;
         }
         local_failure.map_or(Ok(has_found_new), Err)
     }
@@ -204,6 +257,13 @@ impl Workspace {
         }
         let _uploading = self.inner.push_lock.lock().await;
         self.write_head().await
+    }
+
+    fn removal_reads(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<PublicKey, u64>> {
+        self.inner
+            .removal_reads
+            .lock()
+            .expect("removal reads lock poisoned by an earlier panic")
     }
 
     fn note_seen_head(&self, author: &PublicKey, version: &str) {

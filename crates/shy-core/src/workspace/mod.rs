@@ -132,6 +132,9 @@ pub(crate) struct Inner {
     pub last_slow_duties: Mutex<Option<tokio::time::Instant>>,
     /// The version of each commit slot we last found right.
     pub verified_commits: Mutex<std::collections::HashMap<u64, String>>,
+    /// What we held of each unfinished removed member's log when we last
+    /// read it, so a check reads again only once something new came.
+    pub removal_reads: Mutex<std::collections::HashMap<PublicKey, u64>>,
     /// The head version we last acted on, per author; in memory only.
     pub seen_heads: Mutex<std::collections::HashMap<PublicKey, String>>,
     /// The seq our own head was last confirmed to hold.

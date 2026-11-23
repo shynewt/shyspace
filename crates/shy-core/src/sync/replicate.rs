@@ -59,14 +59,21 @@ impl Workspace {
     /// reading back, unless it couldn't even be parked; the first such error
     /// is returned at the end. Returns whether anything new came.
     pub(crate) async fn pull(&self) -> Result<bool> {
-        self.refetch_gaps()?;
+        let gaps = self.gaps_to_repair()?;
         let mut local_failure = None;
         let mut has_found_new = false;
         let authors = self.state().store.everyone_ever()?;
         for author in authors {
             let held = self.state().store.last_seq(&author)?;
-            if let Some(error) = self.sweep_author(&author).await? {
-                local_failure.get_or_insert(error);
+            match self.sweep_author(&author).await? {
+                Some(error) => {
+                    local_failure.get_or_insert(error);
+                }
+                None => {
+                    for gap in gaps.iter().filter(|(gap_author, _)| *gap_author == author) {
+                        self.mark_gap_repaired(*gap);
+                    }
+                }
             }
             has_found_new |= self.state().store.last_seq(&author)? > held;
         }
@@ -283,27 +290,40 @@ impl Workspace {
             .expect("the store is writable in tests");
     }
 
-    /// Once per gap: if an author's next op went missing after we read past
-    /// it (a parked op pushed out by the cap), fetch again what was skipped
-    /// this run. Returns those authors.
-    pub(super) fn refetch_gaps(&self) -> Result<Vec<PublicKey>> {
-        let state = self.state();
-        let mut refetched = self
+    /// Gaps not yet repaired: an author's next op went missing after we
+    /// read past it (a parked op pushed out by the cap). What was skipped of
+    /// their segments this run is fetched again. A gap counts as repaired
+    /// once a read of its author succeeds (`mark_gap_repaired`), so one the
+    /// bucket can't fill isn't read again at every pass, and one a network
+    /// error interrupted is.
+    pub(super) fn gaps_to_repair(&self) -> Result<Vec<(PublicKey, u64)>> {
+        let missing = self.state().store.authors_missing_next_op()?;
+        let repaired = self
             .inner
             .refetched_gaps
             .lock()
-            .expect("gap list lock poisoned by an earlier panic");
-        let mut refetching = Vec::new();
-        for (author, next_seq) in state.store.authors_missing_next_op()? {
-            if refetched.insert((author, next_seq)) {
-                warn!("op {next_seq} from {author} went missing; reading their history again");
-                let author_prefix = format!("ops/{}/", member_id(&author));
-                self.skipped_segments()
-                    .retain(|listed| !listed.key.starts_with(&author_prefix));
-                refetching.push(author);
+            .expect("gap list lock poisoned by an earlier panic")
+            .clone();
+        let mut to_repair = Vec::new();
+        for (author, next_seq) in missing {
+            if repaired.contains(&(author, next_seq)) {
+                continue;
             }
+            warn!("op {next_seq} from {author} went missing; reading their history again");
+            let author_prefix = format!("ops/{}/", member_id(&author));
+            self.skipped_segments()
+                .retain(|listed| !listed.key.starts_with(&author_prefix));
+            to_repair.push((author, next_seq));
         }
-        Ok(refetching)
+        Ok(to_repair)
+    }
+
+    pub(super) fn mark_gap_repaired(&self, gap: (PublicKey, u64)) {
+        self.inner
+            .refetched_gaps
+            .lock()
+            .expect("gap list lock poisoned by an earlier panic")
+            .insert(gap);
     }
 
     fn skipped_segments(&self) -> std::sync::MutexGuard<'_, std::collections::HashSet<ListedObject>> {
