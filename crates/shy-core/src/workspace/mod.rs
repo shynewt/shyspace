@@ -2,6 +2,8 @@
 
 mod actions;
 mod files;
+mod huddle_ring;
+mod huddles;
 mod inbox;
 mod later;
 mod lifecycle;
@@ -14,6 +16,7 @@ mod storage;
 
 pub(crate) use actions::OpMaker;
 pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
+pub use huddles::Via;
 #[cfg(test)]
 pub(crate) use lifecycle::CUT_SHORT_CREATES;
 pub use lifecycle::{DataDir, JoinCancel};
@@ -31,13 +34,14 @@ use tokio::sync::{Notify, broadcast};
 
 use crate::{
     config::WorkspaceConfig,
+    huddle::media::HuddleMedia,
     keys::DeviceKey,
     membership::{admin::drop_unsealed_deliveries, mls::Mls},
     storage::Store,
     sync::SyncStatus,
     transport::{
         bucket::{Bucket, Connector},
-        gossip::Net,
+        gossip::{ExtraProtocols, Net},
     },
     views::{Change, member_id},
 };
@@ -48,6 +52,39 @@ use crate::{
 pub enum Networking {
     Online,
     Offline,
+}
+
+/// How to open a workspace: whether to go online, what else to serve on its
+/// endpoint, and what moves huddle audio. A plain [`Networking`] converts
+/// into options with nothing extra.
+#[derive(Clone)]
+pub struct WorkspaceOptions {
+    pub networking: Networking,
+    pub protocols: Option<ExtraProtocols>,
+    /// Without one, the workspace can show huddles but not join them.
+    pub media: Option<Arc<dyn HuddleMedia>>,
+}
+
+impl WorkspaceOptions {
+    pub fn with_protocols(mut self, protocols: ExtraProtocols) -> Self {
+        self.protocols = Some(protocols);
+        self
+    }
+
+    pub fn with_media(mut self, media: Arc<dyn HuddleMedia>) -> Self {
+        self.media = Some(media);
+        self
+    }
+}
+
+impl From<Networking> for WorkspaceOptions {
+    fn from(networking: Networking) -> Self {
+        Self {
+            networking,
+            protocols: None,
+            media: None,
+        }
+    }
 }
 
 pub struct Profile<'a> {
@@ -104,6 +141,7 @@ pub(crate) struct Inner {
     pub bucket: RwLock<Bucket>,
     pub connect: Connector,
     pub net: Option<Net>,
+    pub huddle_media: Option<Arc<dyn HuddleMedia>>,
     pub events: broadcast::Sender<Change>,
     /// Wakes the sync loop early: after a local write or a peer's nudge.
     pub wake: Notify,
@@ -148,6 +186,11 @@ pub(crate) struct Inner {
     pub last_dialed_ms: Mutex<std::collections::HashMap<iroh::PublicKey, i64>>,
     /// Others' presence, from heartbeats; in memory only.
     pub presence: Mutex<presence::PresenceBook>,
+    pub huddles: Mutex<huddles::HuddleState>,
+    pub huddle_transition: Mutex<()>,
+    /// The runtime the workspace was opened on, so its sync calls can start
+    /// tasks from any thread.
+    pub runtime: tokio::runtime::Handle,
     pub own_presence: Mutex<presence::OwnPresence>,
     /// Sends a heartbeat now instead of at the next tick.
     pub heartbeat_now: Notify,
@@ -251,11 +294,14 @@ impl Workspace {
     /// written just before quitting isn't held back until the next start),
     /// then closes the network.
     pub async fn shutdown(&self) -> Result<()> {
+        let left = self.leave_huddle();
+        self.finish_huddle_sends().await;
         self.inner.stopped.send_replace(true);
         let uploaded = self.push().await;
         if let Some(net) = &self.inner.net {
             net.shutdown().await;
         }
-        uploaded.context("uploading unsent changes before closing")
+        uploaded.context("uploading unsent changes before closing")?;
+        left.context("leaving the huddle before closing")
     }
 }

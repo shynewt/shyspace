@@ -24,7 +24,7 @@ use crate::{
     keys::DeviceKey,
     storage::{snapshot_database, snapshot_store_without_content},
     transport::bucket::{Bucket, BucketConfig, Connector, MAX_RECOVERY_SNAPSHOT_BYTES, s3_connector},
-    workspace::{DataDir, MLS_FILE, Networking, STORE_FILE, Workspace},
+    workspace::{DataDir, MLS_FILE, STORE_FILE, Workspace, WorkspaceOptions},
 };
 
 const KIT_PREFIX: &str = "shyrec1_";
@@ -274,15 +274,19 @@ impl Workspace {
 
     /// Restores the admin from a recovery kit onto this device, then catches
     /// up from the bucket. Only for when the old admin device is gone.
-    pub async fn restore(data: &DataDir, recovery_kit: &str, networking: Networking) -> Result<Self> {
-        Self::restore_with(data, recovery_kit, s3_connector(), networking).await
+    pub async fn restore(
+        data: &DataDir,
+        recovery_kit: &str,
+        options: impl Into<WorkspaceOptions>,
+    ) -> Result<Self> {
+        Self::restore_with(data, recovery_kit, s3_connector(), options).await
     }
 
     pub(crate) async fn restore_with(
         data: &DataDir,
         recovery_kit: &str,
         connect: Connector,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
         let kit = RecoveryKit::decode(recovery_kit)?;
         let bucket = connect(&kit.workspace_id, &kit.bucket)?;
@@ -305,7 +309,7 @@ impl Workspace {
             let _ = std::fs::remove_dir(&data.path);
             return Err(error);
         }
-        let restored = Self::install_snapshot(data, &kit, snapshot, connect, networking).await;
+        let restored = Self::install_snapshot(data, &kit, snapshot, connect, options).await;
         if restored.is_err() {
             // Undo everything this restore did, so it can simply be retried.
             // The key goes first: its keychain slot is named after the folder.
@@ -320,13 +324,13 @@ impl Workspace {
         kit: &RecoveryKit,
         snapshot: Snapshot,
         connect: Connector,
-        networking: Networking,
+        options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
         write_private_file(&data.store_path(), &snapshot.store_db)?;
         write_private_file(&data.mls_path(), &snapshot.mls_db)?;
         write_private_file(&data.path.join(CONFIG_FILE), &snapshot.workspace_json)?;
 
-        let workspace = Self::open_with(data, connect, networking).await?;
+        let workspace = Self::open_with(data, connect, options).await?;
         ensure!(workspace.me() == kit.admin, "the snapshot is not the admin's");
         // Catch up before anyone writes, so our own sequence numbers continue
         // where the lost device left off.

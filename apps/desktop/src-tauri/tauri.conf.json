@@ -39,6 +39,14 @@
       "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["libpipewire-0.3-0 | libpipewire-0.3-0t64", "libasound2 | libasound2t64"]
+      },
+      "rpm": {
+        "depends": ["pipewire-libs", "alsa-lib"]
+      }
+    }
   }
 }

@@ -85,6 +85,9 @@ jobs:
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
+      - name: Huddle audio's system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libasound2-dev libpipewire-0.3-dev clang libclang-dev
       - name: Build the app, and attach it to the draft release for a tag
         uses: tauri-apps/tauri-action@v1
         env:

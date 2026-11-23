@@ -222,7 +222,62 @@ export type Change =
   /** How far this device's upload into `channel` has got, in bytes of the files. */
   | { kind: "upload"; channel: string; sent: number; total: number }
   | { kind: "sync" }
-  | { kind: "removed" };
+  | { kind: "removed" }
+  /** Who is in `channel`'s huddle changed. */
+  | { kind: "huddle"; channel: string }
+  /** Something about this device's own huddle changed. */
+  | { kind: "my_huddle" }
+  /** Someone started a huddle in a DM you're in; raised once, and only if the DM may alert you. */
+  | { kind: "huddle_started"; channel: string; member: string; member_name: string }
+  /** An incoming huddle started ringing on this device; exactly one `huddle_ring_stopped` follows. */
+  | { kind: "huddle_ringing"; channel: string; member: string; member_name: string }
+  /** The ring for an incoming huddle stopped: answered, declined, the caller left, or nobody answered in time. */
+  | { kind: "huddle_ring_stopped"; channel: string }
+  /** Someone in this device's huddle started or stopped speaking; your own member id for your voice. */
+  | { kind: "huddle_speaking"; member: string; speaking: boolean }
+  /** The microphones and speakers offered, or the choice among them, changed. */
+  | { kind: "huddle_devices" }
+  /** Whether huddles play join and leave sounds on this device changed. */
+  | { kind: "huddle_sounds" };
+
+/** Who is in a channel's huddle; you first when you're in it. */
+export type Huddle = { channel: string; participants: HuddleParticipant[]; is_full: boolean };
+export type HuddleParticipant = {
+  member: string;
+  camera: boolean;
+  screen: boolean;
+  is_me: boolean;
+  /** Their app can't exchange audio with yours; one of you must update. */
+  needs_update: boolean;
+};
+/** `joining` lasts only while joining runs; each peer's `link` shows the real wait. */
+export type HuddlePhase = "joining" | "in";
+/** `relayed` works, but may sound worse than `direct`. */
+export type HuddleLink = "connecting" | "direct" | "relayed" | "reconnecting";
+/** `off` means muted, with the microphone really closed; `silent` is open but delivering exact silence. */
+export type MicState = "off" | "opening" | "live" | "permission_denied" | "silent" | "lost";
+export type OutputState = "playing" | "bluetooth_call_mode" | "lost";
+export type HuddlePeer = { member: string; link: HuddleLink; speaking: boolean };
+export type MyHuddle = {
+  channel: string;
+  phase: HuddlePhase;
+  muted: boolean;
+  mic: MicState;
+  output: OutputState;
+  peers: HuddlePeer[];
+};
+/** The incoming huddle ringing on this device. */
+export type IncomingHuddle = { channel: string; member: string; member_name: string };
+export type AudioDevice = {
+  id: string;
+  name: string;
+  is_default: boolean;
+  /** Using its microphone drops it to call quality. */
+  is_bluetooth: boolean;
+};
+export type AudioDevices = { inputs: AudioDevice[]; outputs: AudioDevice[] };
+/** null means the system's default. */
+export type AudioDeviceChoice = { input: string | null; output: string | null };
 
 export const api = {
   session: () => invoke<Session | null>("session"),
@@ -350,6 +405,21 @@ export const api = {
   setProfilePicture: (image: Uint8Array | null) =>
     invoke<void>("set_profile_picture", { image: image ? Array.from(image) : [] }),
   status: () => invoke<SyncStatus>("status"),
+  huddle: (channel: string) => invoke<Huddle>("huddle", { channel }),
+  myHuddle: () => invoke<MyHuddle | null>("my_huddle"),
+  /** Leaves any other huddle first. */
+  joinHuddle: (channel: string, muted: boolean) => invoke<void>("join_huddle", { channel, muted }),
+  leaveHuddle: () => invoke<void>("leave_huddle"),
+  /** Stops the ring for an incoming huddle without joining it. */
+  declineHuddle: () => invoke<void>("decline_huddle"),
+  /** The incoming huddle ringing now, if any. */
+  huddleRinging: () => invoke<IncomingHuddle | null>("huddle_ringing"),
+  setHuddleMuted: (muted: boolean) => invoke<void>("set_huddle_muted", { muted }),
+  huddleDevices: () => invoke<AudioDevices>("huddle_devices"),
+  setHuddleDevices: (choice: AudioDeviceChoice) => invoke<void>("set_huddle_devices", { choice }),
+  /** Whether huddles play join and leave sounds on this device. */
+  huddleSounds: () => invoke<boolean>("huddle_sounds"),
+  setHuddleSounds: (isOn: boolean) => invoke<void>("set_huddle_sounds", { isOn }),
 };
 
 /**

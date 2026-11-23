@@ -16,6 +16,9 @@ pub use heads::Hint;
 
 use std::time::Duration;
 
+/// How often huddle participants whose refreshes stopped are dropped.
+const HUDDLE_EXPIRY_CHECK: Duration = Duration::from_secs(5);
+
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -24,10 +27,13 @@ use pacing::{Pacing, SHORT_WAIT, has_slept};
 
 use crate::{
     ops::now_ms,
-    transport::gossip::{Incoming, Wire},
+    transport::{
+        direct::DirectMessage,
+        gossip::{Incoming, Wire},
+    },
     views::Change,
     views::{PresenceState, member_id},
-    workspace::{NextBeat, Workspace},
+    workspace::{NextBeat, Via, Workspace},
 };
 
 /// Well under the presence timeout, so one lost heartbeat doesn't count.
@@ -94,6 +100,19 @@ impl Workspace {
                         Ok(false) => {}
                         Err(error) => warn!("ignoring a hint: {error:#}"),
                     },
+                    Incoming::Message(Wire::Huddle(beacon)) => {
+                        if let Err(error) = receiver.receive_beacon(&beacon, Via::Gossip) {
+                            warn!("ignoring a huddle beacon: {error:#}");
+                        }
+                    }
+                    Incoming::Direct {
+                        from,
+                        message: DirectMessage::Huddle(beacon),
+                    } => {
+                        if let Err(error) = receiver.receive_beacon(&beacon, Via::Direct(from)) {
+                            warn!("ignoring a direct huddle beacon: {error:#}");
+                        }
+                    }
                     Incoming::Message(Wire::Presence(heartbeat)) => {
                         match receiver.receive_heartbeat(&heartbeat) {
                             Ok(true) => receiver.emit(Change::Members),
@@ -101,6 +120,21 @@ impl Workspace {
                             Err(error) => warn!("ignoring a heartbeat: {error:#}"),
                         }
                     }
+                }
+            }
+        });
+
+        let expirer = self.clone();
+        let mut stopped = self.inner.stopped.subscribe();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(HUDDLE_EXPIRY_CHECK);
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {}
+                    _ = stopped.changed() => break,
+                }
+                if let Err(error) = expirer.expire_huddle_participants() {
+                    warn!("couldn't expire huddle participants: {error:#}");
                 }
             }
         });

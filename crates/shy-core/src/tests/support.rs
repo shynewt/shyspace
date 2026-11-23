@@ -7,7 +7,7 @@ use object_store::memory::InMemory;
 use tokio::task::JoinHandle;
 
 use crate::{
-    BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace, crypto,
+    BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace, WorkspaceOptions, crypto,
     membership::invite::{Invite, JoinMailbox},
     ops::{Envelope, Op, OpBody, now_ms},
     pages::{self, CLIENT_ID_NONCE_BYTES, Edit},
@@ -37,6 +37,10 @@ pub fn data_dir(dir: &Path) -> DataDir {
 }
 
 pub async fn create_admin(dir: &Path, bucket: &Bucket) -> Workspace {
+    create_admin_with(dir, bucket, Networking::Offline.into()).await
+}
+
+pub async fn create_admin_with(dir: &Path, bucket: &Bucket, options: WorkspaceOptions) -> Workspace {
     Workspace::create_with(
         &data_dir(dir),
         "workspace-id".into(),
@@ -47,7 +51,7 @@ pub async fn create_admin(dir: &Path, bucket: &Bucket) -> Workspace {
         },
         test_bucket_config(),
         connector(bucket),
-        Networking::Offline,
+        options,
     )
     .await
     .unwrap()
@@ -94,6 +98,26 @@ pub fn start_cancellable_join(
     is_bot: bool,
     cancel: JoinCancel,
 ) -> JoinHandle<Result<Workspace>> {
+    start_join_with(
+        invite,
+        dir,
+        bucket,
+        name,
+        is_bot,
+        cancel,
+        Networking::Offline.into(),
+    )
+}
+
+fn start_join_with(
+    invite: Invite,
+    dir: &Path,
+    bucket: &Bucket,
+    name: &str,
+    is_bot: bool,
+    cancel: JoinCancel,
+    options: WorkspaceOptions,
+) -> JoinHandle<Result<Workspace>> {
     let dir = dir.to_path_buf();
     let bucket = bucket.clone();
     let name = name.to_owned();
@@ -109,7 +133,7 @@ pub fn start_cancellable_join(
             profile,
             &mailbox,
             connector(&bucket),
-            Networking::Offline,
+            options,
             &cancel,
         )
         .await
@@ -136,9 +160,31 @@ pub async fn wait_for_request(admin: &Workspace, token: &str) {
 
 /// A new member joins with a fresh invite, which the admin approves.
 pub async fn join(admin: &Workspace, dir: &Path, bucket: &Bucket, name: &str, is_bot: bool) -> Workspace {
+    join_as(admin, dir, bucket, name, is_bot, Networking::Offline.into()).await
+}
+
+/// Like `join`, for a person, opening the workspace with `options`.
+pub async fn join_with(
+    admin: &Workspace,
+    dir: &Path,
+    bucket: &Bucket,
+    name: &str,
+    options: WorkspaceOptions,
+) -> Workspace {
+    join_as(admin, dir, bucket, name, false, options).await
+}
+
+async fn join_as(
+    admin: &Workspace,
+    dir: &Path,
+    bucket: &Bucket,
+    name: &str,
+    is_bot: bool,
+    options: WorkspaceOptions,
+) -> Workspace {
     let invite = admin.create_test_invite(name, Duration::from_secs(600)).unwrap();
     let token = invite.token.clone();
-    let joining = start_join(invite, dir, bucket, name, is_bot);
+    let joining = start_join_with(invite, dir, bucket, name, is_bot, JoinCancel::new(), options);
     wait_for_request(admin, &token).await;
     admin.approve_invite(&token).await.unwrap();
     joining.await.unwrap().unwrap()

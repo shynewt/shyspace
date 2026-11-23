@@ -19,14 +19,15 @@ use iroh::{
         self, AfterHandshakeOutcome, BeforeConnectOutcome, Connection, EndpointHooks, VarInt,
         WeakConnectionHandle, presets,
     },
-    protocol::Router,
+    protocol::{Router, RouterBuilder},
 };
 use iroh_gossip::{Event, Gossip, GossipSender, TopicId};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::{ops::Envelope, sync::Hint, workspace::Heartbeat};
+use super::direct::{DIRECT_ALPN, Direct, DirectMessage};
+use crate::{huddle::beacon::Beacon, ops::Envelope, sync::Hint, workspace::Heartbeat};
 
 const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 
@@ -40,6 +41,8 @@ pub enum Wire {
     Presence(Heartbeat),
     /// A signed "my head is at this seq and version", sent after an upload.
     Hint(Hint),
+    /// A public channel's huddle beacon; checked by the receiver, never stored.
+    Huddle(Beacon),
 }
 
 /// What gossip hands the workspace: messages from peers, and local events a
@@ -52,6 +55,12 @@ pub enum Incoming {
     NeighborUp,
     /// Messages were missed; the bucket has them.
     Lagged,
+    /// A message sent straight to us, and the device that sent it, as the
+    /// connection proved.
+    Direct {
+        from: PublicKey,
+        message: DirectMessage,
+    },
 }
 
 /// Who may be connected, and the connections they have open with us.
@@ -132,6 +141,22 @@ impl EndpointHooks for MembersOnly {
     }
 }
 
+/// Protocols an application serves on the workspace's endpoint next to
+/// gossip, such as huddle media. They get the same members-only admission:
+/// only current members can open them, and a removed member's connections
+/// close.
+#[derive(Clone)]
+pub struct ExtraProtocols(Arc<MountProtocols>);
+
+/// Adds protocols to the router being built for `Endpoint`.
+type MountProtocols = dyn Fn(&Endpoint, RouterBuilder) -> RouterBuilder + Send + Sync;
+
+impl ExtraProtocols {
+    pub fn new(mount: impl Fn(&Endpoint, RouterBuilder) -> RouterBuilder + Send + Sync + 'static) -> Self {
+        Self(Arc::new(mount))
+    }
+}
+
 pub struct Net {
     router: Router,
     sender: GossipSender,
@@ -144,11 +169,13 @@ impl Net {
         identity: SecretKey,
         topic: [u8; 32],
         incoming: mpsc::Sender<Incoming>,
+        extra: Option<&ExtraProtocols>,
     ) -> Result<Self> {
         Self::start_with(
             Endpoint::builder(presets::N0).secret_key(identity),
             topic,
             incoming,
+            extra,
         )
         .await
     }
@@ -158,15 +185,20 @@ impl Net {
         endpoint: endpoint::Builder,
         topic: [u8; 32],
         incoming: mpsc::Sender<Incoming>,
+        extra: Option<&ExtraProtocols>,
     ) -> Result<Self> {
         let members_only = MembersOnly::default();
         let endpoint = endpoint.hooks(members_only.clone()).bind().await?;
         let gossip = Gossip::builder()
             .max_message_size(MAX_MESSAGE_SIZE)
             .spawn(endpoint.clone());
-        let router = Router::builder(endpoint)
+        let mut router = Router::builder(endpoint.clone())
             .accept(iroh_gossip::ALPN, gossip.clone())
-            .spawn();
+            .accept(DIRECT_ALPN, Direct::new(incoming.clone()));
+        if let Some(extra) = extra {
+            router = (extra.0)(&endpoint, router);
+        }
+        let router = router.spawn();
         let (sender, mut receiver) = gossip
             .subscribe(TopicId::from_bytes(topic), Vec::new())
             .await?
@@ -260,6 +292,17 @@ impl Net {
         Ok(())
     }
 
+    pub async fn broadcast_beacon(&self, beacon: Beacon) -> Result<()> {
+        let encoded = postcard::to_stdvec(&Wire::Huddle(beacon))?;
+        self.sender.broadcast(Bytes::from(encoded)).await?;
+        Ok(())
+    }
+
+    /// Sends a message straight to one member's device.
+    pub async fn send_direct(&self, to: PublicKey, message: &DirectMessage) -> Result<()> {
+        super::direct::send_direct(self.router.endpoint(), to, message).await
+    }
+
     pub async fn nudge(&self) -> Result<()> {
         let encoded = postcard::to_stdvec(&Wire::Nudge(rand::random()))?;
         self.sender.broadcast(Bytes::from(encoded)).await?;
@@ -284,10 +327,173 @@ mod tests {
     async fn local_net(lookup: &MemoryLookup) -> (PublicKey, Net, mpsc::Receiver<Incoming>) {
         let (sender, receiver) = mpsc::channel(16);
         let builder = Endpoint::builder(presets::Minimal).address_lookup(lookup.clone());
-        let net = Net::start_with(builder, [7; 32], sender).await.unwrap();
+        let net = Net::start_with(builder, [7; 32], sender, None).await.unwrap();
         let endpoint = net.router.endpoint();
         lookup.add_endpoint_info(endpoint.addr());
         (endpoint.id(), net, receiver)
+    }
+
+    fn beacon_from(identity: &SecretKey) -> crate::huddle::beacon::Beacon {
+        use crate::huddle::beacon::{Beacon, BeaconBody, BeaconState, MEDIA_WIRE};
+        let body = BeaconBody {
+            member: identity.public(),
+            endpoint: identity.public(),
+            channel: "c".into(),
+            session: [1; 16],
+            seq: 0,
+            sent_ms: 0,
+            state: BeaconState::Left,
+            media_wire: MEDIA_WIRE,
+        };
+        Beacon::sign(identity, "w", body).unwrap()
+    }
+
+    async fn next_direct(receiver: &mut mpsc::Receiver<Incoming>, within: Duration) -> Option<PublicKey> {
+        tokio::time::timeout(within, async {
+            loop {
+                match receiver.recv().await {
+                    Some(Incoming::Direct { from, .. }) => return Some(from),
+                    Some(_) => continue,
+                    None => return None,
+                }
+            }
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn direct_messages_arrive_one_after_another_with_their_sender() {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice, mut alice_inbox) = local_net(&lookup).await;
+        let (bob_id, bob, _bob_inbox) = local_net(&lookup).await;
+        alice.set_members(&[alice_id, bob_id]);
+        bob.set_members(&[alice_id, bob_id]);
+        let message = DirectMessage::Huddle(beacon_from(&SecretKey::generate()));
+        for _ in 0..3 {
+            bob.send_direct(alice_id, &message).await.unwrap();
+            assert_eq!(
+                next_direct(&mut alice_inbox, Duration::from_secs(5)).await,
+                Some(bob_id)
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_outsider_cant_send_direct_messages() {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice, mut alice_inbox) = local_net(&lookup).await;
+        let (outsider_id, outsider, _outsider_inbox) = local_net(&lookup).await;
+        alice.set_members(&[alice_id]);
+        outsider.set_members(&[alice_id, outsider_id]);
+        let message = DirectMessage::Huddle(beacon_from(&SecretKey::generate()));
+        assert!(outsider.send_direct(alice_id, &message).await.is_err());
+        assert_eq!(next_direct(&mut alice_inbox, Duration::from_secs(2)).await, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_member_holding_connections_open_cant_block_the_others() {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice, mut alice_inbox) = local_net(&lookup).await;
+        let (bob_id, bob, _bob_inbox) = local_net(&lookup).await;
+        let (mallory_id, mallory, _mallory_inbox) = local_net(&lookup).await;
+        for net in [&alice, &bob, &mallory] {
+            net.set_members(&[alice_id, bob_id, mallory_id]);
+        }
+        // Mallory opens many connections and never finishes a message. Alice
+        // refusing some of them, so they fail here, is the limit at work.
+        let mut held = Vec::new();
+        for _ in 0..100 {
+            let connection = mallory
+                .router
+                .endpoint()
+                .connect(alice_id, super::super::direct::DIRECT_ALPN)
+                .await
+                .unwrap();
+            let Ok(mut stream) = connection.open_uni().await else {
+                continue;
+            };
+            if stream.write_all(b"\x00").await.is_ok() {
+                held.push((connection, stream));
+            }
+        }
+        assert!(
+            !held.is_empty(),
+            "Mallory held no connection open, so nothing was tested"
+        );
+        let message = DirectMessage::Huddle(beacon_from(&SecretKey::generate()));
+        bob.send_direct(alice_id, &message).await.unwrap();
+        assert_eq!(
+            next_direct(&mut alice_inbox, Duration::from_secs(5)).await,
+            Some(bob_id)
+        );
+    }
+
+    /// Echoes one message back: stands in for a protocol an app adds, like huddle media.
+    #[derive(Debug, Clone)]
+    struct Echo;
+
+    const ECHO_ALPN: &[u8] = b"shyspace/test-echo/1";
+
+    impl iroh::protocol::ProtocolHandler for Echo {
+        async fn accept(&self, connection: Connection) -> Result<(), iroh::protocol::AcceptError> {
+            let (mut send, mut recv) = connection.accept_bi().await?;
+            let message = recv
+                .read_to_end(64)
+                .await
+                .map_err(iroh::protocol::AcceptError::from_err)?;
+            send.write_all(&message)
+                .await
+                .map_err(iroh::protocol::AcceptError::from_err)?;
+            send.finish()?;
+            connection.closed().await;
+            Ok(())
+        }
+    }
+
+    async fn echo_net(lookup: &MemoryLookup) -> (PublicKey, Net) {
+        let (sender, _receiver) = mpsc::channel(16);
+        let builder = Endpoint::builder(presets::Minimal).address_lookup(lookup.clone());
+        let extra = ExtraProtocols::new(|_, router| router.accept(ECHO_ALPN, Echo));
+        let net = Net::start_with(builder, [7; 32], sender, Some(&extra))
+            .await
+            .unwrap();
+        let endpoint = net.router.endpoint();
+        lookup.add_endpoint_info(endpoint.addr());
+        (endpoint.id(), net)
+    }
+
+    async fn echo_through(from: &Net, to: PublicKey) -> anyhow::Result<Vec<u8>> {
+        let connection = from.router.endpoint().connect(to, ECHO_ALPN).await?;
+        let (mut send, mut recv) = connection.open_bi().await?;
+        send.write_all(b"hello").await?;
+        send.finish()?;
+        Ok(recv.read_to_end(64).await?)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_added_protocol_is_open_to_members_only() {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice) = echo_net(&lookup).await;
+        let (bob_id, bob) = echo_net(&lookup).await;
+        let (outsider_id, outsider) = echo_net(&lookup).await;
+        alice.set_members(&[alice_id, bob_id]);
+        bob.set_members(&[alice_id, bob_id]);
+        outsider.set_members(&[alice_id, outsider_id]);
+
+        let echoed = tokio::time::timeout(Duration::from_secs(10), echo_through(&bob, alice_id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(echoed, b"hello");
+        let refused = tokio::time::timeout(Duration::from_secs(10), echo_through(&outsider, alice_id))
+            .await
+            .unwrap();
+        assert!(
+            refused.is_err(),
+            "someone who isn't a member opened the added protocol"
+        );
     }
 
     async fn next_nonce(receiver: &mut mpsc::Receiver<Incoming>, within: Duration) -> Option<u64> {

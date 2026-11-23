@@ -4,6 +4,7 @@
 pub mod config;
 pub mod crypto;
 pub mod files;
+pub mod huddle;
 pub mod identity;
 pub mod keys;
 mod markdown;
@@ -25,5 +26,5 @@ mod tests;
 
 pub use keys::KeyStorage;
 pub use pages::Edit;
-pub use transport::bucket::BucketConfig;
-pub use workspace::{DataDir, JoinCancel, Networking, Profile, Workspace};
+pub use transport::{bucket::BucketConfig, gossip::ExtraProtocols};
+pub use workspace::{DataDir, JoinCancel, Networking, Profile, Workspace, WorkspaceOptions};

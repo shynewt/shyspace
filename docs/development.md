@@ -5,6 +5,7 @@
 - Rust through rustup, Node with pnpm, Podman or Docker. `rust-toolchain.toml` pins the Rust version, the same for everyone and CI; `rustup toolchain install` in the repository installs it. Bumping it is a deliberate change that fixes any new warnings in the same commit.
 - Linux desktop builds need: `webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel` (Fedora names).
 - `cd apps/desktop && pnpm install`
+- Huddle audio on Linux also needs `alsa-lib-devel pipewire-devel clang` (Ubuntu: `libasound2-dev libpipewire-0.3-dev clang libclang-dev`). `clang-libs` alone isn't enough: generating the PipeWire bindings needs clang's own headers. Those bindings also need a newer PipeWire than Ubuntu 22.04 has, which is one reason the Linux release builds on 24.04.
 
 ## A local bucket
 

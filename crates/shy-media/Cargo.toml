@@ -1,0 +1,29 @@
+[package]
+name = "shy-media"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Huddle audio for shyspace: implements the core's HuddleMedia over the workspace's iroh endpoint."
+
+[dependencies]
+anyhow = "1.0.104"
+iroh = "1.5"
+# The node alone (MoQ over iroh, audiences, access policy): without its
+# `media` feature it carries no codecs, so no video code reaches the build.
+iroh-live = { git = "https://github.com/n0-computer/iroh-live", rev = "747b1bd", default-features = false }
+# The audio half of iroh-live's media stack, at the moq rev iroh-live pins.
+moq-audio = { git = "https://github.com/moq-dev/moq", rev = "4a6f52248", default-features = false, features = ["capture", "playback", "pipewire"] }
+# The catalog a listener reads to find the audio track. Already in the build
+# through moq-audio, at the same rev.
+moq-mux = { git = "https://github.com/moq-dev/moq", rev = "4a6f52248", features = ["async"] }
+shy-core = { version = "0.1.0", path = "../shy-core" }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tracing = "0.1.44"
+
+[dev-dependencies]
+# The test tones are written as frames, which carry their samples as bytes.
+bytes = "1.12.2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+
+[lints]
+workspace = true
