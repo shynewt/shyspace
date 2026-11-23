@@ -3849,3 +3849,30 @@ async fn one_failing_relay_doesnt_stop_the_others() {
     let after = objects_of(&bucket.list_segments(&other.me(), None).await.unwrap(), other);
     assert_eq!(after, before + 1);
 }
+
+/// Junk with real headers under the author, read in a sweep, is no proof
+/// the bucket holds the op: anyone with the bucket keys could put it there.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_with_real_headers_read_in_a_sweep_doesnt_stop_a_relay() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let live_only = send_live_then_die(&store, &bob, &[&carol], "only sent live").await;
+
+    let mut junk = live_only.clone();
+    junk.ciphertext = vec![7; live_only.ciphertext.len()];
+    let bytes = postcard::to_stdvec(&vec![junk]).unwrap();
+    let name = segment_name_for(&bob.me(), live_only.seq, live_only.seq, &[9; 16], &bytes);
+    bucket.put_raw(&name, bytes).await.unwrap();
+    carol.sync().await;
+    let_relays_happen(&[&carol]).await;
+
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    dave.sync().await;
+    assert!(texts_in(&dave, &general).contains(&"only sent live".to_string()));
+}
