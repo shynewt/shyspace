@@ -16,6 +16,7 @@ import type {
   Member,
   MemberStatus,
   MessageCursor,
+  OldKeyCheck,
   Page,
   PageEditorSession,
   ProfileDetails,
@@ -23,6 +24,8 @@ import type {
   SectionSort,
   Session,
   StorageProtection,
+  StorageProvider,
+  StorageRotation,
   StorageSettings,
 } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
@@ -163,6 +166,12 @@ export class FakeBackend {
   private isAppearingOffline = false;
 
   private storageProtection: ProtectionCheck = { state: "unknown", checked_ms: null };
+  /** The bucket key change a removal starts, as the core keeps it on the admin's device. */
+  private rotation: StorageRotation | null = null;
+  /** The provider a removal's key change names; the core tells it from the endpoint. */
+  storageProvider: StorageProvider = "r2";
+  /** What `check_old_key_deleted` finds next. */
+  oldKeyCheck: OldKeyCheck = "dead";
 
   /** Makes joins wait for `approveJoin`, as a real admin's answer does. */
   holdJoins(): void {
@@ -487,6 +496,15 @@ export class FakeBackend {
         this.storageProtection = { ...this.storageProtection, checked_ms: Date.now() };
         this.notify({ kind: "storage_protection" });
         return this.storageProtection;
+      case "storage_rotation":
+        if (!this.session?.is_admin) throw new Error("only the admin can see the storage key change");
+        return this.rotation;
+      case "check_old_key_deleted":
+        return this.checkOldKeyDeleted();
+      case "cancel_storage_rotation":
+        this.rotation = null;
+        this.notify({ kind: "key_rotation" });
+        return null;
       case "update_storage":
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
       case "show_alert":
@@ -649,6 +667,10 @@ export class FakeBackend {
   private updateStorage(region: string, accessKeyId: string): string | null {
     this.storage = { ...this.requireStorage(), region, access_key_id: accessKeyId };
     this.notify({ kind: "storage" });
+    if (this.rotation) {
+      this.rotation = { ...this.rotation, has_new_key: true };
+      this.notify({ kind: "key_rotation" });
+    }
     return this.requireStorage().recovery_snapshot_bytes === null ? null : this.newRecoveryKit();
   }
 
@@ -720,6 +742,37 @@ export class FakeBackend {
     if (!member) throw new Error(`fake backend: no member ${id}`);
     member.active = false;
     this.notify({ kind: "members" });
+    // As in the core: the removed member still holds the bucket key, so a new one is due.
+    this.rotation = {
+      provider: this.storageProvider,
+      has_new_key: false,
+      members: this.members
+        .filter((candidate) => candidate.active && candidate.id !== this.me())
+        .map((candidate) => ({ member: candidate.id, has_moved: false })),
+      old_key: "not_checked",
+    };
+    this.notify({ kind: "key_rotation" });
+  }
+
+  /** `name`'s device starts using the new key, as its head in the bucket would say. */
+  memberMovesToNewKey(name: string): void {
+    const id = this.memberNamed(name);
+    if (!this.rotation) throw new Error("fake backend: no key change under way");
+    this.rotation = {
+      ...this.rotation,
+      members: this.rotation.members.map((move) => (move.member === id ? { ...move, has_moved: true } : move)),
+    };
+    this.notify({ kind: "key_rotation" });
+  }
+
+  /** As in the core: a dead old key ends the change only once the key in use is a new one. */
+  private checkOldKeyDeleted(): OldKeyCheck {
+    if (!this.rotation) throw new Error("fake backend: no key change under way");
+    const found = this.oldKeyCheck;
+    if (found !== "dead") this.rotation = { ...this.rotation, old_key: found };
+    else if (this.rotation.has_new_key) this.rotation = null;
+    this.notify({ kind: "key_rotation" });
+    return found;
   }
 
   private approveInvite(token: string): void {

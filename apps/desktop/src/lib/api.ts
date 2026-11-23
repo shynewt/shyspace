@@ -182,6 +182,22 @@ export type StorageSettings = {
  */
 export type StorageProtection = "locked" | "versioned" | "unprotected" | "unknown";
 export type ProtectionCheck = { state: StorageProtection; checked_ms: number | null };
+/** The storage provider, told from the bucket's endpoint. */
+export type StorageProvider = "scaleway" | "r2" | "b2" | "s3" | "other";
+/** A member other than the admin, and whether their device now uses the new key (a hint only). */
+export type MemberMove = { member: string; has_moved: boolean };
+/** What the last check of the old key found, while it isn't proved dead. */
+export type OldKeyState = "not_checked" | "still_works" | "unknown";
+/** What checking the old key found: `dead` once every replaced key is refused. */
+export type OldKeyCheck = "dead" | "still_works" | "unknown";
+/** A change of bucket key under way, after a member was removed. Admin only. */
+export type StorageRotation = {
+  provider: StorageProvider;
+  /** The key in use is one no removed member had. */
+  has_new_key: boolean;
+  members: MemberMove[];
+  old_key: OldKeyState;
+};
 export type SyncStatus = {
   peers: number;
   last_sync_ms: number | null;
@@ -221,6 +237,8 @@ export type Change =
   | { kind: "invites" }
   | { kind: "storage" }
   | { kind: "storage_protection" }
+  /** The bucket key rotation (`storage_rotation`) changed. */
+  | { kind: "key_rotation" }
   /** How far this device's upload into `channel` has got, in bytes of the files. */
   | { kind: "upload"; channel: string; sent: number; total: number }
   | { kind: "sync" }
@@ -304,6 +322,12 @@ export const api = {
   /** Resolves to the admin's new recovery kit, if they have one. */
   updateStorage: (region: string, accessKeyId: string, secretAccessKey: string) =>
     invoke<string | null>("update_storage", { region, accessKeyId, secretAccessKey }),
+  /** The bucket key change under way, or null when none is due. Admin only. */
+  storageRotation: () => invoke<StorageRotation | null>("storage_rotation"),
+  /** Tries the old keys; `dead` ends the change unless the key in use is a removed member's too. */
+  checkOldKeyDeleted: () => invoke<OldKeyCheck>("check_old_key_deleted"),
+  /** Ends the change without proving the old key dead, and forgets which keys were compromised. */
+  cancelStorageRotation: () => invoke<void>("cancel_storage_rotation"),
   safetyCode: () => invoke<string>("safety_code"),
   recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),

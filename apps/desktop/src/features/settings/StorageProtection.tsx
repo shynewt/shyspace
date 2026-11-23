@@ -5,6 +5,7 @@ import { useFormAction } from "../../lib/useFormAction";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, FormError, Notice, RelativeTime, Tooltip } from "../../ui";
+import { useStorageRotation } from "./KeyRotation";
 import { useAdminName } from "./layout";
 
 /** Whether the bucket keeps deleted and overwritten data, as last checked. */
@@ -12,19 +13,27 @@ export function useStorageProtection(): ProtectionCheck | undefined {
   return useLive(api.storageProtection, (change) => change.kind === "storage_protection");
 }
 
-/** Whether the bucket can lose data, so someone should act. */
+/** What someone should act on in Storage, if anything: a key a removed member has, or a bucket that can lose data. */
+function useStorageAttention(): string | null {
+  const isUnprotected = useStorageProtection()?.state === "unprotected";
+  const rotation = useStorageRotation();
+  if (rotation) return "Change the storage key";
+  return isUnprotected ? "Storage can lose data" : null;
+}
+
 export function useStorageNeedsAttention(): boolean {
-  return useStorageProtection()?.state === "unprotected";
+  return useStorageAttention() !== null;
 }
 
 /** A warning sign for wherever the way to Storage starts, while the bucket can lose data. */
 export function StorageAttentionSign() {
-  if (!useStorageNeedsAttention()) return null;
+  const attention = useStorageAttention();
+  if (!attention) return null;
   return (
-    <Tooltip label="Storage can lose data">
+    <Tooltip label={attention}>
       <TriangleAlert
         role="img"
-        aria-label="Storage needs attention"
+        aria-label={`Storage needs attention: ${attention}`}
         size={14}
         className="relative ml-auto shrink-0 text-danger"
       />

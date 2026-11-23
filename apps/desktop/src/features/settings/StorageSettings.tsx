@@ -5,6 +5,7 @@ import { useFormAction } from "../../lib/useFormAction";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, CopyField, Dialog, DialogActions, Field, FormError, Input } from "../../ui";
+import { KeyRotation } from "./KeyRotation";
 import { ManagedByAdmin } from "./layout";
 import { StorageProtection } from "./StorageProtection";
 
@@ -12,6 +13,7 @@ export function StorageSettings() {
   const { session } = useWorkspace();
   return (
     <div className="flex flex-col gap-6">
+      {session.is_admin && <KeyRotation />}
       <StorageProtection />
       {session.is_admin ? (
         <BucketSettings />
@@ -85,7 +87,7 @@ function BucketForm({ settings }: { settings: Settings }) {
         open={newKit !== null}
         onOpenChange={(open) => !open && setNewKit(null)}
         title="Save your updated recovery kit"
-        description="Your recovery kit holds the storage keys, so the old one no longer works. Replace it in your password manager."
+        description="Your recovery kit holds the storage keys. Replace it in your password manager: the old one stops working once you delete the old key."
       >
         {newKit && <CopyField value={newKit} label="Copy recovery kit" />}
         <DialogActions>
