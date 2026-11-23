@@ -121,6 +121,8 @@ pub(crate) struct Inner {
     pub own_presence: Mutex<presence::OwnPresence>,
     /// Sends a heartbeat now instead of at the next tick.
     pub heartbeat_now: Notify,
+    /// How much the file cache holds, so trimming needn't count it each time.
+    pub file_cache_size: crate::files::cache::CacheSize,
     /// Set by `shutdown`; the background loops end when they see it.
     pub stopped: tokio::sync::watch::Sender<bool>,
     /// Makes the next apply fail as a full disk would.

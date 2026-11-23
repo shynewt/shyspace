@@ -389,6 +389,7 @@ impl Workspace {
                     last_sent: None,
                 }),
                 heartbeat_now: Notify::new(),
+                file_cache_size: Default::default(),
                 stopped: tokio::sync::watch::Sender::new(false),
                 #[cfg(test)]
                 fail_next_apply: Default::default(),

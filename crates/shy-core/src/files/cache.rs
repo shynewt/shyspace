@@ -8,6 +8,7 @@ use std::{
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::SystemTime,
 };
 
@@ -26,6 +27,37 @@ pub struct BlobCache {
     /// Beyond this many bytes, the blobs opened longest ago are dropped.
     /// `None` keeps everything (profile pictures).
     limit_bytes: Option<u64>,
+    size: CacheSize,
+}
+
+/// How many bytes a cache holds: measured once, then kept up to date by every
+/// change made through a [`BlobCache`] sharing it, so trimming needn't read
+/// every folder each time. Unknown until first needed, and again after a
+/// change it couldn't count.
+#[derive(Clone, Default)]
+pub struct CacheSize(Arc<Mutex<Option<u64>>>);
+
+impl CacheSize {
+    fn known(&self) -> Option<u64> {
+        *self.lock()
+    }
+
+    fn set(&self, bytes: Option<u64>) {
+        *self.lock() = bytes;
+    }
+
+    /// Adds `added` and takes away `removed` bytes, if the size is known.
+    fn change(&self, added: u64, removed: u64) {
+        if let Some(bytes) = self.lock().as_mut() {
+            *bytes = (*bytes + added).saturating_sub(removed);
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<u64>> {
+        self.0
+            .lock()
+            .expect("cache size lock poisoned by an earlier panic")
+    }
 }
 
 /// Names one author's blob in the cache.
@@ -40,8 +72,22 @@ impl BlobKey {
 }
 
 impl BlobCache {
-    pub fn new(root: PathBuf, limit_bytes: Option<u64>) -> Self {
-        Self { root, limit_bytes }
+    /// A cache that keeps everything.
+    pub fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            limit_bytes: None,
+            size: CacheSize::default(),
+        }
+    }
+
+    /// A cache trimmed to `limit_bytes`, whose size is kept in `size`.
+    pub fn limited(root: PathBuf, limit_bytes: u64, size: CacheSize) -> Self {
+        Self {
+            root,
+            limit_bytes: Some(limit_bytes),
+            size,
+        }
     }
 
     fn blob_dir(&self, blob: &BlobKey) -> PathBuf {
@@ -65,15 +111,22 @@ impl BlobCache {
     pub fn write_chunk(&self, blob: &BlobKey, index: u32, sealed: &[u8]) -> Result<()> {
         fs::create_dir_all(self.blob_dir(blob)).context("making the file cache")?;
         let path = self.chunk_path(blob, index);
+        let replaced = file_size(&path);
         let partial = path.with_extension("partial");
         fs::write(&partial, sealed).context("caching a file piece")?;
         fs::rename(&partial, &path).context("caching a file piece")?;
+        self.size.change(sealed.len() as u64, replaced);
         Ok(())
     }
 
     pub fn forget_chunk(&self, blob: &BlobKey, index: u32) -> Result<()> {
-        match fs::remove_file(self.chunk_path(blob, index)) {
-            Ok(()) => Ok(()),
+        let path = self.chunk_path(blob, index);
+        let removed = file_size(&path);
+        match fs::remove_file(path) {
+            Ok(()) => {
+                self.size.change(0, removed);
+                Ok(())
+            }
             Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error).context("removing a cached file piece"),
         }
@@ -91,8 +144,17 @@ impl BlobCache {
     }
 
     pub fn forget(&self, blob: &BlobKey) -> Result<()> {
-        match fs::remove_dir_all(self.blob_dir(blob)) {
-            Ok(()) => Ok(()),
+        let dir = self.blob_dir(blob);
+        let removed = dir_size(&dir);
+        match fs::remove_dir_all(dir) {
+            Ok(()) => {
+                match removed {
+                    Ok(removed) => self.size.change(0, removed),
+                    // Couldn't count it: measure again when next needed.
+                    Err(_) => self.size.set(None),
+                }
+                Ok(())
+            }
             Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error).context("removing a cached file"),
         }
@@ -104,6 +166,9 @@ impl BlobCache {
         let Some(limit) = self.limit_bytes else {
             return Ok(());
         };
+        if self.size.known().is_some_and(|bytes| bytes <= limit) {
+            return Ok(());
+        }
         let entries = match fs::read_dir(&self.root) {
             Ok(entries) => entries,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
@@ -130,12 +195,22 @@ impl BlobCache {
                 break;
             }
             if path != kept {
-                fs::remove_dir_all(&path).context("trimming the file cache")?;
+                if let Err(error) = fs::remove_dir_all(&path) {
+                    self.size.set(Some(total));
+                    return Err(error).context("trimming the file cache");
+                }
                 total -= size;
             }
         }
+        self.size.set(Some(total));
         Ok(())
     }
+}
+
+/// A file's size, or 0 if it isn't there (or can't be read, which only
+/// makes the kept size a little off until the next full count).
+fn file_size(path: &Path) -> u64 {
+    fs::metadata(path).map_or(0, |metadata| metadata.len())
 }
 
 fn dir_size(dir: &Path) -> Result<u64> {
@@ -166,7 +241,7 @@ mod tests {
     #[test]
     fn a_cached_piece_reads_back_until_forgotten() {
         let folder = tempfile::tempdir().unwrap();
-        let cache = BlobCache::new(folder.path().to_owned(), None);
+        let cache = BlobCache::new(folder.path().to_owned());
         let blob = key(FIRST);
         assert_eq!(cache.read_chunk(&blob, 0).unwrap(), None);
         cache.write_chunk(&blob, 0, b"sealed").unwrap();
@@ -181,7 +256,7 @@ mod tests {
     #[test]
     fn one_authors_blob_never_stands_in_for_anothers_with_the_same_id() {
         let folder = tempfile::tempdir().unwrap();
-        let cache = BlobCache::new(folder.path().to_owned(), None);
+        let cache = BlobCache::new(folder.path().to_owned());
         let ada = BlobKey::new(&SecretKey::from_bytes(&[1; 32]).public(), FIRST).unwrap();
         let bob = BlobKey::new(&SecretKey::from_bytes(&[2; 32]).public(), FIRST).unwrap();
         cache.write_chunk(&bob, 0, b"junk").unwrap();
@@ -191,7 +266,7 @@ mod tests {
     #[test]
     fn trimming_drops_the_blob_used_longest_ago() {
         let folder = tempfile::tempdir().unwrap();
-        let cache = BlobCache::new(folder.path().to_owned(), Some(15));
+        let cache = BlobCache::limited(folder.path().to_owned(), 15, CacheSize::default());
         let (first, second) = (key(FIRST), key(SECOND));
         cache.write_chunk(&first, 0, &[0; 10]).unwrap();
         cache.touch(&first).unwrap();
@@ -208,6 +283,66 @@ mod tests {
         cache.trim(&second).unwrap();
         assert_eq!(cache.read_chunk(&first, 0).unwrap(), None);
         assert!(cache.read_chunk(&second, 0).unwrap().is_some());
+    }
+
+    /// Measured once, the size is then kept up to date, so trimming a cache
+    /// under its limit reads no folders, however many there are.
+    #[cfg(unix)]
+    #[test]
+    fn trimming_under_the_limit_reads_no_folders() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let folder = tempfile::tempdir().unwrap();
+        let cache = BlobCache::limited(folder.path().to_owned(), 1_000, CacheSize::default());
+        cache.write_chunk(&key(FIRST), 0, &[0; 10]).unwrap();
+        cache.trim(&key(FIRST)).unwrap();
+        let unreadable = folder.path().join("unreadable");
+        fs::create_dir(&unreadable).unwrap();
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+
+        cache.write_chunk(&key(SECOND), 0, &[0; 10]).unwrap();
+        let trimmed = cache.trim(&key(SECOND));
+
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
+        trimmed.unwrap();
+    }
+
+    /// Each use makes a new cache value, sharing one kept size.
+    #[test]
+    fn the_kept_size_follows_writes_and_removals() {
+        let folder = tempfile::tempdir().unwrap();
+        let size = CacheSize::default();
+        let cache = || BlobCache::limited(folder.path().to_owned(), 25, size.clone());
+        let third = "00000000000000000000000000000003";
+        let fourth = "00000000000000000000000000000004";
+        let write = |blob_id: &str| {
+            cache().write_chunk(&key(blob_id), 0, &[0; 10]).unwrap();
+            cache().touch(&key(blob_id)).unwrap();
+            cache().trim(&key(blob_id)).unwrap();
+        };
+        write(FIRST);
+        write(SECOND);
+        cache().forget(&key(FIRST)).unwrap();
+        write(third);
+        assert!(
+            cache().read_chunk(&key(SECOND), 0).unwrap().is_some(),
+            "20 bytes fit"
+        );
+
+        let old = SystemTime::now() - std::time::Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(cache().blob_dir(&key(SECOND)).join(USED_MARKER))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        write(fourth);
+        assert_eq!(
+            cache().read_chunk(&key(SECOND), 0).unwrap(),
+            None,
+            "30 bytes don't"
+        );
+        assert!(cache().read_chunk(&key(third), 0).unwrap().is_some());
     }
 
     #[test]

@@ -59,11 +59,15 @@ impl FileSource {
 
 impl Workspace {
     fn file_cache(&self) -> BlobCache {
-        BlobCache::new(self.inner.data.path.join("file-cache"), Some(FILE_CACHE_LIMIT))
+        BlobCache::limited(
+            self.inner.data.path.join("file-cache"),
+            FILE_CACHE_LIMIT,
+            self.inner.file_cache_size.clone(),
+        )
     }
 
     fn picture_cache(&self) -> BlobCache {
-        BlobCache::new(self.inner.data.path.join("picture-cache"), None)
+        BlobCache::new(self.inner.data.path.join("picture-cache"))
     }
 
     /// Uploads each file, then sends one message carrying them, with `text`
