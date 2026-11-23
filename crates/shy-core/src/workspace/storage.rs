@@ -61,7 +61,7 @@ impl Workspace {
             .check_access()
             .await
             .context("checking the new storage settings")?;
-        self.replace_bucket_key(&current, next)?;
+        self.replace_bucket_key(next)?;
         Workspace::mark_recovery_snapshot_stale(&self.state().store)?;
         self.refresh_recovery_snapshot().await
     }

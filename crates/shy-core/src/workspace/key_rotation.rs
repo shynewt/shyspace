@@ -115,22 +115,23 @@ impl Workspace {
     }
 
     /// Sends `next` to every current member as the bucket settings, keeping
-    /// `current` (in the same transaction) to prove it dead later: never
-    /// one without the other, so the key in use is never offered for
-    /// deletion.
-    pub(crate) fn replace_bucket_key(&self, current: &BucketConfig, next: BucketConfig) -> Result<()> {
+    /// the key it replaces (read in the same transaction) to prove it dead
+    /// later: never one without the other, so the key in use is never
+    /// offered for deletion.
+    pub(crate) fn replace_bucket_key(&self, next: BucketConfig) -> Result<()> {
         self.ensure_not_compromised(&next)?;
-        let is_replaced = current.access_key_id != next.access_key_id
-            || current.secret_access_key != next.secret_access_key;
         self.write_with(|store, _| {
+            let current = config::current_bucket(store)?;
+            let is_replaced = current.access_key_id != next.access_key_id
+                || current.secret_access_key != next.secret_access_key;
             if is_replaced {
                 let mut rotation = load(store)?.unwrap_or_default();
                 rotation
                     .old_keys
                     .retain(|old| old.access_key_id != next.access_key_id);
                 rotation.old_keys.push(OldKey {
-                    access_key_id: current.access_key_id.clone(),
-                    secret_access_key: current.secret_access_key.clone(),
+                    access_key_id: current.access_key_id,
+                    secret_access_key: current.secret_access_key,
                 });
                 rotation.old_key = OldKeyState::NotChecked;
                 save(store, &rotation, &next.access_key_id)?;
@@ -209,9 +210,8 @@ impl Workspace {
     }
 
     /// Erases the keys found `dead`, and ends the rotation if it is over.
-    /// Returns `Dead` only when it ended.
     fn note_old_key_check(&self, dead: &[String], check: OldKeyCheck) -> Result<OldKeyCheck> {
-        let check = {
+        {
             let state = self.state();
             let Some(mut rotation) = load(&state.store)? else {
                 return Ok(check);
@@ -223,13 +223,8 @@ impl Workspace {
                 OldKeyCheck::Dead if rotation.old_keys.is_empty() => OldKeyState::NotChecked,
                 OldKeyCheck::Dead | OldKeyCheck::Unknown => OldKeyState::Unknown,
             };
-            let is_over = rotation.is_over(&current.access_key_id);
             save(&state.store, &rotation, &current.access_key_id)?;
-            match (check, is_over) {
-                (OldKeyCheck::Dead, false) => OldKeyCheck::Unknown,
-                (check, _) => check,
-            }
-        };
+        }
         self.emit(Change::KeyRotation);
         Ok(check)
     }

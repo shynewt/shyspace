@@ -401,7 +401,8 @@ pub enum OldKeyState {
     Unknown,
 }
 
-/// What checking the old key found. `Dead` ends the rotation.
+/// What checking the old key found. `Dead`: every replaced key is refused
+/// (the rotation ends unless the key in use is one a removed member had).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OldKeyCheck {
