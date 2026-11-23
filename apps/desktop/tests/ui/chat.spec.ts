@@ -232,3 +232,23 @@ test("code in a named language is coloured, and unknown languages stay plain", a
   await expect(plain).toHaveText("const stays plain\n");
   await expect(plain.locator("[class^=tok-]")).toHaveCount(0);
 });
+
+test("messages out of time order get one divider per change of day, and no stray ones", async ({ page }) => {
+  const receive = (text: string) =>
+    page.evaluate((body) => window.fake.receiveMessage(window.fake.memberNamed("Grace"), "general", body), text);
+  await page.clock.install({ time: new Date("2026-11-22T09:00:00") });
+  await page.goto("");
+  await page.evaluate(() => window.fake.addMember("Grace"));
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await receive("first today");
+  // From a device whose clock is a day behind.
+  await page.clock.setSystemTime(new Date("2026-11-21T09:05:00"));
+  await receive("from behind");
+  await page.clock.setSystemTime(new Date("2026-11-22T09:10:00"));
+  await receive("later today");
+
+  await expect(page.getByRole("article").filter({ hasText: "later today" })).toBeVisible();
+  const log = page.getByRole("log");
+  await expect(log.getByText("Today", { exact: true })).toHaveCount(2);
+  await expect(log.getByText("Yesterday", { exact: true })).toHaveCount(1);
+});

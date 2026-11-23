@@ -29,7 +29,10 @@ export function DriveView() {
     () => (files ?? []).filter((file) => channels.some((channel) => channel.id === file.place)),
     [files, channels],
   );
-  const shown = readable.filter((file) => matchesFilters(file, filters));
+  // The core lists files in the order they were written down; the view promises newest first.
+  const shown = readable
+    .filter((file) => matchesFilters(file, filters))
+    .sort((left, right) => right.created_ms - left.created_ms);
   const days = groupByDay(shown, (file) => file.created_ms);
 
   return (

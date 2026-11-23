@@ -25,10 +25,17 @@ export function firstUnreadId(messages: Message[], after: MessageCursor | null, 
 
 export function toRows(messages: Message[], unreadFrom: string | null): Row[] {
   const rows: Row[] = [];
+  // Messages come in op order, so a day can start again after another; each
+  // divider keeps the same key when older messages load above it.
+  const dividersSoFar = new Map<string, number>();
   let previous: Message | undefined;
   for (const message of messages) {
     const day = formatDay(message.created_ms);
-    if (!previous || formatDay(previous.created_ms) !== day) rows.push({ kind: "day", key: `day:${day}`, label: day });
+    if (!previous || formatDay(previous.created_ms) !== day) {
+      const earlier = dividersSoFar.get(day) ?? 0;
+      dividersSoFar.set(day, earlier + 1);
+      rows.push({ kind: "day", key: `day:${day}:${earlier}`, label: day });
+    }
     if (message.id === unreadFrom) rows.push({ kind: "unread", key: "unread" });
     const isContinuation =
       !!previous &&

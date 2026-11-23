@@ -716,3 +716,31 @@ test("the kind filter sorts files the way their icons do", async ({ page }) => {
   await expect(page.getByText("backup.zip")).toBeVisible();
   await expect(page.getByText("notes.md")).toHaveCount(0);
 });
+
+test("the files view shows each day once, even for files shared out of time order", async ({ page }) => {
+  const share = (name: string) =>
+    page.evaluate((fileName) => {
+      const grace = window.fake.memberNamed("Grace");
+      const message = window.fake.receiveMessage(grace, "general", fileName);
+      window.fake.files.receive(grace, message, { name: fileName, type: "text/plain", bytes: [1] });
+    }, name);
+  await page.clock.install({ time: new Date("2026-11-20T10:00:00") });
+  await page.goto("");
+  await page.evaluate(() => window.fake.addMember("Grace"));
+  await share("morning.txt");
+  await page.clock.setSystemTime(new Date("2026-11-22T09:00:00"));
+  await share("today.txt");
+  // A device whose clock is behind shares one dated two days ago, after today's.
+  await page.clock.setSystemTime(new Date("2026-11-20T15:00:00"));
+  await share("afternoon.txt");
+  await page.clock.setSystemTime(new Date("2026-11-22T09:30:00"));
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+
+  const friday = page.getByRole("region", { name: "Friday, November 20" });
+  await expect(friday).toHaveCount(1);
+  await expect(friday.getByRole("listitem")).toHaveText([/afternoon\.txt/, /morning\.txt/]);
+  await expect(page.getByRole("region", { name: /^(Today|Friday, November 20)$/ })).toHaveText([
+    /today\.txt/,
+    /afternoon\.txt.*morning\.txt/,
+  ]);
+});

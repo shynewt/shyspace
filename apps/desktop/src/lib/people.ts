@@ -56,14 +56,18 @@ export function formatDay(ms: number) {
 
 export type DayGroup<Item> = { label: string; items: Item[] };
 
-/** Splits items already in time order into runs that share a day ("Today", "Monday, April 27"). */
+/**
+ * Groups items by day ("Today", "Monday, April 27"), in the order each day
+ * first appears. Every item of a day joins its group wherever it falls, so a
+ * day never shows twice.
+ */
 export function groupByDay<Item>(items: Item[], timeOf: (item: Item) => number): DayGroup<Item>[] {
-  const days: DayGroup<Item>[] = [];
+  const days = new Map<string, DayGroup<Item>>();
   for (const item of items) {
     const label = formatDay(timeOf(item));
-    const last = days.at(-1);
-    if (last?.label === label) last.items.push(item);
-    else days.push({ label, items: [item] });
+    const day = days.get(label);
+    if (day) day.items.push(item);
+    else days.set(label, { label, items: [item] });
   }
-  return days;
+  return [...days.values()];
 }
