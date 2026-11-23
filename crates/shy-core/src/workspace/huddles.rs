@@ -11,7 +11,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use iroh::PublicKey;
 use tokio::sync::{mpsc, watch};
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::{Workspace, huddle_ring::Ring};
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
         beacon::{Beacon, BeaconBody, BeaconState, MEDIA_WIRE, Reach, SessionId, media_path_name},
         book::{EXPIRY_MS, HuddleBook, Participant, REFRESH_MS},
         media::{AudioDevice, Cue, DeviceChoice, Link, MediaCall, MediaEvent, MicState, OutputState},
-        ring::{CueLimit, IncomingHuddle, QuietCallers},
+        ring::{CallerAlerts, CueLimit, IncomingHuddle},
         rules::{MAX_PARTICIPANTS, Visibility, hearing_set, huddle_members},
     },
     ops::now_ms,
@@ -33,6 +33,8 @@ use crate::{
 
 /// How often the session checks membership and whether the device slept.
 const TICK: Duration = Duration::from_secs(5);
+/// How soon after waking a device that slept leaves its huddle.
+const SLEEP_CHECK: Duration = Duration::from_secs(1);
 /// Where this device keeps its chosen microphone and speaker.
 const DEVICES_META: &str = "huddle_devices";
 /// Whether this device plays join and leave sounds.
@@ -62,7 +64,7 @@ pub(crate) struct HuddleState {
     sent: Vec<Beacon>,
     pub(super) ringing: Option<Ring>,
     cue_limit: CueLimit,
-    quiet_callers: QuietCallers,
+    caller_alerts: CallerAlerts,
 }
 
 impl Default for HuddleState {
@@ -76,7 +78,7 @@ impl Default for HuddleState {
             sent: Vec::new(),
             ringing: None,
             cue_limit: CueLimit::default(),
-            quiet_callers: QuietCallers::default(),
+            caller_alerts: CallerAlerts::default(),
         }
     }
 }
@@ -89,7 +91,7 @@ impl HuddleState {
     /// This member takes the call in `channel`: its callers may alert again.
     fn answer(&mut self, channel: &str) {
         for participant in self.roster(channel) {
-            self.quiet_callers.answered(&participant.member);
+            self.caller_alerts.answered(&participant.member);
         }
     }
 
@@ -544,15 +546,13 @@ impl Workspace {
             return Ok(());
         }
         {
-            let mut huddles = self.huddles();
+            let huddles = self.huddles();
             if huddles.mine.as_ref().is_some_and(|mine| mine.channel == channel) {
                 return Ok(());
             }
-            let now = huddles.now();
-            if !huddles.quiet_callers.may_alert(starter, now) {
+            if !huddles.caller_alerts.may_alert(starter, huddles.now()) {
                 return Ok(());
             }
-            huddles.quiet_callers.alerted(*starter, now);
         }
         let member_name = {
             let state = self.state();
@@ -570,6 +570,11 @@ impl Workspace {
                 .map(|member| member.name)
                 .unwrap_or_default()
         };
+        {
+            let mut huddles = self.huddles();
+            let now = huddles.now();
+            huddles.caller_alerts.alerted(*starter, now);
+        }
         self.emit(Change::HuddleStarted {
             channel: channel.to_owned(),
             member: member_id(starter),
@@ -755,8 +760,9 @@ impl Workspace {
     async fn run_session(self, session: SessionId, mut events: mpsc::Receiver<MediaEvent>) {
         let mut changes = self.subscribe();
         let mut tick = tokio::time::interval(TICK);
-        let mut last_tick = Instant::now();
-        let mut last_tick_wall = SystemTime::now();
+        let mut sleep_check = tokio::time::interval(SLEEP_CHECK);
+        let mut last_check = Instant::now();
+        let mut last_check_wall = SystemTime::now();
         let mut last_refresh = Instant::now();
         loop {
             tokio::select! {
@@ -771,16 +777,19 @@ impl Workspace {
                         warn!("couldn't update a huddle's audience: {error:#}");
                     }
                 }
-                _ = tick.tick() => {
-                    let wall_elapsed = last_tick_wall.elapsed().unwrap_or_default();
-                    if is_back_from_sleep(wall_elapsed, last_tick.elapsed()) {
+                _ = sleep_check.tick() => {
+                    let wall_elapsed = last_check_wall.elapsed().unwrap_or_default();
+                    if is_back_from_sleep(wall_elapsed, last_check.elapsed()) {
+                        info!("left the huddle: this device slept");
                         if let Err(error) = self.leave_session(session) {
                             warn!("couldn't leave a huddle after sleeping: {error:#}");
                         }
                         return;
                     }
-                    last_tick = Instant::now();
-                    last_tick_wall = SystemTime::now();
+                    last_check = Instant::now();
+                    last_check_wall = SystemTime::now();
+                }
+                _ = tick.tick() => {
                     // Membership can change without a local event, like a
                     // removal learned from the bucket.
                     if let Err(error) = self.follow_membership() {

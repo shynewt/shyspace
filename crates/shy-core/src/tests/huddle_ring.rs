@@ -10,7 +10,7 @@ use super::{
 use crate::{
     huddle::{
         beacon::Beacon,
-        ring::{RING_MS, RING_QUIET_MS},
+        ring::{CALLER_ALERT_WINDOW_MS, CALLER_ALERTS, RING_MS},
     },
     views::{Change, NotifyLevel},
     workspace::Via,
@@ -212,25 +212,42 @@ async fn a_caller_cant_ring_again_and_again() {
     let (_root, [ada, bob, _carol]) = three_members().await;
     let dm = dm_between(&ada, &bob).await;
     let mut changes = bob.workspace.subscribe();
-    call(&ada, &bob, &dm);
-    assert_eq!(bob.media.rings_playing(), 1);
-    hang_up(&ada, &bob);
-
-    for _ in 0..3 {
+    for _ in 0..CALLER_ALERTS {
         call(&ada, &bob, &dm);
-        assert_eq!(
-            bob.media.rings_playing(),
-            0,
-            "a call right after an unanswered one stays quiet"
-        );
+        assert_eq!(bob.media.rings_playing(), 1, "a call, and a redial or two, ring");
         hang_up(&ada, &bob);
     }
-    assert_eq!(alerts(&mut changes), 1, "one alert, not one per call");
 
-    bob.workspace.age_huddles(Duration::from_millis(RING_QUIET_MS));
     call(&ada, &bob, &dm);
-    assert_eq!(bob.media.rings_playing(), 1, "a minute later, a call rings again");
+    assert_eq!(bob.media.rings_playing(), 0, "then calls stay quiet for a while");
+    hang_up(&ada, &bob);
+    assert_eq!(alerts(&mut changes), CALLER_ALERTS);
+
+    bob.workspace
+        .age_huddles(Duration::from_millis(CALLER_ALERT_WINDOW_MS));
+    call(&ada, &bob, &dm);
+    assert_eq!(bob.media.rings_playing(), 1, "a while later, a call rings again");
     assert_eq!(alerts(&mut changes), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn calls_in_a_muted_group_dont_use_up_a_callers_rings() {
+    let (_root, [ada, bob, carol]) = three_members().await;
+    let group = ada
+        .workspace
+        .open_dm(&[bob.workspace.my_id(), carol.workspace.my_id()])
+        .unwrap();
+    let dm = dm_between(&ada, &bob).await;
+    bob.workspace
+        .set_notify_level(&group, NotifyLevel::Nothing)
+        .unwrap();
+    for _ in 0..CALLER_ALERTS {
+        call(&ada, &bob, &group);
+        hang_up(&ada, &bob);
+    }
+
+    call(&ada, &bob, &dm);
+    assert_eq!(bob.media.rings_playing(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

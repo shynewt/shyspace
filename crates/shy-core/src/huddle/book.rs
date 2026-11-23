@@ -20,9 +20,10 @@ pub const REFRESH_MS: u64 = 30 * 1000;
 /// Without a refresh for this long, a participant has left.
 pub const EXPIRY_MS: u64 = 90 * 1000;
 /// How long an expired session is kept, hidden, for its refreshes to bring
-/// back. Past it, every beacon heard before fails the clock skew check, so
-/// forgetting the session can't let one be replayed.
-const LAPSED_KEPT_MS: u64 = 2 * MAX_CLOCK_SKEW_MS as u64;
+/// back. Past it, every beacon heard before fails the clock skew check (with
+/// a refresh's worth to spare), so forgetting the session can't let one be
+/// replayed.
+const LAPSED_KEPT_MS: u64 = 2 * MAX_CLOCK_SKEW_MS as u64 + REFRESH_MS;
 /// Visible changes (joining, camera, screen) one device may make in a quick
 /// burst, like a misclick and the right huddle. Beyond that, one more is
 /// earned per `CHANGE_EARNED_MS`, so nobody can make everyone's roster
@@ -387,7 +388,7 @@ mod tests {
         let mut book = HuddleBook::default();
         book.receive(&joined(&ada, "general", [1; 16], 0, WALL), WALL, 0)
             .unwrap();
-        let gone = 2 * MAX_CLOCK_SKEW_MS as u64;
+        let gone = LAPSED_KEPT_MS;
         book.forget_expired(EXPIRY_MS);
         book.forget_expired(gone);
         assert!(book.entries.is_empty());

@@ -9,9 +9,6 @@ use super::{book::Participant, media::Cue};
 
 /// How long a ring lasts if nobody answers.
 pub const RING_MS: u64 = 30 * 1000;
-/// After a call from someone this member didn't take, more calls from them
-/// stay quiet this long, so nobody can ring or alert another nonstop.
-pub const RING_QUIET_MS: u64 = 60 * 1000;
 /// Others coming and going within this make one sound, not a burst.
 pub const CUE_GAP_MS: u64 = 2 * 1000;
 
@@ -62,27 +59,42 @@ impl CueLimit {
     }
 }
 
-/// Callers whose calls stay quiet for now: each alert starts a quiet
-/// window for its caller, which this member joining that call ends early.
+/// How many calls from one caller may alert this member within
+/// [`CALLER_ALERT_WINDOW_MS`]: enough for a redial after a dropped call,
+/// not for ringing someone nonstop.
+pub const CALLER_ALERTS: usize = 3;
+pub const CALLER_ALERT_WINDOW_MS: u64 = 2 * 60 * 1000;
+
+/// The recent alerts per caller, against [`CALLER_ALERTS`]. This member
+/// joining a caller's call forgets that caller's.
 #[derive(Debug, Default)]
-pub struct QuietCallers {
-    until_ms: HashMap<PublicKey, u64>,
+pub struct CallerAlerts {
+    recent_ms: HashMap<PublicKey, Vec<u64>>,
 }
 
-impl QuietCallers {
+impl CallerAlerts {
     /// Whether a call from `caller` at `now_ms` (a monotonic clock) may alert.
     pub fn may_alert(&self, caller: &PublicKey, now_ms: u64) -> bool {
-        self.until_ms.get(caller).is_none_or(|until| now_ms >= *until)
+        self.recent_ms
+            .get(caller)
+            .is_none_or(|alerts| alerts.iter().filter(|at| is_recent(**at, now_ms)).count() < CALLER_ALERTS)
     }
 
     pub fn alerted(&mut self, caller: PublicKey, now_ms: u64) {
-        self.until_ms.retain(|_, until| *until > now_ms);
-        self.until_ms.insert(caller, now_ms + RING_QUIET_MS);
+        for alerts in self.recent_ms.values_mut() {
+            alerts.retain(|at| is_recent(*at, now_ms));
+        }
+        self.recent_ms.retain(|_, alerts| !alerts.is_empty());
+        self.recent_ms.entry(caller).or_default().push(now_ms);
     }
 
     pub fn answered(&mut self, caller: &PublicKey) {
-        self.until_ms.remove(caller);
+        self.recent_ms.remove(caller);
     }
+}
+
+fn is_recent(alerted_ms: u64, now_ms: u64) -> bool {
+    now_ms.saturating_sub(alerted_ms) < CALLER_ALERT_WINDOW_MS
 }
 
 #[cfg(test)]
@@ -178,28 +190,35 @@ mod tests {
     }
 
     #[test]
-    fn a_caller_is_quiet_for_a_while_after_an_alert() {
+    fn a_caller_may_alert_a_few_times_then_waits() {
         let ada = SecretKey::generate().public();
         let bob = SecretKey::generate().public();
-        let mut quiet = QuietCallers::default();
-        assert!(quiet.may_alert(&ada, 0));
-        quiet.alerted(ada, 0);
-        assert!(!quiet.may_alert(&ada, RING_QUIET_MS - 1));
-        assert!(quiet.may_alert(&bob, 1), "others still alert");
-        assert!(quiet.may_alert(&ada, RING_QUIET_MS));
+        let mut alerts = CallerAlerts::default();
+        for call in 0..CALLER_ALERTS as u64 {
+            assert!(alerts.may_alert(&ada, call));
+            alerts.alerted(ada, call);
+        }
+        assert!(!alerts.may_alert(&ada, CALLER_ALERTS as u64));
+        assert!(alerts.may_alert(&bob, 1), "others still alert");
+        assert!(
+            alerts.may_alert(&ada, CALLER_ALERT_WINDOW_MS),
+            "the oldest alert has aged out"
+        );
 
-        quiet.alerted(ada, 0);
-        quiet.answered(&ada);
-        assert!(quiet.may_alert(&ada, 1), "a call taken leaves no quiet");
+        alerts.answered(&ada);
+        assert!(
+            alerts.may_alert(&ada, CALLER_ALERTS as u64),
+            "a call taken starts afresh"
+        );
     }
 
     #[test]
-    fn quiet_windows_that_ended_are_forgotten() {
-        let mut quiet = QuietCallers::default();
+    fn old_alerts_are_forgotten() {
+        let mut alerts = CallerAlerts::default();
         for _ in 0..100 {
-            quiet.alerted(SecretKey::generate().public(), 0);
+            alerts.alerted(SecretKey::generate().public(), 0);
         }
-        quiet.alerted(SecretKey::generate().public(), RING_QUIET_MS);
-        assert_eq!(quiet.until_ms.len(), 1);
+        alerts.alerted(SecretKey::generate().public(), CALLER_ALERT_WINDOW_MS);
+        assert_eq!(alerts.recent_ms.len(), 1);
     }
 }
