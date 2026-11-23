@@ -182,7 +182,10 @@ jobs:
         # Each platform's builds upload to latest.json separately; one missing
         # leaves those installs on the old version without a word. An app
         # takes the entry for its own kind of install, else its platform's
-        # plain one, and only installs a package of its own kind.
+        # plain one, and only installs a package of its own kind. Apps also
+        # refuse a package whose signature's trusted comment names another
+        # version than latest.json offers (`requireSignedVersion`), so that
+        # is checked here too rather than found when nobody can update.
         run: |
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP"
           feed="$RUNNER_TEMP/latest.json"
@@ -193,6 +196,13 @@ jobs:
               (.platforms["\($platform)-\($installer)"] // .platforms[$platform]) as $entry
               | ($entry.signature // "" | length > 0) and ($entry.url // "" | test($package))
             ' "$feed" > /dev/null || { echo "::error::latest.json has no signed $installer update for $platform"; exit 1; }
+            signed=$(jq -r --arg platform "$platform" --arg installer "$installer" '
+              (.platforms["\($platform)-\($installer)"] // .platforms[$platform]).signature
+              | @base64d | split("\n")[]
+              | select(startswith("trusted comment: ")) | ltrimstr("trusted comment: ")
+              | split("\t")[] | select(startswith("version:")) | ltrimstr("version:")
+            ' "$feed")
+            test "${signed#v}" = "${version#v}" || { echo "::error::the $installer update for $platform is signed for version '$signed', not $version"; exit 1; }
           done <<'INSTALLS'
           darwin-aarch64 app \.app\.tar\.gz$
           linux-x86_64 appimage \.AppImage$
