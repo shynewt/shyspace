@@ -109,6 +109,8 @@ impl Workspace {
     /// Welcome, the key history and the bucket credentials.
     pub async fn approve_invite(&self, token: &str) -> Result<()> {
         self.ensure_admin()?;
+        // No pass may upload the commit before the snapshot below covers it.
+        let _no_pass = self.inner.sync_lock.lock().await;
         let (from_epoch, signed) = {
             let mut state = self.state();
             let pending = state
@@ -326,6 +328,8 @@ impl Workspace {
         if member == self.me() {
             bail!("the admin cannot remove themselves");
         }
+        // No pass may upload the commit before the snapshot below covers it.
+        let _no_pass = self.inner.sync_lock.lock().await;
         self.pull()
             .await
             .context("can't reach the bucket to collect the member's last messages")?;

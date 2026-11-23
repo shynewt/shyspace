@@ -4339,3 +4339,62 @@ async fn reactions_and_status_emoji_cant_read_as_words() {
         .unwrap();
     assert!(bob_seen.status.is_none_or(|status| status.emoji != "(you)"));
 }
+
+/// A sync pass can upload a commit it finds missing. If a removal could
+/// record its commit while a pass runs, the pass could upload it before the
+/// removal uploads the recovery snapshot that covers it; a device lost in
+/// between leaves a kit that restore refuses for good. So membership
+/// changes wait for a pass in progress.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_waits_for_a_sync_pass_in_progress() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let admin = Arc::new(admin);
+    let pass_running = admin.inner.sync_lock.lock().await;
+    let removing = tokio::spawn({
+        let admin = admin.clone();
+        let bob_id = bob.my_id();
+        async move { admin.remove_member(&bob_id).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        admin.current_members().unwrap().contains(&bob.me()),
+        "the removal went ahead during the pass"
+    );
+
+    drop(pass_running);
+    removing.await.unwrap().unwrap();
+
+    assert!(!admin.current_members().unwrap().contains(&bob.me()));
+}
+
+/// An approval waits for a sync pass in progress, for the same reason.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_approval_waits_for_a_sync_pass_in_progress() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = Arc::new(create_admin(&root.path().join("ada"), &bucket).await);
+    let invite = admin
+        .create_test_invite("Bob", std::time::Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &root.path().join("bob"), &bucket, "Bob", false);
+    wait_for_request(&admin, &token).await;
+    let members_before = admin.current_members().unwrap().len();
+    let pass_running = admin.inner.sync_lock.lock().await;
+    let approving = tokio::spawn({
+        let admin = admin.clone();
+        async move { admin.approve_invite(&token).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(
+        admin.current_members().unwrap().len(),
+        members_before,
+        "the approval went ahead during the pass"
+    );
+
+    drop(pass_running);
+    approving.await.unwrap().unwrap();
+
+    assert_eq!(admin.current_members().unwrap().len(), members_before + 1);
+    joining.await.unwrap().unwrap();
+}
