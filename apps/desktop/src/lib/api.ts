@@ -57,8 +57,9 @@ export type Message = {
 /** A shared file. Its bytes come through `api.fileBytes`; show it by what they are, never by its name or type. */
 export type FileInfo = {
   id: string;
-  /** The channel or DM it was shared in. */
+  /** The channel, DM or page it was shared in. */
   place: string;
+  /** Null for a page's file. */
   message: string | null;
   author: string;
   name: string;
@@ -408,6 +409,14 @@ export const api = {
   deleteFile: (file: string) => invoke<void>("delete_file", { file }),
   renameFile: (file: string, name: string) => invoke<void>("rename_file", { file, name }),
   files: () => invoke<FileInfo[]>("files"),
+  /** Uploads a staged file into a page; resolves to its id, for the page's text to link. */
+  sharePageFile: (page: string, token: string) => invoke<string>("share_page_file", { page, token }),
+  pageFiles: (page: string) => invoke<FileInfo[]>("page_files", { page }),
+  /** A page's own file only; any other is refused, so page text can't pull one in by id. */
+  pageFileBytes: async (page: string, file: string) =>
+    new Uint8Array(await invoke<ArrayBuffer>("page_file_bytes", { page, file })),
+  /** Asks where to save one of a page's files, then saves; false if cancelled. */
+  savePageFile: (page: string, file: string) => invoke<boolean>("save_page_file", { page, file }),
   /** Empty if they have none. */
   profilePicture: async (member: string) => new Uint8Array(await invoke<ArrayBuffer>("profile_picture", { member })),
   /** An already cropped PNG, JPEG or WebP; null removes yours. */

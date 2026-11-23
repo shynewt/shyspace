@@ -97,6 +97,7 @@ export class FakeBackend {
     notify: (change) => this.notify(change),
     sendMessage: (channel, text, replyTo) => this.answer("send_message", { channel, text, replyTo }) as string,
     channelOf: (message) => this.chat.channelOf(message),
+    isPage: (id) => this.pages.some((page) => page.id === id),
   });
   readonly huddles = new FakeHuddles({
     me: () => this.me(),
@@ -708,6 +709,7 @@ export class FakeBackend {
   private deletePage(id: string): void {
     this.requireMayDelete(id);
     this.pages = this.pages.filter((page) => page.id !== id);
+    this.files.dropFilesOfPage(id);
     this.notify({ kind: "pages" });
   }
 

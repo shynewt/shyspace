@@ -1,4 +1,4 @@
-import { HardDrive } from "lucide-react";
+import { FileText, HardDrive } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type FileInfo } from "../../lib/api";
 import { formatSize, useFileImage } from "../../lib/files";
@@ -16,9 +16,15 @@ import { FileFilters, matchesFilters, NO_FILTERS } from "./FileFilters";
 
 /** Every file shared where you can read, newest first, grouped by day. */
 export function DriveView() {
-  // The core lists files newest first, which the day groups rely on.
-  const files = useLive(api.files, (change) => change.kind === "messages" || change.kind === "channels");
-  const { members, channels } = useWorkspace();
+  const files = useLive(
+    api.files,
+    (change) =>
+      change.kind === "messages" ||
+      change.kind === "channels" ||
+      change.kind === "page_files" ||
+      change.kind === "pages",
+  );
+  const { members, channels, pages } = useWorkspace();
   const [filters, setFilters] = useState(NO_FILTERS);
 
   const nameOf = useCallback(
@@ -26,8 +32,13 @@ export function DriveView() {
     [members],
   );
   const readable = useMemo(
-    () => (files ?? []).filter((file) => channels.some((channel) => channel.id === file.place)),
-    [files, channels],
+    () =>
+      (files ?? []).filter((file) =>
+        file.message === null
+          ? pages.some((page) => page.id === file.place)
+          : channels.some((channel) => channel.id === file.place),
+      ),
+    [files, channels, pages],
   );
   // The core lists files in the order they were written down; the view promises newest first.
   const shown = readable
@@ -76,6 +87,19 @@ export function DriveView() {
   );
 }
 
+/** Where a file was shared: its channel or DM, or its page by title. */
+function FilePlace({ file }: { file: FileInfo }) {
+  const { pages } = useWorkspace();
+  if (file.message !== null) return <ChannelName channelId={file.place} className="min-w-0" />;
+  const title = pages.find((page) => page.id === file.place)?.title || "Untitled";
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <FileText size={13} className="shrink-0 text-decorative" aria-hidden />
+      <span className="truncate">{title}</span>
+    </span>
+  );
+}
+
 function DriveRow({ file, sharedBy }: { file: FileInfo; sharedBy: string }) {
   const image = useFileImage(file);
   const [isViewing, setViewing] = useState(false);
@@ -94,7 +118,7 @@ function DriveRow({ file, sharedBy }: { file: FileInfo; sharedBy: string }) {
           <>
             <span className="min-w-0 truncate font-semibold text-ink">{sharedBy}</span>
             <span className="shrink-0">in</span>
-            <ChannelName channelId={file.place} className="min-w-0" />
+            <FilePlace file={file} />
             <span className="ml-auto shrink-0 pl-2 text-faint">
               {formatSize(file.size)} · <RelativeTime ms={file.created_ms} />
             </span>
@@ -107,13 +131,13 @@ function DriveRow({ file, sharedBy }: { file: FileInfo; sharedBy: string }) {
               isMenuOpen && "opacity-100",
             )}
           >
-            <FileActions file={file} hasShowInChat isMenuOpen={isMenuOpen} onMenuOpenChange={setMenuOpen} />
+            <FileActions file={file} hasShowInPlace isMenuOpen={isMenuOpen} onMenuOpenChange={setMenuOpen} />
           </span>
         }
       >
         {file.name}
       </ListRow>
-      <FilePreview file={file} image={image} open={isViewing} onOpenChange={setViewing} hasShowInChat />
+      <FilePreview file={file} image={image} open={isViewing} onOpenChange={setViewing} hasShowInPlace />
     </li>
   );
 }

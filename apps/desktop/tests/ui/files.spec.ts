@@ -744,3 +744,22 @@ test("the files view shows each day once, even for files shared out of time orde
     /afternoon\.txt.*morning\.txt/,
   ]);
 });
+
+test("a file shared into a page shows in Files under its page, and leads back to it", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const plan = window.fake.seedPage("Launch plan", "");
+    window.fake.files.receiveInPage(grace, plan, { name: "budget.csv", type: "text/csv", bytes: [49] });
+  });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+
+  const row = page.getByRole("listitem").filter({ hasText: "budget.csv" });
+  await expect(row).toContainText("Grace");
+  await expect(row).toContainText("Launch plan");
+  await page.getByRole("combobox", { name: "In" }).click();
+  await page.getByRole("option", { name: "Launch plan" }).click();
+  await expect(row).toBeVisible();
+  await row.hover();
+  await row.getByRole("button", { name: "Show budget.csv in its page" }).click();
+  await expect(page.getByLabel("Page title")).toHaveValue("Launch plan");
+});

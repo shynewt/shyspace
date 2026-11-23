@@ -278,6 +278,68 @@ pub async fn send_files(
 }
 
 #[tauri::command]
+pub async fn share_page_file(
+    state: State<'_, AppState>,
+    staged: State<'_, StagedFiles>,
+    page: String,
+    token: String,
+) -> CommandResult<String> {
+    let file = staged.get(&token)?;
+    let id = current(&state)
+        .await?
+        .share_page_file(&page, file)
+        .await
+        .map_err(failed)?;
+    staged.lock().remove(&token);
+    Ok(id)
+}
+
+#[tauri::command]
+pub async fn page_files(state: State<'_, AppState>, page: String) -> CommandResult<Vec<FileInfo>> {
+    current(&state).await?.page_files(&page).map_err(failed)
+}
+
+#[tauri::command]
+pub async fn page_file_bytes(
+    state: State<'_, AppState>,
+    page: String,
+    file: String,
+) -> CommandResult<Response> {
+    let bytes = current(&state)
+        .await?
+        .page_file_bytes(&page, &file)
+        .await
+        .map_err(failed)?;
+    Ok(Response::new(bytes))
+}
+
+/// Like [`save_file`], for one of a page's own files.
+#[tauri::command]
+pub async fn save_page_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    page: String,
+    file: String,
+) -> CommandResult<bool> {
+    let workspace = current(&state).await?;
+    let name = workspace
+        .page_files(&page)
+        .map_err(failed)?
+        .into_iter()
+        .find(|candidate| candidate.id == file)
+        .map(|found| found.name)
+        .ok_or_else(|| "that file isn't part of this page".to_owned())?;
+    let Some(path) = ask_where_to_save(&app, name).await? else {
+        return Ok(false);
+    };
+    workspace
+        .save_page_file(&page, &file, &path)
+        .await
+        .map_err(failed)?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub async fn file_bytes(state: State<'_, AppState>, file: String) -> CommandResult<Response> {
     let bytes = current(&state).await?.file_bytes(&file).await.map_err(failed)?;
     Ok(Response::new(bytes))
@@ -294,6 +356,15 @@ pub async fn save_file(app: AppHandle, state: State<'_, AppState>, file: String)
         .find(|candidate| candidate.id == file)
         .map(|found| found.name)
         .ok_or_else(|| "no such file here".to_owned())?;
+    let Some(path) = ask_where_to_save(&app, name).await? else {
+        return Ok(false);
+    };
+    workspace.save_file(&file, &path).await.map_err(failed)?;
+    Ok(true)
+}
+
+/// The system's save dialog, offering `name`; None if the person cancelled.
+async fn ask_where_to_save(app: &AppHandle, name: String) -> CommandResult<Option<PathBuf>> {
     let (answer, chosen) = oneshot::channel();
     app.dialog().file().set_file_name(name).save_file(move |path| {
         let _ = answer.send(path);
@@ -302,11 +373,9 @@ pub async fn save_file(app: AppHandle, state: State<'_, AppState>, file: String)
         .await
         .map_err(|_| "the save dialog closed unexpectedly".to_owned())?
     else {
-        return Ok(false);
+        return Ok(None);
     };
-    let path = path.into_path().map_err(|error| error.to_string())?;
-    workspace.save_file(&file, &path).await.map_err(failed)?;
-    Ok(true)
+    Ok(Some(path.into_path().map_err(|error| error.to_string())?))
 }
 
 #[tauri::command]

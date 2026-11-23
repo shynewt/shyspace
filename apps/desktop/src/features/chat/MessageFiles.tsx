@@ -46,7 +46,7 @@ function InlineImage({ file }: { file: FileInfo }) {
               />
             </button>
           </ContextMenu>
-          <FilePreview file={file} image={image} open={isViewing} onOpenChange={setViewing} hasShowInChat={false} />
+          <FilePreview file={file} image={image} open={isViewing} onOpenChange={setViewing} hasShowInPlace={false} />
         </>
       ) : (
         <div role="img" aria-label={`Loading ${file.name}`} className="h-40 w-64" />
@@ -58,7 +58,7 @@ function InlineImage({ file }: { file: FileInfo }) {
           isMenuOpen && "opacity-100",
         )}
       >
-        <FileActions file={file} hasShowInChat={false} isMenuOpen={isMenuOpen} onMenuOpenChange={setMenuOpen} />
+        <FileActions file={file} hasShowInPlace={false} isMenuOpen={isMenuOpen} onMenuOpenChange={setMenuOpen} />
       </div>
     </figure>
   );
@@ -93,14 +93,14 @@ function FileCard({ file }: { file: FileInfo }) {
         </span>
       </button>
       <div className={cx("flex shrink-0", HOVER_ACTIONS, isMenuOpen && "opacity-100")}>
-        <FileActions file={file} hasShowInChat={false} isMenuOpen={isMenuOpen} onMenuOpenChange={setMenuOpen} />
+        <FileActions file={file} hasShowInPlace={false} isMenuOpen={isMenuOpen} onMenuOpenChange={setMenuOpen} />
       </div>
       <FilePreview
         file={file}
         image={{ status: "none" }}
         open={isViewing}
         onOpenChange={setViewing}
-        hasShowInChat={false}
+        hasShowInPlace={false}
       />
     </div>
   );

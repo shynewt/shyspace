@@ -20,8 +20,8 @@ type ViewerProps = {
   file: FileInfo;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Off where the file is already shown in its message. */
-  hasShowInChat: boolean;
+  /** Off where the file is already shown where it was shared. */
+  hasShowInPlace: boolean;
 };
 
 /** A file shown large over the app, in the way that suits it: an image, a PDF's pages, text, or a note that it can't be shown. */
@@ -56,7 +56,7 @@ export function imageMenu(file: FileInfo, url: string): MenuAction[] {
 }
 
 /** The viewer's frame: a bar saying what the file is, who shared it, where and when, with its actions; then its content. */
-function FileViewer({ file, open, onOpenChange, hasShowInChat, children }: ViewerProps & { children: ReactNode }) {
+function FileViewer({ file, open, onOpenChange, hasShowInPlace, children }: ViewerProps & { children: ReactNode }) {
   const sharer = useMember(file.author);
   const close = () => onOpenChange(false);
   return (
@@ -85,7 +85,7 @@ function FileViewer({ file, open, onOpenChange, hasShowInChat, children }: Viewe
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
-          <FileActions file={file} hasShowInChat={hasShowInChat} onLeave={close} />
+          <FileActions file={file} hasShowInPlace={hasShowInPlace} onLeave={close} />
           <div aria-hidden className="mx-1 h-5 w-px bg-line" />
           <IconButton label="Close" icon={<X size={16} />} onClick={close} />
         </div>

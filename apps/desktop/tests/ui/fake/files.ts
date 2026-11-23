@@ -22,6 +22,7 @@ export type FilesContext = {
   /** Posts a message as this member, like `send_message`, and returns its id. */
   sendMessage: (channel: string, text: string, replyTo: string | null) => string;
   channelOf: (message: string) => string | null;
+  isPage: (id: string) => boolean;
 };
 
 type StoredFile = FileInfo & { bytes: number[] };
@@ -76,6 +77,15 @@ export class FakeFiles {
         );
       case "file_bytes":
         return new Uint8Array(this.find(requireString(args, "file")).bytes).buffer;
+      case "share_page_file":
+        return this.shareInPage(requireString(args, "page"), requireString(args, "token"));
+      case "page_files":
+        return this.filesOfPage(requireString(args, "page")).map((file) => this.present(file));
+      case "page_file_bytes":
+        return new Uint8Array(this.findInPage(requireString(args, "page"), requireString(args, "file")).bytes).buffer;
+      case "save_page_file":
+        this.saved.push(this.findInPage(requireString(args, "page"), requireString(args, "file")).id);
+        return true;
       case "save_file":
         this.saved.push(this.find(requireString(args, "file")).id);
         return true;
@@ -99,6 +109,11 @@ export class FakeFiles {
     return this.files.filter((file) => file.message === message).map((file) => this.present(file));
   }
 
+  /** Forgets the files of a deleted page, as the core does. */
+  dropFilesOfPage(page: string): void {
+    this.files = this.files.filter((file) => file.place !== page);
+  }
+
   /** Forgets the files of a deleted message. */
   dropFilesOf(message: string): void {
     this.files = this.files.filter((file) => file.message !== message);
@@ -115,6 +130,15 @@ export class FakeFiles {
 
   dragOver(isDragging: boolean): void {
     void emit("file-drag", isDragging);
+  }
+
+  /** A file someone else shared into a page. */
+  receiveInPage(author: string, page: string, file: FileForTest): string {
+    if (!this.context.isPage(page)) throw new Error("fake files: no such page");
+    const id = ownedId(author);
+    this.files.push(this.stored(id, author, page, null, file));
+    this.context.notify({ kind: "page_files", page });
+    return id;
   }
 
   /** A file someone else shared with a new message. */
@@ -169,7 +193,34 @@ export class FakeFiles {
     return message;
   }
 
-  private stored(id: string, author: string, place: string, message: string, file: FileForTest): StoredFile {
+  private shareInPage(page: string, token: string): string {
+    const file = this.staged.get(token);
+    if (!file) throw new Error("that file is no longer waiting to be sent");
+    if (!this.context.isPage(page)) throw new Error("no such page here");
+    this.context.notify({ kind: "upload", channel: page, sent: file.bytes.length, total: file.bytes.length });
+    const id = ownedId(this.context.me());
+    this.files.push(this.stored(id, this.context.me(), page, null, file));
+    this.staged.delete(token);
+    this.context.notify({ kind: "page_files", page });
+    return id;
+  }
+
+  private filesOfPage(page: string): StoredFile[] {
+    return this.files.filter((file) => file.place === page && file.message === null);
+  }
+
+  /** Like the core: a page reads only its own files. */
+  private findInPage(page: string, id: string): StoredFile {
+    const file = this.find(id);
+    if (file.place !== page || file.message !== null) throw new Error("that file isn't part of this page");
+    return file;
+  }
+
+  private changeFor(file: StoredFile): Change {
+    return file.message === null ? { kind: "page_files", page: file.place } : { kind: "messages", channel: file.place };
+  }
+
+  private stored(id: string, author: string, place: string, message: string | null, file: FileForTest): StoredFile {
     return {
       id,
       place,
@@ -198,7 +249,7 @@ export class FakeFiles {
     if (file.author !== this.context.me()) throw new Error("only the person who shared a file can rename it");
     if (!name.trim()) throw new Error("a file needs a name");
     file.name = name.trim();
-    this.context.notify({ kind: "messages", channel: file.place });
+    this.context.notify(this.changeFor(file));
     return null;
   }
 
@@ -213,7 +264,7 @@ export class FakeFiles {
     if (file.author !== this.context.me() && !this.context.isAdmin())
       throw new Error("only its owner or the admin can do that");
     this.files = this.files.filter((candidate) => candidate.id !== id);
-    this.context.notify({ kind: "messages", channel: file.place });
+    this.context.notify(this.changeFor(file));
     return null;
   }
 }

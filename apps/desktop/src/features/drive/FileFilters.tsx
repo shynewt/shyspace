@@ -1,6 +1,6 @@
-import { MessagesSquare, Search, Users } from "lucide-react";
+import { FileText, MessagesSquare, Search, Users } from "lucide-react";
 import { useMemo } from "react";
-import type { Channel, FileInfo, Member } from "../../lib/api";
+import type { Channel, FileInfo, Member, Page } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
 import { type FileKind, fileKindOf } from "../../lib/fileKinds";
 import { displayName } from "../../lib/people";
@@ -61,9 +61,9 @@ export function FileFilters({
   filters: Filters;
   onChange: (filters: Filters) => void;
 }) {
-  const { members, channels } = useWorkspace();
+  const { members, channels, pages } = useWorkspace();
   const sharers = useMemo(() => sharerOptions(files, members), [files, members]);
-  const places = useMemo(() => placeOptions(files, channels, members), [files, channels, members]);
+  const places = useMemo(() => placeOptions(files, channels, pages, members), [files, channels, pages, members]);
   const change = (update: Partial<Filters>) => onChange({ ...filters, ...update });
   return (
     <div className="@container/filters flex flex-col gap-2">
@@ -125,10 +125,20 @@ function sharerOptions(files: FileInfo[], members: Member[] | undefined): Select
   ];
 }
 
-function placeOptions(files: FileInfo[], channels: Channel[], members: Member[] | undefined): SelectOption<string>[] {
-  const withFiles = [...new Set(files.map((file) => file.place))].flatMap((id) => {
+function placeOptions(
+  files: FileInfo[],
+  channels: Channel[],
+  pages: Page[],
+  members: Member[] | undefined,
+): SelectOption<string>[] {
+  const places = [...new Set(files.map((file) => file.place))];
+  const withFiles = places.flatMap((id) => {
     const channel = channels.find((candidate) => candidate.id === id);
     return channel ? [channel] : [];
+  });
+  const pagesWithFiles = places.flatMap((id) => {
+    const page = pages.find((candidate) => candidate.id === id);
+    return page ? [page] : [];
   });
   return [
     { value: ANY, label: "Anywhere", icon: <MessagesSquare size={14} /> },
@@ -146,5 +156,10 @@ function placeOptions(files: FileInfo[], channels: Channel[], members: Member[] 
           ),
       };
     }),
+    ...pagesWithFiles.map((page) => ({
+      value: page.id,
+      label: page.title || "Untitled",
+      icon: <FileText size={14} className="text-decorative" />,
+    })),
   ];
 }
