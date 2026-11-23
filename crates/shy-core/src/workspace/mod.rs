@@ -130,6 +130,11 @@ pub(crate) struct Inner {
     /// When gap repair last listed each author whole, so a forged gap can't
     /// make it list them whole on every pass.
     pub gap_whole_listings: Mutex<std::collections::HashMap<PublicKey, tokio::time::Instant>>,
+    /// When commits, fork proofs and peers were last looked at; they need
+    /// it every 10 minutes, not every check.
+    pub last_slow_duties: Mutex<Option<tokio::time::Instant>>,
+    /// The version of each commit slot we last found right.
+    pub verified_commits: Mutex<std::collections::HashMap<u64, String>>,
     /// The head version we last acted on, per author; in memory only.
     pub seen_heads: Mutex<std::collections::HashMap<PublicKey, String>>,
     /// The seq our own head was last confirmed to hold.

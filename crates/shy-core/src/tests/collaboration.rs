@@ -882,3 +882,90 @@ async fn a_removed_members_headless_segment_arrives_at_a_check() {
 
     assert!(texts(&carol, &general).contains(&"last words".to_string()));
 }
+
+/// Commits are checked by one listing every 10 minutes (and at sweeps);
+/// only a commit whose version changed is fetched again, and one that was
+/// deleted or altered is put back. A removed member who deletes the removal
+/// commit can't keep returning members in the old epoch for long.
+#[tokio::test(flavor = "multi_thread")]
+async fn commits_are_checked_by_listing_and_put_back_when_changed() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    // A commit Bob followed (he joined after the one that added him).
+    let epochs: Vec<u64> = bob
+        .state()
+        .store
+        .commit_records()
+        .unwrap()
+        .into_iter()
+        .map(|(epoch, _)| epoch)
+        .collect();
+    assert!(!epochs.is_empty());
+
+    let slow_check = || async {
+        bob.make_slow_duties_due();
+        let before = store.requests();
+        bob.check().await;
+        store.requests().since(&before).gets
+    };
+    let plain_check = || async {
+        let before = store.requests();
+        bob.check().await;
+        store.requests().since(&before).gets
+    };
+    slow_check().await;
+    let gets_when_verified = slow_check().await;
+    assert_eq!(
+        gets_when_verified,
+        plain_check().await,
+        "unchanged commits aren't fetched"
+    );
+
+    bucket.delete_commit(epochs[0]).await.unwrap();
+    slow_check().await;
+    assert!(bucket.commit(epochs[0]).await.unwrap().is_some(), "put back");
+
+    slow_check().await;
+    assert_eq!(
+        slow_check().await,
+        gets_when_verified,
+        "verified commits aren't fetched again"
+    );
+}
+
+/// An idle check costs the same however many members there are: heads are
+/// one listing, not one per member.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_idle_check_costs_the_same_however_many_members() {
+    let mut idle_costs = Vec::new();
+    for member_count in [2, 6] {
+        let root = tempfile::tempdir().unwrap();
+        let (store, bucket) = super::capacity::counting_store::counting_bucket();
+        let admin = create_admin(&root.path().join("ada"), &bucket).await;
+        let mut members = Vec::new();
+        for number in 0..member_count {
+            let name = format!("member{number}");
+            members.push(join(&admin, &root.path().join(&name), &bucket, &name, false).await);
+        }
+        let everyone: Vec<&Workspace> = std::iter::once(&admin).chain(members.iter()).collect();
+        sync_all(&everyone).await;
+        let reader = &members[0];
+        reader.check().await;
+        reader.check().await;
+
+        let before = store.requests();
+        reader.check().await;
+        let cost = store.requests().since(&before);
+        idle_costs.push((cost.list_pages(), cost.gets, cost.puts));
+    }
+
+    assert_eq!(idle_costs[0], idle_costs[1], "(list pages, gets, puts)");
+    assert_eq!(
+        idle_costs[0].0, 1,
+        "only heads are listed between the 10-minute duties"
+    );
+}

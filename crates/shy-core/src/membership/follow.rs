@@ -60,14 +60,34 @@ impl Workspace {
     /// the bucket. Every member does this, so deleting commit slots (to make
     /// a stale recovery snapshot look current) gets undone. Commits are
     /// admin-signed, so anyone may re-upload them.
+    /// One listing tells which slots changed since we last found them
+    /// right; only those are fetched and compared.
     pub(crate) async fn republish_commits(&self) -> Result<()> {
         let records = self.state().store.commit_records()?;
+        let listed: std::collections::HashMap<u64, String> =
+            self.bucket().listed_commits().await?.into_iter().collect();
         for (from_epoch, signed) in records {
-            if self.bucket().commit(from_epoch).await?.as_deref() != Some(signed.as_slice()) {
+            let listed_version = listed.get(&from_epoch);
+            let verified = self.verified_commits().get(&from_epoch).cloned();
+            if listed_version.is_some() && listed_version == verified.as_ref() {
+                continue;
+            }
+            if self.bucket().commit(from_epoch).await?.as_deref() == Some(signed.as_slice()) {
+                if let Some(version) = listed_version {
+                    self.verified_commits().insert(from_epoch, version.clone());
+                }
+            } else {
                 self.bucket().put_commit(from_epoch, signed).await?;
             }
         }
         Ok(())
+    }
+
+    fn verified_commits(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<u64, String>> {
+        self.inner
+            .verified_commits
+            .lock()
+            .expect("verified commits lock poisoned by an earlier panic")
     }
 
     fn emit_all_views_changed(&self) -> Result<()> {

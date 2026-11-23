@@ -435,6 +435,8 @@ impl Workspace {
                 refetched_gaps: Mutex::new(std::collections::HashSet::new()),
                 skipped_segments: Mutex::new(std::collections::HashSet::new()),
                 gap_whole_listings: Mutex::new(std::collections::HashMap::new()),
+                last_slow_duties: Mutex::new(None),
+                verified_commits: Mutex::new(std::collections::HashMap::new()),
                 seen_heads: Mutex::new(std::collections::HashMap::new()),
                 confirmed_head_seq: Default::default(),
                 heard_hints: Mutex::new(std::collections::HashMap::new()),

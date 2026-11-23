@@ -31,6 +31,8 @@ use crate::{
 
 /// Well under the presence timeout, so one lost heartbeat doesn't count.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
+/// How often commit slots, fork proofs and peers are looked at between sweeps.
+const SLOW_DUTIES_EVERY: Duration = Duration::from_secs(10 * 60);
 /// Batches bursts of writes (like typing) into one bucket upload.
 const PUSH_DEBOUNCE: Duration = Duration::from_millis(600);
 
@@ -262,6 +264,30 @@ impl Workspace {
             .expect("sync status lock poisoned by an earlier panic")
     }
 
+    /// Whether commits, fork proofs and peers are due (every 10 minutes);
+    /// if so, starts the next interval.
+    fn take_slow_duties_if_due(&self) -> bool {
+        let mut last = self
+            .inner
+            .last_slow_duties
+            .lock()
+            .expect("slow duties lock poisoned by an earlier panic");
+        let is_due = last.is_none_or(|last| last.elapsed() >= SLOW_DUTIES_EVERY);
+        if is_due {
+            *last = Some(tokio::time::Instant::now());
+        }
+        is_due
+    }
+
+    #[cfg(test)]
+    pub(crate) fn make_slow_duties_due(&self) {
+        *self
+            .inner
+            .last_slow_duties
+            .lock()
+            .expect("slow duties lock poisoned by an earlier panic") = None;
+    }
+
     pub(crate) fn mark_removed(&self) {
         self.status_lock().removed = true;
     }
@@ -299,18 +325,21 @@ impl Workspace {
             Err(error) => errors.push(error),
         }
         if !self.status().removed {
-            // The admin repairs commits as part of its duties, after its
-            // recovery snapshot; members repair them here.
-            let repaired = if self.is_admin() {
-                self.admin_duties().await
-            } else {
-                self.republish_commits().await
+            let is_slow_due = matches!(kind, PassKind::Sweep) || self.take_slow_duties_if_due();
+            if self.is_admin()
+                && let Err(error) = self.admin_duties().await
+            {
+                errors.push(error);
+            }
+            // Commit repair comes after the admin's recovery snapshot, and
+            // fork proofs before reading, so ops proved forked never apply.
+            let (repaired, shared_forks) = match is_slow_due {
+                true => (self.republish_commits().await, self.share_forks().await),
+                false => (Ok(()), Ok(())),
             };
             if let Err(error) = repaired {
                 errors.push(error);
             }
-            // Forks first, so ops proved forked never apply or alert here.
-            let shared_forks = self.share_forks().await;
             let pulled = match kind {
                 PassKind::Sweep => self.pull().await,
                 PassKind::Check => self.check_heads().await,
@@ -324,7 +353,11 @@ impl Workspace {
                 self.push().await,
                 // After the push, so a delete is out before its file goes.
                 self.remove_unused_blobs().await,
-                self.join_peers().await,
+                self.refresh_gossip_members(),
+                match is_slow_due {
+                    true => self.join_peers().await,
+                    false => Ok(()),
+                },
             ] {
                 if let Err(error) = result {
                     errors.push(error);

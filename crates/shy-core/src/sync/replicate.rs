@@ -202,13 +202,19 @@ impl Workspace {
         self.write_head().await
     }
 
-    /// Refreshes who may gossip with us, then connects to members who seem
-    /// to be around (see `peers_to_dial`).
+    /// Lets only current members gossip with us; local, so done every pass.
+    pub(super) fn refresh_gossip_members(&self) -> Result<()> {
+        if let Some(net) = &self.inner.net {
+            net.set_members(&self.current_members()?);
+        }
+        Ok(())
+    }
+
+    /// Connects to members who seem to be around (see `peers_to_dial`).
     pub(super) async fn join_peers(&self) -> Result<()> {
         let Some(net) = &self.inner.net else {
             return Ok(());
         };
-        net.set_members(&self.current_members()?);
         let announcements = self.bucket().peers().await?;
         let now = now_ms()?;
         let to_dial = {

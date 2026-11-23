@@ -60,11 +60,11 @@ Bucket requests cost money on some providers, so the loop reads as little as it 
 
 1. apply new admin commits (advance epochs);
 2. retry parked ops;
-3. repair missing or altered commits in the bucket (everyone); admin only: refresh the recovery snapshot first, then collect join requests and deliver answers;
-4. read new segments: the logs whose heads moved (a check) or everyone who was ever a member, ourselves included (a sweep; newcomers need removed members' history, a restored device its own);
-5. learn the forks proved in the bucket, and put there the proofs we have that it lacks (`sync/forks.rs`);
+3. admin only: refresh the recovery snapshot, then collect join requests and deliver answers;
+4. every 10 minutes and at sweeps: repair missing or altered commits (one listing of `mls/commit/`; only slots whose version changed since we found them right are fetched) and learn the forks proved in the bucket, putting there the proofs we have that it lacks (`sync/forks.rs`);
+5. read new segments: the logs whose heads moved (a check) or everyone who was ever a member, ourselves included (a sweep; newcomers need removed members' history, a restored device its own);
 6. push our unpushed ops as segments, each under the 32 MB that readers accept;
-7. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
+7. refresh the gossip allowlist to current members; every 10 minutes, connect to members listed in the bucket.
 
 A pull lists an author's segments past the highest seq we hold (all of them once an hour, on gap repair, and before a removal, for older names), fetches the ones that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
 

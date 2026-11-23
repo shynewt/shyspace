@@ -57,8 +57,11 @@ pub struct SegmentFetch {
     bucket: Bucket,
     author: PublicKey,
     listed: std::vec::IntoIter<ListedObject>,
-    in_flight: VecDeque<(ListedObject, JoinHandle<Result<Option<Bytes>>>)>,
+    in_flight: VecDeque<(ListedObject, JoinHandle<Result<Option<Versioned>>>)>,
 }
+
+/// An object's bytes and the version they were read at.
+type Versioned = (Bytes, String);
 
 /// An object's key and version, as a listing showed it.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -84,15 +87,20 @@ impl SegmentFetch {
             };
             let bucket = self.bucket.clone();
             let path = Path::from(listed.key.as_str());
-            let fetching = tokio::spawn(async move { bucket.get(&path).await });
+            let fetching = tokio::spawn(async move { bucket.get_versioned(&path, MAX_OBJECT_SIZE).await });
             self.in_flight.push_back((listed, fetching));
         }
-        let Some((listed, fetching)) = self.in_flight.pop_front() else {
+        let Some((mut listed, fetching)) = self.in_flight.pop_front() else {
             return Ok(None);
         };
         let path = &listed.key;
         let named_hash = parse_segment_name(&self.author, path).and_then(|name| name.hash);
-        let envelopes = match fetching.await.context("fetching a segment")?? {
+        let fetched = fetching.await.context("fetching a segment")??;
+        if let Some((_, version)) = &fetched {
+            // Name exactly what was read, which may be newer than the listing.
+            listed.version = version.clone();
+        }
+        let envelopes = match fetched.map(|(bytes, _)| bytes) {
             Some(bytes) if named_hash.is_some_and(|hash| blake3::hash(&bytes) != hash) => {
                 warn!("skipping segment {path}: its bytes don't match its name");
                 Vec::new()
@@ -381,12 +389,20 @@ impl Bucket {
     }
 
     pub(super) async fn get_at_most(&self, path: &Path, limit: u64) -> Result<Option<Bytes>> {
+        Ok(self.get_versioned(path, limit).await?.map(|(bytes, _)| bytes))
+    }
+
+    /// An object's bytes and the version they were read at.
+    async fn get_versioned(&self, path: &Path, limit: u64) -> Result<Option<Versioned>> {
         match self.store.get(path).await {
             Ok(result) if result.meta.size > limit => {
                 warn!("ignoring oversized object {path} ({} bytes)", result.meta.size);
                 Ok(None)
             }
-            Ok(result) => Ok(Some(result.bytes().await?)),
+            Ok(result) => {
+                let version = object_version(&result.meta);
+                Ok(Some((result.bytes().await?, version)))
+            }
             Err(object_store::Error::NotFound { .. }) => Ok(None),
             Err(error) => Err(error.into()),
         }
@@ -518,6 +534,19 @@ impl Bucket {
             signed_commit,
         )
         .await
+    }
+
+    /// Commit slots in the bucket, valid or not, with their versions.
+    pub async fn listed_commits(&self) -> Result<Vec<(u64, String)>> {
+        let mut listing = self.store.list(Some(&Path::from("mls/commit")));
+        let mut listed = Vec::new();
+        while let Some(meta) = listing.next().await {
+            let meta = meta?;
+            if let Some(epoch) = meta.location.filename().and_then(|name| name.parse().ok()) {
+                listed.push((epoch, object_version(&meta)));
+            }
+        }
+        Ok(listed)
     }
 
     /// Epochs that have a commit slot in the bucket, valid or not.
@@ -920,6 +949,29 @@ mod tests {
         ) -> object_store::Result<()> {
             self.inner.copy_opts(from, to, options).await
         }
+    }
+
+    /// The skip list must name exactly what was read: a fetch reports the
+    /// version it got, which may be newer than the listing's.
+    #[tokio::test]
+    async fn a_fetched_segment_carries_the_version_it_was_read_at() {
+        let store = Arc::new(object_store::memory::InMemory::new());
+        let bucket = Bucket::without_signing(store.clone());
+        let author = iroh::SecretKey::generate().public();
+        let empty = postcard::to_stdvec(&Vec::<Envelope>::new()).unwrap();
+        let path = segment_path(&author, 1, 1, &empty);
+        bucket.put(&path, empty.clone()).await.unwrap();
+        let listed = bucket.list_segments(&author, None).await.unwrap();
+        bucket.put(&path, empty).await.unwrap();
+
+        let mut fetching = bucket.fetch_segments(&author, listed.clone());
+        let fetched = fetching.next().await.unwrap().unwrap();
+
+        assert_eq!(fetched.listed.key, listed[0].key);
+        assert_ne!(
+            fetched.listed.version, listed[0].version,
+            "the version read, not the one listed"
+        );
     }
 
     /// A newcomer reads an author's history segment by segment: several at
