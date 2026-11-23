@@ -176,3 +176,29 @@ test("a destructive menu item's icon takes the item's red, not grey", async ({ p
   const iconColour = await deleteItem.locator("svg").evaluate((icon) => getComputedStyle(icon).color);
   expect(iconColour).toBe(textColour);
 });
+
+test("starting a second edit keeps your draft for when editing ends", async ({ page }) => {
+  await openGeneral(page);
+  const composer = page.getByLabel("Message #general");
+  for (const text of ["First note", "Second note"]) {
+    await composer.fill(text);
+    await composer.press("Enter");
+  }
+  await composer.fill("hello");
+
+  const first = page.getByRole("article").filter({ hasText: "First note" });
+  await first.hover();
+  await first.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Edit" }).click();
+  await expect(composer).toHaveValue("First note");
+  await composer.fill("First note, half edited");
+  // A message being edited keeps its toolbar, so each is opened from its own.
+  const second = page.getByRole("article").filter({ hasText: "Second note" });
+  await second.hover();
+  await second.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Edit" }).click();
+  await expect(composer).toHaveValue("Second note");
+
+  await composer.press("Escape");
+  await expect(composer).toHaveValue("hello");
+});

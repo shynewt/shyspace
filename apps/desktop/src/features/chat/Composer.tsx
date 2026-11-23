@@ -78,10 +78,17 @@ export function Composer({
   }, [editing, text]);
   const editingId = editing?.id;
   const { adopt } = picker;
+  // Only the draft from before any editing is set aside: going from one
+  // edit straight to another keeps it, rather than the half-done edit.
+  const wasEditing = useRef(false);
   useEffect(() => {
     const message = latest.current.editing;
-    if (!editingId || !message) return;
-    setSetAside(latest.current.text);
+    if (!editingId || !message) {
+      wasEditing.current = false;
+      return;
+    }
+    if (!wasEditing.current) setSetAside(latest.current.text);
+    wasEditing.current = true;
     updateText(adopt(message.text));
     input.current?.focus();
   }, [editingId, adopt, updateText]);
