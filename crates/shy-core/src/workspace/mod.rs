@@ -111,6 +111,9 @@ pub(crate) struct Inner {
     pub push_now: Notify,
     /// One upload at a time, so the same ops never go up twice at once.
     pub push_lock: tokio::sync::Mutex<()>,
+    /// When each pending join answer last went up, so it goes up again only
+    /// now and then rather than on every pass; in memory only.
+    pub answers_sent_ms: Mutex<std::collections::HashMap<iroh::PublicKey, i64>>,
     pub recovery_lock: tokio::sync::Mutex<()>,
     pub status: Mutex<SyncStatus>,
     /// Gaps (author, missing seq) already fetched again this run, so a gap

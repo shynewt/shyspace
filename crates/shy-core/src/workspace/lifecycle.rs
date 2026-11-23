@@ -420,6 +420,7 @@ impl Workspace {
                 sync_lock: tokio::sync::Mutex::new(()),
                 push_now: Notify::new(),
                 push_lock: tokio::sync::Mutex::new(()),
+                answers_sent_ms: Default::default(),
                 recovery_lock: tokio::sync::Mutex::new(()),
                 status: Mutex::new(SyncStatus::default()),
                 refetched_gaps: Mutex::new(std::collections::HashSet::new()),

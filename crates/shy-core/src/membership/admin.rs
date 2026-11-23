@@ -24,6 +24,8 @@ use crate::{
 /// Presigned S3 links can't outlive seven days.
 const INVITE_LIFETIME: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const MAX_REQUESTER_NAME: usize = 80;
+/// How often a pending join answer is put up again, in case someone removed it.
+const ANSWER_REFRESH_MS: i64 = 10 * 60 * 1000;
 
 /// What the admin still owes a joiner. Saved before the commit is applied and
 /// kept until the joiner posts, so neither a crash nor a failed upload strands
@@ -235,14 +237,25 @@ impl Workspace {
     }
 
     /// Uploads owed answers until each joiner posts their first op, then
-    /// clears the invite's slots in the bucket.
+    /// clears the invite's slots in the bucket. An answer goes up once, and
+    /// again only every few minutes, in case someone with the bucket keys
+    /// removed it.
     async fn deliver_answers(&self) -> Result<()> {
         let deliveries = self.state().store.deliveries()?;
+        let now = now_ms()?;
         for (joiner, token, payload) in deliveries {
             if self.state().store.has_ops_from(&joiner)? {
                 self.bucket().delete_invite_answer(&token).await?;
                 self.bucket().delete_invite_request(&token).await?;
                 self.state().store.delete_delivery(&joiner)?;
+                self.answers_sent().remove(&joiner);
+                continue;
+            }
+            let is_recent = self
+                .answers_sent()
+                .get(&joiner)
+                .is_some_and(|sent_ms| now.saturating_sub(*sent_ms) < ANSWER_REFRESH_MS);
+            if is_recent {
                 continue;
             }
             let delivery: Delivery = postcard::from_bytes(&payload)?;
@@ -258,8 +271,16 @@ impl Workspace {
             self.bucket()
                 .put_invite_answer(&token, postcard::to_stdvec(&answer)?)
                 .await?;
+            self.answers_sent().insert(joiner, now);
         }
         Ok(())
+    }
+
+    fn answers_sent(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<iroh::PublicKey, i64>> {
+        self.inner
+            .answers_sent_ms
+            .lock()
+            .expect("sent answers lock poisoned by an earlier panic")
     }
 
     /// Removes a member. Their log is frozen at the last op we have from

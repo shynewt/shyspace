@@ -300,3 +300,38 @@ async fn a_join_cut_short_after_the_answer_finishes_on_the_next_open() {
     );
     assert_eq!(reopened.state().store.meta("pending_profile").unwrap(), None);
 }
+
+/// An answer goes up once; the admin doesn't put it again on every pass
+/// while the joiner hasn't synced yet (only now and then, in case someone
+/// with the bucket keys removed it).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_goes_up_once_not_on_every_pass() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let invite = admin
+        .create_test_invite("for Bob", Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &root.path().join("bob"), &bucket, "Bob", false);
+    wait_for_request(&admin, &token).await;
+    admin.approve_invite(&token).await.unwrap();
+    let bob = joining.await.unwrap().unwrap();
+    bucket.delete_invite_answer(&token).await.unwrap();
+
+    admin.sync().await;
+    assert_eq!(
+        bucket.invite_answer(&token).await.unwrap(),
+        None,
+        "not put again this soon"
+    );
+
+    sync_all(&[&bob, &admin]).await;
+    assert!(
+        admin
+            .members()
+            .unwrap()
+            .iter()
+            .any(|member| member.name == "Bob" && member.active)
+    );
+}
