@@ -11,7 +11,6 @@ import { openAlertTarget } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
 import { useMouseBackAndForward } from "../../lib/useMouseBackAndForward";
 import { ScrollMemoryContext, useNavigation } from "../../lib/useNavigation";
-import { usePresence } from "../../lib/usePresence";
 import { useReminders } from "../../lib/useReminders";
 import { sameView, savedItemView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog, tweens } from "../../ui";
@@ -157,7 +156,6 @@ export function Shell({ session }: { session: Session }) {
     openAlertTarget(openFirst, navigate);
   }, [openFirst, navigate]);
   useReminders(session.workspace_id, openSaved);
-  usePresence();
 
   const openSettings = useCallback((target: SettingsTarget = { section: "profile" }) => setSettingsTarget(target), []);
   const openSearch = useCallback((query = "") => setPaletteQuery(query), []);

@@ -11,6 +11,7 @@ import {
 import { saveEverythingBeforeSwitch } from "../../lib/beforeSwitch";
 import { reportError } from "../../lib/toast";
 import { useAlerts } from "../../lib/useAlerts";
+import { usePresence } from "../../lib/usePresence";
 
 type WorkspacesValue = {
   /** Every workspace on this device, in rail order. */
@@ -127,6 +128,7 @@ export function WorkspacesProvider({
     [workspaces, select],
   );
   useAlerts(alertWorkspaces);
+  usePresence();
 
   const value = useMemo(
     () => ({ workspaces, badges, shownId: session.workspace_id, select, leave, add: onAdd }),
