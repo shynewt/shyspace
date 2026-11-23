@@ -10,6 +10,7 @@ use crate::{
     crypto::{self, EpochKey, NewerFormat},
     ops::{Envelope, MAX_PAGE_UPDATE_BYTES, MAX_STORED_NUMBER, RuleViolation, VerifiedOp},
     storage::{Applied, ApplyContext},
+    transport::bucket::parse_segment_name,
     views::Change,
     workspace::{State, Workspace},
 };
@@ -42,6 +43,41 @@ impl std::fmt::Display for NotKept {
     }
 }
 
+/// The last seq of `key` if it looks like a real segment of `author`'s: its
+/// name matches the envelopes inside, all by `author`, in order with no
+/// gaps. Envelope headers aren't signed, so this alone proves nothing;
+/// reading resumes after it only once its last op has applied.
+fn genuine_last_seq(author: &PublicKey, key: &str, envelopes: &[Envelope]) -> Option<u64> {
+    let name = parse_segment_name(author, key)?;
+    let is_in_order = envelopes.iter().enumerate().all(|(index, envelope)| {
+        let expected_seq = u64::try_from(index)
+            .ok()
+            .and_then(|index| name.first.checked_add(index));
+        envelope.author == *author && Some(envelope.seq) == expected_seq
+    });
+    let is_whole = envelopes.first().map(|envelope| envelope.seq) == Some(name.first)
+        && envelopes.last().map(|envelope| envelope.seq) == Some(name.last);
+    (is_in_order && is_whole).then_some(name.last)
+}
+
+/// Whether the segment at `key` starts no later than right after the one
+/// reading resumes from now (or at the log's start when there's none), and
+/// ends later. An honest upload always starts just after the last one;
+/// starting earlier is fine (a re-upload after a crash), starting later would
+/// skip ops, and ending no later would move reading back.
+fn continues_from_cursor(store: &crate::storage::Store, author: &PublicKey, key: &str) -> Result<bool> {
+    let Some(name) = parse_segment_name(author, key) else {
+        return Ok(false);
+    };
+    let Some(cursor) = store.cursor(author)? else {
+        return Ok(name.first == 1);
+    };
+    let Some(current) = parse_segment_name(author, &cursor) else {
+        return Ok(false);
+    };
+    Ok(name.first <= current.last.saturating_add(1) && name.last > current.last)
+}
+
 /// How many downloaded ops share one transaction: few enough that the
 /// state lock is let go often, many enough to save most disk syncs.
 const OPS_PER_TRANSACTION: usize = 500;
@@ -54,6 +90,8 @@ pub(super) struct SegmentRead {
     /// An op couldn't even be kept: the rest of the segment waits, and the
     /// cursor stays before it.
     pub is_stopped: bool,
+    /// Reading this author resumes after this segment from now on.
+    pub is_resume_point: bool,
 }
 
 /// What retrying parked ops found.
@@ -108,6 +146,10 @@ impl Workspace {
         envelopes: &[Envelope],
     ) -> Result<SegmentRead> {
         let mut read = SegmentRead::default();
+        let genuine_last = genuine_last_seq(author, key, envelopes);
+        if genuine_last.is_none() {
+            warn!("{key} isn't a genuine segment; reading its ops, but never resuming from it");
+        }
         let mut batches: Vec<&[Envelope]> = envelopes.chunks(OPS_PER_TRANSACTION).collect();
         if batches.is_empty() {
             batches.push(&[]);
@@ -150,8 +192,20 @@ impl Workspace {
                         Err(error) => warn!("dropping op from {key}: {error:#}"),
                     }
                 }
-                if index == last {
+                // Reading resumes after a segment only once its last op
+                // verified and applied (logs have no gaps, so all of it did),
+                // and only if it carries on from where reading resumes now:
+                // we may hold ops from gossip that the bucket doesn't yet, and
+                // a copy of one put ahead would hide the author's next upload.
+                let is_resume_point = match genuine_last {
+                    Some(last_seq) if index == last => {
+                        continues_from_cursor(store, author, key)? && store.is_applied(author, last_seq)?
+                    }
+                    _ => false,
+                };
+                if is_resume_point {
                     store.set_cursor(author, key)?;
+                    read.is_resume_point = true;
                     #[cfg(test)]
                     if self
                         .inner
@@ -419,4 +473,50 @@ fn park(state: &State, envelope: &Envelope) -> Result<()> {
         envelope.epoch
     );
     state.store.insert_pending(envelope).context(NotKept)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn envelope(author: PublicKey, seq: u64) -> Envelope {
+        Envelope {
+            author,
+            seq,
+            epoch: 1,
+            nonce: [0; 24],
+            ciphertext: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_segment_looks_genuine_only_if_its_name_matches_every_envelope() {
+        let alice = iroh::SecretKey::generate().public();
+        let bob = iroh::SecretKey::generate().public();
+        let key = format!("ops/{}/{:020}-{:020}", crate::views::member_id(&alice), 3, 5);
+        let run = |author: PublicKey, seqs: &[u64]| -> Vec<Envelope> {
+            seqs.iter().map(|seq| envelope(author, *seq)).collect()
+        };
+
+        assert_eq!(genuine_last_seq(&alice, &key, &run(alice, &[3, 4, 5])), Some(5));
+        assert_eq!(
+            genuine_last_seq(&alice, &key, &run(alice, &[3, 4])),
+            None,
+            "ends early"
+        );
+        assert_eq!(
+            genuine_last_seq(&alice, &key, &run(alice, &[3, 5])),
+            None,
+            "a gap"
+        );
+        assert_eq!(
+            genuine_last_seq(&alice, &key, &run(alice, &[4, 5])),
+            None,
+            "starts late"
+        );
+        assert_eq!(genuine_last_seq(&alice, &key, &[]), None, "empty");
+        let mut mixed = run(alice, &[3, 4, 5]);
+        mixed[1].author = bob;
+        assert_eq!(genuine_last_seq(&alice, &key, &mixed), None, "someone else's op");
+    }
 }

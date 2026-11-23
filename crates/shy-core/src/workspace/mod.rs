@@ -122,6 +122,11 @@ pub(crate) struct Inner {
     /// Gaps (author, missing seq) already fetched again this run, so a gap
     /// the bucket can't fill doesn't make every pass re-read everything.
     pub refetched_gaps: Mutex<std::collections::HashSet<(iroh::PublicKey, u64)>>,
+    /// Objects among someone's segments that reading can't resume after
+    /// (junk, or ops that didn't apply), already read this run in this
+    /// version: not fetched again unless replaced, so junk can't cost a
+    /// download on every pass.
+    pub skipped_segments: Mutex<std::collections::HashSet<crate::transport::bucket::ListedObject>>,
     /// Fork proof objects in the bucket already looked at, by path, with the
     /// version we saw: our own found intact, and ones found overwritten.
     pub seen_fork_proofs: Mutex<std::collections::HashMap<String, String>>,

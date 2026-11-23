@@ -860,6 +860,350 @@ async fn an_unreadable_op_far_ahead_raises_no_update_alarm() {
     assert_eq!(status.error, None, "sync still reports success");
 }
 
+/// Anyone with the bucket keys can put objects among someone's segments: junk
+/// that sorts after every real name, or a copy of their real ops under the
+/// highest name. Neither may become where readers resume, or that person's
+/// later segments would never be read.
+#[tokio::test(flavor = "multi_thread")]
+async fn objects_posing_as_later_segments_cannot_hide_someones_history() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "first", None).unwrap();
+    let copied = bob.state().store.unpushed(&bob.me()).unwrap();
+    sync_all(&[&bob, &admin]).await;
+    let bob_segments = format!("ops/{}", bob.my_id());
+    let highest = u64::MAX.to_string();
+    bucket
+        .put_raw(&format!("{bob_segments}/z"), b"junk".to_vec())
+        .await
+        .unwrap();
+    bucket
+        .put_raw(
+            &format!("{bob_segments}/{highest}-{highest}"),
+            postcard::to_stdvec(&copied).unwrap(),
+        )
+        .await
+        .unwrap();
+    admin.sync().await;
+
+    bob.send_message(&general, "second", None).unwrap();
+    bob.sync().await;
+    admin.sync().await;
+
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(texts.contains(&"second".to_string()), "{texts:?}");
+}
+
+/// Segment headers aren't signed: an author and seq in the clear prove
+/// nothing until the op inside verifies. Forged ones under a matching name
+/// must not move where reading resumes, whether they're dropped outright or
+/// kept waiting for an epoch key.
+#[tokio::test(flavor = "multi_thread")]
+async fn forged_segment_headers_cannot_move_where_reading_resumes() {
+    for is_kept_waiting in [false, true] {
+        let (_root, bucket, admin, bob) = admin_and_bob().await;
+        let general = channel_id(&admin, "general");
+        let (epoch, _) = current_key(&bob);
+        let next_seq = bob.state().store.next_seq(&bob.me()).unwrap();
+        let (seq, epoch) = match is_kept_waiting {
+            false => (u64::MAX, 0),
+            true => (next_seq + 100, epoch + 1),
+        };
+        let forged = vec![Envelope {
+            author: bob.me(),
+            seq,
+            epoch,
+            nonce: [0; 24],
+            ciphertext: vec![1, 2, 3],
+        }];
+        bucket
+            .put_raw(
+                &format!("ops/{}/{seq:020}-{seq:020}", bob.my_id()),
+                postcard::to_stdvec(&forged).unwrap(),
+            )
+            .await
+            .unwrap();
+        admin.sync().await;
+
+        bob.send_message(&general, "second", None).unwrap();
+        bob.sync().await;
+        admin.sync().await;
+
+        let texts: Vec<_> = admin
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|message| message.text)
+            .collect();
+        assert!(
+            texts.contains(&"second".to_string()),
+            "kept waiting: {is_kept_waiting}, {texts:?}"
+        );
+    }
+}
+
+/// Junk sorting after someone's last real segment can't become where reading
+/// resumes, so it is listed every pass; it is fetched only once a run, so
+/// it can't cost every reader its size on every pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_after_someones_last_segment_is_fetched_once_a_run() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let junk_count = 20;
+    for number in 0..junk_count {
+        bucket
+            .put_raw(&format!("ops/{}/z{number:04}", admin.my_id()), b"junk".to_vec())
+            .await
+            .unwrap();
+    }
+    bob.sync().await;
+
+    let before = store.requests();
+    bob.sync().await;
+    let pass = store.requests().since(&before);
+
+    assert!(pass.gets < junk_count, "{pass}");
+}
+
+/// A segment named with a hash of its bytes is read and resumed after; one
+/// whose bytes don't match that hash is ignored, ops and all.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_segment_named_by_its_hash_must_match_it() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let bob_segments = format!("ops/{}", bob.my_id());
+    let texts = |admin: &Workspace| -> Vec<String> {
+        admin
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|message| message.text)
+            .collect()
+    };
+    let unpushed_segment = |bob: &Workspace| {
+        let envelopes = bob.state().store.unpushed(&bob.me()).unwrap();
+        let range = format!(
+            "{:020}-{:020}",
+            envelopes.first().unwrap().seq,
+            envelopes.last().unwrap().seq
+        );
+        (range, postcard::to_stdvec(&envelopes).unwrap())
+    };
+
+    bob.send_message(&general, "tampered", None).unwrap();
+    let (range, bytes) = unpushed_segment(&bob);
+    let wrong_hash = blake3::hash(b"other bytes").to_hex();
+    let tampered = format!("{bob_segments}/{range}-{wrong_hash}");
+    bucket.put_raw(&tampered, bytes).await.unwrap();
+    let cursor_before = admin.state().store.cursor(&bob.me()).unwrap();
+    admin.sync().await;
+    assert!(!texts(&admin).contains(&"tampered".to_string()));
+    assert_eq!(admin.state().store.cursor(&bob.me()).unwrap(), cursor_before);
+
+    bucket.delete_raw(&tampered).await.unwrap();
+    let (range, bytes) = unpushed_segment(&bob);
+    let named = format!("{bob_segments}/{range}-{}", blake3::hash(&bytes).to_hex());
+    bucket.put_raw(&named, bytes).await.unwrap();
+    admin.sync().await;
+    assert!(texts(&admin).contains(&"tampered".to_string()));
+    assert_eq!(admin.state().store.cursor(&bob.me()).unwrap(), Some(named));
+}
+
+/// Older versions resumed after any object, junk included. A resume point
+/// that isn't a segment name is dropped, and that author is read again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resume_point_left_on_junk_by_an_older_version_is_dropped() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "hidden before", None).unwrap();
+    bob.sync().await;
+    let junk_key = format!("ops/{}/z", bob.my_id());
+    admin.state().store.set_cursor(&bob.me(), &junk_key).unwrap();
+
+    admin.sync().await;
+
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(texts.contains(&"hidden before".to_string()), "{texts:?}");
+}
+
+/// A reader can be ahead of the bucket: gossip delivers ops before their
+/// author uploads them. A copy of one of those, real or forged, put in the
+/// bucket under its exact name must not become where reading resumes, or the
+/// author's next upload (which sorts before it) would never be read.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_copy_of_ops_received_live_cannot_hide_the_authors_next_upload() {
+    for is_forged in [false, true] {
+        let (_root, bucket, admin, bob) = admin_and_bob().await;
+        let general = channel_id(&admin, "general");
+        bob.send_message(&general, "first", None).unwrap();
+        sync_all(&[&bob, &admin]).await;
+        // Two ops reach admin live (gossip) before bob pushes them.
+        bob.send_message(&general, "live one", None).unwrap();
+        bob.send_message(&general, "live two", None).unwrap();
+        let live = bob.state().store.unpushed(&bob.me()).unwrap();
+        assert!(live.len() >= 2);
+        for envelope in &live {
+            admin.receive(envelope.clone()).unwrap();
+        }
+        // A member who also saw them live copies the last one to the bucket
+        // under its exact name, before bob pushes.
+        let mut last = live.last().unwrap().clone();
+        if is_forged {
+            last.ciphertext = vec![9; 8];
+        }
+        let seq = last.seq;
+        bucket
+            .put_raw(
+                &format!("ops/{}/{seq:020}-{seq:020}", bob.my_id()),
+                postcard::to_stdvec(&vec![last]).unwrap(),
+            )
+            .await
+            .unwrap();
+        admin.sync().await;
+
+        // Admin goes quiet; bob writes more and pushes it all in one segment.
+        bob.send_message(&general, "after", None).unwrap();
+        bob.sync().await;
+        admin.sync().await;
+
+        let texts: Vec<_> = admin
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|message| message.text)
+            .collect();
+        assert!(
+            texts.contains(&"after".to_string()),
+            "forged: {is_forged}, {texts:?}"
+        );
+    }
+}
+
+/// Anyone can guess an author's next segment names and put junk there first.
+/// When the author's real upload replaces it, it is read, not skipped as the
+/// junk that once stood there.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_at_the_authors_next_segment_name_cannot_hide_their_upload() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "first", None).unwrap();
+    sync_all(&[&bob, &admin]).await;
+    let next_seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    for last in next_seq..next_seq + 5 {
+        bucket
+            .put_raw(
+                &format!("ops/{}/{next_seq:020}-{last:020}", bob.my_id()),
+                b"junk".to_vec(),
+            )
+            .await
+            .unwrap();
+    }
+    admin.sync().await;
+
+    bob.send_message(&general, "hidden", None).unwrap();
+    bob.sync().await;
+    admin.sync().await;
+
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(texts.contains(&"hidden".to_string()), "{texts:?}");
+}
+
+/// A copy of an op from inside a segment already read sorts after it, but
+/// must not move where reading resumes backwards, or it would never move on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_copy_from_inside_a_read_segment_cannot_move_the_resume_point_back() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    for text in ["one", "two", "three"] {
+        bob.send_message(&general, text, None).unwrap();
+    }
+    let pushed = bob.state().store.unpushed(&bob.me()).unwrap();
+    sync_all(&[&bob, &admin]).await;
+    let middle = pushed[1].clone();
+    let seq = middle.seq;
+    bucket
+        .put_raw(
+            &format!("ops/{}/{seq:020}-{seq:020}", bob.my_id()),
+            postcard::to_stdvec(&vec![middle]).unwrap(),
+        )
+        .await
+        .unwrap();
+    admin.sync().await;
+
+    for text in ["later", "much later"] {
+        bob.send_message(&general, text, None).unwrap();
+        bob.sync().await;
+        admin.sync().await;
+    }
+
+    let bob_last = bob.state().store.next_seq(&bob.me()).unwrap() - 1;
+    let cursor = admin.state().store.cursor(&bob.me()).unwrap().unwrap();
+    assert!(
+        cursor.ends_with(&format!("-{bob_last:020}")),
+        "resumes after {cursor}, not seq {bob_last}"
+    );
+}
+
+/// A segment that couldn't become the resume point is skipped for the rest
+/// of the run, but gap repair still reads it again when its ops are lost.
+#[tokio::test(flavor = "multi_thread")]
+async fn gap_repair_reads_a_skipped_segment_again() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "second", None).unwrap();
+    bob.send_message(&general, "third", None).unwrap();
+    bob.sync().await;
+    admin
+        .inner
+        .fail_next_apply
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.sync().await;
+    assert!(!admin.inner.skipped_segments.lock().unwrap().is_empty());
+    // As if the parked ops were pushed out by the cap.
+    admin.state().store.execute_for_test("DELETE FROM pending_ops");
+
+    bob.send_message(&general, "fourth", None).unwrap();
+    let fourth = bob
+        .state()
+        .store
+        .unpushed(&bob.me())
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    admin.receive(fourth).unwrap();
+    admin.sync().await;
+    admin.sync().await;
+
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    for text in ["second", "third", "fourth"] {
+        assert!(texts.contains(&text.to_string()), "{text}: {texts:?}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_lost_op_is_fetched_again_from_the_bucket() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;

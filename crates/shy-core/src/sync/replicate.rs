@@ -4,7 +4,16 @@ use anyhow::Result;
 use tracing::warn;
 
 use super::peers::peers_to_dial;
-use crate::{ops::now_ms, transport::bucket::split_into_segments, workspace::Workspace};
+use crate::{
+    ops::now_ms,
+    transport::bucket::{ListedObject, parse_segment_name, split_into_segments},
+    views::member_id,
+    workspace::Workspace,
+};
+
+/// At most this many skipped objects are remembered; past it, the rest are
+/// fetched again each pass rather than using unbounded memory.
+const MAX_SKIPPED_SEGMENTS: usize = 10_000;
 
 impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
@@ -19,9 +28,32 @@ impl Workspace {
         let authors = self.state().store.everyone_ever()?;
         'authors: for author in authors {
             let cursor = self.state().store.cursor(&author)?;
-            let mut segments = self.bucket().segments_after(&author, cursor.as_deref()).await?;
-            while let Some((key, envelopes)) = segments.next().await? {
-                let read = self.receive_segment(&author, &key, &envelopes)?;
+            // Older versions resumed after any object, junk included; start
+            // that author over rather than trust it.
+            let cursor = match cursor {
+                Some(key) if parse_segment_name(&author, &key).is_none() => {
+                    warn!(
+                        "reading {author}'s history again: we were resuming after {key}, which isn't a segment"
+                    );
+                    self.state().store.forget_cursor(&author)?;
+                    None
+                }
+                cursor => cursor,
+            };
+            let skipped = self.skipped_segments().clone();
+            let mut segments = self
+                .bucket()
+                .segments_after(&author, cursor.as_deref())
+                .await?
+                .without(&skipped);
+            while let Some(segment) = segments.next().await? {
+                let read = self.receive_segment(&author, &segment.listed.key, &segment.envelopes)?;
+                if !read.is_resume_point && !read.is_stopped {
+                    let mut skipped = self.skipped_segments();
+                    if skipped.len() < MAX_SKIPPED_SEGMENTS {
+                        skipped.insert(segment.listed);
+                    }
+                }
                 if let Some(error) = read.local_failure {
                     local_failure.get_or_insert(error);
                 }
@@ -46,9 +78,19 @@ impl Workspace {
             if refetched.insert((author, next_seq)) {
                 warn!("op {next_seq} from {author} went missing; reading their history again");
                 state.store.forget_cursor(&author)?;
+                let author_prefix = format!("ops/{}/", member_id(&author));
+                self.skipped_segments()
+                    .retain(|listed| !listed.key.starts_with(&author_prefix));
             }
         }
         Ok(())
+    }
+
+    fn skipped_segments(&self) -> std::sync::MutexGuard<'_, std::collections::HashSet<ListedObject>> {
+        self.inner
+            .skipped_segments
+            .lock()
+            .expect("skipped segments lock poisoned by an earlier panic")
     }
 
     /// Uploads our ops that aren't in the bucket yet, in as few segments as

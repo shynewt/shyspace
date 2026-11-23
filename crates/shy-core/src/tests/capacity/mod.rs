@@ -13,7 +13,7 @@
 //! printed, not asserted, because they depend on the machine.
 
 mod catch_up;
-mod counting_store;
+pub(super) mod counting_store;
 mod files;
 mod history;
 mod members;

@@ -54,34 +54,64 @@ const PARALLEL_SEGMENT_FETCHES: usize = 8;
 /// An author's segments, fetched ahead a few at a time.
 pub struct SegmentFetch {
     bucket: Bucket,
-    paths: std::vec::IntoIter<Path>,
-    in_flight: VecDeque<(Path, JoinHandle<Result<Option<Bytes>>>)>,
+    author: PublicKey,
+    listed: std::vec::IntoIter<ListedObject>,
+    in_flight: VecDeque<(ListedObject, JoinHandle<Result<Option<Bytes>>>)>,
+}
+
+/// An object's key and version, as a listing showed it.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ListedObject {
+    pub key: String,
+    /// Changes whenever the object is replaced.
+    pub version: String,
+}
+
+pub struct FetchedSegment {
+    pub listed: ListedObject,
+    pub envelopes: Vec<Envelope>,
 }
 
 impl SegmentFetch {
-    /// The next segment and its key, in order. An unreadable one comes back
-    /// empty, so one bad object can't block everything after it.
-    pub async fn next(&mut self) -> Result<Option<(String, Vec<Envelope>)>> {
+    /// Leaves out `objects` (by key and version); call before fetching starts.
+    pub fn without(mut self, objects: &std::collections::HashSet<ListedObject>) -> Self {
+        self.listed = std::mem::take(&mut self.listed)
+            .filter(|listed| !objects.contains(listed))
+            .collect::<Vec<_>>()
+            .into_iter();
+        self
+    }
+
+    /// The next segment, in order. An unreadable one, or one whose bytes
+    /// don't match the hash in its name, comes back empty, so one bad object
+    /// can't block everything after it.
+    pub async fn next(&mut self) -> Result<Option<FetchedSegment>> {
         while self.in_flight.len() < PARALLEL_SEGMENT_FETCHES {
-            let Some(path) = self.paths.next() else {
+            let Some(listed) = self.listed.next() else {
                 break;
             };
             let bucket = self.bucket.clone();
-            let fetched = path.clone();
-            let fetching = tokio::spawn(async move { bucket.get(&fetched).await });
-            self.in_flight.push_back((path, fetching));
+            let path = Path::from(listed.key.as_str());
+            let fetching = tokio::spawn(async move { bucket.get(&path).await });
+            self.in_flight.push_back((listed, fetching));
         }
-        let Some((path, fetching)) = self.in_flight.pop_front() else {
+        let Some((listed, fetching)) = self.in_flight.pop_front() else {
             return Ok(None);
         };
+        let path = &listed.key;
+        let named_hash = parse_segment_name(&self.author, path).and_then(|name| name.hash);
         let envelopes = match fetching.await.context("fetching a segment")?? {
+            Some(bytes) if named_hash.is_some_and(|hash| blake3::hash(&bytes) != hash) => {
+                warn!("skipping segment {path}: its bytes don't match its name");
+                Vec::new()
+            }
             Some(bytes) => postcard::from_bytes(&bytes).unwrap_or_else(|error| {
                 warn!("skipping unreadable segment {path}: {error}");
                 Vec::new()
             }),
             None => Vec::new(),
         };
-        Ok(Some((path.to_string(), envelopes)))
+        Ok(Some(FetchedSegment { listed, envelopes }))
     }
 }
 
@@ -277,6 +307,49 @@ pub fn fork_proof_path(author: &PublicKey, seq: u64, proof: &[u8]) -> String {
     )
 }
 
+/// What a segment's name says.
+#[derive(Debug, PartialEq)]
+pub struct SegmentName {
+    pub first: u64,
+    pub last: u64,
+    /// Newer names end in a hash of the segment's bytes.
+    pub hash: Option<blake3::Hash>,
+}
+
+/// Parses `key` if it is exactly a segment name of `author`'s:
+/// `ops/<author>/<first>-<last>`, both padded, optionally followed by
+/// `-<hash of the bytes, 64 lowercase hex digits>`.
+pub fn parse_segment_name(author: &PublicKey, key: &str) -> Option<SegmentName> {
+    let name = key.strip_prefix(&format!("ops/{}/", member_id(author)))?;
+    let mut parts = name.split('-');
+    let (first, last) = (parts.next()?, parts.next()?);
+    let hash = match parts.next() {
+        None => None,
+        Some(hex) => {
+            let is_lowercase_hex =
+                hex.len() == 64 && hex.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+            Some(blake3::Hash::from_hex(is_lowercase_hex.then_some(hex)?).ok()?)
+        }
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    let parse = |number: &str| {
+        let is_padded = number.len() == padded(0).len() && number.bytes().all(|byte| byte.is_ascii_digit());
+        is_padded.then(|| number.parse::<u64>().ok()).flatten()
+    };
+    let (first, last) = (parse(first)?, parse(last)?);
+    (first <= last).then_some(SegmentName { first, last, hash })
+}
+
+/// Changes whenever the object is replaced: an overwrite always changes the
+/// ETag, and stores without one still change the size or time.
+fn object_version(meta: &object_store::ObjectMeta) -> String {
+    meta.e_tag
+        .clone()
+        .unwrap_or_else(|| format!("{}@{}", meta.size, meta.last_modified))
+}
+
 fn segment_path(author: &PublicKey, first: u64, last: u64) -> Path {
     Path::from(format!(
         "ops/{}/{}-{}",
@@ -340,10 +413,24 @@ impl Bucket {
     /// Segments by `author` after `cursor`, fetched a few at a time and
     /// handed over in order, each with its key to resume from.
     pub async fn segments_after(&self, author: &PublicKey, cursor: Option<&str>) -> Result<SegmentFetch> {
-        let paths = self.list(&format!("ops/{}", member_id(author)), cursor).await?;
+        let prefix = Path::from(format!("ops/{}", member_id(author)));
+        let mut stream = match cursor {
+            Some(offset) => self.store.list_with_offset(Some(&prefix), &Path::from(offset)),
+            None => self.store.list(Some(&prefix)),
+        };
+        let mut listed = Vec::new();
+        while let Some(meta) = stream.next().await {
+            let meta = meta?;
+            listed.push(ListedObject {
+                key: meta.location.to_string(),
+                version: object_version(&meta),
+            });
+        }
+        listed.sort_by(|one, other| one.key.cmp(&other.key));
         Ok(SegmentFetch {
             bucket: self.clone(),
-            paths: paths.into_iter(),
+            author: *author,
+            listed: listed.into_iter(),
             in_flight: VecDeque::new(),
         })
     }
@@ -372,11 +459,7 @@ impl Bucket {
                 continue;
             };
             if let (Ok(author), Ok(seq)) = (parse_member_id(author), seq.parse()) {
-                // An overwrite always changes the ETag; stores without one
-                // still change the size or time.
-                let version = meta
-                    .e_tag
-                    .unwrap_or_else(|| format!("{}@{}", meta.size, meta.last_modified));
+                let version = object_version(&meta);
                 proofs.push(ListedProof {
                     author,
                     seq,
@@ -393,6 +476,11 @@ impl Bucket {
     #[cfg(test)]
     pub async fn put_raw(&self, path: &str, bytes: Vec<u8>) -> Result<()> {
         self.put(&Path::from(path), bytes).await
+    }
+
+    #[cfg(test)]
+    pub async fn delete_raw(&self, path: &str) -> Result<()> {
+        self.delete(&Path::from(path)).await
     }
 
     pub async fn fork_proof(&self, path: &str) -> Result<Option<Bytes>> {
@@ -615,6 +703,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_exact_segment_names_of_the_author_give_a_range() {
+        let alice = iroh::SecretKey::generate().public();
+        let bob = iroh::SecretKey::generate().public();
+        let real = segment_path(&alice, 3, 5).to_string();
+        let range = |author: &PublicKey, key: &str| {
+            parse_segment_name(author, key).map(|named| (named.first, named.last))
+        };
+        assert_eq!(range(&alice, &real), Some((3, 5)));
+        assert_eq!(range(&bob, &real), None, "someone else's prefix");
+
+        let alice_ops = format!("ops/{}", member_id(&alice));
+        let max = u64::MAX;
+        assert_eq!(
+            range(&alice, &format!("{alice_ops}/{}-{}", padded(max), padded(max))),
+            Some((max, max))
+        );
+        for junk in [
+            "z".to_owned(),
+            format!("{}-{}", "9".repeat(20), "9".repeat(20)),
+            format!("{}-{}", padded(5), padded(3)),
+            "3-5".to_owned(),
+            format!("{}-{}-extra", padded(3), padded(5)),
+            format!("+{}-{}", &padded(3)[1..], padded(5)),
+        ] {
+            assert_eq!(range(&alice, &format!("{alice_ops}/{junk}")), None, "{junk}");
+        }
+    }
+
+    /// Newer segment names may end in a hash of the segment's bytes; older
+    /// readers must already take them, so mixed versions keep working.
+    #[test]
+    fn segment_names_may_end_in_a_hash_of_their_bytes() {
+        let alice = iroh::SecretKey::generate().public();
+        let alice_ops = format!("ops/{}", member_id(&alice));
+        let hash = blake3::hash(b"segment bytes");
+        let range = format!("{}-{}", padded(3), padded(5));
+        let named = parse_segment_name(&alice, &format!("{alice_ops}/{range}-{}", hash.to_hex())).unwrap();
+        assert_eq!((named.first, named.last, named.hash), (3, 5, Some(hash)));
+        assert_eq!(
+            parse_segment_name(&alice, &format!("{alice_ops}/{range}"))
+                .unwrap()
+                .hash,
+            None
+        );
+
+        let upper = hash.to_hex().to_uppercase();
+        let short = &hash.to_hex()[..63];
+        for junk in [upper.as_str(), short, "", "not-hex"] {
+            assert!(
+                parse_segment_name(&alice, &format!("{alice_ops}/{range}-{junk}")).is_none(),
+                "{junk}"
+            );
+        }
+        assert!(parse_segment_name(&alice, &format!("{alice_ops}/{range}-{}-more", hash.to_hex())).is_none());
+    }
+
+    #[test]
     fn endpoints_get_a_scheme_and_bad_ones_are_refused() {
         let endpoint = |value: &str| {
             BucketConfig {
@@ -755,8 +900,8 @@ mod tests {
 
         let mut fetching = bucket.segments_after(&author, None).await.unwrap();
         let mut fetched = Vec::new();
-        while let Some((key, _)) = fetching.next().await.unwrap() {
-            fetched.push(key);
+        while let Some(segment) = fetching.next().await.unwrap() {
+            fetched.push(segment.listed.key);
         }
 
         assert_eq!(fetched, written);
