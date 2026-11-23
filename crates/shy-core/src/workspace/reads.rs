@@ -11,10 +11,33 @@ use crate::{
     ops::{Op, now_ms},
     pages, search,
     storage::{Reply, SearchFilters},
-    views::{Channel, LinkedMessage, Member, Message, MessageCursor, Page, SearchHit},
+    views::{
+        Channel, ChannelKind, LinkedMessage, Member, Message, MessageCursor, NotifyLevel, Page, SearchHit,
+        WorkspaceBadge,
+    },
 };
 
 impl Workspace {
+    /// What this workspace's rail icon shows, counted as its sidebar does.
+    pub fn badge(&self) -> Result<WorkspaceBadge> {
+        let mut badge = WorkspaceBadge {
+            workspace_id: self.workspace_id().to_owned(),
+            unread: false,
+            mentions: 0,
+        };
+        for channel in self.channels()? {
+            let is_muted = channel.notify == NotifyLevel::Nothing;
+            let mentions = match (channel.kind, is_muted) {
+                (_, true) => 0,
+                (ChannelKind::Dm, false) => channel.unread,
+                (_, false) => channel.unread_mentions,
+            };
+            badge.mentions = badge.mentions.saturating_add(mentions);
+            badge.unread |= mentions > 0 || (!is_muted && channel.unread > 0);
+        }
+        Ok(badge)
+    }
+
     pub fn channels(&self) -> Result<Vec<Channel>> {
         let state = self.state();
         let mut channels = state.store.channels()?;

@@ -180,6 +180,8 @@ pub(crate) struct Inner {
     pub confirmed_head_seq: std::sync::atomic::AtomicU64,
     /// The latest signed hint per author: (seq, head version).
     pub heard_hints: Mutex<std::collections::HashMap<PublicKey, (u64, String)>>,
+    /// Live, or checking the bucket only every few minutes in the background.
+    pub cadence: Mutex<crate::sync::Cadence>,
     /// What each author has in the bucket, for relaying ops that never got there.
     pub relays: Mutex<crate::sync::RelayState>,
     /// Fork proof objects in the bucket already looked at, by path, with the

@@ -10,6 +10,8 @@ use std::time::Duration;
 pub(super) const SHORT_WAIT: Duration = Duration::from_secs(8);
 /// The longest wait: how long a silent gossip split can go unnoticed.
 const LONGEST_WAIT: Duration = Duration::from_secs(60);
+/// The shortest wait of a workspace checking in the background.
+const BACKGROUND_WAIT: Duration = Duration::from_secs(5 * 60);
 /// The wall clock running this far ahead of the monotonic clock (which
 /// stops while the computer sleeps) means it slept.
 const SLEEP_GAP: Duration = Duration::from_secs(30);
@@ -46,6 +48,27 @@ impl Pacing {
     }
 }
 
+/// How often a workspace checks the bucket when nothing wakes it. One of
+/// several open in the app runs in the background once others were used
+/// more recently: gossip still delivers live and wakes a check at once,
+/// but the timer only checks every few minutes, so idle workspaces cost
+/// few requests.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Cadence {
+    #[default]
+    Live,
+    Background,
+}
+
+impl Cadence {
+    pub(super) fn stretch(self, wait: Duration) -> Duration {
+        match self {
+            Self::Live => wait,
+            Self::Background => wait.max(BACKGROUND_WAIT),
+        }
+    }
+}
+
 /// Whether the computer slept while we waited: the wall clock moved on
 /// much further than the monotonic one. A wall clock set back never counts.
 pub(super) fn has_slept(wall_elapsed: Duration, monotonic_elapsed: Duration) -> bool {
@@ -58,6 +81,15 @@ mod tests {
 
     fn seconds(waits: impl IntoIterator<Item = Duration>) -> Vec<u64> {
         waits.into_iter().map(|wait| wait.as_secs()).collect()
+    }
+
+    #[test]
+    fn a_workspace_in_the_background_checks_every_few_minutes() {
+        let mut pacing = Pacing::default();
+        let wait = pacing.after_check(true);
+
+        assert_eq!(Cadence::Live.stretch(wait), SHORT_WAIT);
+        assert_eq!(Cadence::Background.stretch(wait), BACKGROUND_WAIT);
     }
 
     #[test]

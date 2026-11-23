@@ -170,7 +170,7 @@ async fn a_move_cut_short_at_any_step_finishes_the_next_time() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn leaving_deletes_the_folder_and_its_key_but_never_an_open_workspace() {
+async fn leaving_closes_the_workspace_and_deletes_its_folder_and_key() {
     let device = Device::new();
     let workspaces = device.workspaces();
     let acme = workspaces
@@ -180,19 +180,145 @@ async fn leaving_deletes_the_folder_and_its_key_but_never_an_open_workspace() {
     let workspace_id = acme.workspace_id().to_owned();
     let folder = workspaces.folder(&workspace_id).unwrap();
 
-    assert!(workspaces.leave(&workspace_id).await.is_err(), "it is open");
-    drop(acme);
-    workspaces.leave(&workspace_id).await.unwrap();
-
-    assert!(!folder.path.exists());
     assert!(
-        !device
-            .root
-            .path()
-            .join(format!("keys/{workspace_id}.key"))
-            .exists()
+        workspaces.leave(&workspace_id).await.is_err(),
+        "still open elsewhere (here, the handle the test holds)"
     );
-    assert!(names(&workspaces).is_empty());
+    drop(acme);
+    let acme = workspaces
+        .create("Acme 2", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap();
+    let second_id = acme.workspace_id().to_owned();
+    drop(acme);
+    workspaces.leave(&second_id).await.unwrap();
+
+    assert!(!workspaces.folder(&second_id).unwrap().path.exists());
+    assert!(!device.root.path().join(format!("keys/{second_id}.key")).exists());
+    assert!(folder.path.exists(), "the first is untouched");
+    assert_eq!(names(&workspaces), ["Acme"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn leaving_the_selected_workspace_selects_the_one_used_before() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap()
+        .workspace_id()
+        .to_owned();
+    let beta = workspaces
+        .create("Beta", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap()
+        .workspace_id()
+        .to_owned();
+    assert_eq!(workspaces.selected().unwrap().workspace_id(), beta);
+
+    workspaces.leave(&beta).await.unwrap();
+
+    assert_eq!(workspaces.selected().unwrap().workspace_id(), acme);
+}
+
+/// Every workspace stays open, gossip delivering live; only the most
+/// recently used check the bucket at full pace, also after a restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_most_recently_used_workspaces_run_live() {
+    use crate::{sync::Cadence, workspaces::LIVE_WORKSPACES};
+    let device = Device::new();
+    let mut ids = Vec::new();
+    {
+        let workspaces = device.workspaces();
+        for number in 0..LIVE_WORKSPACES + 2 {
+            let workspace = workspaces
+                .create(
+                    &format!("W{number}"),
+                    profile(),
+                    test_bucket_config(),
+                    Networking::Offline,
+                )
+                .await
+                .unwrap();
+            ids.push(workspace.workspace_id().to_owned());
+        }
+        workspaces.select(&ids[0]).unwrap();
+        let live: Vec<bool> = workspaces
+            .rail()
+            .unwrap()
+            .iter()
+            .map(|item| item.is_live)
+            .collect();
+        // W0 was just used, then W6 back to W3; W1 and W2 least recently.
+        assert_eq!(live, [true, false, false, true, true, true, true]);
+    }
+
+    let workspaces = device.workspaces();
+    assert!(
+        workspaces
+            .open_all(|| Networking::Offline.into())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    assert_eq!(workspaces.selected().unwrap().workspace_id(), ids[0]);
+    let cadence_of = |id: &str| workspaces.find(id).unwrap().cadence();
+    assert_eq!(cadence_of(&ids[0]), Cadence::Live);
+    assert_eq!(cadence_of(&ids[1]), Cadence::Background);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn muting_a_workspace_or_pausing_all_holds_its_notifications() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap()
+        .workspace_id()
+        .to_owned();
+    assert!(workspaces.may_notify(&acme).unwrap());
+
+    workspaces.mute(&acme).unwrap();
+    assert!(!workspaces.may_notify(&acme).unwrap());
+    assert!(workspaces.rail().unwrap()[0].is_muted);
+    workspaces.unmute(&acme).unwrap();
+
+    let now = crate::ops::now_ms().unwrap();
+    workspaces.pause_notifications(now + 60_000).unwrap();
+    assert!(!workspaces.may_notify(&acme).unwrap());
+    workspaces.pause_notifications(now - 1).unwrap();
+    assert!(workspaces.may_notify(&acme).unwrap(), "a pause that ran out");
+    assert_eq!(workspaces.notifications_paused().unwrap(), None);
+}
+
+/// The rail's badge counts what the workspace's sidebar does: mentions,
+/// and every unread message in a DM that isn't muted.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_badge_counts_what_its_sidebar_does() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "no mention here", None).unwrap();
+    bob.send_message(
+        &general,
+        &format!("[@Ada](shy://member/{}) look", admin.my_id()),
+        None,
+    )
+    .unwrap();
+    let dm = bob.open_dm(&[admin.my_id()]).unwrap();
+    bob.send_message(&dm, "just for you", None).unwrap();
+    sync_all(&[&bob, &admin]).await;
+
+    let badge = admin.badge().unwrap();
+    assert!(badge.unread);
+    assert_eq!(badge.mentions, 2, "one mention and one DM message");
+
+    admin
+        .set_notify_level(&dm, crate::views::NotifyLevel::Nothing)
+        .unwrap();
+    assert_eq!(admin.badge().unwrap().mentions, 1, "a muted DM counts nothing");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -18,6 +18,7 @@ pub(super) mod counting_store;
 mod files;
 mod history;
 mod members;
+mod open_workspaces;
 mod pages;
 mod provider_run;
 

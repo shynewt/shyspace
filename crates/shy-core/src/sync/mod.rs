@@ -7,6 +7,7 @@ mod forks;
 mod gaps;
 mod heads;
 mod pacing;
+pub use pacing::Cadence;
 mod packing;
 mod peers;
 mod receive;
@@ -220,7 +221,7 @@ impl Workspace {
                 if syncer.status().removed {
                     break;
                 }
-                let wait = pacing.after_check(has_found_new);
+                let wait = syncer.cadence().stretch(pacing.after_check(has_found_new));
                 is_sweep_due = false;
                 match syncer.wait_for_next_check(wait, &mut stopped).await {
                     NextCheck::Due => {}
@@ -323,6 +324,25 @@ impl Workspace {
             .last_slow_duties
             .lock()
             .expect("slow duties lock poisoned by an earlier panic") = None;
+    }
+
+    /// Runs this workspace live or in the background. Going live checks at once.
+    pub fn set_cadence(&self, cadence: Cadence) {
+        let previous = std::mem::replace(&mut *self.cadence_lock(), cadence);
+        if previous != cadence && cadence == Cadence::Live {
+            self.inner.wake.notify_one();
+        }
+    }
+
+    pub fn cadence(&self) -> Cadence {
+        *self.cadence_lock()
+    }
+
+    fn cadence_lock(&self) -> std::sync::MutexGuard<'_, Cadence> {
+        self.inner
+            .cadence
+            .lock()
+            .expect("cadence lock poisoned by an earlier panic")
     }
 
     pub(crate) fn mark_removed(&self) {

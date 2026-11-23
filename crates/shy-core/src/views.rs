@@ -359,6 +359,30 @@ pub struct StorageSettings {
     pub recovery_snapshot_limit: u64,
 }
 
+/// A workspace on this device, as the workspace rail shows it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WorkspaceItem {
+    pub workspace_id: String,
+    pub name: String,
+    /// The workspace's picture; `None` shows a letter tile.
+    pub icon: Option<String>,
+    /// Checking the bucket at full pace (one of the most recently used);
+    /// the others check every few minutes, though gossip still delivers live.
+    pub is_live: bool,
+    /// Muted on this device: no notifications from it.
+    pub is_muted: bool,
+}
+
+/// What a workspace's rail icon shows: the same counts as its sidebar.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WorkspaceBadge {
+    pub workspace_id: String,
+    /// Something unread outside muted channels, or any mention.
+    pub unread: bool,
+    /// Mentions of you, plus unread messages in DMs that aren't muted.
+    pub mentions: u32,
+}
+
 /// A change of bucket key under way, after a member was removed (they keep
 /// the old key until it is deleted at the provider). Shown to the admin only.
 #[derive(Debug, Clone, Serialize, PartialEq)]
