@@ -130,6 +130,10 @@ impl Store {
     }
 
     /// Runs `work` atomically: either everything it wrote is kept, or nothing.
+    pub(crate) fn is_in_transaction(&self) -> bool {
+        !self.db.is_autocommit()
+    }
+
     /// Inside a transaction already, `work` runs in a savepoint of it.
     pub fn atomically<T>(&self, work: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
         if !self.db.is_autocommit() {
@@ -150,6 +154,9 @@ impl Store {
                 self.db.execute_batch("RELEASE work")?;
                 Ok(value)
             }
+            // SQLite may have given up the whole transaction itself (a full
+            // disk, say); then there's no savepoint left to go back to.
+            Err(error) if self.db.is_autocommit() => Err(error),
             Err(error) => {
                 self.db.execute_batch("ROLLBACK TO work; RELEASE work")?;
                 Err(error)
@@ -196,4 +203,30 @@ fn to_public_key(bytes: Vec<u8>) -> Result<PublicKey> {
         .try_into()
         .map_err(|_| anyhow::anyhow!("stored member id is not 32 bytes"))?;
     Ok(PublicKey::from_bytes(&bytes)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failing_step_inside_a_transaction_undoes_only_its_own_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db"), TEST_DB_KEY).unwrap();
+
+        store
+            .atomically(|outer| {
+                outer.set_meta("kept", b"yes")?;
+                let inner = outer.atomically(|inner| -> Result<()> {
+                    inner.set_meta("undone", b"yes")?;
+                    anyhow::bail!("this step fails")
+                });
+                assert!(inner.is_err());
+                outer.set_meta("also kept", b"yes")
+            })
+            .unwrap();
+
+        assert!(store.meta("kept").unwrap().is_some() && store.meta("also kept").unwrap().is_some());
+        assert_eq!(store.meta("undone").unwrap(), None);
+    }
 }

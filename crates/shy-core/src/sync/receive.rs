@@ -42,6 +42,10 @@ impl std::fmt::Display for NotKept {
     }
 }
 
+/// How many downloaded ops share one transaction: few enough that the
+/// state lock is let go often, many enough to save most disk syncs.
+const OPS_PER_TRANSACTION: usize = 500;
+
 /// What applying a downloaded segment found.
 #[derive(Default)]
 pub(super) struct SegmentRead {
@@ -90,56 +94,74 @@ impl Workspace {
         })
     }
 
-    /// Applies one downloaded segment of `author`'s ops in a single
-    /// transaction, so it costs one disk sync rather than one per op. Each op
-    /// still applies on its own (a savepoint): one that breaks a rule or fails
-    /// here is skipped or kept for later as when received alone. The cursor
-    /// moves past the segment in the same transaction, so if saving fails,
-    /// nothing of it stays and the next pull reads it again.
+    /// Applies one downloaded segment of `author`'s ops, a batch at a time in
+    /// one transaction each, so it costs a disk sync per batch rather than per
+    /// op, while the state lock is let go between batches. Each op still
+    /// applies on its own (a savepoint): one that breaks a rule or fails here
+    /// is skipped or kept for later as when received alone. The cursor moves
+    /// past the segment with the last batch, so if saving fails, the next
+    /// pull reads the segment again; ops already saved are then recognised.
     pub(super) fn receive_segment(
         &self,
         author: &PublicKey,
         key: &str,
         envelopes: &[Envelope],
     ) -> Result<SegmentRead> {
-        let state = self.state();
-        let (read, changes) = state.store.atomically(|store| {
-            let mut read = SegmentRead::default();
-            let mut changes = Vec::new();
-            for envelope in envelopes {
-                if envelope.author != *author {
-                    warn!("segment {key} contains an op by someone else; skipping it");
-                    continue;
-                }
-                match self.receive_locked(&state, envelope) {
-                    Ok(more) => changes.extend(more),
-                    Err(error) if error.downcast_ref::<NotKept>().is_some() => {
-                        // The cursor stays before this segment, so the next
-                        // pull reads the op again.
-                        read.local_failure.get_or_insert(error);
-                        read.is_stopped = true;
-                        return Ok((read, changes));
+        let mut read = SegmentRead::default();
+        let mut batches: Vec<&[Envelope]> = envelopes.chunks(OPS_PER_TRANSACTION).collect();
+        if batches.is_empty() {
+            batches.push(&[]);
+        }
+        let last = batches.len() - 1;
+        for (index, batch) in batches.into_iter().enumerate() {
+            let state = self.state();
+            let changes = state.store.atomically(|store| {
+                let mut changes = Vec::new();
+                for envelope in batch {
+                    if envelope.author != *author {
+                        warn!("segment {key} contains an op by someone else; skipping it");
+                        continue;
                     }
-                    Err(error) if error.downcast_ref::<LocalFailure>().is_some() => {
-                        read.local_failure.get_or_insert(error);
+                    let received = self.receive_locked(&state, envelope);
+                    ensure!(
+                        store.is_in_transaction(),
+                        "the database gave up the segment's transaction; it is read again"
+                    );
+                    match received {
+                        Ok(more) => changes.extend(more),
+                        Err(error) if error.downcast_ref::<NotKept>().is_some() => {
+                            // The cursor stays before this segment, so the next
+                            // pull reads the op again.
+                            read.local_failure.get_or_insert(error);
+                            read.is_stopped = true;
+                            return Ok(changes);
+                        }
+                        Err(error) if error.downcast_ref::<LocalFailure>().is_some() => {
+                            read.local_failure.get_or_insert(error);
+                        }
+                        Err(error) => warn!("dropping op from {key}: {error:#}"),
                     }
-                    Err(error) => warn!("dropping op from {key}: {error:#}"),
                 }
+                if index == last {
+                    store.set_cursor(author, key)?;
+                    #[cfg(test)]
+                    if self
+                        .inner
+                        .fail_segment_save
+                        .swap(false, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        bail!("a simulated crash while saving a segment");
+                    }
+                }
+                Ok(changes)
+            })?;
+            drop(state);
+            for change in changes {
+                self.emit(change);
             }
-            store.set_cursor(author, key)?;
-            #[cfg(test)]
-            if self
-                .inner
-                .fail_segment_save
-                .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                bail!("a simulated crash while saving a segment");
+            if read.is_stopped {
+                break;
             }
-            Ok((read, changes))
-        })?;
-        drop(state);
-        for change in changes {
-            self.emit(change);
         }
         Ok(read)
     }

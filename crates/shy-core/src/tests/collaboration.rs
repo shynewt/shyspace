@@ -576,3 +576,72 @@ async fn writes_go_up_while_a_catch_up_is_still_reading() {
     assert!(went_up, "the message went up while the pull was still reading");
     admin.shutdown().await.unwrap();
 }
+
+/// An op that writes before it fails a rule (a damaged page update first
+/// adds its page) leaves nothing behind in a downloaded segment either.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rule_broken_halfway_leaves_nothing_in_a_downloaded_segment() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mut forger = Forger::new(&bob);
+    let message = |text: &str| crate::ops::Op::Message {
+        id: crate::ops::new_owned_id(&bob.me()),
+        channel: general.clone(),
+        text: text.into(),
+        reply_to: None,
+    };
+    let page = crate::ops::new_owned_id(&bob.me());
+    let segment = [
+        forger.seal(message("before")),
+        forger.seal(crate::ops::Op::DocUpdate {
+            page: page.clone(),
+            update: b"not a page update".to_vec(),
+        }),
+        forger.seal(message("after")),
+    ];
+    bucket.put_segment(&segment).await.unwrap();
+
+    admin.sync().await;
+
+    assert_eq!(
+        admin.state().store.count_where("pages", "id", &page),
+        0,
+        "no page row stayed"
+    );
+    let texts = texts_in(&admin, &general);
+    assert!(texts.contains(&"before".to_string()) && texts.contains(&"after".to_string()));
+}
+
+/// A long segment is saved a batch at a time, letting go of the state
+/// between batches. If its last batch fails, the batches already saved stay,
+/// and reading the segment again adds only the rest.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_long_segment_is_saved_in_batches_and_finished_when_read_again() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mut forger = Forger::new(&bob);
+    let segment: Vec<_> = (0..1_200)
+        .map(|number| {
+            forger.seal(crate::ops::Op::Message {
+                id: crate::ops::new_owned_id(&bob.me()),
+                channel: general.clone(),
+                text: format!("number {number}"),
+                reply_to: None,
+            })
+        })
+        .collect();
+    bucket.put_segment(&segment).await.unwrap();
+    let applied = |admin: &Workspace| admin.state().store.next_seq(&bob.me()).unwrap();
+    let before = applied(&admin);
+
+    admin
+        .inner
+        .fail_segment_save
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.sync().await;
+    assert_eq!(applied(&admin), before + 1_000, "the two full batches stayed");
+
+    admin.sync().await;
+    assert_eq!(applied(&admin), before + 1_200);
+    assert_eq!(admin.status().error, None);
+}
