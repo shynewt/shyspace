@@ -8,6 +8,7 @@ import { createPortal } from "react-dom";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import { api, onChange, onFilesDropped, type PageEditorSession } from "../../lib/api";
+import { saveBeforeSwitch } from "../../lib/beforeSwitch";
 import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
 import { activeDropTarget, addDropTarget, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
@@ -133,9 +134,16 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
       hasStopped = true;
       restartRef.current();
     };
+    // Waiting for everything typed so far to be sent, before switching workspace.
+    let whenSent: (() => void)[] = [];
+    const settle = () => {
+      if (isSending || (pending.length > 0 && !hasStopped && session)) return;
+      for (const resolve of whenSent) resolve();
+      whenSent = [];
+    };
     const flush = () => {
       timer = undefined;
-      if (pending.length === 0 || isSending || hasStopped || !session) return;
+      if (pending.length === 0 || isSending || hasStopped || !session) return settle();
       // Yjs picks a new client id when a remote update uses this doc's own;
       // edits under it would be refused, so start over with a new session.
       if (doc.clientID !== session.client_id) {
@@ -156,11 +164,19 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
           flush();
         },
         (error: unknown) => {
+          isSending = false;
           reportError(error);
           startOver();
+          settle();
         },
       );
     };
+    const stopSavingBeforeSwitch = saveBeforeSwitch(() => {
+      if (timer) clearTimeout(timer);
+      const sent = new Promise<void>((resolve) => whenSent.push(resolve));
+      flush();
+      return sent;
+    });
     let created: EditorView | undefined;
     // Restarting drops the cursor and undo history, so it waits until you're
     // not in the editor and nothing is being saved.
@@ -270,6 +286,7 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
 
     return () => {
       disposed = true;
+      stopSavingBeforeSwitch();
       unsubscribe();
       if (timer) clearTimeout(timer);
       clearTimeout(renewal);

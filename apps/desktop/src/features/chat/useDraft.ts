@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
+import { saveBeforeSwitch } from "../../lib/beforeSwitch";
 import { reportError } from "../../lib/toast";
 
 const SAVE_DELAY_MS = 400;
@@ -40,6 +41,8 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
     if (text === saved.current) return;
     isDirty.current = true;
     const timer = setTimeout(() => {
+      // Already saved, before switching workspace.
+      if (!isDirty.current) return;
       saved.current = text;
       isDirty.current = false;
       api.setDraft(target, text).catch(reportError);
@@ -51,6 +54,17 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
     () => () => {
       if (isDirty.current) api.setDraft(target, latest.current.text).catch(reportError);
     },
+    [target],
+  );
+
+  useEffect(
+    () =>
+      saveBeforeSwitch(async () => {
+        if (!isDirty.current) return;
+        isDirty.current = false;
+        saved.current = latest.current.text;
+        await api.setDraft(target, latest.current.text).catch(reportError);
+      }),
     [target],
   );
 }

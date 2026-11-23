@@ -1,5 +1,12 @@
 import { expect, type Page, test } from "@playwright/test";
 
+declare global {
+  interface Window {
+    /** The commands the app sent, in order, once a test starts recording. */
+    commandsSent?: string[];
+  }
+}
+
 function rail(page: Page) {
   return page.getByRole("navigation", { name: "Workspaces" });
 }
@@ -135,4 +142,63 @@ test("a leave that fails says why and keeps the workspace", async ({ page }) => 
   await expect(confirm).toBeVisible();
   await confirm.getByRole("button", { name: "Cancel" }).click();
   await expect(rail(page).getByRole("button", { name: /^Team/ })).toBeVisible();
+});
+
+/** Records the commands the app sends, in order, from now on. */
+async function recordCommands(page: Page) {
+  await page.evaluate(() => {
+    const answer = window.fake.handle.bind(window.fake);
+    window.commandsSent = [];
+    window.fake.handle = (command, args) => {
+      window.commandsSent?.push(command);
+      return answer(command, args);
+    };
+  });
+}
+
+/** Whether `first` was sent before `then`, both at least once. */
+function sentBefore(page: Page, first: string, then: string) {
+  return page.evaluate(
+    ([first, then]) => {
+      const sent = window.commandsSent ?? [];
+      const firstAt = sent.indexOf(first);
+      const thenAt = sent.indexOf(then);
+      return firstAt !== -1 && thenAt !== -1 && firstAt < thenAt;
+    },
+    [first, then],
+  );
+}
+
+test("a draft typed just before switching is saved in its own workspace first", async ({ page }) => {
+  await openApp(page);
+  await addTeam(page);
+  await recordCommands(page);
+  await page.getByLabel("Message #general").fill("half a thought");
+  await page.keyboard.press("Control+2");
+  await expect(rail(page).getByRole("button", { name: /^Team/ })).toHaveAttribute("aria-current", "page");
+  expect(await sentBefore(page, "set_draft", "select_workspace")).toBe(true);
+});
+
+test("page typing just before switching is saved in its own workspace first", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => window.fake.seedPage("Plans", "Start"));
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Plans", exact: true }).click();
+  await addTeam(page);
+  await recordCommands(page);
+  await page.locator(".cm-content").click();
+  await page.keyboard.type(" more");
+  await page.keyboard.press("Control+2");
+  await expect(rail(page).getByRole("button", { name: /^Team/ })).toHaveAttribute("aria-current", "page");
+  expect(await sentBefore(page, "apply_doc_update", "select_workspace")).toBe(true);
+});
+
+test("what you read just before switching is saved in its own workspace first", async ({ page }) => {
+  await openApp(page);
+  await addTeam(page);
+  await recordCommands(page);
+  await page.evaluate(() => window.fake.receiveMessage(window.fake.addMember("Grace"), "general", "Fresh news"));
+  await expect(page.getByText("Fresh news")).toBeVisible();
+  await page.keyboard.press("Control+2");
+  await expect(rail(page).getByRole("button", { name: /^Team/ })).toHaveAttribute("aria-current", "page");
+  expect(await sentBefore(page, "mark_read", "select_workspace")).toBe(true);
 });

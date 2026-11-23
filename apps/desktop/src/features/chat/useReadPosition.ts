@@ -1,5 +1,6 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { api, type Message, type MessageCursor } from "../../lib/api";
+import { saveBeforeSwitch } from "../../lib/beforeSwitch";
 import { newestMessageEndingInView } from "../../lib/messageList";
 import { reportError } from "../../lib/toast";
 
@@ -66,15 +67,15 @@ export function useReadPosition({
     setReadCursor(cursor);
   }, []);
 
-  const flush = useCallback(() => {
+  const flush = useCallback((): Promise<void> => {
     clearTimeout(timer.current);
     timer.current = undefined;
     const message = unsaved.current;
-    if (!message) return;
+    if (!message) return Promise.resolve();
     unsaved.current = null;
     const cursor = cursorOf(message);
     sentPositions.set(key, cursor);
-    latest.current.save(message.id).then(
+    return latest.current.save(message.id).then(
       () => {
         if (!saved.current || isAfter(cursor, saved.current)) saved.current = cursor;
       },
@@ -140,6 +141,8 @@ export function useReadPosition({
     if (isLooking) markSeen();
     else flush();
   }, [isLooking, markSeen, flush]);
+
+  useEffect(() => saveBeforeSwitch(flush), [flush]);
 
   useEffect(() => {
     window.addEventListener("pagehide", flush);

@@ -8,6 +8,7 @@ import {
   type WorkspaceBadge,
   type WorkspaceItem,
 } from "../../lib/api";
+import { saveEverythingBeforeSwitch } from "../../lib/beforeSwitch";
 import { reportError } from "../../lib/toast";
 
 type WorkspacesValue = {
@@ -89,10 +90,12 @@ export function WorkspacesProvider({
   const select = useCallback(
     (workspaceId: string, target?: AlertTarget) => {
       if (workspaceId === session.workspace_id) return;
-      api.selectWorkspace(workspaceId).then((next) => {
-        pendingTarget = target ?? null;
-        onSession(next);
-      }, reportError);
+      saveEverythingBeforeSwitch()
+        .then(() => api.selectWorkspace(workspaceId))
+        .then((next) => {
+          pendingTarget = target ?? null;
+          onSession(next);
+        }, reportError);
     },
     [session.workspace_id, onSession],
   );
