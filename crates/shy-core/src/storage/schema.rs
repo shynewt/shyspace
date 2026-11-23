@@ -1,5 +1,5 @@
 //! The database schema, as a list of migrations: a store's `user_version`
-//! is how many it has had. Stored data is kept from the internal pilot on,
+//! is how many it has had. Stored data is kept from v0.1.0 on,
 //! so a change is a new migration at the end (additive), never an edit to
 //! one already released. A store from a newer app is refused ("update
 //! shyspace"): everyone moves to new versions together. Migrations run in
@@ -8,7 +8,7 @@
 use anyhow::{Context, Result, ensure};
 use rusqlite::Connection;
 
-/// Every migration in order; the first is the schema as of the pilot.
+/// Every migration in order; the first is the schema as of v0.1.0.
 const MIGRATIONS: &[&str] = &[FIRST_SCHEMA];
 
 const FIRST_SCHEMA: &str = r#"
@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(version(&db), 2, "left as it was");
     }
 
-    /// Pilot stores hold this number or a count: a fingerprint computed
+    /// Stores made before migrations hold this number or a count: a fingerprint computed
     /// from the code alone would follow an edit to the first migration and
     /// stop matching them.
     #[test]

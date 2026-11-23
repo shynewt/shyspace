@@ -115,8 +115,8 @@ jobs:
           args: --features vendored-openssl ${{ github.ref_type == 'tag' && '--config src-tauri/tauri.release.conf.json' || '' }}
           # Empty without a tag, so the action only keeps workflow artifacts.
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: shyspace pilot ${{ github.ref_name }}
-          releaseBody: "Pilot build. Installed apps update themselves once this is published. macOS: the app isn't signed with an Apple identity; drag it to Applications, open it once, and if macOS refuses, allow it in System Settings › Privacy & Security › Open Anyway."
+          releaseName: shyspace ${{ github.ref_name }}
+          releaseBody: "Installed apps update themselves once this is published. macOS: the app isn't signed with an Apple identity; drag it to Applications, open it once, and if macOS refuses, allow it in System Settings › Privacy & Security › Open Anyway."
           # A draft until it's looked over; published as a normal release, since apps only see the latest one.
           releaseDraft: true
           prerelease: false

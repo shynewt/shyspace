@@ -28,7 +28,7 @@ pub(crate) fn header_bytes(author: &PublicKey, seq: u64, epoch: u64) -> Vec<u8> 
 /// The format every op body is signed in, written before the op itself so
 /// any version can read it. Raised whenever how ops are encoded changes;
 /// logs and the bucket keep older ops for good (stored data is kept from
-/// the pilot on), so a new format must keep reading every older one.
+/// v0.1.0 on), so a new format must keep reading every older one.
 pub const OP_FORMAT: u32 = 1;
 
 /// A validly signed op in a newer format than this version's: a teammate's
