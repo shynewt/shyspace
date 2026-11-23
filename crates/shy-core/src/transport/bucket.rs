@@ -669,9 +669,11 @@ impl Bucket {
         self.get(&Path::from(RECOVERY_SNAPSHOT)).await
     }
 
-    /// Writes, reads back and deletes a small object, so wrong credentials,
-    /// bucket names or endpoints fail now with a clear error rather than
-    /// later in the middle of something else.
+    /// Writes, reads back and deletes a small object, then writes and
+    /// deletes one create-only, as messages are written, so wrong
+    /// credentials, bucket names, endpoints or a provider without
+    /// create-only writes fail now with a clear error rather than later in
+    /// the middle of something else.
     pub async fn check_access(&self) -> Result<()> {
         let path = Path::from(ACCESS_CHECK);
         let probe = rand::random::<[u8; 16]>().to_vec();
@@ -683,7 +685,17 @@ impl Bucket {
             read.as_deref() == Some(probe.as_slice()),
             "the bucket didn't return what was written"
         );
-        self.delete(&path).await.context("can't delete from the bucket")
+        self.delete(&path).await.context("can't delete from the bucket")?;
+        let created = Path::from(format!(
+            "{ACCESS_CHECK}-{}",
+            hex::encode(rand::random::<[u8; 8]>())
+        ));
+        self.put_new(&created, probe).await.context(
+            "the bucket refuses create-only writes (If-None-Match), which messages are written with",
+        )?;
+        self.delete(&created)
+            .await
+            .context("can't delete from the bucket")
     }
 
     /// Whether deleted or overwritten data can be brought back, proved
@@ -1104,6 +1116,90 @@ mod tests {
     async fn access_check_round_trips_through_the_bucket() {
         let bucket = Bucket::without_signing(Arc::new(object_store::memory::InMemory::new()));
         bucket.check_access().await.unwrap();
+    }
+
+    /// A provider that doesn't support create-only writes (If-None-Match).
+    #[derive(Debug, Default)]
+    struct CreateRefusingStore(object_store::memory::InMemory);
+
+    impl std::fmt::Display for CreateRefusingStore {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("create-refusing store")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ObjectStore for CreateRefusingStore {
+        async fn put_opts(
+            &self,
+            location: &Path,
+            payload: PutPayload,
+            opts: object_store::PutOptions,
+        ) -> object_store::Result<object_store::PutResult> {
+            if matches!(opts.mode, object_store::PutMode::Create) {
+                return Err(object_store::Error::Generic {
+                    store: "create-refusing",
+                    source: "501 Not Implemented: If-None-Match".into(),
+                });
+            }
+            self.0.put_opts(location, payload, opts).await
+        }
+        async fn put_multipart_opts(
+            &self,
+            location: &Path,
+            opts: object_store::PutMultipartOptions,
+        ) -> object_store::Result<Box<dyn object_store::MultipartUpload>> {
+            self.0.put_multipart_opts(location, opts).await
+        }
+        async fn get_opts(
+            &self,
+            location: &Path,
+            options: object_store::GetOptions,
+        ) -> object_store::Result<object_store::GetResult> {
+            self.0.get_opts(location, options).await
+        }
+        fn delete_stream(
+            &self,
+            locations: futures_lite::stream::Boxed<object_store::Result<Path>>,
+        ) -> futures_lite::stream::Boxed<object_store::Result<Path>> {
+            self.0.delete_stream(locations)
+        }
+        fn list(
+            &self,
+            prefix: Option<&Path>,
+        ) -> futures_lite::stream::Boxed<object_store::Result<object_store::ObjectMeta>> {
+            self.0.list(prefix)
+        }
+        fn list_with_offset(
+            &self,
+            prefix: Option<&Path>,
+            offset: &Path,
+        ) -> futures_lite::stream::Boxed<object_store::Result<object_store::ObjectMeta>> {
+            self.0.list_with_offset(prefix, offset)
+        }
+        async fn list_with_delimiter(
+            &self,
+            prefix: Option<&Path>,
+        ) -> object_store::Result<object_store::ListResult> {
+            self.0.list_with_delimiter(prefix).await
+        }
+        async fn copy_opts(
+            &self,
+            from: &Path,
+            to: &Path,
+            options: object_store::CopyOptions,
+        ) -> object_store::Result<()> {
+            self.0.copy_opts(from, to, options).await
+        }
+    }
+
+    /// Messages are written create-only, so a bucket that can't do that
+    /// fails the check at setup, not at the first message.
+    #[tokio::test]
+    async fn access_check_fails_on_a_bucket_without_create_only_writes() {
+        let bucket = Bucket::without_signing(Arc::new(CreateRefusingStore::default()));
+        let error = bucket.check_access().await.unwrap_err();
+        assert!(format!("{error:#}").contains("create-only"), "{error:#}");
     }
 
     fn test_config() -> BucketConfig {
