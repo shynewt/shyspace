@@ -21,6 +21,8 @@ import {
   type ImageHost,
   type ImageProps,
   type ImageRange,
+  imageAt,
+  isImageSelected,
   MAX_IMAGE_WIDTH,
   selectedImage,
   setImageWidth,
@@ -301,7 +303,6 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
     if (members) view?.dispatch({ effects: setKnownMembers.of(new Set(members.map((member) => member.id))) });
   }, [view, members]);
 
-  const selected = view ? selectedImage(view.state) : null;
   const viewedFile = viewingFile ? filesById.get(viewingFile) : undefined;
   return (
     <div className="relative">
@@ -315,7 +316,7 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
               pageId={pageId}
               {...props}
               file={filesById.get(props.fileId)}
-              isSelected={selected !== null && isAt(view, element, selected)}
+              isSelected={isDrawnImageSelected(view, element)}
               isEditingCaption={captionEditing === element}
               onCaptionEditEnd={() => setCaptionEditing(null)}
             />,
@@ -381,6 +382,13 @@ function elementOf(
     if (isAt(view, element, image)) return element;
   }
   return null;
+}
+
+/** Whether the selection takes in the image this widget's element draws. */
+function isDrawnImageSelected(view: EditorView, element: HTMLElement): boolean {
+  if (!element.isConnected) return false;
+  const image = imageAt(view.state, view.posAtDOM(element));
+  return image !== null && isImageSelected(view.state, image);
 }
 
 /** Whether a widget's element draws `image`: its spot in the document falls inside the image's markdown. */

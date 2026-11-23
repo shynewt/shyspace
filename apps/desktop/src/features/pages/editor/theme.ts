@@ -138,7 +138,9 @@ const editorTheme = EditorView.theme({
   ".cm-md-page:hover": { backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent)" },
   ".cm-md-page-missing": { cursor: "default", color: "var(--text-muted)", backgroundColor: "var(--surface-2)" },
   ".cm-md-mention[role=button]": { cursor: "pointer" },
-  ".cm-page-image": { display: "block" },
+  // Opaque, so a selection running through an image tints only the text around it.
+  ".cm-page-image": { display: "block", backgroundColor: "var(--surface)" },
+  "&.cm-image-selected .cm-selectionLayer, &.cm-image-selected .cm-cursorLayer": { display: "none" },
   ".cm-upload": {
     display: "inline-flex",
     alignItems: "center",

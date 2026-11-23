@@ -5,7 +5,7 @@
  */
 import { syntaxTree } from "@codemirror/language";
 import { type EditorState, Facet } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import { escapeLinkText } from "../pageUploads";
 
 const FILE_IMAGE_URL = /^shy:\/\/file\/([0-9a-f]+)(#.*)?$/;
@@ -100,6 +100,18 @@ export function setImageCaption(view: EditorView, image: ImageRange, caption: st
     changes: { from: image.captionFrom, to: image.captionTo, insert: escapeLinkText(caption.trim()) },
     userEvent: "input.format",
   });
+}
+
+/** While the selection is exactly one image, its ring shows it: no text tint, no caret. */
+export const imageSelectionLook = EditorView.editorAttributes.compute(
+  ["selection"],
+  (state): Record<string, string> => (selectedImage(state) ? { class: "cm-image-selected" } : {}),
+);
+
+/** Whether the main selection takes in all of `image`. */
+export function isImageSelected(state: EditorState, image: ImageRange): boolean {
+  const selection = state.selection.main;
+  return !selection.empty && selection.from <= image.from && selection.to >= image.to;
 }
 
 /** What the page shows for an image; the screen that hosts the editor draws it. */

@@ -17,7 +17,7 @@ import {
 import { MOD_LABEL } from "../../../lib/shortcuts";
 import { CalloutLabelWidget } from "./callouts";
 import { fileIcon, messageIcon, pageIcon } from "./icons";
-import { type ImageHost, type ImageProps, imageHost } from "./images";
+import { type ImageHost, type ImageProps, imageHost, imageSelectionLook } from "./images";
 import { externalUrl, linkAt } from "./links";
 import { previewItems } from "./markdownPreview";
 import {
@@ -95,6 +95,7 @@ export function livePreview({
     knownMembers,
     fileOpener.of(onOpenFile),
     imageHost.of(images),
+    imageSelectionLook,
     pageOpener.of(onOpenPage),
     messageOpener.of(onOpenMessage),
     memberOpener.of(onOpenMember),

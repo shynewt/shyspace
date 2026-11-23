@@ -232,3 +232,22 @@ test("an image without a caption offers one only while selected", async ({ page 
   await page.keyboard.press("ArrowRight");
   await expect(addCaption).toHaveCount(0);
 });
+
+test("a selected image shows its ring, not the text selection's tint or caret", async ({ page }) => {
+  await pageWithImage(page, (id) => `Intro\n![Team photo](shy://file/${id})`);
+  await expect(page.locator(".cm-content").getByRole("img", { name: "Team photo" })).toBeVisible();
+  await selectImageOnSecondLine(page);
+
+  const frame = page.locator("[data-image-selected]");
+  await expect(frame).toHaveCount(1);
+  await expect(page.locator(".cm-selectionBackground").first()).toBeHidden();
+  await expect(page.locator(".cm-cursor").first()).toBeHidden();
+
+  // A selection running from the text above through the image keeps the text's tint.
+  await lines(page).first().click();
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Shift+End");
+  await expect(frame).toHaveCount(1);
+  await expect(page.locator(".cm-selectionBackground").first()).toBeVisible();
+});

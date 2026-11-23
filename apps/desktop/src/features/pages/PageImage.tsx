@@ -95,6 +95,7 @@ function ResizableImage({
 
   return (
     <div
+      data-image-selected={isSelected || undefined}
       className={cx("relative rounded-xl", isSelected && "ring-2 ring-accent")}
       style={{ width: shownWidth === null ? undefined : `${shownWidth}%`, maxWidth: "100%" }}
     >
