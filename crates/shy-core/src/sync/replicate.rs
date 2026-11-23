@@ -22,7 +22,8 @@ impl Workspace {
         let authors = self.state().store.everyone_ever()?;
         'authors: for author in authors {
             let cursor = self.state().store.cursor(&author)?;
-            for (key, envelopes) in self.bucket().segments_after(&author, cursor.as_deref()).await? {
+            let mut segments = self.bucket().segments_after(&author, cursor.as_deref()).await?;
+            while let Some((key, envelopes)) = segments.next().await? {
                 for envelope in envelopes {
                     if envelope.author != author {
                         warn!("segment {key} contains an op by someone else; skipping it");

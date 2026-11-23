@@ -11,7 +11,7 @@
 //!   recovery/snapshot                     the admin's encrypted recovery snapshot
 //!   files/<author>/<blob id>/<piece>      a shared file's encrypted pieces (see `blobs`)
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use bytes::Bytes;
@@ -25,6 +25,7 @@ use object_store::{
     signer::{Method, Signer},
 };
 use serde::{Deserialize, Serialize};
+use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::{
@@ -45,6 +46,53 @@ const MAX_OBJECT_SIZE: u64 = 32 * 1024 * 1024;
 
 /// The largest recovery snapshot restore reads.
 pub const MAX_RECOVERY_SNAPSHOT_BYTES: u64 = MAX_OBJECT_SIZE;
+
+/// How many segments one pull fetches at once: a newcomer reads a log's
+/// whole history, and each fetch takes a round trip to the bucket.
+const PARALLEL_SEGMENT_FETCHES: usize = 8;
+
+/// An author's segments, fetched ahead a few at a time.
+pub struct SegmentFetch {
+    bucket: Bucket,
+    paths: std::vec::IntoIter<Path>,
+    in_flight: VecDeque<(Path, JoinHandle<Result<Option<Bytes>>>)>,
+}
+
+impl SegmentFetch {
+    /// The next segment and its key, in order. An unreadable one comes back
+    /// empty, so one bad object can't block everything after it.
+    pub async fn next(&mut self) -> Result<Option<(String, Vec<Envelope>)>> {
+        while self.in_flight.len() < PARALLEL_SEGMENT_FETCHES {
+            let Some(path) = self.paths.next() else {
+                break;
+            };
+            let bucket = self.bucket.clone();
+            let fetched = path.clone();
+            let fetching = tokio::spawn(async move { bucket.get(&fetched).await });
+            self.in_flight.push_back((path, fetching));
+        }
+        let Some((path, fetching)) = self.in_flight.pop_front() else {
+            return Ok(None);
+        };
+        let envelopes = match fetching.await.context("fetching a segment")?? {
+            Some(bytes) => postcard::from_bytes(&bytes).unwrap_or_else(|error| {
+                warn!("skipping unreadable segment {path}: {error}");
+                Vec::new()
+            }),
+            None => Vec::new(),
+        };
+        Ok(Some((path.to_string(), envelopes)))
+    }
+}
+
+impl Drop for SegmentFetch {
+    /// A pull that stops early leaves nothing fetching in the background.
+    fn drop(&mut self) {
+        for (_, fetching) in &self.in_flight {
+            fetching.abort();
+        }
+    }
+}
 
 /// Splits a log's run of envelopes, in order, into segments that each stay
 /// under the size readers accept. A segment holds a count (at most 10 bytes)
@@ -289,26 +337,15 @@ impl Bucket {
         self.put(&path, postcard::to_stdvec(envelopes)?).await
     }
 
-    /// Segments by `author` after `cursor`, each with its key to resume
-    /// from. Unreadable segments come back empty so one bad object can't
-    /// block everything after it.
-    pub async fn segments_after(
-        &self,
-        author: &PublicKey,
-        cursor: Option<&str>,
-    ) -> Result<Vec<(String, Vec<Envelope>)>> {
-        let mut segments = Vec::new();
-        for path in self.list(&format!("ops/{}", member_id(author)), cursor).await? {
-            let envelopes = match self.get(&path).await? {
-                Some(bytes) => postcard::from_bytes(&bytes).unwrap_or_else(|error| {
-                    warn!("skipping unreadable segment {path}: {error}");
-                    Vec::new()
-                }),
-                None => Vec::new(),
-            };
-            segments.push((path.to_string(), envelopes));
-        }
-        Ok(segments)
+    /// Segments by `author` after `cursor`, fetched a few at a time and
+    /// handed over in order, each with its key to resume from.
+    pub async fn segments_after(&self, author: &PublicKey, cursor: Option<&str>) -> Result<SegmentFetch> {
+        let paths = self.list(&format!("ops/{}", member_id(author)), cursor).await?;
+        Ok(SegmentFetch {
+            bucket: self.clone(),
+            paths: paths.into_iter(),
+            in_flight: VecDeque::new(),
+        })
     }
 
     /// Stores proof that `author` signed two versions of op `seq`. The proof
@@ -614,6 +651,110 @@ mod tests {
         let printed = format!("{:?}", test_config());
         assert!(!printed.contains("very-secret-key"), "{printed}");
         assert!(printed.contains("AKIDEXAMPLE"));
+    }
+
+    /// Counts GETs in flight; each waits a little, so overlapping ones show.
+    #[derive(Debug, Default)]
+    struct SlowStore {
+        inner: object_store::memory::InMemory,
+        in_flight: std::sync::atomic::AtomicUsize,
+        most_in_flight: std::sync::atomic::AtomicUsize,
+    }
+
+    impl std::fmt::Display for SlowStore {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("slow test store")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ObjectStore for SlowStore {
+        async fn put_opts(
+            &self,
+            location: &Path,
+            payload: PutPayload,
+            opts: object_store::PutOptions,
+        ) -> object_store::Result<object_store::PutResult> {
+            self.inner.put_opts(location, payload, opts).await
+        }
+
+        async fn put_multipart_opts(
+            &self,
+            location: &Path,
+            opts: object_store::PutMultipartOptions,
+        ) -> object_store::Result<Box<dyn object_store::MultipartUpload>> {
+            self.inner.put_multipart_opts(location, opts).await
+        }
+
+        async fn get_opts(
+            &self,
+            location: &Path,
+            options: object_store::GetOptions,
+        ) -> object_store::Result<object_store::GetResult> {
+            use std::sync::atomic::Ordering;
+            let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most_in_flight.fetch_max(now, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let got = self.inner.get_opts(location, options).await;
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            got
+        }
+
+        fn delete_stream(
+            &self,
+            locations: futures_lite::stream::Boxed<object_store::Result<Path>>,
+        ) -> futures_lite::stream::Boxed<object_store::Result<Path>> {
+            self.inner.delete_stream(locations)
+        }
+
+        fn list(
+            &self,
+            prefix: Option<&Path>,
+        ) -> futures_lite::stream::Boxed<object_store::Result<object_store::ObjectMeta>> {
+            self.inner.list(prefix)
+        }
+
+        async fn list_with_delimiter(
+            &self,
+            prefix: Option<&Path>,
+        ) -> object_store::Result<object_store::ListResult> {
+            self.inner.list_with_delimiter(prefix).await
+        }
+
+        async fn copy_opts(
+            &self,
+            from: &Path,
+            to: &Path,
+            options: object_store::CopyOptions,
+        ) -> object_store::Result<()> {
+            self.inner.copy_opts(from, to, options).await
+        }
+    }
+
+    /// A newcomer reads an author's history segment by segment: several at
+    /// once, still handed over in order.
+    #[tokio::test]
+    async fn segments_are_fetched_several_at_a_time_in_order() {
+        let store = Arc::new(SlowStore::default());
+        let bucket = Bucket::without_signing(store.clone());
+        let author = iroh::SecretKey::generate().public();
+        let empty = postcard::to_stdvec(&Vec::<Envelope>::new()).unwrap();
+        let mut written = Vec::new();
+        for segment in 0..20 {
+            let path = segment_path(&author, segment * 10 + 1, segment * 10 + 10);
+            bucket.put(&path, empty.clone()).await.unwrap();
+            written.push(path.to_string());
+        }
+
+        let mut fetching = bucket.segments_after(&author, None).await.unwrap();
+        let mut fetched = Vec::new();
+        while let Some((key, _)) = fetching.next().await.unwrap() {
+            fetched.push(key);
+        }
+
+        assert_eq!(fetched, written);
+        let most = store.most_in_flight.load(std::sync::atomic::Ordering::SeqCst);
+        assert!((2..=PARALLEL_SEGMENT_FETCHES).contains(&most), "{most} at once");
     }
 
     #[tokio::test]
