@@ -29,6 +29,24 @@ test("the emoji button inserts at the cursor, replacing the selection", async ({
     .toContainEqual(expect.objectContaining({ text: "hello 🎉!" }));
 });
 
+test("a search typed while the emoji are still loading applies once they're there", async ({ page }) => {
+  let release = () => {};
+  const loaded = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(/emojibase-data/, async (route) => {
+    await loaded;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Insert emoji" }).first().click();
+  await expect(page.getByText("Loading emoji…")).toBeVisible();
+  await page.getByLabel("Search emoji").fill("rocket");
+
+  release();
+  await page.getByRole("gridcell", { name: "Rocket" }).click();
+  await expect(composer(page)).toHaveValue("🚀");
+});
+
 test("thread replies have the emoji button too", async ({ page }) => {
   await composer(page).fill("Release today?");
   await composer(page).press("Enter");
