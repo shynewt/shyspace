@@ -659,6 +659,7 @@ mod tests {
         inner: object_store::memory::InMemory,
         in_flight: std::sync::atomic::AtomicUsize,
         most_in_flight: std::sync::atomic::AtomicUsize,
+        started: std::sync::atomic::AtomicUsize,
     }
 
     impl std::fmt::Display for SlowStore {
@@ -694,7 +695,13 @@ mod tests {
             use std::sync::atomic::Ordering;
             let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             self.most_in_flight.fetch_max(now, Ordering::SeqCst);
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            // Earlier requests finish later, so handing them over in order
+            // can't come from the order they finish in.
+            let started = self.started.fetch_add(1, Ordering::SeqCst) as u64;
+            tokio::time::sleep(std::time::Duration::from_millis(
+                60u64.saturating_sub(started * 2),
+            ))
+            .await;
             let got = self.inner.get_opts(location, options).await;
             self.in_flight.fetch_sub(1, Ordering::SeqCst);
             got

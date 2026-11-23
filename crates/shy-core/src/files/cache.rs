@@ -35,25 +35,46 @@ pub struct BlobCache {
 /// every folder each time. Unknown until first needed, and again after a
 /// change it couldn't count.
 #[derive(Clone, Default)]
-pub struct CacheSize(Arc<Mutex<Option<u64>>>);
+pub struct CacheSize(Arc<Mutex<KeptSize>>);
+
+#[derive(Default)]
+struct KeptSize {
+    bytes: Option<u64>,
+    /// Counts changes, so a count taken while others wrote isn't trusted.
+    changes: u64,
+}
 
 impl CacheSize {
     fn known(&self) -> Option<u64> {
-        *self.lock()
+        self.lock().bytes
+    }
+
+    fn changes(&self) -> u64 {
+        self.lock().changes
     }
 
     fn set(&self, bytes: Option<u64>) {
-        *self.lock() = bytes;
+        self.lock().bytes = bytes;
+    }
+
+    /// Takes a full count as the size, unless the cache changed since
+    /// `changes_before`, when the count began; then the size is measured
+    /// again next time.
+    fn counted(&self, bytes: u64, changes_before: u64) {
+        let mut kept = self.lock();
+        kept.bytes = (kept.changes == changes_before).then_some(bytes);
     }
 
     /// Adds `added` and takes away `removed` bytes, if the size is known.
     fn change(&self, added: u64, removed: u64) {
-        if let Some(bytes) = self.lock().as_mut() {
+        let mut kept = self.lock();
+        kept.changes += 1;
+        if let Some(bytes) = kept.bytes.as_mut() {
             *bytes = (*bytes + added).saturating_sub(removed);
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<u64>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, KeptSize> {
         self.0
             .lock()
             .expect("cache size lock poisoned by an earlier panic")
@@ -169,6 +190,7 @@ impl BlobCache {
         if self.size.known().is_some_and(|bytes| bytes <= limit) {
             return Ok(());
         }
+        let changes_before = self.size.changes();
         let entries = match fs::read_dir(&self.root) {
             Ok(entries) => entries,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
@@ -196,13 +218,13 @@ impl BlobCache {
             }
             if path != kept {
                 if let Err(error) = fs::remove_dir_all(&path) {
-                    self.size.set(Some(total));
+                    self.size.counted(total, changes_before);
                     return Err(error).context("trimming the file cache");
                 }
                 total -= size;
             }
         }
-        self.size.set(Some(total));
+        self.size.counted(total, changes_before);
         Ok(())
     }
 }
@@ -307,42 +329,34 @@ mod tests {
         trimmed.unwrap();
     }
 
-    /// Each use makes a new cache value, sharing one kept size.
+    /// Each use makes a new cache value, sharing one kept size. Writes and
+    /// removals keep it right: if a removal weren't counted, the cache would
+    /// look over its limit, and trimming would read the unreadable folder.
+    #[cfg(unix)]
     #[test]
     fn the_kept_size_follows_writes_and_removals() {
+        use std::os::unix::fs::PermissionsExt;
+
         let folder = tempfile::tempdir().unwrap();
         let size = CacheSize::default();
         let cache = || BlobCache::limited(folder.path().to_owned(), 25, size.clone());
-        let third = "00000000000000000000000000000003";
-        let fourth = "00000000000000000000000000000004";
         let write = |blob_id: &str| {
             cache().write_chunk(&key(blob_id), 0, &[0; 10]).unwrap();
-            cache().touch(&key(blob_id)).unwrap();
-            cache().trim(&key(blob_id)).unwrap();
+            cache().trim(&key(blob_id))
         };
-        write(FIRST);
-        write(SECOND);
-        cache().forget(&key(FIRST)).unwrap();
-        write(third);
-        assert!(
-            cache().read_chunk(&key(SECOND), 0).unwrap().is_some(),
-            "20 bytes fit"
-        );
+        write(FIRST).unwrap();
+        write(SECOND).unwrap();
+        let unreadable = folder.path().join("unreadable");
+        fs::create_dir(&unreadable).unwrap();
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
 
-        let old = SystemTime::now() - std::time::Duration::from_secs(60);
-        fs::File::options()
-            .write(true)
-            .open(cache().blob_dir(&key(SECOND)).join(USED_MARKER))
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
-        write(fourth);
-        assert_eq!(
-            cache().read_chunk(&key(SECOND), 0).unwrap(),
-            None,
-            "30 bytes don't"
-        );
-        assert!(cache().read_chunk(&key(third), 0).unwrap().is_some());
+        cache().forget(&key(FIRST)).unwrap();
+        let within_limit = write("00000000000000000000000000000003");
+        let past_limit = write("00000000000000000000000000000004");
+
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
+        within_limit.unwrap();
+        assert!(past_limit.is_err(), "30 bytes are past the limit, so it counted");
     }
 
     #[test]
