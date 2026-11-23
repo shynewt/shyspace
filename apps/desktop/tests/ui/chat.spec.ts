@@ -252,3 +252,18 @@ test("messages out of time order get one divider per change of day, and no stray
   await expect(log.getByText("Today", { exact: true })).toHaveCount(2);
   await expect(log.getByText("Yesterday", { exact: true })).toHaveCount(1);
 });
+
+test("a message shows twenty reactions at most, and the rest on request", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "So many feelings");
+    for (let face = 0x1f600; face < 0x1f600 + 30; face++) {
+      window.fake.receiveReaction(grace, message, String.fromCodePoint(face));
+    }
+  });
+  const message = page.getByRole("article").filter({ hasText: "So many feelings" });
+  const reactions = message.locator("button[aria-pressed]");
+  await expect(reactions).toHaveCount(20);
+  await message.getByRole("button", { name: "Show 10 more reactions" }).click();
+  await expect(reactions).toHaveCount(30);
+});

@@ -31,3 +31,6 @@ export const MAX_PICTURE_BYTES = 512 * 1024;
 export const MAX_FILES_PER_MESSAGE = 10;
 /** Must match `MAX_PASTED_BYTES` in src-tauri/src/files.rs: pasted files cross the bridge as bytes. */
 export const MAX_PASTED_BYTES = 25 * 1024 * 1024;
+
+/** Reactions a message shows before "+N": each member may add up to 20, so many members can add far more. */
+export const MAX_SHOWN_REACTIONS = 20;

@@ -9,7 +9,7 @@ use crate::{
     ops::{
         EntityId, Envelope, MAX_EMOJI_CHARS, MAX_MESSAGE_CHARS, MAX_OP_BYTES, MAX_PAGE_TITLE_CHARS,
         MAX_PAGE_UPDATE_BYTES, MAX_PROFILE_NAME_CHARS, Op, OpBody, VerifiedOp, clean_display_name,
-        clean_emoji, clean_page_title, new_owned_id, normalize_channel_name, now_ms,
+        clean_emoji, clean_page_title, is_emoji_only, new_owned_id, normalize_channel_name, now_ms,
     },
     pages::{self, CLIENT_ID_NONCE_BYTES, Edit},
     private::ids::{new_private_message_id, private_channel_of, private_kind},
@@ -376,7 +376,7 @@ impl Workspace {
 
     pub fn react(&self, message: &str, emoji: &str, active: bool) -> Result<()> {
         ensure!(
-            clean_emoji(emoji) == emoji,
+            clean_emoji(emoji) == emoji && is_emoji_only(emoji),
             "a reaction is one emoji (up to {MAX_EMOJI_CHARS} characters)"
         );
         self.write(Op::Reaction {

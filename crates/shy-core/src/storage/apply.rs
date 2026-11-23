@@ -11,9 +11,9 @@ use crate::{
     files::MAX_PICTURE_BYTES,
     markdown::visible_text,
     ops::{
-        MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, Op, VerifiedOp, clean_display_name,
-        clean_emoji, clean_page_title, cut_to, is_owned_by, is_valid_channel_name, is_valid_status, now_ms,
-        rule_violation,
+        MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, MAX_REACTIONS_PER_AUTHOR, Op, VerifiedOp,
+        clean_display_name, clean_emoji, clean_page_title, cut_to, is_emoji_only, is_owned_by,
+        is_valid_channel_name, is_valid_status, now_ms, rule_violation,
     },
     pages,
     private::{crypto::is_valid_sealing_public_key, ids::is_private_id},
@@ -174,6 +174,21 @@ impl Store {
                 active,
             } => {
                 let emoji = clean_emoji(emoji);
+                if !is_emoji_only(&emoji) {
+                    return Err(rule_violation("a reaction is emoji only"));
+                }
+                // An author's ops apply in their own order, so every device
+                // keeps the same ones.
+                let others_kept: i64 = self.db.query_row(
+                    "SELECT COUNT(*) FROM reactions WHERE message = ? AND author = ? AND emoji != ? AND active = 1",
+                    params![message, author, emoji],
+                    |row| row.get(0),
+                )?;
+                if *active && others_kept >= MAX_REACTIONS_PER_AUTHOR as i64 {
+                    return Err(rule_violation(
+                        "too many reactions from one member on one message",
+                    ));
+                }
                 self.db.execute(
                     "INSERT INTO reactions (message, author, emoji, active, lamport) VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT (message, author, emoji) DO UPDATE SET active = ?4, lamport = ?5 WHERE lamport < ?5",

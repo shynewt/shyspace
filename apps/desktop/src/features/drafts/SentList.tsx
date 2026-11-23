@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LinkedMessage, type Message, messageLink } from "../../lib/api";
+import { MAX_SHOWN_REACTIONS } from "../../lib/limits";
 import { plainPreview } from "../../lib/markdown";
 import { formatTime, groupByDay } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
@@ -183,7 +184,7 @@ function Responses({ message }: { message: Message }) {
           </span>
         </span>
       )}
-      {message.reactions.map((reaction) => (
+      {message.reactions.slice(0, MAX_SHOWN_REACTIONS).map((reaction) => (
         <span
           key={reaction.emoji}
           className="inline-flex items-center gap-1 rounded-full border border-line px-1.5 text-xs tabular-nums"
@@ -191,6 +192,9 @@ function Responses({ message }: { message: Message }) {
           {reaction.emoji} {reaction.count}
         </span>
       ))}
+      {message.reactions.length > MAX_SHOWN_REACTIONS && (
+        <span className="text-xs text-muted tabular-nums">+{message.reactions.length - MAX_SHOWN_REACTIONS}</span>
+      )}
     </>
   );
 }

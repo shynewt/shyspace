@@ -287,6 +287,8 @@ const MAX_STATUS_TEXT_CHARS: usize = 100;
 pub const MAX_PROFILE_NAME_CHARS: usize = 80;
 /// Enough for any emoji sequence, and for a custom emoji's `:name:` later.
 pub const MAX_EMOJI_CHARS: usize = 32;
+/// Distinct reactions one member keeps on one message; more would only crowd it.
+pub const MAX_REACTIONS_PER_AUTHOR: usize = 20;
 /// The longest id an op may name. Real ones are under about 120 (a private
 /// message's), so only forged ops come near.
 pub const MAX_ID_CHARS: usize = 200;
@@ -380,6 +382,24 @@ impl From<StatusAlerts> for NotifyLevel {
 /// A status shows next to the author's name everywhere: bounded, on one
 /// line, and free of characters that hide or reorder text. Emoji keep their
 /// joiners (U+200D) and variation selectors.
+/// Whether `text` is only emoji, with their joiners, variation selectors,
+/// skin tones and keycaps, so it can't read as words: no letters, no digits
+/// outside a keycap (1️⃣), no spaces and no ASCII punctuation. A few emoji that
+/// Unicode files as letters, like ℹ️, don't pass.
+pub fn is_emoji_only(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    !chars.is_empty()
+        && chars.iter().enumerate().all(|(index, &c)| {
+            if c.is_ascii_digit() || c == '#' || c == '*' {
+                return matches!(
+                    &chars[index + 1..],
+                    ['\u{20E3}', ..] | ['\u{FE0F}', '\u{20E3}', ..]
+                );
+            }
+            !(c.is_alphanumeric() || c.is_whitespace() || c.is_ascii_punctuation() || c.is_control())
+        })
+}
+
 pub fn is_valid_status(emoji: &str, text: &str) -> bool {
     let is_sneaky = |c: char| {
         c.is_control()
@@ -387,6 +407,7 @@ pub fn is_valid_status(emoji: &str, text: &str) -> bool {
             || (c != '\u{200D}' && is_invisible_format_char(c))
     };
     emoji.chars().count() <= MAX_STATUS_EMOJI_CHARS
+        && (emoji.is_empty() || is_emoji_only(emoji))
         && text.chars().count() <= MAX_STATUS_TEXT_CHARS
         && !emoji.chars().chain(text.chars()).any(is_sneaky)
 }

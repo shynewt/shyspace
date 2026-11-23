@@ -3920,3 +3920,108 @@ async fn a_removed_member_never_learns_the_new_bucket_key() {
         crate::views::OldKeyCheck::Dead
     );
 }
+
+fn reactions_on(member: &crate::Workspace, channel: &str, message: &str) -> Vec<String> {
+    member
+        .messages(channel, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|shown| shown.id == message)
+        .expect("the message is shown")
+        .reactions
+        .into_iter()
+        .map(|reaction| reaction.emoji)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_member_cant_flood_a_message_with_reactions() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let faces: Vec<String> = ('\u{1F600}'..='\u{1F63F}').map(String::from).collect();
+    let mut forger = Forger::new(&bob);
+    for face in &faces {
+        admin
+            .receive(forger.seal(Op::Reaction {
+                message: message.clone(),
+                emoji: face.clone(),
+                active: true,
+            }))
+            .unwrap();
+    }
+    let shown = reactions_on(&admin, &general, &message);
+    assert_eq!(shown, faces[..crate::ops::MAX_REACTIONS_PER_AUTHOR]);
+
+    // Taking one back makes room for another.
+    for (emoji, active) in [(&faces[0], false), (&faces[40], true)] {
+        admin
+            .receive(forger.seal(Op::Reaction {
+                message: message.clone(),
+                emoji: emoji.clone(),
+                active,
+            }))
+            .unwrap();
+    }
+    let shown = reactions_on(&admin, &general, &message);
+    assert_eq!(shown.len(), crate::ops::MAX_REACTIONS_PER_AUTHOR);
+    assert!(shown.contains(&faces[40]) && !shown.contains(&faces[0]));
+    // Everyone else can still react.
+    admin.react(&message, "👍", true).unwrap();
+    assert!(reactions_on(&admin, &general, &message).contains(&"👍".to_owned()));
+}
+
+#[tokio::test]
+async fn reactions_and_status_emoji_cant_read_as_words() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    for label in ["✓ approved by admin", "(you)", "Admin", "ok", "1", "#"] {
+        assert!(bob.react(&message, label, true).is_err(), "{label}");
+        let status = crate::views::StatusUpdate {
+            emoji: label,
+            text: "",
+            until_ms: None,
+            alerts: crate::views::NotifyLevel::All,
+        };
+        assert!(bob.set_status(status).is_err(), "{label}");
+    }
+    for emoji in ["👍🏽", "1️⃣", "🇫🇷", "👨‍👩‍👧", "❤️"] {
+        bob.react(&message, emoji, true).unwrap();
+    }
+    sync_all(&[&admin, &bob]).await;
+    assert_eq!(reactions_on(&admin, &general, &message).len(), 5);
+
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal(Op::Reaction {
+            message: message.clone(),
+            emoji: "✓ approved by admin".into(),
+            active: true,
+        }))
+        .unwrap();
+    admin
+        .receive(forger.seal(Op::Status {
+            emoji: "(you)".into(),
+            text: String::new(),
+            until_ms: None,
+            alerts: crate::ops::StatusAlerts::All,
+        }))
+        .unwrap();
+    assert_eq!(
+        reactions_on(&admin, &general, &message).len(),
+        5,
+        "the label wasn't added"
+    );
+    let bob_seen = admin
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| member.id == bob.my_id())
+        .unwrap();
+    assert!(bob_seen.status.is_none_or(|status| status.emoji != "(you)"));
+}

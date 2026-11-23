@@ -14,6 +14,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink, pageLink } from "../../lib/api";
+import { MAX_SHOWN_REACTIONS } from "../../lib/limits";
 import { ChatMarkdown, messageIdsIn, pageIdsIn, plainPreview } from "../../lib/markdown";
 import { useMember } from "../../lib/members";
 import { displayName, formatFullDate, formatTime } from "../../lib/people";
@@ -71,6 +72,8 @@ export const MessageItem = memo(function MessageItem({
   const [isFullPickerShown, setFullPickerShown] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const [isMenuOpen, setMenuOpen] = useState(false);
+  const [areAllReactionsShown, setAllReactionsShown] = useState(false);
+  const hiddenReactions = Math.max(0, message.reactions.length - MAX_SHOWN_REACTIONS);
   const article = useRef<HTMLElement>(null);
   const openMenu = useCallback(() => setMenuOpen(true), []);
   useContextMenu(article, openMenu);
@@ -193,36 +196,48 @@ export const MessageItem = memo(function MessageItem({
           {message.reactions.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
               <AnimatePresence initial={false}>
-                {message.reactions.map((reaction) => (
-                  <motion.button
-                    key={reaction.emoji}
-                    type="button"
-                    aria-pressed={reaction.mine}
-                    aria-label={`${reaction.emoji} ${reaction.count}`}
-                    initial={{ scale: 0.4, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    whileTap={{ scale: 0.88 }}
-                    transition={springs.pop}
-                    onClick={() => toggleReaction(reaction.emoji)}
-                    className={cx(
-                      "flex h-6 items-center gap-1 rounded-full border px-2 text-xs transition-colors",
-                      reaction.mine
-                        ? "border-accent/40 bg-accent-soft text-accent-text"
-                        : "border-line bg-surface hover:border-surface-3",
-                    )}
-                  >
-                    <span>{reaction.emoji}</span>
-                    <motion.span
-                      key={reaction.count}
-                      initial={{ y: -6, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      className="tabular-nums"
+                {(areAllReactionsShown ? message.reactions : message.reactions.slice(0, MAX_SHOWN_REACTIONS)).map(
+                  (reaction) => (
+                    <motion.button
+                      key={reaction.emoji}
+                      type="button"
+                      aria-pressed={reaction.mine}
+                      aria-label={`${reaction.emoji} ${reaction.count}`}
+                      initial={{ scale: 0.4, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      whileTap={{ scale: 0.88 }}
+                      transition={springs.pop}
+                      onClick={() => toggleReaction(reaction.emoji)}
+                      className={cx(
+                        "flex h-6 items-center gap-1 rounded-full border px-2 text-xs transition-colors",
+                        reaction.mine
+                          ? "border-accent/40 bg-accent-soft text-accent-text"
+                          : "border-line bg-surface hover:border-surface-3",
+                      )}
                     >
-                      {reaction.count}
-                    </motion.span>
-                  </motion.button>
-                ))}
+                      <span>{reaction.emoji}</span>
+                      <motion.span
+                        key={reaction.count}
+                        initial={{ y: -6, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        className="tabular-nums"
+                      >
+                        {reaction.count}
+                      </motion.span>
+                    </motion.button>
+                  ),
+                )}
               </AnimatePresence>
+              {!areAllReactionsShown && hiddenReactions > 0 && (
+                <button
+                  type="button"
+                  aria-label={`Show ${hiddenReactions} more reactions`}
+                  onClick={() => setAllReactionsShown(true)}
+                  className="flex h-6 items-center rounded-full border border-line bg-surface px-2 text-xs text-muted tabular-nums transition-colors hover:border-surface-3"
+                >
+                  +{hiddenReactions}
+                </button>
+              )}
             </div>
           )}
           {onOpenThread && message.reply_count > 0 && (
