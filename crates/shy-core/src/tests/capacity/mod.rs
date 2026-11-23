@@ -19,6 +19,7 @@ mod files;
 mod history;
 mod members;
 mod pages;
+mod provider_run;
 
 use std::{
     path::Path,

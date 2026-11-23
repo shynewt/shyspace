@@ -71,9 +71,9 @@ struct Counters {
     deletes: AtomicU64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CountingStore {
-    inner: InMemory,
+    inner: Arc<dyn ObjectStore>,
     counters: Arc<Counters>,
     fetched_keys: Mutex<Vec<String>>,
     listed_prefixes: Mutex<Vec<String>>,
@@ -81,7 +81,30 @@ pub struct CountingStore {
     delay_ms: AtomicU64,
 }
 
+impl Default for CountingStore {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(InMemory::new()),
+            counters: Arc::default(),
+            fetched_keys: Mutex::default(),
+            listed_prefixes: Mutex::default(),
+            delay_ms: AtomicU64::default(),
+        }
+    }
+}
+
 impl CountingStore {
+    /// Counts requests to `inner` into the same totals as this store's.
+    pub fn wrapping(&self, inner: Arc<dyn ObjectStore>) -> Self {
+        Self {
+            inner,
+            counters: self.counters.clone(),
+            fetched_keys: Mutex::default(),
+            listed_prefixes: Mutex::default(),
+            delay_ms: AtomicU64::default(),
+        }
+    }
+
     pub fn requests(&self) -> Requests {
         let counters = &self.counters;
         Requests {

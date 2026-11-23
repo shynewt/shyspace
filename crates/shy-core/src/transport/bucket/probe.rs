@@ -23,7 +23,7 @@ use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload,
 
 use super::{BucketConfig, listing_after, object_version, segment_path};
 
-fn read_settings(file: &str) -> Result<BucketConfig> {
+pub(crate) fn read_settings(file: &str) -> Result<BucketConfig> {
     let text = std::fs::read_to_string(file).context("reading the probe settings file")?;
     let values: HashMap<&str, &str> = text
         .lines()

@@ -799,7 +799,27 @@ impl Bucket {
 }
 
 #[cfg(test)]
-mod probe;
+pub(crate) mod probe;
+
+#[cfg(test)]
+impl Bucket {
+    /// The same bucket with its store wrapped, say to count requests.
+    pub fn wrapped(self, wrap: impl FnOnce(Arc<dyn ObjectStore>) -> Arc<dyn ObjectStore>) -> Self {
+        Self {
+            store: wrap(self.store),
+            signing: self.signing,
+        }
+    }
+
+    /// Deletes every object under this bucket's prefix; returns how many.
+    pub async fn delete_everything(&self) -> Result<usize> {
+        let paths: Vec<Path> = self.list("", None).await?;
+        for path in &paths {
+            self.delete(path).await?;
+        }
+        Ok(paths.len())
+    }
+}
 
 #[cfg(test)]
 mod tests {
