@@ -3319,3 +3319,41 @@ async fn newcomer_reading_with_planted_packs(planted: u64) -> (u64, bool) {
         carol.state().store.last_seq(&bob.me()).unwrap() == bob.state().store.last_seq(&bob.me()).unwrap();
     (downloads, is_complete)
 }
+
+/// Anyone with the bucket keys can plant an envelope "from" a member for an
+/// epoch whose key hasn't come yet, so it is parked unchecked. It mustn't
+/// count as an op waiting behind a missing one: gap repair would then fetch
+/// that member's junk objects again every time they write (#215).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forged_parked_op_doesnt_make_gap_repair_fetch_junk_again() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let general = channel_id(&admin, "general");
+    let held = admin.state().store.last_seq(&bob.me()).unwrap();
+    let junk = segment_name_for(&bob.me(), held + 1_000, held + 1_000, &[3; 16], b"other");
+    bucket.put_raw(&junk, b"junk".to_vec()).await.unwrap();
+    let epoch = admin.state().mls.epoch().unwrap();
+    admin
+        .receive(Envelope {
+            author: bob.me(),
+            seq: held + 500,
+            epoch: epoch + 1,
+            nonce: [0; 24],
+            ciphertext: vec![1; 64],
+        })
+        .unwrap();
+
+    for number in 0..3 {
+        bob.send_message(&general, &format!("message {number}"), None)
+            .unwrap();
+        bob.push().await.unwrap();
+        admin.sync().await;
+    }
+
+    assert!(texts_in(&admin, &general).contains(&"message 2".to_string()));
+    let junk_key = format!("{}", object_store::path::Path::from(junk.as_str()));
+    assert_eq!(store.downloads_of(&junk_key), 1, "fetched once per run");
+}

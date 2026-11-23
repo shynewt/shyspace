@@ -4,7 +4,7 @@
 use std::{
     fmt,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -75,6 +75,7 @@ struct Counters {
 pub struct CountingStore {
     inner: InMemory,
     counters: Arc<Counters>,
+    fetched_keys: Mutex<Vec<String>>,
     /// Added to every request while set, to act like a bucket over the internet.
     delay_ms: AtomicU64,
 }
@@ -89,6 +90,12 @@ impl CountingStore {
             puts: counters.puts.load(Ordering::SeqCst),
             deletes: counters.deletes.load(Ordering::SeqCst),
         }
+    }
+
+    /// How many times the object at `key` was downloaded.
+    pub fn downloads_of(&self, key: &str) -> usize {
+        let fetched = self.fetched_keys.lock().unwrap();
+        fetched.iter().filter(|fetched| fetched.as_str() == key).count()
     }
 
     pub fn set_delay(&self, delay: Duration) {
@@ -158,6 +165,7 @@ impl ObjectStore for CountingStore {
 
     async fn get_opts(&self, location: &Path, options: GetOptions) -> object_store::Result<GetResult> {
         self.counters.gets.fetch_add(1, Ordering::SeqCst);
+        self.fetched_keys.lock().unwrap().push(location.to_string());
         self.wait().await;
         self.inner.get_opts(location, options).await
     }

@@ -234,16 +234,18 @@ impl Store {
         rows.map(|bytes| Ok(postcard::from_bytes(&bytes?)?)).collect()
     }
 
-    /// The last bucket key we read from `author`'s log.
     /// Authors with parked ops but not the one that must apply next: it was
     /// lost (say, pushed out of the bounded parking table) after we read
-    /// past it in the bucket.
+    /// past it in the bucket. Only ops we could check count (those for an
+    /// epoch whose key we hold); anyone with the bucket keys could plant the
+    /// others, and repairing for them would fetch junk again and again.
     pub fn authors_missing_next_op(&self) -> Result<Vec<(PublicKey, u64)>> {
         let mut statement = self.db.prepare(
             "SELECT gap.author, gap.next FROM (
                 SELECT DISTINCT p.author,
                        COALESCE((SELECT MAX(o.seq) FROM ops o WHERE o.author = p.author), 0) + 1 AS next
-                FROM pending_ops p) AS gap
+                FROM pending_ops p
+                WHERE EXISTS (SELECT 1 FROM epoch_keys k WHERE k.epoch = p.epoch)) AS gap
              WHERE NOT EXISTS (SELECT 1 FROM pending_ops q WHERE q.author = gap.author AND q.seq = gap.next)",
         )?;
         let rows = statement.query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, u64>(1)?)))?;
