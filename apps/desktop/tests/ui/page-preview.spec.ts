@@ -168,6 +168,32 @@ test("page links show as chips with the page's current title", async ({ page }) 
   await expect(page.getByLabel("Page title")).toHaveValue("Roadmap 2027");
 });
 
+test("a message link in a page shows as a chip that opens the message", async ({ page }) => {
+  await page.goto("");
+  const message = await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const id = window.fake.receiveMessage(grace, "general", "The plan is to ship on Friday");
+    window.fake.seedPage("Notes", `See shy://message/${id} and [the decision](shy://message/${id})`);
+    return id;
+  });
+  await openPage(page, "Notes");
+
+  const content = page.locator(".cm-content");
+  await expect(lines(page).first()).toHaveText("See a message and the decision");
+  await expect(content.getByRole("link", { name: "a message" })).toHaveCount(1);
+  await content.getByRole("link", { name: "the decision" }).click();
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await expect(page.locator(`#message-${message}`)).toBeVisible();
+});
+
+test("a chip for a message that's gone says so instead of opening", async ({ page }) => {
+  await seedAndOpen(page, "Notes", "Was in shy://message/0123456789abcdef");
+
+  await page.locator(".cm-content").getByRole("link", { name: "a message" }).click();
+  await expect(page.getByText("That message was deleted.")).toBeVisible();
+  await expect(page.getByLabel("Page title")).toHaveValue("Notes");
+});
+
 test("two members editing one page converge, and the preview follows", async ({ page }) => {
   await seedAndOpen(page, "Shared", "# Title\n- [ ] one\n- [ ] two");
   await lines(page).nth(2).click();

@@ -42,6 +42,8 @@ function shownAs(item: PreviewItem): string | null {
       return "———";
     case "page":
       return `<page ${item.pageId}>`;
+    case "message":
+      return `<message ${item.messageId}: ${item.label}>`;
     case "mention":
       return item.label;
     case "callout":
@@ -110,6 +112,14 @@ test("a mention chip knows who it names; @channel names no one", () => {
 
 test("a page link inside code stays text", () => {
   expect(rendered("`shy://page/ab12`")).toBe("shy://page/ab12");
+});
+
+test("message links become chips, labeled or not; inside code they stay text", () => {
+  expect(rendered("see shy://message/ab12 or [the plan](shy://message/p:cd34/ef56)")).toBe(
+    "see <message ab12: a message> or <message p:cd34/ef56: the plan>",
+  );
+  expect(rendered("[](shy://message/ab12)")).toBe("<message ab12: a message>");
+  expect(rendered("`shy://message/ab12`")).toBe("shy://message/ab12");
 });
 
 test("a divider becomes a line and escapes lose their backslash", () => {
