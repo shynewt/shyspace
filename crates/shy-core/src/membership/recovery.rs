@@ -382,19 +382,17 @@ impl Workspace {
         if let Some(error) = self.pull_author(&me).await? {
             return Err(error.context("reading this device's changes back after a restore"));
         }
-        if let Some(seq) = self.parked_own_change()? {
-            bail!(
-                "this device's change {seq} came back from the bucket, but this version can't apply it yet; update shyspace"
-            );
+        if let Some(waiting) = self.parked_own_change()? {
+            bail!(waiting.reason());
         }
         self.state().store.mark_caught_up()?;
         self.finish_writes_left_over()
     }
 
-    /// The seq of one of our own changes that came back but waits, unapplied
-    /// (one from a newer version, say): a write now would take its place.
-    /// Only one we signed counts, so nobody can plant one to hold us up.
-    fn parked_own_change(&self) -> Result<Option<u64>> {
+    /// One of our own changes that came back but waits, unapplied: a write
+    /// now would take the place of it or of the one it waits for. Only one we
+    /// signed counts, so nobody can plant one to hold us up.
+    fn parked_own_change(&self) -> Result<Option<WaitingOwnChange>> {
         let me = self.me();
         let state = self.state();
         let applied_through = state.store.last_seq(&me)?;
@@ -406,7 +404,10 @@ impl Workspace {
                 continue;
             };
             if crypto::signed_body(&envelope, &key).is_ok() {
-                return Ok(Some(envelope.seq));
+                return Ok(Some(WaitingOwnChange {
+                    seq: envelope.seq,
+                    applied_through,
+                }));
             }
         }
         Ok(None)
@@ -428,6 +429,28 @@ impl Workspace {
     async fn forget_restored_files(data: &DataDir) {
         let _ = data.keys.forget(&data.path).await;
         let _ = std::fs::remove_dir_all(&data.path);
+    }
+}
+
+/// One of our own changes a restore read back but can't apply yet.
+struct WaitingOwnChange {
+    seq: u64,
+    applied_through: u64,
+}
+
+impl WaitingOwnChange {
+    /// Right after what applied, it's one this version can't read; further
+    /// on, it waits for one the bucket no longer has.
+    fn reason(&self) -> String {
+        let next = self.applied_through + 1;
+        match self.seq == next {
+            true => format!(
+                "this device's change {next} came back from the bucket, but this version can't apply it yet; update shyspace"
+            ),
+            false => format!(
+                "this device's change {next} is missing from the bucket, so the ones after it can't apply; the admin's log must be complete before writing again"
+            ),
+        }
     }
 }
 

@@ -367,6 +367,11 @@ impl Workspace {
 
     async fn pass(&self, kind: PassKind) -> bool {
         let _guard = self.inner.sync_lock.lock().await;
+        // A pass that waited for the lock while the workspace was closing
+        // has nothing left to do.
+        if *self.inner.stopped.borrow() {
+            return false;
+        }
         let mut errors = Vec::new();
         let mut has_found_new = false;
         if let Err(error) = self.follow_admin_commits().await {

@@ -90,7 +90,7 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issues?q=label%3Asecurity>
 
 - A restored admin can reuse sequence numbers of ops that reached peers only live before the old device died (#26).
-- Restore trusts the bucket to hold the admin's whole log. Someone with the bucket keys who deletes the admin's newest uploads before a restore makes it reuse those sequence numbers, which members holding the deleted ops then prove a fork.
+- Restore trusts the bucket to hold the admin's whole log. Someone with the bucket keys who deletes the admin's newest uploads before a restore makes it reuse those sequence numbers, which members holding the deleted ops then prove a fork; deleting one from the middle, or planting an object under the admin's name that can't be downloaded, instead stops the restore until the bucket is put right.
 - In a group DM, a participant can show their own messages to only some members, by writing them with a key only those members got. Members on versions before #72 can still be led to write with such a key (#111).
 - A private channel's owner can leave a member who already joined out of a new key; only that member is told, and the others still see them as in. A hostile owner can also withhold older keys from someone they add.
 - A private channel key that leaks stays useful until the next removal or rotation. Bots read only the private channels someone adds them to; public channels are readable by every member, bots included.

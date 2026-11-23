@@ -569,3 +569,39 @@ async fn a_restore_never_gives_up_on_its_own_log() {
         "the unread log shows as an error"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_names_a_change_missing_from_the_bucket() {
+    use futures_lite::StreamExt;
+    use object_store::ObjectStoreExt;
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(UnlistableStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let general = channel_id(&admin, "general");
+    admin.sync().await;
+    for text in ["one", "two", "three"] {
+        admin.send_message(&general, text, None).unwrap();
+        admin.sync().await;
+    }
+    let own_log = Path::from(format!("ops/{}", member_id(&admin.me())));
+    let mut segments: Vec<Path> = store
+        .inner
+        .list(Some(&own_log))
+        .map(|meta| meta.unwrap().location)
+        .collect()
+        .await;
+    segments.sort();
+    let middle = segments[segments.len() - 2].clone();
+    store.inner.delete(&middle).await.unwrap();
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let refused = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Offline).await;
+    let error = format!(
+        "{:#}",
+        refused.err().expect("a restore can't skip a missing change")
+    );
+    assert!(error.contains("missing from the bucket"), "{error}");
+}
