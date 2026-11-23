@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/shy-core", "crates/shy-cli", "crates/shy-demo", "apps/desktop/src-tauri"]
+exclude = ["vendor"]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -10,3 +11,7 @@ unwrap_used = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+
+# A patched copy of yrs; see vendor/README.md.
+[patch.crates-io]
+yrs = { path = "vendor/yrs" }

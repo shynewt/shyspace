@@ -36,7 +36,8 @@ serde_json = "1.0.154"
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.44"
-yrs = "0.28"
+# Pinned to the version of the patched copy in vendor/yrs.
+yrs = "=0.28.1"
 zeroize = "1"
 
 [dev-dependencies]
