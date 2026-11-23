@@ -223,10 +223,6 @@ impl Sink for SystemSink {
         Ok(written.accepted_sample_frames)
     }
 
-    fn buffered(&self) -> Duration {
-        self.0.buffered()
-    }
-
     async fn finish(self) {
         self.0.finish().await;
     }

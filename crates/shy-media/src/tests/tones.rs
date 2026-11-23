@@ -183,10 +183,6 @@ impl Sink for Recording {
         Ok(samples.len() / self.channels)
     }
 
-    fn buffered(&self) -> Duration {
-        Duration::ZERO
-    }
-
     async fn finish(self) {}
 }
 

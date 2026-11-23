@@ -4,31 +4,42 @@
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+use tokio::time::Instant;
 
-use crate::backend::Sink;
+use crate::{backend::Sink, wav};
 
-/// How far ahead of the speaker the sound is kept: under the sink's own
-/// 50 ms, so a write never overflows it.
-const AHEAD: Duration = Duration::from_millis(30);
+/// How far ahead of real time the sound is written: under the sink's own
+/// 50 ms queue, so it rarely has to refuse any.
+const LEAD: Duration = Duration::from_millis(20);
 /// 10 ms of mono samples at 48 kHz.
 const CHUNK: usize = 480;
 const TICK: Duration = Duration::from_millis(5);
 /// How long the speaker may take nothing before the sound is given up.
 const STALL_LIMIT: Duration = Duration::from_secs(2);
 
-/// Writes mono `samples` into `sink` as fast as it plays them.
+/// Writes mono `samples` at [`wav::RATE`] into `sink` as fast as they play.
+///
+/// Paced by the clock from the first sample the speaker takes, not by what
+/// the sink reports as buffered: a real one counts its own latency there,
+/// which never drops below a fixed mark.
 pub(crate) async fn play<K: Sink>(sink: &mut K, samples: &[f32]) -> Result<()> {
     let mut rest = samples;
-    let mut stalled_since = tokio::time::Instant::now();
+    let mut started: Option<Instant> = None;
+    let mut written = Duration::ZERO;
+    let mut stalled_since = Instant::now();
     while !rest.is_empty() {
-        if sink.buffered() >= AHEAD {
+        if let Some(started) = started
+            && written >= started.elapsed() + LEAD
+        {
             tokio::time::sleep(TICK).await;
             continue;
         }
         let taken = sink.write(&rest[..rest.len().min(CHUNK)])?;
         rest = &rest[taken.min(rest.len())..];
         if taken > 0 {
-            stalled_since = tokio::time::Instant::now();
+            started.get_or_insert_with(Instant::now);
+            written += Duration::from_secs_f64(taken as f64 / f64::from(wav::RATE));
+            stalled_since = Instant::now();
             continue;
         }
         if stalled_since.elapsed() >= STALL_LIMIT {
@@ -87,10 +98,6 @@ mod tests {
             Ok(taken)
         }
 
-        fn buffered(&self) -> Duration {
-            Duration::from_secs_f32((self.written - self.played()) as f32 / RATE)
-        }
-
         async fn finish(self) {}
     }
 
@@ -111,6 +118,20 @@ mod tests {
         let mut device = Device::new(Duration::from_millis(300));
         let sound = sound(0.5);
         play(&mut device, &sound).await.unwrap();
+        assert_eq!(device.heard, sound);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_sound_plays_in_about_its_own_length() {
+        let mut device = Device::new(Duration::ZERO);
+        let sound = sound(1.0);
+        let started = Instant::now();
+        play(&mut device, &sound).await.unwrap();
+        let took = started.elapsed();
+        assert!(
+            took < Duration::from_millis(1_100),
+            "took {took:?}, as if it waited on the sink"
+        );
         assert_eq!(device.heard, sound);
     }
 
