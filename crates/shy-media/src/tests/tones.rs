@@ -179,7 +179,7 @@ async fn play_tone(outgoing: Outgoing, frequency: f32, reports: &mpsc::Sender<Vo
     let mut producer = encode::Producer::new(&mut broadcast, outgoing.catalog, input, &options)?;
     let _ = reports.try_send(VoiceReport::Opened);
     let per_frame = (RATE as f32 * FRAME.as_secs_f32()) as usize;
-    let mut every = tokio::time::interval(FRAME);
+    let mut every = real_time(FRAME);
     for frame in 0.. {
         every.tick().await;
         let samples: Vec<f32> = (0..per_frame)
@@ -219,7 +219,7 @@ async fn play_tone_with_a_bad_packet(
     track.set(encoder.catalog())?;
     let _ = reports.try_send(VoiceReport::Opened);
     let per_frame = encoder.frame_size();
-    let mut every = tokio::time::interval(Duration::from_secs_f64(per_frame as f64 / f64::from(RATE)));
+    let mut every = real_time(Duration::from_secs_f64(per_frame as f64 / f64::from(RATE)));
     for frame in 0.. {
         every.tick().await;
         let samples: Vec<f32> = (0..per_frame)
@@ -247,6 +247,14 @@ async fn play_tone_with_a_bad_packet(
         }
     }
     Ok(())
+}
+
+/// A tick per frame that never catches up in a burst after a stall, as a
+/// microphone doesn't: the tone's audio never runs ahead of the clock.
+fn real_time(frame: Duration) -> tokio::time::Interval {
+    let mut every = tokio::time::interval(frame);
+    every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    every
 }
 
 /// One stream's samples, as played.

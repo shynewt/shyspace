@@ -31,7 +31,7 @@ const DEVICE_CHECK_EVERY: Duration = Duration::from_secs(3);
 /// How much of this device's voice is kept for a listener that falls
 /// behind. A listener let in later can ask for no more than this from
 /// before, so it stays well under a word.
-const HISTORY: Duration = Duration::from_millis(200);
+pub(crate) const HISTORY: Duration = Duration::from_millis(200);
 
 /// What a call needs from the media layer.
 pub(crate) struct Shared<B: Backend> {

@@ -16,7 +16,7 @@ use shy_core::huddle::media::{DeviceChoice, HuddleMedia, Link, MediaCall, MediaE
 use tokio::sync::{mpsc, watch};
 
 use super::tones::{Listings, Recorder, Tones, pitch};
-use crate::{Media, WorkspaceMedia};
+use crate::{Media, WorkspaceMedia, call::HISTORY};
 
 const A: f32 = 440.0;
 const E: f32 = 660.0;
@@ -367,6 +367,7 @@ async fn someone_let_in_late_cant_replay_what_was_said_before() {
     // Alice speaks alone for a while before Bob may hear her.
     tokio::time::sleep(Duration::from_secs(3)).await;
     alices_call.list.send_replace(listing(&[(&bob, "h-bob")]));
+    let let_in = Instant::now();
 
     // A modified client asks for the oldest audio there is.
     let (bobs_node, _) = bob.media.attached().expect("attached");
@@ -411,9 +412,13 @@ async fn someone_let_in_late_cant_replay_what_was_said_before() {
             heard += Duration::from_secs_f32((frame.data.len() / 4 / channels) as f32 / rate);
         }
     }
+    // The tone is spoken in real time, so all Bob may have is what was said
+    // since he was let in, plus the moments the call keeps for a listener
+    // that falls behind. Measured from when he was let in, whatever the load.
+    let allowed = let_in.elapsed() + HISTORY + Duration::from_millis(100);
     assert!(
-        heard < listening + Duration::from_millis(500),
-        "Bob got {heard:?} of audio in {listening:?}: some of it is from before he was let in"
+        heard <= allowed,
+        "Bob got {heard:?} of audio, more than the {allowed:?} since he was let in: some of it is from before"
     );
 }
 
