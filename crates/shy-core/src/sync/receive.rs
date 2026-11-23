@@ -468,7 +468,13 @@ mod tests {
     fn a_segment_looks_genuine_only_if_its_name_matches_every_envelope() {
         let alice = iroh::SecretKey::generate().public();
         let bob = iroh::SecretKey::generate().public();
-        let key = format!("ops/{}/{:020}-{:020}", crate::views::member_id(&alice), 3, 5);
+        let key = format!(
+            "ops/{}/{:020}-{:020}-{}",
+            crate::views::member_id(&alice),
+            5,
+            3,
+            blake3::hash(b"segment").to_hex()
+        );
         let run = |author: PublicKey, seqs: &[u64]| -> Vec<Envelope> {
             seqs.iter().map(|seq| envelope(author, *seq)).collect()
         };

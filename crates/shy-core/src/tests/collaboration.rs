@@ -649,8 +649,7 @@ async fn a_long_segment_is_saved_in_batches_and_finished_when_read_again() {
 
 /// If SQLite gives up a segment's transaction while an op applies (a full
 /// disk can do that), nothing after it is saved as if the transaction were
-/// still there: above all, the cursor doesn't move past the op that was
-/// undone, and the next pull applies the segment.
+/// still there, and the next pull applies the segment.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_segment_whose_transaction_sqlite_gave_up_is_read_again_whole() {
     let (_root, bucket, admin, bob) = admin_and_bob().await;
@@ -668,19 +667,13 @@ async fn a_segment_whose_transaction_sqlite_gave_up_is_read_again_whole() {
         .collect();
     bucket.put_segment(&segment).await.unwrap();
     let applied = |admin: &Workspace| admin.state().store.next_seq(&bob.me()).unwrap();
-    let cursor = |admin: &Workspace| admin.state().store.cursor(&bob.me()).unwrap();
-    let (applied_before, cursor_before) = (applied(&admin), cursor(&admin));
+    let applied_before = applied(&admin);
 
     admin
         .inner
         .drop_segment_transaction
         .store(true, std::sync::atomic::Ordering::SeqCst);
     admin.sync().await;
-    assert_eq!(
-        cursor(&admin),
-        cursor_before,
-        "the cursor stayed before the segment"
-    );
     assert_eq!(applied(&admin), applied_before);
 
     admin.sync().await;

@@ -11,7 +11,6 @@ mod receive;
 mod replicate;
 
 pub use heads::Hint;
-pub(crate) use replicate::Listing;
 
 use std::time::Duration;
 
@@ -171,11 +170,11 @@ impl Workspace {
                     syncer.announce_self().await;
                     last_announced = tokio::time::Instant::now();
                 }
-                let is_whole_listing_due = syncer.is_whole_listing_due().unwrap_or_else(|error| {
-                    warn!("couldn't tell when everyone was last listed whole: {error:#}");
+                let is_hour_up = syncer.is_sweep_due().unwrap_or_else(|error| {
+                    warn!("couldn't tell when we last swept: {error:#}");
                     true
                 });
-                let kind = match is_sweep_due || is_whole_listing_due {
+                let kind = match is_sweep_due || is_hour_up {
                     true => PassKind::Sweep,
                     false => PassKind::Check,
                 };

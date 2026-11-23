@@ -1,7 +1,5 @@
 //! Moving envelopes between the local log, the bucket, and online peers.
 
-use std::time::Duration;
-
 use anyhow::Result;
 use iroh::PublicKey;
 use tracing::warn;
@@ -17,17 +15,9 @@ use crate::{
 /// At most this many skipped objects are remembered; past it, the rest are
 /// fetched again each pass rather than using unbounded memory.
 const MAX_SKIPPED_SEGMENTS: usize = 10_000;
-/// How often every author is listed whole, at most.
-const WHOLE_LISTING_EVERY_MS: i64 = 60 * 60 * 1000;
-const LAST_WHOLE_LISTING_META: &str = "last_whole_listing_ms";
-
-/// How much of an author's segments to list.
-pub(crate) enum Listing {
-    /// Only names that sort past what we hold.
-    PastHeld,
-    /// All of them, for older names we may hold part of.
-    Whole,
-}
+/// How often a sweep reads every author past what we hold, at most.
+const SWEEP_EVERY_MS: i64 = 60 * 60 * 1000;
+const LAST_SWEEP_META: &str = "last_sweep_ms";
 
 impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
@@ -39,51 +29,35 @@ impl Workspace {
     /// reading back, unless it couldn't even be parked; the first such error
     /// is returned at the end. Returns whether anything new came.
     pub(crate) async fn pull(&self) -> Result<bool> {
-        let refetching = self.refetch_gaps()?;
-        let is_whole_listing_due = self.is_whole_listing_due()?;
+        self.refetch_gaps()?;
         let mut local_failure = None;
         let mut has_found_new = false;
         let authors = self.state().store.everyone_ever()?;
         for author in authors {
             let held = self.state().store.last_seq(&author)?;
-            let is_gap_listed_whole = refetching
-                .iter()
-                .any(|(gap_author, listing)| *gap_author == author && matches!(listing, Listing::Whole));
-            let listing = match is_whole_listing_due || is_gap_listed_whole {
-                true => Listing::Whole,
-                false => Listing::PastHeld,
-            };
-            if let Some(error) = self.pull_author(&author, listing).await? {
+            if let Some(error) = self.pull_author(&author).await? {
                 local_failure.get_or_insert(error);
             }
             has_found_new |= self.state().store.last_seq(&author)? > held;
         }
-        // A listing cut short by our own failure isn't done; try again next pass.
-        if is_whole_listing_due && local_failure.is_none() {
+        // A sweep cut short by our own failure isn't done; try again next pass.
+        if local_failure.is_none() {
             let now = now_ms()?;
-            self.state()
-                .store
-                .set_meta(LAST_WHOLE_LISTING_META, &now.to_le_bytes())?;
+            self.state().store.set_meta(LAST_SWEEP_META, &now.to_le_bytes())?;
         }
         local_failure.map_or(Ok(has_found_new), Err)
     }
 
-    /// Reads `author`'s segments that may hold ops past what we hold; returns
-    /// the first op that failed locally. Only names that parse are fetched,
-    /// so junk costs a line in a listing, never a download.
-    pub(crate) async fn pull_author(
-        &self,
-        author: &PublicKey,
-        listing: Listing,
-    ) -> Result<Option<anyhow::Error>> {
-        // Older versions stored where they resumed; reading no longer uses it.
-        self.state().store.forget_cursor(author)?;
+    /// Reads `author`'s segments that may hold ops past what we hold (names
+    /// sort by their last seq, so listing past what we hold finds them all);
+    /// returns the first op that failed locally. Only names that parse are
+    /// fetched, so junk costs a line in a listing, never a download.
+    pub(crate) async fn pull_author(&self, author: &PublicKey) -> Result<Option<anyhow::Error>> {
         let held = self.state().store.last_seq(author)?;
-        let offset = match listing {
-            Listing::PastHeld => Some(listing_after(author, held)),
-            Listing::Whole => None,
-        };
-        let listed = self.bucket().list_segments(author, offset.as_deref()).await?;
+        let listed = self
+            .bucket()
+            .list_segments(author, Some(&listing_after(author, held)))
+            .await?;
         let skipped = self.skipped_segments().clone();
         let worth_fetching = listed
             .into_iter()
@@ -110,39 +84,36 @@ impl Workspace {
         Ok(local_failure)
     }
 
-    /// Whether it's time to list every author whole: older names sort by
-    /// their first seq, so a segment from an older version that we hold part
-    /// of sorts before what we hold, and only a whole listing finds it. Timed
-    /// by the wall clock, saved, so a restart or sleep doesn't put it off; a
-    /// clock set back makes it due at once.
-    pub(crate) fn is_whole_listing_due(&self) -> Result<bool> {
-        let Some(saved) = self.state().store.meta(LAST_WHOLE_LISTING_META)? else {
+    /// Whether a sweep is due: the hourly net under heads and hints, which
+    /// reads every author past what we hold. Timed by the wall clock, saved,
+    /// so a restart or sleep doesn't put it off; a clock set back makes it
+    /// due at once.
+    pub(crate) fn is_sweep_due(&self) -> Result<bool> {
+        let Some(saved) = self.state().store.meta(LAST_SWEEP_META)? else {
             return Ok(true);
         };
         let Ok(bytes) = <[u8; 8]>::try_from(saved.as_slice()) else {
-            warn!("the time of the last whole listing is unreadable; listing everyone whole");
+            warn!("the time of the last sweep is unreadable; sweeping now");
             return Ok(true);
         };
         let last_ms = i64::from_le_bytes(bytes);
         let now = now_ms()?;
-        Ok(now < last_ms || now.saturating_sub(last_ms) >= WHOLE_LISTING_EVERY_MS)
+        Ok(now < last_ms || now.saturating_sub(last_ms) >= SWEEP_EVERY_MS)
     }
 
-    /// As if the last whole listing had been at `last_ms`.
+    /// As if the last sweep had been at `last_ms`.
     #[cfg(test)]
-    pub(crate) fn set_last_whole_listing(&self, last_ms: i64) {
+    pub(crate) fn set_last_sweep(&self, last_ms: i64) {
         self.state()
             .store
-            .set_meta(LAST_WHOLE_LISTING_META, &last_ms.to_le_bytes())
+            .set_meta(LAST_SWEEP_META, &last_ms.to_le_bytes())
             .expect("the store is writable in tests");
     }
 
     /// Once per gap: if an author's next op went missing after we read past
     /// it (a parked op pushed out by the cap), fetch again what was skipped
-    /// this run, and list their whole history (at most once an hour each:
-    /// a forged parked op can fake a gap whenever their log moves). Returns
-    /// the authors to read again, and how.
-    pub(super) fn refetch_gaps(&self) -> Result<Vec<(PublicKey, Listing)>> {
+    /// this run. Returns those authors.
+    pub(super) fn refetch_gaps(&self) -> Result<Vec<PublicKey>> {
         let state = self.state();
         let mut refetched = self
             .inner
@@ -156,20 +127,7 @@ impl Workspace {
                 let author_prefix = format!("ops/{}/", member_id(&author));
                 self.skipped_segments()
                     .retain(|listed| !listed.key.starts_with(&author_prefix));
-                let mut listed_whole = self
-                    .inner
-                    .gap_whole_listings
-                    .lock()
-                    .expect("gap listing times lock poisoned by an earlier panic");
-                let is_due = listed_whole.get(&author).is_none_or(|last| {
-                    last.elapsed() >= Duration::from_millis(WHOLE_LISTING_EVERY_MS.unsigned_abs())
-                });
-                if is_due {
-                    listed_whole.insert(author, tokio::time::Instant::now());
-                    refetching.push((author, Listing::Whole));
-                } else {
-                    refetching.push((author, Listing::PastHeld));
-                }
+                refetching.push(author);
             }
         }
         Ok(refetching)

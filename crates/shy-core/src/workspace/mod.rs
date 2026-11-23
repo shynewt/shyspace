@@ -127,9 +127,6 @@ pub(crate) struct Inner {
     /// version: not fetched again unless replaced, so junk can't cost a
     /// download on every pass.
     pub skipped_segments: Mutex<std::collections::HashSet<crate::transport::bucket::ListedObject>>,
-    /// When gap repair last listed each author whole, so a forged gap can't
-    /// make it list them whole on every pass.
-    pub gap_whole_listings: Mutex<std::collections::HashMap<PublicKey, tokio::time::Instant>>,
     /// When commits, fork proofs and peers were last looked at; they need
     /// it every 10 minutes, not every check.
     pub last_slow_duties: Mutex<Option<tokio::time::Instant>>,

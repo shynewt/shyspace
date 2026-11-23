@@ -9,7 +9,7 @@ use rusqlite::backup::Backup;
 use super::{open_encrypted, private::PRIVATE_STATE_TABLES, rebuild::SHARED_VIEW_TABLES};
 
 /// The op log and how far we've read the bucket: a restore reads them again.
-const OP_LOG_TABLES: &[&str] = &["ops", "pending_ops", "forks", "fork_proofs_checked", "cursors"];
+const OP_LOG_TABLES: &[&str] = &["ops", "pending_ops", "forks", "fork_proofs_checked"];
 
 /// This device's own state (read positions, alerts, follows, drafts, Later,
 /// sidebar order), which a new device starts without.

@@ -1019,28 +1019,6 @@ async fn a_segment_named_by_its_hash_must_match_it() {
     assert!(texts(&admin).contains(&"tampered".to_string()));
 }
 
-/// Older versions resumed after any object, junk included. A resume point
-/// that isn't a segment name is dropped, and that author is read again.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_resume_point_left_on_junk_by_an_older_version_is_dropped() {
-    let (_root, _bucket, admin, bob) = admin_and_bob().await;
-    let general = channel_id(&admin, "general");
-    bob.send_message(&general, "hidden before", None).unwrap();
-    bob.sync().await;
-    let junk_key = format!("ops/{}/z", bob.my_id());
-    admin.state().store.set_cursor(&bob.me(), &junk_key).unwrap();
-
-    admin.sync().await;
-
-    let texts: Vec<_> = admin
-        .messages(&general, None, 50)
-        .unwrap()
-        .into_iter()
-        .map(|message| message.text)
-        .collect();
-    assert!(texts.contains(&"hidden before".to_string()), "{texts:?}");
-}
-
 /// A reader can be ahead of the bucket: gossip delivers ops before their
 /// author uploads them. A copy of one of those, real or forged, put in the
 /// bucket under its exact name must not become where reading resumes, or the
@@ -1159,7 +1137,6 @@ async fn a_copy_from_inside_a_read_segment_cannot_hold_reading_back() {
 
     let bob_last = bob.state().store.last_seq(&bob.me()).unwrap();
     assert_eq!(admin.state().store.last_seq(&bob.me()).unwrap(), bob_last);
-    assert_eq!(admin.state().store.cursor(&bob.me()).unwrap(), None);
 }
 
 /// A reader can hold an author's newest ops from gossip before their upload
@@ -1239,242 +1216,6 @@ async fn a_removal_freezes_at_the_true_last_op_despite_copies_uploaded_ahead() {
     );
 }
 
-/// Removing someone reads their whole history first, so even a segment from
-/// an older version that the admin holds part of (after the member went back
-/// to that version) is in the frozen log.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_removal_reads_an_older_segment_the_admin_holds_part_of() {
-    let (_root, bucket, admin, bob) = admin_and_bob().await;
-    let general = channel_id(&admin, "general");
-    for text in ["one", "two", "three"] {
-        bob.send_message(&general, text, None).unwrap();
-    }
-    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
-    for envelope in &unpushed[..unpushed.len() - 1] {
-        admin.receive(envelope.clone()).unwrap();
-    }
-    let (first, last) = (unpushed.first().unwrap().seq, unpushed.last().unwrap().seq);
-    bucket
-        .put_raw(
-            &format!("ops/{}/{first:020}-{last:020}", bob.my_id()),
-            postcard::to_stdvec(&unpushed).unwrap(),
-        )
-        .await
-        .unwrap();
-
-    admin.remove_member(&bob.my_id()).await.unwrap();
-
-    assert_eq!(
-        admin.state().store.frozen_last_seq(&bob.me()).unwrap(),
-        Some(last)
-    );
-}
-
-/// Bucket names can't prove which version wrote them, so nothing planted can
-/// change how often every author is listed whole: a segment from a member
-/// on an older version that a reader holds part of is read at the next whole
-/// listing, however newer-looking the names someone planted.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_planted_newer_name_cannot_hide_an_older_writers_segment() {
-    let (_root, bucket, admin, bob) = admin_and_bob().await;
-    as_if_written_by_an_older_version(&bucket, &bob).await;
-    let general = channel_id(&admin, "general");
-    let bob_segments = format!("ops/{}", bob.my_id());
-    let junk = b"junk".to_vec();
-    let planted = format!(
-        "{bob_segments}/{:020}-{:020}-{}",
-        u64::MAX / 2,
-        1,
-        blake3::hash(&junk).to_hex()
-    );
-    bucket.put_raw(&planted, junk).await.unwrap();
-    admin.sync().await;
-    for text in ["one", "two", "three"] {
-        bob.send_message(&general, text, None).unwrap();
-    }
-    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
-    for envelope in &unpushed[..unpushed.len() - 1] {
-        admin.receive(envelope.clone()).unwrap();
-    }
-    let (first, last) = (unpushed.first().unwrap().seq, unpushed.last().unwrap().seq);
-    bucket
-        .put_raw(
-            &format!("{bob_segments}/{first:020}-{last:020}"),
-            postcard::to_stdvec(&unpushed).unwrap(),
-        )
-        .await
-        .unwrap();
-    bob.state().store.mark_pushed(&bob.me(), last).unwrap();
-    admin.sync().await;
-
-    admin.set_last_whole_listing(0);
-    admin.sync().await;
-
-    assert_eq!(admin.state().store.last_seq(&bob.me()).unwrap(), last);
-}
-
-/// The whole listing is timed by the wall clock and saved, so a clock set
-/// back (the saved time is then ahead of now) makes it due at once rather
-/// than putting it off.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_clock_set_back_makes_the_whole_listing_due_at_once() {
-    let (_root, bucket, admin, bob) = admin_and_bob().await;
-    as_if_written_by_an_older_version(&bucket, &bob).await;
-    let general = channel_id(&admin, "general");
-    for text in ["one", "two", "three"] {
-        bob.send_message(&general, text, None).unwrap();
-    }
-    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
-    for envelope in &unpushed[..unpushed.len() - 1] {
-        admin.receive(envelope.clone()).unwrap();
-    }
-    let (first, last) = (unpushed.first().unwrap().seq, unpushed.last().unwrap().seq);
-    bucket
-        .put_raw(
-            &format!("ops/{}/{first:020}-{last:020}", bob.my_id()),
-            postcard::to_stdvec(&unpushed).unwrap(),
-        )
-        .await
-        .unwrap();
-    admin.sync().await;
-
-    let a_day_ahead = now_ms().unwrap() + 24 * 60 * 60 * 1000;
-    admin.set_last_whole_listing(a_day_ahead);
-    admin.sync().await;
-
-    assert_eq!(admin.state().store.last_seq(&bob.me()).unwrap(), last);
-}
-
-/// A whole listing that stopped on our own failure (a full disk) isn't
-/// counted as done, so the next pass tries it again instead of waiting an
-/// hour.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_whole_listing_cut_short_by_a_local_failure_is_still_due() {
-    let (_root, _bucket, admin, bob) = admin_and_bob().await;
-    let general = channel_id(&admin, "general");
-    bob.send_message(&general, "one", None).unwrap();
-    bob.sync().await;
-    admin.set_last_whole_listing(0);
-    for hook in [&admin.inner.fail_next_apply, &admin.inner.fail_next_park] {
-        hook.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    admin.sync().await;
-
-    assert!(admin.status().error.is_some());
-    assert!(admin.is_whole_listing_due().unwrap());
-}
-
-/// As if `member` had only ever written with an older version: their
-/// segments carry older `<first>-<last>` names.
-async fn as_if_written_by_an_older_version(bucket: &crate::transport::bucket::Bucket, member: &Workspace) {
-    use crate::transport::bucket::parse_segment_name;
-    for listed in bucket.list_segments(&member.me(), None).await.unwrap() {
-        let name = parse_segment_name(&member.me(), &listed.key).unwrap();
-        let bytes = bucket.get_raw(&listed.key).await.unwrap().unwrap();
-        let older = format!("ops/{}/{:020}-{:020}", member.my_id(), name.first, name.last);
-        bucket.put_raw(&older, bytes.to_vec()).await.unwrap();
-        bucket.delete_raw(&listed.key).await.unwrap();
-    }
-}
-
-/// Older versions name segments `<first>-<last>`, sorted by first. A reader
-/// that holds part of such a segment from gossip, and has an older version's
-/// resume point, still reads the rest of it at the next whole listing (at
-/// most an hour); the resume point goes.
-#[tokio::test(flavor = "multi_thread")]
-async fn segments_from_an_older_writer_are_read_even_when_partly_held() {
-    let (_root, bucket, admin, bob) = admin_and_bob().await;
-    as_if_written_by_an_older_version(&bucket, &bob).await;
-    let general = channel_id(&admin, "general");
-    let bob_segments = format!("ops/{}", bob.my_id());
-    let older_name = |envelopes: &[Envelope]| {
-        let (first, last) = (envelopes.first().unwrap().seq, envelopes.last().unwrap().seq);
-        format!("{bob_segments}/{first:020}-{last:020}")
-    };
-    // Where an older version had resumed reading Bob.
-    let held = admin.state().store.last_seq(&bob.me()).unwrap();
-    let older_cursor = format!("{bob_segments}/{:020}-{held:020}", 1);
-    admin.state().store.set_cursor(&bob.me(), &older_cursor).unwrap();
-
-    for text in ["one", "two", "three"] {
-        bob.send_message(&general, text, None).unwrap();
-    }
-    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
-    for envelope in &unpushed[..unpushed.len() - 1] {
-        admin.receive(envelope.clone()).unwrap();
-    }
-    bucket
-        .put_raw(&older_name(&unpushed), postcard::to_stdvec(&unpushed).unwrap())
-        .await
-        .unwrap();
-    let last = unpushed.last().unwrap().seq;
-    bob.state().store.mark_pushed(&bob.me(), last).unwrap();
-    admin.sync().await;
-    admin.set_last_whole_listing(0);
-    admin.sync().await;
-
-    let bob_last = bob.state().store.last_seq(&bob.me()).unwrap();
-    assert_eq!(admin.state().store.last_seq(&bob.me()).unwrap(), bob_last);
-    assert_eq!(
-        admin.state().store.cursor(&bob.me()).unwrap(),
-        None,
-        "the older resume point went"
-    );
-}
-
-/// A member still on an older version names segments `<first>-<last>`, which
-/// sort by their first seq. A reader holding part of one from gossip still
-/// reads the rest of it: when that member writes again (gap repair), or at
-/// the next whole listing (at most an hour) if they don't.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_older_writers_segment_partly_held_is_still_read() {
-    for writes_again in [false, true] {
-        let (_root, bucket, admin, bob) = admin_and_bob().await;
-        as_if_written_by_an_older_version(&bucket, &bob).await;
-        let general = channel_id(&admin, "general");
-        let bob_segments = format!("ops/{}", bob.my_id());
-        let upload_as_older_version = |envelopes: Vec<Envelope>| {
-            let (first, last) = (envelopes.first().unwrap().seq, envelopes.last().unwrap().seq);
-            let name = format!("{bob_segments}/{first:020}-{last:020}");
-            bob.state().store.mark_pushed(&bob.me(), last).unwrap();
-            let bucket = bucket.clone();
-            async move {
-                bucket
-                    .put_raw(&name, postcard::to_stdvec(&envelopes).unwrap())
-                    .await
-                    .unwrap()
-            }
-        };
-        for text in ["one", "two", "three"] {
-            bob.send_message(&general, text, None).unwrap();
-        }
-        let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
-        for envelope in &unpushed[..unpushed.len() - 1] {
-            admin.receive(envelope.clone()).unwrap();
-        }
-        upload_as_older_version(unpushed).await;
-        admin.sync().await;
-        if writes_again {
-            bob.send_message(&general, "four", None).unwrap();
-            let later = bob.state().store.unpushed(&bob.me()).unwrap();
-            upload_as_older_version(later).await;
-        } else {
-            admin.set_last_whole_listing(0);
-        }
-        for _ in 0..3 {
-            admin.sync().await;
-        }
-
-        let bob_last = bob.state().store.last_seq(&bob.me()).unwrap();
-        assert_eq!(
-            admin.state().store.last_seq(&bob.me()).unwrap(),
-            bob_last,
-            "writes again: {writes_again}"
-        );
-    }
-}
-
 /// A segment that couldn't become the resume point is skipped for the rest
 /// of the run, but gap repair still reads it again when its ops are lost.
 #[tokio::test(flavor = "multi_thread")]
@@ -1527,8 +1268,6 @@ async fn a_lost_op_is_fetched_again_from_the_bucket() {
     let third = unpushed.last().unwrap().clone();
     bob.sync().await;
 
-    // As if the admin had read past "second" in the bucket and then lost it.
-    admin.state().store.set_cursor(&bob.me(), "z").unwrap();
     admin.receive(third).unwrap();
     admin.sync().await;
     admin.sync().await;
@@ -2872,62 +2611,6 @@ async fn a_falsely_high_head_is_corrected_by_its_author() {
     assert_eq!(head.last_seq, pushed);
 }
 
-/// A forged op parked far ahead makes an author look like they have a gap
-/// each time their log moves. Gap repair still fetches again what it skipped,
-/// but lists that author whole at most once an hour, so the forgery can't
-/// make every pass list their whole history (and any junk under it).
-#[tokio::test(flavor = "multi_thread")]
-async fn a_forged_gap_cannot_make_every_pass_list_an_author_whole() {
-    let root = tempfile::tempdir().unwrap();
-    let (store, bucket) = super::capacity::counting_store::counting_bucket();
-    let admin = create_admin(&root.path().join("ada"), &bucket).await;
-    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
-    sync_all(&[&admin, &bob]).await;
-    let general = channel_id(&admin, "general");
-    let junk_count = 50;
-    for number in 0..junk_count {
-        bucket
-            .put_raw(
-                &format!("ops/{}/{:020}-junk{number:04}", bob.my_id(), 0),
-                b"junk".to_vec(),
-            )
-            .await
-            .unwrap();
-    }
-    let (epoch, _) = current_key(&bob);
-    let held = admin.state().store.last_seq(&bob.me()).unwrap();
-    let forged = Envelope {
-        author: bob.me(),
-        seq: held + 1_000,
-        epoch: epoch + 1,
-        nonce: [0; 24],
-        ciphertext: vec![1, 2, 3],
-    };
-    admin.receive(forged).unwrap();
-    admin.set_last_whole_listing(now_ms().unwrap());
-
-    let mut listed_per_pass = Vec::new();
-    for _ in 0..3 {
-        bob.send_message(&general, "moves the log", None).unwrap();
-        for envelope in bob.state().store.unpushed(&bob.me()).unwrap() {
-            admin.receive(envelope).unwrap();
-        }
-        bob.sync().await;
-        let before = store.requests();
-        admin.sync().await;
-        listed_per_pass.push(store.requests().since(&before).listed_keys);
-    }
-
-    assert!(
-        listed_per_pass[0] >= junk_count,
-        "the first gap lists Bob whole: {listed_per_pass:?}"
-    );
-    assert!(
-        listed_per_pass[1..].iter().all(|listed| *listed < junk_count),
-        "later gaps don't: {listed_per_pass:?}"
-    );
-}
-
 /// Heads under keys that were never members are ignored: anyone with the
 /// bucket keys could otherwise make every reader fetch junk heads.
 #[tokio::test(flavor = "multi_thread")]
@@ -3006,4 +2689,39 @@ async fn members_cannot_write_under_another_editors_client_id() {
     }
     admin.state().store.rebuild_views(admin.apply_context()).unwrap();
     assert_eq!(admin.page_text(&page).unwrap(), text);
+}
+
+/// The hourly sweep is timed by the wall clock and saved: due once the hour
+/// is up, and at once if the clock was set back (the saved time is then
+/// ahead of now) rather than put off.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sweep_is_due_hourly_and_at_once_after_the_clock_is_set_back() {
+    let (_root, _bucket, admin, _bob) = admin_and_bob().await;
+    let hour_ms = 60 * 60 * 1000;
+    let now = now_ms().unwrap();
+    admin.set_last_sweep(now);
+    assert!(!admin.is_sweep_due().unwrap());
+    admin.set_last_sweep(now - hour_ms);
+    assert!(admin.is_sweep_due().unwrap());
+    admin.set_last_sweep(now + 24 * hour_ms);
+    assert!(admin.is_sweep_due().unwrap(), "the clock was set back");
+}
+
+/// A sweep that stopped on our own failure (a full disk) isn't counted as
+/// done, so the next pass sweeps again instead of waiting an hour.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sweep_cut_short_by_a_local_failure_is_still_due() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "one", None).unwrap();
+    bob.sync().await;
+    admin.set_last_sweep(0);
+    for hook in [&admin.inner.fail_next_apply, &admin.inner.fail_next_park] {
+        hook.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    admin.sync().await;
+
+    assert!(admin.status().error.is_some());
+    assert!(admin.is_sweep_due().unwrap());
 }

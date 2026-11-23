@@ -331,10 +331,6 @@ impl Workspace {
         self.pull()
             .await
             .context("can't reach the bucket to collect the member's last messages")?;
-        // Their whole history, so the freeze can't miss a segment we hold part of.
-        if let Some(error) = self.pull_author(&member, crate::sync::Listing::Whole).await? {
-            return Err(error.context("couldn't keep all of the member's last messages"));
-        }
         let (from_epoch, signed, view_changes) = {
             let mut state = self.state();
             let frozen = FrozenAuthor {

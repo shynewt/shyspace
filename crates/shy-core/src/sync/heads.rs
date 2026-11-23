@@ -10,7 +10,6 @@ use iroh::{PublicKey, Signature};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use super::replicate::Listing;
 use crate::{transport::heads::Head, workspace::Workspace};
 
 const SIGNATURE_DOMAIN: &str = "shyspace head hint v1";
@@ -46,7 +45,7 @@ impl Workspace {
         let me = self.me();
         if let Some(current) = self.bucket().head(&me).await?
             && current.last_seq > self.state().store.last_seq(&me)?
-            && let Some(error) = self.pull_author(&me, Listing::PastHeld).await?
+            && let Some(error) = self.pull_author(&me).await?
         {
             return Err(error.context("reading our own log before writing our head"));
         }
@@ -111,9 +110,8 @@ impl Workspace {
     }
 
     /// Lists `heads/` once and reads the logs of authors whose head moved
-    /// past what we hold; authors without a head (older versions) and
-    /// removed members whose frozen log we haven't finished are listed past
-    /// what we hold.
+    /// past what we hold, and of removed members whose frozen log we haven't
+    /// finished.
     /// Repairs gaps, and rewrites our own head if it is missing or behind.
     /// Returns whether it brought ops gossip had missed.
     pub(crate) async fn check_heads(&self) -> Result<bool> {
@@ -133,10 +131,8 @@ impl Workspace {
                 .map(|head| head.version.clone()),
         )
         .await?;
-        let mut has_head = HashSet::from([me]);
-        let mut to_read: Vec<(PublicKey, Listing, Option<String>)> = Vec::new();
+        let mut to_read: Vec<(PublicKey, Option<String>)> = Vec::new();
         for head in listed {
-            has_head.insert(head.author);
             if head.author == me || self.seen_heads().get(&head.author) == Some(&head.version) {
                 continue;
             }
@@ -151,33 +147,32 @@ impl Workspace {
             }
             match self.bucket().head(&head.author).await? {
                 Some(head_now) if head_now.last_seq > held => {
-                    to_read.push((head.author, Listing::PastHeld, Some(head.version)));
+                    to_read.push((head.author, Some(head.version)));
                 }
                 _ => self.note_seen_head(&head.author, &head.version),
             }
         }
-        for (author, listing) in self.refetch_gaps()? {
-            to_read.push((author, listing, None));
+        for author in self.refetch_gaps()? {
+            to_read.push((author, None));
         }
         for author in &everyone {
-            if *author == me {
-                continue;
-            }
             let held = self.state().store.last_seq(author)?;
-            let frozen_last = self.state().store.frozen_last_seq(author)?;
             // A removed member can't fix their own head, but the removal
             // commit says how far their log goes.
-            let is_unfinished_removal = frozen_last.is_some_and(|last| last > held);
-            let is_headless_and_open = !has_head.contains(author) && frozen_last != Some(held);
-            if is_unfinished_removal || is_headless_and_open {
-                to_read.push((*author, Listing::PastHeld, None));
+            if self
+                .state()
+                .store
+                .frozen_last_seq(author)?
+                .is_some_and(|last| last > held)
+            {
+                to_read.push((*author, None));
             }
         }
         let mut has_found_new = false;
         let mut local_failure = None;
-        for (author, listing, head_version) in to_read {
+        for (author, head_version) in to_read {
             let held = self.state().store.last_seq(&author)?;
-            match self.pull_author(&author, listing).await? {
+            match self.pull_author(&author).await? {
                 // A head counts as seen only once its log was read, so a
                 // failed read is tried again at the next check.
                 None => {

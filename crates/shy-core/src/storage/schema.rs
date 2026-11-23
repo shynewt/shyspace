@@ -19,7 +19,6 @@ CREATE TABLE ops (
 CREATE TABLE pending_ops (
     hash BLOB PRIMARY KEY, author BLOB NOT NULL, seq INTEGER NOT NULL, epoch INTEGER NOT NULL,
     envelope BLOB NOT NULL);
-CREATE TABLE cursors (author BLOB PRIMARY KEY, last_key TEXT NOT NULL);
 CREATE TABLE profiles (
     member BLOB PRIMARY KEY, name TEXT NOT NULL, is_bot INTEGER NOT NULL, lamport INTEGER NOT NULL);
 CREATE TABLE channels (

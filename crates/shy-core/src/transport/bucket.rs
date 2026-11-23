@@ -3,7 +3,6 @@
 //!
 //! Layout under the workspace prefix:
 //!   ops/<author>/<last seq>-<first seq>-<hash>   segments of envelopes
-//!                                         (older versions: <first>-<last>)
 //!   ops/forks/<author>/<seq>/<hash>       proof an author signed two versions of one op
 //!   mls/commit/<from epoch>               admin-signed commits, one per epoch
 //!   invites/<token>/request               a joiner's request (via presigned link)
@@ -94,7 +93,7 @@ impl SegmentFetch {
             return Ok(None);
         };
         let path = &listed.key;
-        let named_hash = parse_segment_name(&self.author, path).and_then(|name| name.hash);
+        let named_hash = parse_segment_name(&self.author, path).map(|name| name.hash);
         let fetched = fetching.await.context("fetching a segment")??;
         if let Some((_, version)) = &fetched {
             // Name exactly what was read, which may be newer than the listing.
@@ -312,34 +311,25 @@ pub fn fork_proof_path(author: &PublicKey, seq: u64, proof: &[u8]) -> String {
 pub struct SegmentName {
     pub first: u64,
     pub last: u64,
-    /// Names since #137 end in a hash of the segment's bytes.
-    pub hash: Option<blake3::Hash>,
+    /// A hash of the segment's bytes; bytes that don't match it are ignored.
+    pub hash: blake3::Hash,
 }
 
-/// Parses `key` if it is exactly a segment name of `author`'s. Names since
-/// #137 are `ops/<author>/<last>-<first>-<hash of the bytes>`, so they sort by
-/// their last seq and a reader can list everything past what it holds; older
-/// names are `ops/<author>/<first>-<last>`. Numbers are padded, the hash is 64
-/// lowercase hex digits.
+/// Parses `key` if it is exactly a segment name of `author`'s:
+/// `ops/<author>/<last>-<first>-<hash of the bytes>`, numbers padded, the
+/// hash 64 lowercase hex digits. Leading with the last seq makes names sort
+/// by it, so a reader can list everything past what it holds.
 pub fn parse_segment_name(author: &PublicKey, key: &str) -> Option<SegmentName> {
     let name = key.strip_prefix(&format!("ops/{}/", member_id(author)))?;
     let mut parts = name.split('-');
-    let (leading, trailing) = (parse_padded(parts.next()?)?, parse_padded(parts.next()?)?);
-    let hash = match parts.next() {
-        None => None,
-        Some(hex) => {
-            let is_lowercase_hex =
-                hex.len() == 64 && hex.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
-            Some(blake3::Hash::from_hex(is_lowercase_hex.then_some(hex)?).ok()?)
-        }
-    };
+    let (last, first) = (parse_padded(parts.next()?)?, parse_padded(parts.next()?)?);
+    let hex = parts.next()?;
+    let is_lowercase_hex =
+        hex.len() == 64 && hex.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+    let hash = blake3::Hash::from_hex(is_lowercase_hex.then_some(hex)?).ok()?;
     if parts.next().is_some() {
         return None;
     }
-    let (first, last) = match hash {
-        Some(_) => (trailing, leading),
-        None => (leading, trailing),
-    };
     (first <= last).then_some(SegmentName { first, last, hash })
 }
 
@@ -758,62 +748,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_exact_segment_names_of_the_author_give_a_range() {
+    fn only_exact_segment_names_of_the_author_parse() {
         let alice = iroh::SecretKey::generate().public();
         let bob = iroh::SecretKey::generate().public();
-        let real = format!("ops/{}/{}-{}", member_id(&alice), padded(3), padded(5));
-        let range = |author: &PublicKey, key: &str| {
-            parse_segment_name(author, key).map(|named| (named.first, named.last))
-        };
-        assert_eq!(range(&alice, &real), Some((3, 5)));
-        assert_eq!(range(&bob, &real), None, "someone else's prefix");
-
-        let alice_ops = format!("ops/{}", member_id(&alice));
-        let max = u64::MAX;
-        assert_eq!(
-            range(&alice, &format!("{alice_ops}/{}-{}", padded(max), padded(max))),
-            Some((max, max))
-        );
-        for junk in [
-            "z".to_owned(),
-            format!("{}-{}", "9".repeat(20), "9".repeat(20)),
-            format!("{}-{}", padded(5), padded(3)),
-            "3-5".to_owned(),
-            format!("{}-{}-extra", padded(3), padded(5)),
-            format!("+{}-{}", &padded(3)[1..], padded(5)),
-        ] {
-            assert_eq!(range(&alice, &format!("{alice_ops}/{junk}")), None, "{junk}");
-        }
-    }
-
-    /// Names since #137 lead with the last seq and end in a hash of the
-    /// bytes, so they sort by what they hold up to.
-    #[test]
-    fn newer_segment_names_lead_with_the_last_seq_and_end_in_a_hash() {
-        let alice = iroh::SecretKey::generate().public();
-        let alice_ops = format!("ops/{}", member_id(&alice));
         let written = segment_path(&alice, 3, 5, b"segment bytes").to_string();
         let named = parse_segment_name(&alice, &written).unwrap();
         assert_eq!((named.first, named.last), (3, 5));
-        assert_eq!(named.hash, Some(blake3::hash(b"segment bytes")));
-        let older = parse_segment_name(&alice, &format!("{alice_ops}/{}-{}", padded(3), padded(5))).unwrap();
-        assert_eq!((older.first, older.last, older.hash), (3, 5, None));
+        assert_eq!(named.hash, blake3::hash(b"segment bytes"));
+        assert_eq!(parse_segment_name(&bob, &written), None, "someone else's prefix");
 
+        let alice_ops = format!("ops/{}", member_id(&alice));
         let hash = blake3::hash(b"segment bytes").to_hex();
-        let backwards = format!("{alice_ops}/{}-{}-{hash}", padded(3), padded(5));
-        assert!(
-            parse_segment_name(&alice, &backwards).is_none(),
-            "first after last"
-        );
-        let range = format!("{}-{}", padded(5), padded(3));
-        let upper = hash.to_uppercase();
-        for junk in [upper.as_str(), &hash[..63], "", "not-hex"] {
-            assert!(
-                parse_segment_name(&alice, &format!("{alice_ops}/{range}-{junk}")).is_none(),
+        let max = padded(u64::MAX);
+        let highest = parse_segment_name(&alice, &format!("{alice_ops}/{max}-{max}-{hash}")).unwrap();
+        assert_eq!((highest.first, highest.last), (u64::MAX, u64::MAX));
+        let (three, five) = (padded(3), padded(5));
+        for junk in [
+            "z".to_owned(),
+            format!("{five}-{three}"),
+            format!("{three}-{five}-{hash}"),
+            format!("{}-{}-{hash}", "9".repeat(20), "9".repeat(20)),
+            format!("5-3-{hash}"),
+            format!("{five}-{three}-{}", hash.to_uppercase()),
+            format!("{five}-{three}-{}", &hash[..63]),
+            format!("{five}-{three}-not-hex"),
+            format!("{five}-{three}-{hash}-more"),
+            format!("+{}-{three}-{hash}", &five[1..]),
+        ] {
+            assert_eq!(
+                parse_segment_name(&alice, &format!("{alice_ops}/{junk}")),
+                None,
                 "{junk}"
             );
         }
-        assert!(parse_segment_name(&alice, &format!("{alice_ops}/{range}-{hash}-more")).is_none());
     }
 
     /// Listing past what a reader holds keeps every newer name that holds

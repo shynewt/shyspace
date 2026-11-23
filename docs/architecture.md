@@ -56,7 +56,7 @@ Only the admin (the workspace creator) changes membership. This keeps a single, 
 
 ## Sync loop (`sync/`)
 
-Bucket requests cost money on some providers, so the loop reads as little as it can (#137). After each upload an author rewrites their head (`heads/<id>`, the last seq they uploaded) and gossips a signed hint naming the head's version (`sync/heads.rs`). Most passes are *checks*: one listing of `heads/` (heads of keys that were never members are ignored), and only the logs whose head moved in a way no hint explained are read; members without a head (older versions), removed members whose frozen log we haven't finished, and authors with a gap are read past what we hold. A head counts as seen only once its log was read, so a failed read is retried at the next check. A *sweep* reads every author's log past what we hold: at start, after the computer slept, and when the hourly whole listing is due. Checks wait 8 s after one that found something gossip missed, then half as long again after each empty one, up to a minute (`sync/pacing.rs`); a hint naming ops we lack, an admin's commit nudge, or a neighbour joining wakes one at once, and the admin looks at open invites' request slots every 8 s, since joiners can't nudge. Our own writes don't wake a pass: a separate task uploads them 600 ms later, then writes our head and sends the hint. Each step of a pass runs even if another fails:
+Bucket requests cost money on some providers, so the loop reads as little as it can (#137). After each upload an author rewrites their head (`heads/<id>`, the last seq they uploaded) and gossips a signed hint naming the head's version (`sync/heads.rs`). Most passes are *checks*: one listing of `heads/` (heads of keys that were never members are ignored), and only the logs whose head moved in a way no hint explained are read; removed members whose frozen log we haven't finished, and authors with a gap, are read past what we hold. A head counts as seen only once its log was read, so a failed read is retried at the next check. A *sweep* reads every author's log past what we hold: at start, after the computer slept, and at least hourly by the saved wall clock (at once if the clock was set back). Checks wait 8 s after one that found something gossip missed, then half as long again after each empty one, up to a minute (`sync/pacing.rs`); a hint naming ops we lack, an admin's commit nudge, or a neighbour joining wakes one at once, and the admin looks at open invites' request slots every 8 s, since joiners can't nudge. Our own writes don't wake a pass: a separate task uploads them 600 ms later, then writes our head and sends the hint. Each step of a pass runs even if another fails:
 
 1. apply new admin commits (advance epochs);
 2. retry parked ops;
@@ -66,7 +66,7 @@ Bucket requests cost money on some providers, so the loop reads as little as it 
 6. push our unpushed ops as segments, each under the 32 MB that readers accept;
 7. refresh the gossip allowlist to current members; every 10 minutes, connect to members listed in the bucket.
 
-A pull lists an author's segments past the highest seq we hold (all of them once an hour, on gap repair, and before a removal, for older names), fetches the ones that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
+A pull lists an author's segments past the highest seq we hold, fetches the ones that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
 
 An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried. If a second, different version of an op we already have arrives, signed by its author, neither version counts (see Forked logs in `security.md`).
 
@@ -76,7 +76,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 
 | Path | Content |
 |---|---|
-| `ops/<author>/<last seq>-<first seq>-<hash>` | a segment of that author's envelopes; the name leads with the last seq so a reader lists exactly what holds more than it has, and ends in a BLAKE3 hash of the bytes (older versions wrote `<first>-<last>`) |
+| `ops/<author>/<last seq>-<first seq>-<hash>` | a segment of that author's envelopes; the name leads with the last seq so a reader lists exactly what holds more than it has, and ends in a BLAKE3 hash of the bytes |
 | `ops/forks/<author>/<seq>/<hash>` | proof that the author signed two versions of that op: both envelopes |
 | `mls/commit/<from epoch>` | admin-signed MLS commits |
 | `invites/<token>/request` | a joiner's request, written through a presigned link |
