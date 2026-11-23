@@ -72,12 +72,13 @@ impl Workspace {
             if listed_version.is_some() && listed_version == verified.as_ref() {
                 continue;
             }
-            if self.bucket().commit(from_epoch).await?.as_deref() == Some(signed.as_slice()) {
-                if let Some(version) = listed_version {
-                    self.verified_commits().insert(from_epoch, version.clone());
+            // Verified at the version the bytes were read at, not the one
+            // listed: the slot may change in between.
+            match self.bucket().commit_versioned(from_epoch).await? {
+                Some((bytes, version)) if bytes.as_ref() == signed.as_slice() => {
+                    self.verified_commits().insert(from_epoch, version);
                 }
-            } else {
-                self.bucket().put_commit(from_epoch, signed).await?;
+                _ => self.bucket().put_commit(from_epoch, signed).await?,
             }
         }
         Ok(())

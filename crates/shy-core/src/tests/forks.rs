@@ -287,3 +287,37 @@ async fn a_version_heard_live_is_checked_against_the_bucket_within_a_sweep() {
             .unwrap()
     );
 }
+
+/// Junk over a range we hold (real headers, garbage contents) must not count
+/// as checked against the bucket, or the author could plant it, wait for a
+/// sweep, then upload a different version that nobody ever compares.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_over_a_held_range_cannot_hide_a_later_upload() {
+    let fork = fork().await;
+    let admin = &fork.admin;
+    admin.receive(fork.for_admin.clone()).unwrap();
+    admin.receive(fork.after.clone()).unwrap();
+    let junk = |real: &Envelope| Envelope {
+        ciphertext: vec![7; 64],
+        ..real.clone()
+    };
+    fork.bucket
+        .put_segment(&[junk(&fork.for_admin), junk(&fork.after)])
+        .await
+        .unwrap();
+    admin.sync().await;
+
+    fork.bucket
+        .put_segment(&[fork.for_carol.clone(), fork.after.clone()])
+        .await
+        .unwrap();
+    admin.sync().await;
+
+    assert!(
+        admin
+            .state()
+            .store
+            .is_forked(&fork.bob.me(), fork.for_admin.seq)
+            .unwrap()
+    );
+}

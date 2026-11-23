@@ -181,6 +181,16 @@ impl Store {
         )
     }
 
+    /// How many bytes `author`'s stored envelopes from `first` to `last` take.
+    pub fn envelope_bytes_between(&self, author: &PublicKey, first: u64, last: u64) -> Result<u64> {
+        let total: Option<u64> = self.db.query_row(
+            "SELECT SUM(length(envelope)) FROM ops WHERE author = ? AND seq BETWEEN ? AND ?",
+            params![author.as_bytes(), first, last],
+            |row| row.get(0),
+        )?;
+        Ok(total.unwrap_or(0))
+    }
+
     /// `author`'s envelopes from `first` to `last`, in order, as stored.
     pub fn envelopes_between(&self, author: &PublicKey, first: u64, last: u64) -> Result<Vec<Envelope>> {
         self.envelopes(

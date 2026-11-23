@@ -291,10 +291,10 @@ impl Workspace {
         self.status_lock().removed = true;
     }
 
-    /// One full pass: every author's segments past what we hold (whole
-    /// listings when due). Each step runs even if an earlier one failed, so
-    /// one bad object can't stop the others; the first error is shown in the
-    /// UI.
+    /// One full pass (a sweep): every author's segments past what we have
+    /// checked against the bucket. Each step runs even if an earlier one
+    /// failed, so one bad object can't stop the others; the first error is
+    /// shown in the UI.
     pub async fn sync(&self) {
         self.pass(PassKind::Sweep).await;
     }
@@ -325,16 +325,27 @@ impl Workspace {
         }
         if !self.status().removed {
             let is_slow_due = matches!(kind, PassKind::Sweep) || self.take_slow_duties_if_due();
-            if self.is_admin()
-                && let Err(error) = self.admin_duties().await
-            {
-                errors.push(error);
+            let mut has_snapshot = true;
+            if self.is_admin() {
+                if let Err(error) = self.refresh_recovery_snapshot().await {
+                    errors.push(error);
+                    has_snapshot = false;
+                }
+                if let Err(error) = self.answer_join_requests().await {
+                    errors.push(error);
+                }
             }
-            // Commit repair comes after the admin's recovery snapshot, and
-            // fork proofs before reading, so ops proved forked never apply.
-            let (repaired, shared_forks) = match is_slow_due {
-                true => (self.republish_commits().await, self.share_forks().await),
-                false => (Ok(()), Ok(())),
+            // Commit repair only once the admin's recovery snapshot is up (a
+            // commit must never be in the bucket before the snapshot that
+            // covers it), and fork proofs before reading, so ops proved
+            // forked never apply.
+            let repaired = match is_slow_due && has_snapshot {
+                true => self.republish_commits().await,
+                false => Ok(()),
+            };
+            let shared_forks = match is_slow_due {
+                true => self.share_forks().await,
+                false => Ok(()),
             };
             if let Err(error) = repaired {
                 errors.push(error);

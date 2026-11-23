@@ -1,13 +1,27 @@
 //! Attacks from members, removed members and anyone with bucket access.
 //! Every security rule in docs/security.md has a test here.
 
+use std::{
+    collections::HashMap,
+    fmt,
+    sync::{Arc, Mutex},
+};
+
+use async_trait::async_trait;
+use bytes::Bytes;
+use futures_lite::{StreamExt, stream};
 use iroh::SecretKey;
+use object_store::{
+    CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
+    PutMultipartOptions, PutOptions, PutPayload, PutResult, memory::InMemory, path::Path,
+};
 
 use super::support::*;
 use crate::{
     DataDir, KeyStorage, Networking, Workspace, crypto,
     membership::commit::{self, FrozenAuthor},
     ops::{Envelope, Op, OpBody, now_ms},
+    transport::bucket::{Bucket, parse_segment_name},
     views::PresenceState,
 };
 
@@ -2724,4 +2738,252 @@ async fn a_sweep_cut_short_by_a_local_failure_is_still_due() {
 
     assert!(admin.status().error.is_some());
     assert!(admin.is_sweep_due().unwrap());
+}
+
+/// Like S3: an object's ETag is a hash of its content, so putting the same
+/// bytes again gives the same ETag. Can swap an object right before a GET.
+#[derive(Debug, Default)]
+struct ContentTagStore {
+    inner: InMemory,
+    tags: Arc<Mutex<HashMap<Path, String>>>,
+    swap_before_get: Mutex<Option<(Path, Bytes)>>,
+}
+
+fn tag_of(payload: &PutPayload) -> String {
+    let mut hasher = blake3::Hasher::new();
+    for chunk in payload.iter() {
+        hasher.update(chunk);
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+impl fmt::Display for ContentTagStore {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("content tag store")
+    }
+}
+
+#[async_trait]
+impl ObjectStore for ContentTagStore {
+    async fn put_opts(
+        &self,
+        location: &Path,
+        payload: PutPayload,
+        opts: PutOptions,
+    ) -> object_store::Result<PutResult> {
+        self.tags
+            .lock()
+            .unwrap()
+            .insert(location.clone(), tag_of(&payload));
+        self.inner.put_opts(location, payload, opts).await
+    }
+    async fn put_multipart_opts(
+        &self,
+        location: &Path,
+        opts: PutMultipartOptions,
+    ) -> object_store::Result<Box<dyn MultipartUpload>> {
+        self.inner.put_multipart_opts(location, opts).await
+    }
+    async fn get_opts(&self, location: &Path, options: GetOptions) -> object_store::Result<GetResult> {
+        let swap = {
+            let mut armed = self.swap_before_get.lock().unwrap();
+            match armed.as_ref() {
+                Some((path, _)) if path == location => armed.take(),
+                _ => None,
+            }
+        };
+        if let Some((path, bytes)) = swap {
+            self.put_opts(&path, PutPayload::from(bytes), PutOptions::default())
+                .await?;
+        }
+        let mut result = self.inner.get_opts(location, options).await?;
+        result.meta.e_tag = self.tags.lock().unwrap().get(location).cloned();
+        Ok(result)
+    }
+    fn delete_stream(
+        &self,
+        locations: stream::Boxed<object_store::Result<Path>>,
+    ) -> stream::Boxed<object_store::Result<Path>> {
+        self.inner.delete_stream(locations)
+    }
+    fn list(&self, prefix: Option<&Path>) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        let tags = self.tags.clone();
+        Box::pin(self.inner.list(prefix).map(move |meta| {
+            meta.map(|mut meta| {
+                meta.e_tag = tags.lock().unwrap().get(&meta.location).cloned();
+                meta
+            })
+        }))
+    }
+    fn list_with_offset(
+        &self,
+        prefix: Option<&Path>,
+        offset: &Path,
+    ) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        let tags = self.tags.clone();
+        Box::pin(self.inner.list_with_offset(prefix, offset).map(move |meta| {
+            meta.map(|mut meta| {
+                meta.e_tag = tags.lock().unwrap().get(&meta.location).cloned();
+                meta
+            })
+        }))
+    }
+    async fn list_with_delimiter(&self, prefix: Option<&Path>) -> object_store::Result<ListResult> {
+        self.inner.list_with_delimiter(prefix).await
+    }
+    async fn copy_opts(&self, from: &Path, to: &Path, options: CopyOptions) -> object_store::Result<()> {
+        self.inner.copy_opts(from, to, options).await
+    }
+}
+
+/// A commit slot is verified at the version the bytes were read at, not the
+/// one listed: otherwise someone swapping it between junk and the real
+/// commit around our listing could make us skip the junk for good (S3
+/// ETags are content hashes, so the junk's ETag repeats).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commit_swapped_around_a_listing_is_still_put_back() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(ContentTagStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let (epoch, signed) = bob
+        .state()
+        .store
+        .commit_records()
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    let junk = b"junk".to_vec();
+
+    bucket.put_commit(epoch, junk.clone()).await.unwrap();
+    *store.swap_before_get.lock().unwrap() = Some((
+        Path::from(format!("mls/commit/{epoch:020}")),
+        Bytes::from(signed.clone()),
+    ));
+    bob.make_slow_duties_due();
+    bob.check().await;
+    assert!(
+        store.swap_before_get.lock().unwrap().is_none(),
+        "the swap happened"
+    );
+
+    bucket.put_commit(epoch, junk).await.unwrap();
+    bob.make_slow_duties_due();
+    bob.check().await;
+
+    assert_eq!(
+        bucket.commit(epoch).await.unwrap().as_deref(),
+        Some(signed.as_slice()),
+        "bob should repair the commit"
+    );
+}
+
+/// One of Bob's segments goes missing, so the admin's checked mark for him
+/// can't pass it. Junk planted over a later range the admin holds is still
+/// fetched at most once a run, not at every sweep.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_over_a_held_range_is_fetched_once_a_run() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let general = channel_id(&admin, "general");
+
+    bob.send_message(&general, "one", None).unwrap();
+    let first_batch = bob.state().store.unpushed(&bob.me()).unwrap();
+    for envelope in first_batch.clone() {
+        admin.receive(envelope).unwrap();
+    }
+    bob.sync().await;
+    let listed = bucket.list_segments(&bob.me(), None).await.unwrap();
+    let missing = listed
+        .iter()
+        .find(|object| parse_segment_name(&bob.me(), &object.key).unwrap().first == first_batch[0].seq)
+        .unwrap();
+    bucket.delete_raw(&missing.key).await.unwrap();
+
+    bob.send_message(&general, "two", None).unwrap();
+    let second_batch = bob.state().store.unpushed(&bob.me()).unwrap();
+    for envelope in second_batch.clone() {
+        admin.receive(envelope).unwrap();
+    }
+    bob.sync().await;
+    admin.sync().await;
+    let before = store.requests();
+    admin.sync().await;
+    let idle_sweep = store.requests().since(&before).gets;
+
+    let last = second_batch.last().unwrap();
+    let junk = Envelope {
+        ciphertext: vec![7; 64],
+        ..last.clone()
+    };
+    bucket.put_segment(&[junk]).await.unwrap();
+    admin.sync().await;
+    let before = store.requests();
+    admin.sync().await;
+
+    assert_eq!(
+        store.requests().since(&before).gets,
+        idle_sweep,
+        "junk is fetched once per run at most"
+    );
+}
+
+/// Anyone with the epoch key can encrypt an honest op again and gossip that
+/// copy. It's still the op its author signed, so the author's own upload
+/// still counts as checked against the bucket, and their mark moves on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_copy_encrypted_again_does_not_stop_the_checked_mark() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let (_, epoch_key) = current_key(&admin);
+    bob.send_message(&general, "one", None).unwrap();
+    for envelope in bob.state().store.unpushed(&bob.me()).unwrap() {
+        admin.receive(encrypted_again(&envelope, &epoch_key, 0)).unwrap();
+    }
+    bob.sync().await;
+    admin.sync().await;
+    bob.send_message(&general, "two", None).unwrap();
+    bob.sync().await;
+    admin.sync().await;
+    admin.sync().await;
+
+    let held = admin.state().store.last_seq(&bob.me()).unwrap();
+    assert_eq!(admin.checked_against_bucket(&bob.me()).unwrap(), held);
+}
+
+/// The admin repairs commits only once its recovery snapshot is up: a
+/// commit must never reach the bucket before the snapshot that covers it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admin_repairs_commits_only_after_its_snapshot_is_up() {
+    let (_root, bucket, admin, _bob) = admin_and_bob().await;
+    admin.recovery_kit().await.unwrap();
+    let epoch = admin.state().store.commit_records().unwrap()[0].0;
+    let key = admin.state().store.meta("recovery_key").unwrap().unwrap();
+    let corrupt = |admin: &Workspace| {
+        let store = &admin.state().store;
+        store.set_meta("recovery_key", &[1, 2, 3]).unwrap();
+        store.set_meta("recovery_uploaded_generation", &[0; 8]).unwrap();
+        store.set_meta("recovery_change_generation", &[9; 8]).unwrap();
+    };
+    corrupt(&admin);
+    bucket.delete_commit(epoch).await.unwrap();
+
+    admin.make_slow_duties_due();
+    admin.sync().await;
+    assert!(
+        bucket.commit(epoch).await.unwrap().is_none(),
+        "not before the snapshot"
+    );
+
+    admin.state().store.set_meta("recovery_key", &key).unwrap();
+    admin.make_slow_duties_due();
+    admin.sync().await;
+    assert!(bucket.commit(epoch).await.unwrap().is_some(), "after it");
 }

@@ -42,7 +42,7 @@ const LOCK_PROBE_PREFIX: &str = "ops/lock-probe-";
 
 /// Objects larger than this are ignored, so a hostile writer can't make us
 /// load arbitrary amounts of data into memory.
-const MAX_OBJECT_SIZE: u64 = 32 * 1024 * 1024;
+pub(crate) const MAX_OBJECT_SIZE: u64 = 32 * 1024 * 1024;
 
 /// The largest recovery snapshot restore reads.
 pub const MAX_RECOVERY_SNAPSHOT_BYTES: u64 = MAX_OBJECT_SIZE;
@@ -546,6 +546,15 @@ impl Bucket {
             .iter()
             .filter_map(|path| path.filename()?.parse().ok())
             .collect())
+    }
+
+    /// A commit slot's bytes and the version they were read at.
+    pub async fn commit_versioned(&self, from_epoch: u64) -> Result<Option<(Bytes, String)>> {
+        self.get_versioned(
+            &Path::from(format!("mls/commit/{}", padded(from_epoch))),
+            MAX_OBJECT_SIZE,
+        )
+        .await
     }
 
     pub async fn commit(&self, from_epoch: u64) -> Result<Option<Bytes>> {

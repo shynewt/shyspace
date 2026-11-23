@@ -6,8 +6,11 @@ use tracing::warn;
 
 use super::peers::peers_to_dial;
 use crate::{
-    ops::now_ms,
-    transport::bucket::{ListedObject, SegmentName, listing_after, parse_segment_name, split_into_segments},
+    crypto,
+    ops::{Envelope, now_ms},
+    transport::bucket::{
+        ListedObject, MAX_OBJECT_SIZE, SegmentName, listing_after, parse_segment_name, split_into_segments,
+    },
     views::member_id,
     workspace::Workspace,
 };
@@ -23,8 +26,8 @@ const LAST_SWEEP_META: &str = "last_sweep_ms";
 struct SegmentsRead {
     /// The first op that failed locally.
     local_failure: Option<anyhow::Error>,
-    /// The (first, last) ranges of segments read whose ops all applied.
-    settled: Vec<(u64, u64)>,
+    /// The (first, last) ranges of segments read that hold exactly our log.
+    matching: Vec<(u64, u64)>,
 }
 
 fn checked_key(author: &PublicKey) -> String {
@@ -33,8 +36,8 @@ fn checked_key(author: &PublicKey) -> String {
 
 /// How far a log is checked against the bucket once `ranges` are: the
 /// furthest point reachable from `checked` through ranges that each start
-/// no later than right after it. Junk can't push it on, since only ranges
-/// that matched or applied count.
+/// no later than right after it. Only ranges whose envelopes are exactly
+/// ours count, so junk can't push it on.
 fn checked_through(checked: u64, mut ranges: Vec<(u64, u64)>) -> u64 {
     ranges.sort_unstable();
     ranges.into_iter().fold(checked, |reached, (first, last)| {
@@ -100,18 +103,26 @@ impl Workspace {
     async fn sweep_author(&self, author: &PublicKey) -> Result<Option<anyhow::Error>> {
         let held = self.state().store.last_seq(author)?;
         // We can't have checked what we no longer hold (a restore leaves the
-        // log out, and a fork drops ops).
-        let checked = self.checked_against_bucket(author)?.min(held);
+        // log out).
+        let stored_checked = self.checked_against_bucket(author)?;
+        let checked = stored_checked.min(held);
+        if checked < stored_checked {
+            self.save_checked(author, checked)?;
+        }
         let listed = self
             .bucket()
             .list_segments(author, Some(&listing_after(author, checked)))
             .await?;
+        let skipped = self.skipped_segments().clone();
         let mut matching = Vec::new();
         let mut worth_fetching = Vec::new();
         for object in listed {
             let Some(name) = parse_segment_name(author, &object.key) else {
                 continue;
             };
+            if skipped.contains(&object) {
+                continue;
+            }
             if name.last <= held && self.is_same_as_ours(author, &name)? {
                 matching.push((name.first, name.last));
             } else {
@@ -119,31 +130,91 @@ impl Workspace {
             }
         }
         let read = self.read_segments(author, worth_fetching).await?;
-        matching.extend(read.settled);
+        matching.extend(read.matching);
         let checked_now = checked_through(checked, matching);
         if checked_now > checked {
-            self.state()
-                .store
-                .set_meta(&checked_key(author), &checked_now.to_le_bytes())?;
+            self.save_checked(author, checked_now)?;
         }
         Ok(read.local_failure)
     }
 
     /// Whether our copy of `name`'s range encodes to exactly the bytes its
-    /// hash names, as an honest upload of the same ops does.
+    /// hash names, as an honest upload of the same ops does. A range bigger
+    /// than any segment can't be, so it isn't loaded.
     fn is_same_as_ours(&self, author: &PublicKey, name: &SegmentName) -> Result<bool> {
+        let size = self
+            .state()
+            .store
+            .envelope_bytes_between(author, name.first, name.last)?;
+        if size > MAX_OBJECT_SIZE {
+            return Ok(false);
+        }
         let ours = self
             .state()
             .store
             .envelopes_between(author, name.first, name.last)?;
-        let count = name.last - name.first + 1;
-        if u64::try_from(ours.len())? != count {
+        if u64::try_from(ours.len())? != name.last - name.first + 1 {
             return Ok(false);
         }
         Ok(blake3::hash(&postcard::to_stdvec(&ours)?) == name.hash)
     }
 
-    fn checked_against_bucket(&self, author: &PublicKey) -> Result<u64> {
+    /// Whether every one of these envelopes is the op in our log: the same
+    /// bytes, or the same body its author signed (anyone with the epoch key
+    /// can encrypt an op again), or a seq that is a proved fork. Only then
+    /// does a segment count as checked against the bucket: headers aren't
+    /// signed, so junk with real headers must not count. A genuine segment's
+    /// seqs run without gaps, so the two are compared pairwise.
+    fn is_all_in_our_log(&self, author: &PublicKey, envelopes: &[Envelope]) -> Result<bool> {
+        let (Some(first), Some(last)) = (envelopes.first(), envelopes.last()) else {
+            return Ok(false);
+        };
+        let ours = self
+            .state()
+            .store
+            .envelopes_between(author, first.seq, last.seq)?;
+        if ours.len() != envelopes.len() {
+            return Ok(false);
+        }
+        for (theirs, stored) in envelopes.iter().zip(&ours) {
+            // One refused for its size kept only its header: nothing to
+            // compare, as when checking for forks.
+            let is_ours = stored.seq == theirs.seq
+                && (stored == theirs
+                    || stored.ciphertext.is_empty()
+                    || self.state().store.is_forked(author, theirs.seq)?
+                    || self.is_same_signed(stored, theirs)?);
+            if !is_ours {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn is_same_signed(&self, stored: &Envelope, theirs: &Envelope) -> Result<bool> {
+        let state = self.state();
+        let (Some(stored_key), Some(their_key)) = (
+            state.store.epoch_key(stored.epoch)?,
+            state.store.epoch_key(theirs.epoch)?,
+        ) else {
+            return Ok(false);
+        };
+        match (
+            crypto::signed_body(stored, &stored_key),
+            crypto::signed_body(theirs, &their_key),
+        ) {
+            (Ok(ours), Ok(their)) => Ok(ours == their),
+            _ => Ok(false),
+        }
+    }
+
+    fn save_checked(&self, author: &PublicKey, checked: u64) -> Result<()> {
+        self.state()
+            .store
+            .set_meta(&checked_key(author), &checked.to_le_bytes())
+    }
+
+    pub(crate) fn checked_against_bucket(&self, author: &PublicKey) -> Result<u64> {
         let Some(saved) = self.state().store.meta(&checked_key(author))? else {
             return Ok(0);
         };
@@ -164,15 +235,17 @@ impl Workspace {
         let mut read_all = SegmentsRead::default();
         while let Some(segment) = segments.next().await? {
             let read = self.receive_segment(author, &segment.listed.key, &segment.envelopes)?;
-            if read.is_settled {
-                if let Some(name) = parse_segment_name(author, &segment.listed.key) {
-                    read_all.settled.push((name.first, name.last));
+            let name = parse_segment_name(author, &segment.listed.key);
+            let is_checked = read.is_settled && self.is_all_in_our_log(author, &segment.envelopes)?;
+            match name {
+                Some(name) if is_checked => read_all.matching.push((name.first, name.last)),
+                _ if !read.is_stopped => {
+                    let mut skipped = self.skipped_segments();
+                    if skipped.len() < MAX_SKIPPED_SEGMENTS {
+                        skipped.insert(segment.listed);
+                    }
                 }
-            } else if !read.is_stopped {
-                let mut skipped = self.skipped_segments();
-                if skipped.len() < MAX_SKIPPED_SEGMENTS {
-                    skipped.insert(segment.listed);
-                }
+                _ => {}
             }
             if let Some(error) = read.local_failure {
                 read_all.local_failure.get_or_insert(error);
@@ -185,7 +258,7 @@ impl Workspace {
     }
 
     /// Whether a sweep is due: the hourly net under heads and hints, which
-    /// reads every author past what we hold. Timed by the wall clock, saved,
+    /// reads every author past what it has checked against the bucket. Timed by the wall clock, saved,
     /// so a restart or sleep doesn't put it off; a clock set back makes it
     /// due at once.
     pub(crate) fn is_sweep_due(&self) -> Result<bool> {

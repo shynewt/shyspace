@@ -195,10 +195,8 @@ impl Workspace {
         self.bucket().delete_invite_request(token).await
     }
 
-    /// The snapshot goes first, so commits (repaired after this) are only
-    /// ever republished once the recovery snapshot covers them.
-    pub(crate) async fn admin_duties(&self) -> Result<()> {
-        self.refresh_recovery_snapshot().await?;
+    /// Picks up join requests and delivers answers owed.
+    pub(crate) async fn answer_join_requests(&self) -> Result<()> {
         self.collect_join_requests().await?;
         self.deliver_answers().await
     }
