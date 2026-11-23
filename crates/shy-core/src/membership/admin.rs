@@ -48,7 +48,7 @@ pub(crate) fn drop_unsealed_deliveries(store: &Store) -> Result<()> {
 }
 
 impl Workspace {
-    fn ensure_admin(&self) -> Result<()> {
+    pub(crate) fn ensure_admin(&self) -> Result<()> {
         ensure!(self.is_admin(), "only the workspace admin can manage members");
         Ok(())
     }
@@ -345,6 +345,7 @@ impl Workspace {
             state.mls.merge_pending_commit()?;
             state.record_epoch()?;
             Workspace::mark_recovery_snapshot_stale(&state.store)?;
+            Workspace::start_storage_rotation(&state.store)?;
             let view_changes = match views_changed {
                 true => state.store.all_view_changes()?,
                 false => Vec::new(),

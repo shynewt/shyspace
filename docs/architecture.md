@@ -84,7 +84,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 | `invites/<token>/request` | a joiner's request, written through a presigned link |
 | `invites/<token>/answer` | the admin's answer, read through a presigned link |
 | `recovery/snapshot` | the admin's recovery snapshot, encrypted with the recovery key |
-| `heads/<id>` | the last seq that member uploaded, rewritten after each upload; a hint only (`transport/heads.rs`) |
+| `heads/<id>` | the last seq that member uploaded and a short tag of the bucket key they use, rewritten after each upload and after the key changes; a hint only (`transport/heads.rs`) |
 | `peers/<id>` | gossip bootstrap hints, rewritten when a member starts and every 6 hours; members silent for a day aren't dialed, and nobody is redialed more often than every 10 minutes unless they announce again (`sync/peers.rs`) |
 | `files/<author>/<blob id>/<piece>` | a shared file's or profile picture's encrypted pieces (`transport/blobs.rs`) |
 | `health/versioning-probe`, `ops/lock-probe-<member>` | small probes that prove the bucket keeps deleted data (see `workspace/protection.rs`) |

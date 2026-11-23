@@ -20,6 +20,17 @@ const MAX_HEAD_BYTES: u64 = 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Head {
     pub last_seq: u64,
+    /// Which bucket key the author uses (`key_tag`), so the admin can see
+    /// who has moved to a new one.
+    pub key: [u8; 8],
+}
+
+/// A short tag naming a bucket key by its access key id (not a secret).
+pub fn key_tag(access_key_id: &str) -> [u8; 8] {
+    let hash = blake3::hash(access_key_id.as_bytes());
+    let mut tag = [0; 8];
+    tag.copy_from_slice(&hash.as_bytes()[..8]);
+    tag
 }
 
 pub struct ListedHead {

@@ -10,7 +10,10 @@ use iroh::{PublicKey, Signature};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::{transport::heads::Head, workspace::Workspace};
+use crate::{
+    transport::heads::{Head, key_tag},
+    workspace::Workspace,
+};
 
 const SIGNATURE_DOMAIN: &str = "shyspace head hint v1";
 
@@ -107,11 +110,15 @@ impl Workspace {
         if pushed == 0 {
             return Ok(());
         }
-        if self.bucket().head(&me).await? == Some(Head { last_seq: pushed }) {
+        let head = Head {
+            last_seq: pushed,
+            key: key_tag(&self.bucket_config()?.access_key_id),
+        };
+        if self.bucket().head(&me).await? == Some(head) {
             self.inner.confirmed_head_seq.store(pushed, Ordering::SeqCst);
             return Ok(());
         }
-        let version = self.bucket().put_head(&me, Head { last_seq: pushed }).await?;
+        let version = self.bucket().put_head(&me, head).await?;
         self.note_seen_head(&me, &version);
         self.inner.confirmed_head_seq.store(pushed, Ordering::SeqCst);
         if let Some(net) = &self.inner.net {

@@ -51,7 +51,7 @@ impl Workspace {
             region: update.region.trim().to_owned(),
             access_key_id: update.access_key_id.trim().to_owned(),
             secret_access_key: update.secret_access_key.trim().to_owned(),
-            ..current
+            ..current.clone()
         };
         ensure!(
             !next.region.is_empty() && !next.access_key_id.is_empty() && !next.secret_access_key.is_empty(),
@@ -62,6 +62,7 @@ impl Workspace {
             .check_access()
             .await
             .context("checking the new storage settings")?;
+        Workspace::keep_replaced_key(&self.state().store, &current, &next)?;
         self.write(Op::StorageSettings { bucket: next })?;
         Workspace::mark_recovery_snapshot_stale(&self.state().store)?;
         self.refresh_recovery_snapshot().await
@@ -79,6 +80,10 @@ impl Workspace {
                     .bucket
                     .write()
                     .expect("bucket lock poisoned by an earlier panic") = bucket;
+                // Rewrite our head at the next check, naming the new key.
+                self.inner
+                    .confirmed_head_seq
+                    .store(u64::MAX, std::sync::atomic::Ordering::SeqCst);
                 // New keys can have other rights; the next sync checks again.
                 if let Err(error) = self.forget_storage_protection() {
                     warn!("can't forget the last storage check: {error:#}");

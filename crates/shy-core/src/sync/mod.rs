@@ -372,6 +372,9 @@ impl Workspace {
                 if let Err(error) = self.answer_join_requests().await {
                     errors.push(error);
                 }
+                if is_slow_due && let Err(error) = self.recheck_old_key_if_unknown().await {
+                    errors.push(error);
+                }
             }
             // Commit repair only once the admin's recovery snapshot is up (a
             // commit must never be in the bucket before the snapshot that

@@ -32,3 +32,12 @@ A French provider (EU jurisdiction), with no request fees.
 - **MinIO (self-hosted):** `mc version enable`, and a members' policy without `s3:DeleteObjectVersion`.
 
 Backblaze B2 can do this too, but its privacy notice describes sharing identifiers with advertising networks, so we don't recommend it for a privacy product.
+
+## Changing the key after removing someone
+
+A removed member keeps the bucket key until you delete it, so after each removal shyspace asks you to change it (Settings › Storage):
+
+1. Make a new key at your provider, with the same rights as the old one, limited to this bucket. Your provider's own guide: [Cloudflare R2 API tokens](https://developers.cloudflare.com/r2/api/tokens/) (under R2, "Manage" next to "API Tokens", permission "Object Read & Write"), [Backblaze B2 application keys](https://www.backblaze.com/docs/cloud-storage-create-and-manage-app-keys) ("Application Keys" › "Add a New Application Key", read and write), [AWS IAM access keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/id-credentials-access-keys-update.html) (the user's "Security credentials" › "Create access key"). On Scaleway, make a new API key for the members' IAM application (step 3 above).
+2. Paste it into shyspace. The app checks it and sends it to the current members only.
+3. Wait until the app shows everyone has moved. Anyone who hasn't when you delete the old key can't reach the bucket any more and needs a new invite.
+4. Delete the old key at the provider (on AWS, deactivate it first, then delete it), then press "I deleted the old key". The app checks that the old key is refused.

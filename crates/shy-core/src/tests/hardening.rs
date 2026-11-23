@@ -2558,7 +2558,10 @@ async fn a_falsely_high_head_is_corrected_by_its_author() {
     let general = channel_id(&_admin, "general");
     bob.send_message(&general, "one", None).unwrap();
     bob.sync().await;
-    let high = crate::transport::heads::Head { last_seq: 1_000_000 };
+    let high = crate::transport::heads::Head {
+        last_seq: 1_000_000,
+        key: [0; 8],
+    };
     bucket.put_head(&bob.me(), high).await.unwrap();
 
     bob.check().await;
@@ -2581,7 +2584,13 @@ async fn heads_of_strangers_are_not_read() {
     for _ in 0..strangers {
         let stranger = SecretKey::generate().public();
         bucket
-            .put_head(&stranger, crate::transport::heads::Head { last_seq: 5 })
+            .put_head(
+                &stranger,
+                crate::transport::heads::Head {
+                    last_seq: 5,
+                    key: [0; 8],
+                },
+            )
             .await
             .unwrap();
     }
@@ -3875,4 +3884,39 @@ async fn junk_with_real_headers_read_in_a_sweep_doesnt_stop_a_relay() {
     let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
     dave.sync().await;
     assert!(texts_in(&dave, &general).contains(&"only sent live".to_string()));
+}
+
+/// A removed member keeps the old bucket key but never learns the new one:
+/// it travels in an op under the epoch key the removal replaced. Once the
+/// old key is deleted at the provider, everyone else carries on with the
+/// new key, and the app proves the old one dead.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_member_never_learns_the_new_bucket_key() {
+    use super::key_rotation::{FIRST_KEY, Provider, admin_bob_carol, change_key};
+    let provider = Provider::new();
+    let (_root, admin, bob, carol) = admin_bob_carol(&provider).await;
+    let key_of = |member: &Workspace| {
+        crate::config::current_bucket(&member.state().store)
+            .unwrap()
+            .access_key_id
+    };
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    change_key(&admin, "new-key").await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    assert_eq!(
+        (key_of(&bob), key_of(&carol)),
+        ("new-key".to_string(), FIRST_KEY.to_string())
+    );
+
+    provider.delete_key(FIRST_KEY);
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "after the old key went", None)
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    assert!(texts_in(&admin, &general).contains(&"after the old key went".to_string()));
+    assert_eq!(
+        admin.check_old_key_deleted().await.unwrap(),
+        crate::views::OldKeyCheck::Dead
+    );
 }

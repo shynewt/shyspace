@@ -359,6 +359,56 @@ pub struct StorageSettings {
     pub recovery_snapshot_limit: u64,
 }
 
+/// A change of bucket key under way, after a member was removed (they keep
+/// the old key until it is deleted at the provider). Shown to the admin only.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct StorageRotation {
+    pub provider: StorageProvider,
+    /// A new key was saved since the rotation began.
+    pub has_new_key: bool,
+    /// Current members other than the admin, and whether each now uses the
+    /// new key (as their head in the bucket says: a hint only).
+    pub members: Vec<MemberMove>,
+    pub old_key: OldKeyState,
+}
+
+/// The storage provider, told from the bucket's endpoint, so the app can
+/// show where its keys are made and deleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageProvider {
+    Scaleway,
+    R2,
+    B2,
+    S3,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MemberMove {
+    pub member: String,
+    pub has_moved: bool,
+}
+
+/// What the last check of the old key found, while it isn't proved dead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OldKeyState {
+    NotChecked,
+    StillWorks,
+    /// The check couldn't tell (the bucket was unreachable); tried again.
+    Unknown,
+}
+
+/// What checking the old key found. `Dead` ends the rotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OldKeyCheck {
+    Dead,
+    StillWorks,
+    Unknown,
+}
+
 /// Whether the bucket keeps deleted or overwritten data, so a member with
 /// its keys can't destroy the workspace for good.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

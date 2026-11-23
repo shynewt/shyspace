@@ -16,8 +16,8 @@ use shy_core::{
     sync::SyncStatus,
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
-        Page, PageEditorSession, PrivateMembers, ProtectionCheck, SearchHit, SectionSort, SidebarSection,
-        StatusUpdate, StorageSettings,
+        OldKeyCheck, Page, PageEditorSession, PrivateMembers, ProtectionCheck, SearchHit, SectionSort,
+        SidebarSection, StatusUpdate, StorageRotation, StorageSettings,
     },
     workspace::StorageUpdate,
 };
@@ -244,6 +244,25 @@ async fn check_storage_protection(state: State<'_, AppState>) -> CommandResult<P
         .check_storage_protection()
         .await
         .map_err(failed)
+}
+
+#[tauri::command]
+async fn storage_rotation(state: State<'_, AppState>) -> CommandResult<Option<StorageRotation>> {
+    current(&state).await?.storage_rotation().await.map_err(failed)
+}
+
+#[tauri::command]
+async fn check_old_key_deleted(state: State<'_, AppState>) -> CommandResult<OldKeyCheck> {
+    current(&state)
+        .await?
+        .check_old_key_deleted()
+        .await
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn cancel_storage_rotation(state: State<'_, AppState>) -> CommandResult<()> {
+    current(&state).await?.cancel_storage_rotation().map_err(failed)
 }
 
 /// Returns the admin's new recovery kit, if they have one: it holds the keys.
@@ -850,6 +869,9 @@ pub fn run() {
             storage_protection,
             check_storage_protection,
             update_storage,
+            storage_rotation,
+            check_old_key_deleted,
+            cancel_storage_rotation,
             safety_code,
             recovery_kit,
             channels,

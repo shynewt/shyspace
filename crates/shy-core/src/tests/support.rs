@@ -41,6 +41,15 @@ pub async fn create_admin(dir: &Path, bucket: &Bucket) -> Workspace {
 }
 
 pub async fn create_admin_with(dir: &Path, bucket: &Bucket, options: WorkspaceOptions) -> Workspace {
+    create_admin_using(dir, connector(bucket), options).await
+}
+
+/// Like `create_admin`, reaching the bucket through `connect`.
+pub async fn create_admin_connected(dir: &Path, connect: Connector) -> Workspace {
+    create_admin_using(dir, connect, Networking::Offline.into()).await
+}
+
+async fn create_admin_using(dir: &Path, connect: Connector, options: WorkspaceOptions) -> Workspace {
     Workspace::create_with(
         &data_dir(dir),
         "workspace-id".into(),
@@ -50,7 +59,7 @@ pub async fn create_admin_with(dir: &Path, bucket: &Bucket, options: WorkspaceOp
             is_bot: false,
         },
         test_bucket_config(),
-        connector(bucket),
+        connect,
         options,
     )
     .await
@@ -118,6 +127,31 @@ fn start_join_with(
     cancel: JoinCancel,
     options: WorkspaceOptions,
 ) -> JoinHandle<Result<Workspace>> {
+    let setup = JoinSetup {
+        connect: connector(bucket),
+        options,
+        cancel,
+    };
+    spawn_join(invite, dir, bucket, name, is_bot, setup)
+}
+
+/// How a test member joins: how it reaches the bucket once in, with what
+/// options, and what can stop it while it waits.
+struct JoinSetup {
+    connect: Connector,
+    options: WorkspaceOptions,
+    cancel: JoinCancel,
+}
+
+/// Joins in the background, posting the request to `bucket`.
+fn spawn_join(
+    invite: Invite,
+    dir: &Path,
+    bucket: &Bucket,
+    name: &str,
+    is_bot: bool,
+    setup: JoinSetup,
+) -> JoinHandle<Result<Workspace>> {
     let dir = dir.to_path_buf();
     let bucket = bucket.clone();
     let name = name.to_owned();
@@ -132,12 +166,33 @@ fn start_join_with(
             invite,
             profile,
             &mailbox,
-            connector(&bucket),
-            options,
-            &cancel,
+            setup.connect,
+            setup.options,
+            &setup.cancel,
         )
         .await
     })
+}
+
+/// Like `join`, the new member reaching the bucket through `connect`.
+pub async fn join_connected(
+    admin: &Workspace,
+    dir: &Path,
+    bucket: &Bucket,
+    connect: Connector,
+    name: &str,
+) -> Workspace {
+    let invite = admin.create_test_invite(name, Duration::from_secs(600)).unwrap();
+    let token = invite.token.clone();
+    let setup = JoinSetup {
+        connect,
+        options: Networking::Offline.into(),
+        cancel: JoinCancel::new(),
+    };
+    let joining = spawn_join(invite, dir, bucket, name, false, setup);
+    wait_for_request(admin, &token).await;
+    admin.approve_invite(&token).await.unwrap();
+    joining.await.unwrap().unwrap()
 }
 
 /// Syncs the admin until the invite's request arrives.

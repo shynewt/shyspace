@@ -5,6 +5,7 @@ mod files;
 mod huddle_ring;
 mod huddles;
 mod inbox;
+mod key_rotation;
 mod later;
 mod lifecycle;
 mod presence;

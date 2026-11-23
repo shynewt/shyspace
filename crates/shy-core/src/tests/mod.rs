@@ -11,6 +11,7 @@ mod huddle_sounds;
 mod huddles;
 mod inbox;
 mod invites;
+mod key_rotation;
 mod later;
 mod mentions;
 mod notes;
