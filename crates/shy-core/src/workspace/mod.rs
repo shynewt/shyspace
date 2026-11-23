@@ -166,6 +166,9 @@ pub(crate) struct Inner {
     /// version: not fetched again unless replaced, so junk can't cost a
     /// download on every pass.
     pub skipped_segments: Mutex<std::collections::HashSet<crate::transport::bucket::ListedObject>>,
+    /// How often each object among someone's segments failed to download
+    /// this run; one that keeps failing is skipped like junk.
+    pub fetch_failures: Mutex<std::collections::HashMap<crate::transport::bucket::ListedObject, u32>>,
     /// When commits, fork proofs and peers were last looked at; they need
     /// it every 10 minutes, not every check.
     pub last_slow_duties: Mutex<Option<tokio::time::Instant>>,

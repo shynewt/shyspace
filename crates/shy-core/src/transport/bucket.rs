@@ -73,12 +73,16 @@ pub struct ListedObject {
 pub struct FetchedSegment {
     pub listed: ListedObject,
     pub envelopes: Vec<Envelope>,
+    /// The object couldn't be fetched this time, so it may still hold ops.
+    pub is_unfetched: bool,
 }
 
 impl SegmentFetch {
-    /// The next segment, in order. An unreadable one, or one whose bytes
-    /// don't match the hash in its name, comes back empty, so one bad object
-    /// can't block everything after it.
+    /// The next segment, in order. One that can't be fetched or read, or
+    /// whose bytes don't match the hash in its name, comes back empty, so one
+    /// bad object can't block everything after it: anyone with the bucket
+    /// keys can put one a plain GET is refused (a customer-keyed or archived
+    /// object).
     pub async fn next(&mut self) -> Result<Option<FetchedSegment>> {
         while self.in_flight.len() < PARALLEL_SEGMENT_FETCHES {
             let Some(listed) = self.listed.next() else {
@@ -94,7 +98,17 @@ impl SegmentFetch {
         };
         let path = &listed.key;
         let named = parse_segment_name(&self.author, path).map(|name| (name.nonce, name.hash));
-        let fetched = fetching.await.context("fetching a segment")??;
+        let fetched = match fetching.await.context("fetching a segment")? {
+            Ok(fetched) => fetched,
+            Err(error) => {
+                warn!("passing over segment {path} for now: it can't be fetched: {error:#}");
+                return Ok(Some(FetchedSegment {
+                    listed,
+                    envelopes: Vec::new(),
+                    is_unfetched: true,
+                }));
+            }
+        };
         if let Some((_, version)) = &fetched {
             // Name exactly what was read, which may be newer than the listing.
             listed.version = version.clone();
@@ -110,7 +124,11 @@ impl SegmentFetch {
             }),
             None => Vec::new(),
         };
-        Ok(Some(FetchedSegment { listed, envelopes }))
+        Ok(Some(FetchedSegment {
+            listed,
+            envelopes,
+            is_unfetched: false,
+        }))
     }
 }
 

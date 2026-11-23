@@ -62,7 +62,9 @@ impl Workspace {
     /// a stale recovery snapshot look current) gets undone. Commits are
     /// admin-signed, so anyone may re-upload them.
     /// One listing tells which slots changed since we last found them
-    /// right; only those are fetched and compared.
+    /// right; only those are fetched and compared. A slot that can't be read
+    /// is written over: anyone with the bucket keys can put an object there
+    /// that a plain GET is refused, to keep members from following.
     pub(crate) async fn republish_commits(&self) -> Result<()> {
         let records = self.state().store.commit_records()?;
         let listed: std::collections::HashMap<u64, String> =
@@ -75,7 +77,16 @@ impl Workspace {
             }
             // Verified at the version the bytes were read at, not the one
             // listed: the slot may change in between.
-            match self.bucket().commit_versioned(from_epoch).await? {
+            let fetched = match self.bucket().commit_versioned(from_epoch).await {
+                Ok(fetched) => fetched,
+                Err(error) => {
+                    tracing::warn!(
+                        "commit slot {from_epoch} can't be read, so it is written again: {error:#}"
+                    );
+                    None
+                }
+            };
+            match fetched {
                 Some((bytes, version)) if bytes.as_ref() == signed.as_slice() => {
                     self.verified_commits().insert(from_epoch, version);
                 }

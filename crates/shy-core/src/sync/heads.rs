@@ -101,8 +101,15 @@ impl Workspace {
     pub(crate) async fn write_head(&self) -> Result<()> {
         let me = self.me();
         // Read once: our app writes our head only under the upload lock, and
-        // anyone else changing it in between is caught at the next check.
-        let current = self.bucket().head(&me).await?;
+        // anyone else changing it in between is caught at the next check. One
+        // we can't read is written over, so it can't keep our head stale.
+        let current = match self.bucket().head(&me).await {
+            Ok(current) => current,
+            Err(error) => {
+                warn!("our head can't be read, so it is written again: {error:#}");
+                None
+            }
+        };
         if let Some(current) = current
             && current.last_seq > self.state().store.last_seq(&me)?
             && let Some(error) = self.pull_author(&me).await?
@@ -178,6 +185,7 @@ impl Workspace {
     /// past what we hold, and of removed members whose frozen log we haven't
     /// finished.
     /// Repairs gaps, and rewrites our own head if it is missing or behind.
+    /// One failure doesn't stop the rest; the first is returned at the end.
     /// Returns whether it brought ops gossip had missed.
     pub(crate) async fn check_heads(&self) -> Result<bool> {
         let me = self.me();
@@ -189,13 +197,18 @@ impl Workspace {
             .into_iter()
             .filter(|head| everyone.contains(&head.author))
             .collect();
-        self.heal_own_head(
-            listed
-                .iter()
-                .find(|head| head.author == me)
-                .map(|head| head.version.clone()),
-        )
-        .await?;
+        let mut first_failure = None;
+        let healed = self
+            .heal_own_head(
+                listed
+                    .iter()
+                    .find(|head| head.author == me)
+                    .map(|head| head.version.clone()),
+            )
+            .await;
+        if let Err(error) = healed {
+            first_failure.get_or_insert(error);
+        }
         let mut to_read: Vec<ToRead> = Vec::new();
         for head in listed {
             if head.author == me || self.seen_heads().get(&head.author) == Some(&head.version) {
@@ -210,11 +223,16 @@ impl Workspace {
                 self.note_seen_head(&head.author, &head.version);
                 continue;
             }
-            match self.bucket().head(&head.author).await? {
-                Some(head_now) if head_now.last_seq > held => {
+            match self.bucket().head(&head.author).await {
+                Ok(Some(head_now)) if head_now.last_seq > held => {
                     queue_read(&mut to_read, head.author, |read| read.with_head(head.version));
                 }
-                _ => self.note_seen_head(&head.author, &head.version),
+                Ok(_) => self.note_seen_head(&head.author, &head.version),
+                // It may have moved: read the log, and the head again next check.
+                Err(error) => {
+                    warn!("{}'s head can't be read: {error:#}", head.author);
+                    queue_read(&mut to_read, head.author, |read| read);
+                }
             }
         }
         for (author, next_seq) in self.gaps_to_repair()? {
@@ -236,13 +254,12 @@ impl Workspace {
             }
         }
         let mut has_found_new = false;
-        let mut local_failure = None;
         for read in to_read {
             let held = self.state().store.last_seq(&read.author)?;
-            match self.pull_author(&read.author).await? {
+            match self.pull_author(&read.author).await {
                 // A head, gap or removal counts as read only once the read
                 // succeeded, so a failed one is tried again at the next check.
-                None => {
+                Ok(None) => {
                     if let Some(version) = &read.head_version {
                         self.note_seen_head(&read.author, version);
                     }
@@ -254,13 +271,13 @@ impl Workspace {
                         self.removal_reads().insert(read.author, held_now);
                     }
                 }
-                Some(error) => {
-                    local_failure.get_or_insert(error);
+                Ok(Some(error)) | Err(error) => {
+                    first_failure.get_or_insert(error);
                 }
             }
             has_found_new |= self.state().store.last_seq(&read.author)? > held;
         }
-        local_failure.map_or(Ok(has_found_new), Err)
+        first_failure.map_or(Ok(has_found_new), Err)
     }
 
     /// Rewrites our head if it was replaced (or is missing) or we uploaded

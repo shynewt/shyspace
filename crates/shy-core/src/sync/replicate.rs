@@ -19,6 +19,10 @@ use crate::{
 /// At most this many skipped objects are remembered; past it, the rest are
 /// fetched again each pass rather than using unbounded memory.
 const MAX_SKIPPED_SEGMENTS: usize = 10_000;
+/// Failed downloads of one object before it's skipped for the run: enough
+/// to ride out a network blip, few enough that objects a key holder made
+/// unreadable cost little.
+const MAX_FETCH_FAILURES: u32 = 3;
 /// How often a sweep reads every author past what we hold, at most.
 const SWEEP_EVERY_MS: i64 = 60 * 60 * 1000;
 const LAST_SWEEP_META: &str = "last_sweep_ms";
@@ -31,11 +35,15 @@ pub(super) struct SegmentsRead {
     pub matching: Vec<(u64, u64)>,
     /// An op couldn't even be kept, so reading stopped for this author.
     pub is_stopped: bool,
+    /// Objects that couldn't be downloaded, with the last seq their names
+    /// claim.
+    pub unfetched: Vec<(String, u64)>,
 }
 
 impl SegmentsRead {
     pub(super) fn absorb(&mut self, other: SegmentsRead) {
         self.matching.extend(other.matching);
+        self.unfetched.extend(other.unfetched);
         if let Some(error) = other.local_failure {
             self.local_failure.get_or_insert(error);
         }
@@ -69,20 +77,21 @@ impl Workspace {
     /// Each author is listed from what we hold of their log, never from a
     /// stored bucket key, so objects others put in the bucket can't make us
     /// skip any of it. An op that fails locally is parked and doesn't hold
-    /// reading back, unless it couldn't even be parked; the first such error
-    /// is returned at the end. Returns whether anything new came.
+    /// reading back, unless it couldn't even be parked; a log that fails to
+    /// read doesn't hold back the others. The first error is returned at the
+    /// end. Returns whether anything new came.
     pub(crate) async fn pull(&self) -> Result<bool> {
         let gaps = self.gaps_to_repair()?;
-        let mut local_failure = None;
+        let mut first_failure = None;
         let mut has_found_new = false;
         let authors = self.state().store.everyone_ever()?;
         for author in authors {
             let held = self.state().store.last_seq(&author)?;
-            match self.sweep_author(&author).await? {
-                Some(error) => {
-                    local_failure.get_or_insert(error);
+            match self.sweep_author(&author).await {
+                Ok(Some(error)) | Err(error) => {
+                    first_failure.get_or_insert(error);
                 }
-                None => {
+                Ok(None) => {
                     for gap in gaps.iter().filter(|(gap_author, _)| *gap_author == author) {
                         self.mark_gap_repaired(*gap);
                     }
@@ -90,17 +99,18 @@ impl Workspace {
             }
             has_found_new |= self.state().store.last_seq(&author)? > held;
         }
-        // A sweep cut short by our own failure isn't done; try again next pass.
-        if local_failure.is_none() {
+        // A sweep cut short by a failure isn't done; try again next pass.
+        if first_failure.is_none() {
             let now = now_ms()?;
             self.state().store.set_meta(LAST_SWEEP_META, &now.to_le_bytes())?;
         }
-        local_failure.map_or(Ok(has_found_new), Err)
+        first_failure.map_or(Ok(has_found_new), Err)
     }
 
     /// Reads `author`'s segments that may hold ops past what we hold (names
     /// sort by their last seq, so listing past what we hold finds them all);
-    /// returns the first op that failed locally. Only names that parse are
+    /// returns why the read isn't complete, if it isn't (see
+    /// `incomplete_read`). Only names that parse are
     /// fetched, so junk costs a line in a listing, never a download.
     pub(crate) async fn pull_author(&self, author: &PublicKey) -> Result<Option<anyhow::Error>> {
         let held = self.state().store.last_seq(author)?;
@@ -111,7 +121,7 @@ impl Workspace {
         let candidates = self.named_unskipped(author, listed);
         let mut chain = self.read_covering_chain(author, &candidates).await?;
         if chain.read.is_stopped {
-            return Ok(chain.read.local_failure);
+            return self.incomplete_read(author, chain.read);
         }
         let held = self.state().store.last_seq(author)?;
         let rest = candidates
@@ -120,7 +130,7 @@ impl Workspace {
             .collect();
         let (rest_read, _) = self.read_rest(author, rest).await?;
         chain.read.absorb(rest_read);
-        Ok(chain.read.local_failure)
+        self.incomplete_read(author, chain.read)
     }
 
     /// The listed objects whose names are `author`'s segments, with those
@@ -192,11 +202,27 @@ impl Workspace {
                 read.absorb(self.read_segments(author, differing).await?);
             }
         }
-        let checked_now = checked_through(checked, read.matching);
+        let checked_now = checked_through(checked, std::mem::take(&mut read.matching));
         if checked_now > checked {
             self.save_checked(author, checked_now)?;
         }
-        Ok(read.local_failure)
+        self.incomplete_read(author, read)
+    }
+
+    /// Why a read of `author`'s log isn't complete, if it isn't: an op that
+    /// failed locally, or an object that couldn't be downloaded whose name
+    /// claims ops past what we now hold. Callers count the read as done only
+    /// without one, so it is tried again.
+    fn incomplete_read(&self, author: &PublicKey, read: SegmentsRead) -> Result<Option<anyhow::Error>> {
+        if read.local_failure.is_some() {
+            return Ok(read.local_failure);
+        }
+        let held = self.state().store.last_seq(author)?;
+        Ok(read
+            .unfetched
+            .into_iter()
+            .find(|(_, last)| *last > held)
+            .map(|(key, _)| anyhow::anyhow!("couldn't download {key}, which may hold ops we lack")))
     }
 
     /// Whether our copy of `name`'s range encodes to exactly the bytes its
@@ -310,6 +336,11 @@ impl Workspace {
         segment: FetchedSegment,
         read_all: &mut SegmentsRead,
     ) -> Result<SegmentRead> {
+        if segment.is_unfetched {
+            self.note_unfetched(author, segment.listed, read_all);
+            return Ok(SegmentRead::default());
+        }
+        self.fetch_failures().remove(&segment.listed);
         let mut read = self.receive_segment(author, &segment.listed.key, &segment.envelopes)?;
         let name = parse_segment_name(author, &segment.listed.key);
         let is_checked = read.is_settled && self.is_all_in_our_log(author, &segment.envelopes)?;
@@ -332,6 +363,43 @@ impl Workspace {
             read_all.local_failure.get_or_insert(error);
         }
         Ok(read)
+    }
+
+    /// Notes an object that couldn't be downloaded: tried again at later
+    /// reads, and given up for the run once it has failed too often, so it
+    /// no longer keeps reads from finishing (one a gap repair puts back is
+    /// still given up). Past the cap on what is counted, a failure is given
+    /// up at once.
+    fn note_unfetched(&self, author: &PublicKey, listed: ListedObject, read_all: &mut SegmentsRead) {
+        let failures = {
+            let mut failures = self.fetch_failures();
+            let is_counted = failures.contains_key(&listed) || failures.len() < MAX_SKIPPED_SEGMENTS;
+            match is_counted {
+                true => {
+                    let count = failures.entry(listed.clone()).or_insert(0);
+                    *count = count.saturating_add(1);
+                    *count
+                }
+                false => MAX_FETCH_FAILURES,
+            }
+        };
+        if failures < MAX_FETCH_FAILURES {
+            if let Some(name) = parse_segment_name(author, &listed.key) {
+                read_all.unfetched.push((listed.key, name.last));
+            }
+            return;
+        }
+        let mut skipped = self.skipped_segments();
+        if skipped.len() < MAX_SKIPPED_SEGMENTS {
+            skipped.insert(listed);
+        }
+    }
+
+    fn fetch_failures(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<ListedObject, u32>> {
+        self.inner
+            .fetch_failures
+            .lock()
+            .expect("fetch failures lock poisoned by an earlier panic")
     }
 
     /// Whether a sweep is due: the hourly net under heads and hints, which

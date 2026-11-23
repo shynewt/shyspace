@@ -2964,13 +2964,17 @@ async fn a_store_missing_its_identity_does_not_open() {
 
 /// A store whose next listing under a prefix fails, as a network blip
 /// would, and which can refuse every upload to keys starting with one. It
-/// records the prefix of every listing.
+/// records the prefix of every listing. Objects can also be made unreadable,
+/// as one put with a customer key (SSE-C) or in an archive storage class is
+/// to a plain GET, until something is written over them.
 #[derive(Debug, Default)]
 struct FlakyStore {
     inner: InMemory,
     fail_next_list_under: Mutex<Option<String>>,
     refuse_puts_under: Mutex<Option<String>>,
     listed_prefixes: Mutex<Vec<String>>,
+    unreadable: Mutex<std::collections::HashSet<String>>,
+    refused_reads: std::sync::atomic::AtomicUsize,
 }
 
 impl fmt::Display for FlakyStore {
@@ -3005,6 +3009,31 @@ impl FlakyStore {
             source: "a network blip".into(),
         }
     }
+
+    /// Puts `bytes` at `key` and makes it unreadable, as a member with the
+    /// bucket keys could.
+    async fn plant_unreadable(&self, key: &str, bytes: &'static [u8]) {
+        self.inner
+            .put_opts(
+                &Path::from(key),
+                PutPayload::from_static(bytes),
+                PutOptions::default(),
+            )
+            .await
+            .unwrap();
+        self.unreadable.lock().unwrap().insert(key.to_owned());
+    }
+
+    async fn keys_under(&self, prefix: &str) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .inner
+            .list(Some(&Path::from(prefix)))
+            .map(|meta| meta.unwrap().location.to_string())
+            .collect()
+            .await;
+        keys.sort();
+        keys
+    }
 }
 
 #[async_trait]
@@ -3024,7 +3053,9 @@ impl ObjectStore for FlakyStore {
         if is_refused {
             return Err(Self::failure());
         }
-        self.inner.put_opts(location, payload, opts).await
+        let put = self.inner.put_opts(location, payload, opts).await?;
+        self.unreadable.lock().unwrap().remove(location.as_ref());
+        Ok(put)
     }
     async fn put_multipart_opts(
         &self,
@@ -3034,6 +3065,14 @@ impl ObjectStore for FlakyStore {
         self.inner.put_multipart_opts(location, opts).await
     }
     async fn get_opts(&self, location: &Path, options: GetOptions) -> object_store::Result<GetResult> {
+        if self.unreadable.lock().unwrap().contains(location.as_ref()) {
+            self.refused_reads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Err(object_store::Error::PermissionDenied {
+                path: location.to_string(),
+                source: "the object is archived".into(),
+            });
+        }
         self.inner.get_opts(location, options).await
     }
     fn delete_stream(
@@ -3066,6 +3105,281 @@ impl ObjectStore for FlakyStore {
     async fn copy_opts(&self, from: &Path, to: &Path, options: CopyOptions) -> object_store::Result<()> {
         self.inner.copy_opts(from, to, options).await
     }
+}
+
+/// Ada, with Bob and Carol, on a store whose objects can be made unreadable.
+async fn on_a_flaky_store(
+    root: &std::path::Path,
+) -> (Arc<FlakyStore>, Bucket, Workspace, Workspace, Workspace) {
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.join("ada"), &bucket).await;
+    let bob = join(&admin, &root.join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    (store, bucket, admin, bob, carol)
+}
+
+/// `author`'s newest segment in the bucket.
+async fn newest_segment(store: &FlakyStore, author: &Workspace) -> String {
+    store
+        .keys_under(&format!("ops/{}/", author.my_id()))
+        .await
+        .pop()
+        .unwrap()
+}
+
+/// An object a member with the keys made unreadable, named to be fetched
+/// before the real segments and to claim far more ops than were written,
+/// doesn't stop the rest of the log being read. It counts as a read that
+/// didn't finish until it has failed a few times, then it is given up for
+/// the run like junk, so it can't cost a download on every pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_object_among_segments_doesnt_stop_reading() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "landed", None).unwrap();
+    bob.sync().await;
+    plant_far_ahead(&store, &bob).await;
+
+    admin.sync().await;
+    assert!(texts_in(&admin, &general).contains(&"landed".to_owned()));
+    assert!(admin.status().error.is_some(), "the read didn't finish");
+    for _ in 0..2 {
+        admin.sync().await;
+    }
+
+    assert_eq!(admin.status().error, None, "given up at the third try");
+}
+
+/// Plants an unreadable object among `author`'s segments, named to claim
+/// far more ops than they wrote.
+async fn plant_far_ahead(store: &FlakyStore, author: &Workspace) {
+    let real = newest_segment(store, author).await;
+    let (prefix, name) = real.rsplit_once('/').unwrap();
+    let fields: Vec<&str> = name.split('-').collect();
+    let last: u64 = fields[0].parse().unwrap();
+    let planted = format!(
+        "{prefix}/{:0width$}-{:0first_width$}-{}-{}",
+        last + 1000,
+        1,
+        "0".repeat(fields[2].len()),
+        fields[3],
+        width = fields[0].len(),
+        first_width = fields[1].len(),
+    );
+    store.plant_unreadable(&planted, b"junk").await;
+}
+
+/// An object given up stays given up while its author has a gap: gap
+/// repair reads their log again, but doesn't download it again on every
+/// check or keep the error showing.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_object_stays_given_up_through_gap_repair() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "second", None).unwrap();
+    bob.sync().await;
+    let second = newest_segment(&store, &bob).await;
+    plant_far_ahead(&store, &bob).await;
+    admin
+        .inner
+        .fail_next_apply
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.check().await;
+    // As if the parked op was pushed out by the cap, and gone from the
+    // bucket: a gap that can't be filled.
+    admin.state().store.execute_for_test("DELETE FROM pending_ops");
+    let removed: Vec<_> = store
+        .inner
+        .delete_stream(Box::pin(stream::once(Ok(Path::from(second)))))
+        .collect()
+        .await;
+    assert!(removed.iter().all(Result::is_ok));
+    bob.send_message(&general, "third", None).unwrap();
+    let third = bob
+        .state()
+        .store
+        .unpushed(&bob.me())
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    admin.receive(third).unwrap();
+    assert!(
+        !admin.state().store.authors_missing_next_op().unwrap().is_empty(),
+        "a gap formed"
+    );
+
+    for _ in 0..8 {
+        admin.check().await;
+    }
+
+    let downloads = store.refused_reads.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(downloads <= 3, "downloaded {downloads} times");
+    assert_eq!(admin.status().error, None);
+}
+
+/// A check that couldn't download a segment doesn't count the author's
+/// head as read, so the next check reads it once it can be downloaded.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_segment_that_couldnt_be_fetched_is_read_at_the_next_check() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "landed", None).unwrap();
+    bob.sync().await;
+    let real = newest_segment(&store, &bob).await;
+    store.unreadable.lock().unwrap().insert(real.clone());
+    admin.check().await;
+    assert!(!texts_in(&admin, &general).contains(&"landed".to_owned()));
+    assert!(admin.status().error.is_some(), "the read didn't finish");
+
+    store.unreadable.lock().unwrap().remove(&real);
+    admin.check().await;
+
+    assert!(texts_in(&admin, &general).contains(&"landed".to_owned()));
+}
+
+/// A sweep that couldn't download a segment isn't marked done.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sweep_that_couldnt_download_a_segment_stays_due() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "landed", None).unwrap();
+    bob.sync().await;
+    let real = newest_segment(&store, &bob).await;
+    store.unreadable.lock().unwrap().insert(real);
+    // As if the last sweep was long ago.
+    admin
+        .state()
+        .store
+        .execute_for_test("DELETE FROM meta WHERE key = 'last_sweep_ms'");
+
+    admin.sync().await;
+
+    assert!(admin.is_sweep_due().unwrap());
+}
+
+/// A restore that can't download all of the admin's log is refused, rather
+/// than letting the restored admin reuse seqs the bucket already holds,
+/// which every device would prove a fork.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restore_that_cant_download_the_admins_log_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket, admin, _bob, _carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    let kit = admin.recovery_kit().await.unwrap();
+    admin.send_message(&general, "after the kit", None).unwrap();
+    admin.sync().await;
+    let real = newest_segment(&store, &admin).await;
+    drop(admin);
+    store.unreadable.lock().unwrap().insert(real);
+
+    let restored = Workspace::restore_with(
+        &data_dir(&root.path().join("ada-new")),
+        &kit,
+        connector(&bucket),
+        Networking::Offline,
+    )
+    .await;
+
+    let error = format!("{:#}", restored.err().expect("refused"));
+    assert!(error.contains("couldn't catch up"), "{error}");
+}
+
+/// One log that can't be listed doesn't stop the sweep reading the others.
+/// Logs are swept in no set order, so each member in turn is the one that
+/// fails, and one of the two rounds always fails before the other's log.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_log_that_cant_be_listed_doesnt_stop_the_sweep() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+    let general = channel_id(&admin, "general");
+    for (failing, other) in [(&bob, &carol), (&carol, &bob)] {
+        let text = format!("from {} while {} fails", other.my_id(), failing.my_id());
+        other.send_message(&general, &text, None).unwrap();
+        other.sync().await;
+        *store.fail_next_list_under.lock().unwrap() = Some(format!("ops/{}", failing.my_id()));
+
+        admin.sync().await;
+
+        assert!(texts_in(&admin, &general).contains(&text), "{text}");
+    }
+}
+
+/// A member's head that can't be read doesn't stop the check reading the
+/// others' logs, and that member's log is read anyway.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_head_doesnt_stop_reading_the_others() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+    // Heads are checked in key order; the first one is the unreadable one.
+    let (first, second) = match bob.my_id() < carol.my_id() {
+        true => (&bob, &carol),
+        false => (&carol, &bob),
+    };
+    let general = channel_id(&admin, "general");
+    first.send_message(&general, "from the first", None).unwrap();
+    first.sync().await;
+    second.send_message(&general, "from the second", None).unwrap();
+    second.sync().await;
+    store
+        .plant_unreadable(&format!("heads/{}", first.my_id()), b"junk")
+        .await;
+
+    admin.check().await;
+
+    let texts = texts_in(&admin, &general);
+    assert!(texts.contains(&"from the second".to_owned()));
+    assert!(
+        texts.contains(&"from the first".to_owned()),
+        "its log is read anyway"
+    );
+}
+
+/// Our own head that can't be read is written again after an upload,
+/// rather than stopping the upload's head for good.
+#[tokio::test(flavor = "multi_thread")]
+async fn our_own_unreadable_head_is_written_again() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    store
+        .plant_unreadable(&format!("heads/{}", bob.my_id()), b"junk")
+        .await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "landed", None).unwrap();
+
+    bob.sync().await;
+
+    let head = bucket.head(&bob.me()).await.expect("readable again");
+    let pushed = bob.state().store.last_pushed_seq(&bob.me()).unwrap();
+    assert_eq!(head.map(|head| head.last_seq), Some(pushed));
+}
+
+/// Right after a removal, the removed member makes the commit slot
+/// unreadable, so members who were offline can't follow and would keep
+/// writing under the key the removed member has. Commit repair writes the
+/// commit over it, without first needing to read what's there.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_commit_slot_is_repaired() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, _bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    let slot = store.keys_under("mls/commit/").await.pop().unwrap();
+    store.plant_unreadable(&slot, b"junk").await;
+
+    admin.sync().await;
+    bob.sync().await;
+
+    assert_eq!(
+        bob.state().mls.epoch().unwrap(),
+        admin.state().mls.epoch().unwrap(),
+        "Bob followed the removal"
+    );
 }
 
 /// A gap whose repair failed on a network blip is tried again at the next
