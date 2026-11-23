@@ -127,3 +127,16 @@ test("switching views while one fades in on a slow machine still shows the one c
   });
   expect(shown).toEqual(Array.from({ length: 12 }, () => ["Later", "Inbox"]).flat());
 });
+
+test("a direct message shows the person's status beside their name", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    window.fake.handle("open_dm", { members: [grace] });
+    window.fake.setMemberStatus(grace, { emoji: "📅", text: "In a meeting", until_ms: null, alerts: "all" });
+  });
+  const dm = page
+    .getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: /^Grace, direct message/ });
+  await expect(dm).toContainText("📅");
+  await expect(dm).toHaveAccessibleName(/^Grace, direct message, 📅 In a meeting/);
+});

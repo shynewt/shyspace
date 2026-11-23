@@ -8,6 +8,7 @@ import { useWorkspace } from "../../lib/workspace";
 import { IconButton } from "../../ui";
 import { useHuddleSummary } from "../huddles/HuddleMarker";
 import { MemberAvatar } from "../members/MemberAvatar";
+import { describeStatus, shownStatus } from "../members/StatusEmoji";
 import { NewDmDialog } from "../private/NewPrivateDialogs";
 import { NavItem } from "./NavItem";
 
@@ -72,8 +73,12 @@ function NotesItem({ notes }: { notes: Channel | undefined }) {
 }
 
 function DmItem({ dm, title }: { dm: Channel; title: string }) {
+  const { members } = useWorkspace();
   const [first] = dm.dm_members;
   const huddle = useHuddleSummary(dm.id);
+  // Only a 1:1 DM has one person whose status to show.
+  const person = dm.dm_members.length === 1 ? members?.find((member) => member.id === first) : undefined;
+  const status = person && shownStatus(person);
   return (
     <NavItem
       view={{ kind: "channel", id: dm.id }}
@@ -85,6 +90,11 @@ function DmItem({ dm, title }: { dm: Channel; title: string }) {
       mentions={dm.notify === "nothing" ? 0 : dm.unread}
       isMuted={dm.notify === "nothing"}
       huddle={huddle}
+      status={
+        status?.emoji
+          ? { icon: <span className="text-sm leading-none">{status.emoji}</span>, label: describeStatus(status) }
+          : null
+      }
     />
   );
 }
