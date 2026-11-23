@@ -21,7 +21,7 @@ const OUTPUT_NEWS: Partial<Record<OutputState, string>> = {
  * What a screen reader should hear about your huddle going from `previous`
  * to `current`: joining and leaving, people coming and going, mute, and
  * device trouble. Never who's speaking: that changes too often to say. A
- * device unplugged is a toast instead (`unpluggedNews`), which is announced too.
+ * device that stops working is said once it lasts (`HuddleProvider`).
  */
 export function huddleNews(
   previous: MyHuddle | null,
@@ -46,18 +46,5 @@ export function huddleNews(
   if (micNews && previous.mic !== current.mic) news.push(micNews);
   const outputNews = OUTPUT_NEWS[current.output];
   if (outputNews && previous.output !== current.output) news.push(outputNews);
-  return news;
-}
-
-/** A toast for each device that went away between `previous` and `current`. */
-export function unpluggedNews(previous: MyHuddle | null, current: MyHuddle | null): string[] {
-  if (!previous || !current || previous.channel !== current.channel) return [];
-  const news: string[] = [];
-  if (current.mic === "lost" && previous.mic !== "lost") {
-    news.push("Your microphone was disconnected. Switching to the default.");
-  }
-  if (current.output === "lost" && previous.output !== "lost") {
-    news.push("Your speakers were disconnected. Switching to the default.");
-  }
   return news;
 }

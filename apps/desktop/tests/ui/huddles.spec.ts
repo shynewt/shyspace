@@ -192,9 +192,6 @@ test("microphone and headset trouble each show one calm line with its fix", asyn
   await expect(bar(page)).toContainText("shyspace can't use your microphone.");
   await expect(bar(page).getByRole("button", { name: "Mute", exact: true })).toBeDisabled();
 
-  await page.evaluate(() => window.fake.huddles.mic("lost"));
-  await expect(page.getByText("Your microphone was disconnected. Switching to the default.")).toBeVisible();
-
   await page.evaluate(() => {
     window.fake.handle("set_huddle_devices", { choice: { input: "headset-mic", output: "headset" } });
     window.fake.huddles.output("bluetooth_call_mode");
@@ -204,6 +201,87 @@ test("microphone and headset trouble each show one calm line with its fix", asyn
   await expect
     .poll(() => page.evaluate(() => window.fake.huddles.chosenDevices))
     .toEqual({ input: null, output: "headset" });
+});
+
+test("a device that stops working says so only once it lasts, so a quick swap shows nothing", async ({ page }) => {
+  await page.clock.install();
+  await openApp(page);
+  await page.getByRole("button", { name: "Start a huddle" }).click();
+  await expect(bar(page)).toContainText("Just you so far");
+
+  // A chosen mic unplugged: the default takes over within a second.
+  await page.evaluate(() => window.fake.huddles.mic("lost"));
+  await page.clock.runFor(500);
+  await page.evaluate(() => window.fake.huddles.mic("live"));
+  await page.clock.runFor(3000);
+  await expect(bar(page)).not.toContainText("isn't working");
+
+  await page.evaluate(() => window.fake.huddles.mic("lost"));
+  await page.clock.runFor(1500);
+  await expect(bar(page)).not.toContainText("isn't working");
+  await page.clock.runFor(1000);
+  await expect(bar(page)).toContainText("Your microphone isn't working. Trying again…");
+  await expect(announcement(page)).toHaveText("Your microphone isn't working. Trying again");
+});
+
+test("a microphone or speakers that stop working offer another, and the notice goes once they work", async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByRole("button", { name: "Start a huddle" }).click();
+
+  await page.evaluate(() => window.fake.huddles.mic("lost"));
+  await bar(page).getByRole("button", { name: "Choose another microphone" }).click();
+  await expect(page.getByRole("combobox", { name: "Microphone" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.fake.huddles.mic("live"));
+  await expect(bar(page)).not.toContainText("isn't working");
+
+  await page.evaluate(() => window.fake.huddles.output("lost"));
+  await expect(bar(page)).toContainText("Your speakers aren't working. Trying again…");
+  await expect(announcement(page)).toHaveText("Your speakers aren't working. Trying again");
+  await expect(bar(page).getByRole("button", { name: "Choose other speakers" })).toBeVisible();
+  await page.evaluate(() => window.fake.huddles.output("playing"));
+  await expect(bar(page)).not.toContainText("aren't working");
+});
+
+test("with no device marked as the default, the pickers still offer the system's default", async ({ page }) => {
+  await openApp(page);
+  // PipeWire marks none: following the default is choosing no device.
+  await page.evaluate(() =>
+    window.fake.huddles.setDevices({
+      inputs: [
+        { id: "analog-mic", name: "Analog Input", is_default: false, is_bluetooth: false },
+        { id: "usb-mic", name: "USB Microphone", is_default: false, is_bluetooth: false },
+      ],
+      outputs: [{ id: "analog-out", name: "Analog Output", is_default: false, is_bluetooth: false }],
+    }),
+  );
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Huddles" }).click();
+
+  const microphone = settings.getByRole("combobox", { name: "Microphone" });
+  await expect(microphone).toHaveText("System default");
+  await expect(settings.getByRole("combobox", { name: "Speakers" })).toHaveText("System default");
+  await microphone.click();
+  await page.getByRole("option", { name: "USB Microphone" }).click();
+  await expect(microphone).toHaveText("USB Microphone");
+  expect(await page.evaluate(() => window.fake.huddles.chosenDevices)).toEqual({ input: "usb-mic", output: null });
+
+  // Unplugged, the choice stays (it comes back when the device does), and says what's used meanwhile.
+  await page.evaluate(() =>
+    window.fake.huddles.setDevices({
+      inputs: [{ id: "analog-mic", name: "Analog Input", is_default: false, is_bluetooth: false }],
+      outputs: [{ id: "analog-out", name: "Analog Output", is_default: false, is_bluetooth: false }],
+    }),
+  );
+  await expect(microphone).toHaveText("Not connected, using the system default");
+
+  await microphone.click();
+  await page.getByRole("option", { name: "System default", exact: true }).click();
+  await expect(microphone).toHaveText("System default");
+  expect(await page.evaluate(() => window.fake.huddles.chosenDevices)).toEqual({ input: null, output: null });
 });
 
 test("joining another huddle leaves this one, with an undo", async ({ page }) => {
@@ -259,7 +337,7 @@ test("Settings picks the microphone and speakers, and can join muted", async ({ 
   await settings.getByRole("tab", { name: "Huddles" }).click();
 
   const microphone = settings.getByRole("combobox", { name: "Microphone" });
-  await expect(microphone).toHaveText("Built-in Microphone (default)");
+  await expect(microphone).toHaveText("System default (Built-in Microphone)");
   await microphone.click();
   await page.getByRole("option", { name: "Headset" }).click();
   await expect(microphone).toHaveText("Headset");

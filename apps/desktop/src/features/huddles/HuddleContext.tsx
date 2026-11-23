@@ -4,13 +4,15 @@ import { channelReference } from "../../lib/channels";
 import { displayName } from "../../lib/people";
 import { usePreferences } from "../../lib/preferences";
 import { SHORTCUTS } from "../../lib/shortcuts";
-import { reportError, showToast, showUndoToast } from "../../lib/toast";
+import { reportError, showUndoToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { huddleNews, unpluggedNews } from "./huddleText";
+import { huddleNews } from "./huddleText";
 
 /** A link that comes back within this long shows nothing, so a blip never alarms anyone. */
 export const RECONNECT_GRACE_MS = 3000;
+/** A device that recovers within this long shows nothing: a chosen one unplugged hands over to the default within a second. */
+const DEVICE_GRACE_MS = 2000;
 
 type HuddleValue = {
   /** Your huddle; null when you're in none, undefined until loaded. */
@@ -19,6 +21,9 @@ type HuddleValue = {
   speaking: ReadonlySet<string>;
   /** Peers whose audio has been reconnecting for longer than the grace. */
   reconnecting: ReadonlySet<string>;
+  /** Your microphone, or your speakers, have been failing for longer than the grace; the core keeps retrying. */
+  isMicDown: boolean;
+  isSpeakerDown: boolean;
   join: (channel: string) => void;
   leave: () => void;
   toggleMute: () => void;
@@ -58,6 +63,14 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   const [news, setNews] = useState<{ id: number; text: string } | null>(null);
   const say = useCallback((text: string) => setNews((last) => ({ id: (last?.id ?? 0) + 1, text })), []);
   useNews(mine, nameOf, placeOf, say);
+  const isMicDown = useLasting(mine?.mic === "lost", DEVICE_GRACE_MS);
+  const isSpeakerDown = useLasting(mine?.output === "lost", DEVICE_GRACE_MS);
+  useEffect(() => {
+    if (isMicDown) say("Your microphone isn't working. Trying again");
+  }, [isMicDown, say]);
+  useEffect(() => {
+    if (isSpeakerDown) say("Your speakers aren't working. Trying again");
+  }, [isSpeakerDown, say]);
   const peerCount = mine?.peers.length ?? 0;
   const isReconnecting = peerCount > 0 && mine?.peers.every((peer) => reconnecting.has(peer.member)) === true;
   const wasReconnecting = useRef(false);
@@ -94,8 +107,8 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   useHuddleKeys(mine, join, leave, toggleMute);
 
   const value = useMemo(
-    () => ({ mine, speaking, reconnecting, join, leave, toggleMute }),
-    [mine, speaking, reconnecting, join, leave, toggleMute],
+    () => ({ mine, speaking, reconnecting, isMicDown, isSpeakerDown, join, leave, toggleMute }),
+    [mine, speaking, reconnecting, isMicDown, isSpeakerDown, join, leave, toggleMute],
   );
   return (
     <HuddleContext.Provider value={value}>
@@ -209,7 +222,21 @@ function useLongReconnects(peers: HuddlePeer[]): ReadonlySet<string> {
   return long;
 }
 
-/** Says what changed in your huddle, and shows a toast for an unplugged device. */
+/** True once `isOn` has held for `ms`; false again as soon as it stops. */
+function useLasting(isOn: boolean, ms: number): boolean {
+  const [hasLasted, setLasted] = useState(false);
+  useEffect(() => {
+    if (!isOn) {
+      setLasted(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setLasted(true), ms);
+    return () => clearTimeout(timer);
+  }, [isOn, ms]);
+  return isOn && hasLasted;
+}
+
+/** Says what changed in your huddle. */
 function useNews(
   mine: MyHuddle | null | undefined,
   nameOf: (member: string) => string,
@@ -222,7 +249,6 @@ function useNews(
     previous.current = mine;
     // The first load is where things already stand, not news.
     if (before === undefined || mine === undefined) return;
-    for (const text of unpluggedNews(before, mine)) showToast(text, "info");
     const said = huddleNews(before, mine, nameOf, placeOf);
     if (said.length > 0) say(said.join(". "));
   }, [mine, nameOf, placeOf, say]);

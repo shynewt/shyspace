@@ -67,6 +67,8 @@ export class FakeHuddles {
   soundsOn = true;
   /** The incoming huddle ringing, as the core would ring it. */
   ringing: IncomingHuddle | null = null;
+  /** The microphones and speakers the system offers; `setDevices` changes them. */
+  private devices: Omit<AudioDevices, "chosen"> = DEVICES;
 
   constructor(context: HuddlesContext) {
     this.context = context;
@@ -105,6 +107,10 @@ export class FakeHuddles {
 
   leave(member: string, channel: string): void {
     if (!this.rosterOf(channel).delete(member)) return;
+    // Like the core: the ring ends with its caller or an empty huddle, not when anyone else leaves.
+    if (this.ringing?.channel === channel && (this.ringing.member === member || this.rosterOf(channel).size === 0)) {
+      this.stopRinging();
+    }
     if (this.mine?.channel === channel) {
       this.mine.peers = this.mine.peers.filter((peer) => peer.member !== member);
       this.context.notify({ kind: "my_huddle" });
@@ -157,6 +163,12 @@ export class FakeHuddles {
     }
   }
 
+  /** The system's devices change, as plugging one in or out (or a sound server that marks no default) would. */
+  setDevices(devices: Omit<AudioDevices, "chosen">): void {
+    this.devices = devices;
+    this.context.notify({ kind: "huddle_devices" });
+  }
+
   /** Finishes a join held by `holdJoining`. */
   connect(): void {
     if (!this.releaseJoin) throw new Error("fake backend: no join is waiting");
@@ -191,7 +203,7 @@ export class FakeHuddles {
         this.setMuted(argument(args, "muted") === true);
         return null;
       case "huddle_devices":
-        return { ...DEVICES, chosen: this.chosenDevices };
+        return { ...this.devices, chosen: this.chosenDevices };
       case "set_huddle_devices": {
         const choice = argument(args, "choice");
         if (!isDeviceChoice(choice)) throw new Error("fake backend: missing device choice");

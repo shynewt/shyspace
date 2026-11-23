@@ -7,7 +7,7 @@ import { cx, Select } from "../../ui";
 import { HuddleAvatar } from "./HuddleAvatar";
 import { useMyHuddle } from "./HuddleContext";
 import { useHuddle, useHuddleNames, useMemberNames } from "./useHuddle";
-import { chooseDevice, deviceInUse, useHuddleDevices } from "./useHuddleDevices";
+import { chooseDevice, deviceChoices, deviceInUse, useHuddleDevices } from "./useHuddleDevices";
 
 /** The core's cap on a huddle. */
 export const HUDDLE_LIMIT = 8;
@@ -113,19 +113,13 @@ export function DeviceSelect({
   kind: "input" | "output";
   className?: string;
 }) {
-  const list = kind === "input" ? devices.inputs : devices.outputs;
+  const choices = deviceChoices(devices, kind);
   return (
     <Select
       aria-label={kind === "input" ? "Microphone" : "Speakers"}
-      value={deviceInUse(list, devices.chosen[kind])?.id ?? ""}
-      options={list.map((device) => ({
-        value: device.id,
-        label: device.is_default ? `${device.name} (default)` : device.name,
-      }))}
-      onChange={(id) => {
-        const device = list.find((candidate) => candidate.id === id);
-        if (device) chooseDevice(devices, kind, device);
-      }}
+      value={choices.find((choice) => choice.isChosen)?.value ?? ""}
+      options={choices.map(({ value, label }) => ({ value, label }))}
+      onChange={(value) => chooseDevice(devices, kind, value)}
       className={className}
     />
   );

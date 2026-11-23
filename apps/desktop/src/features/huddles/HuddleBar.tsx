@@ -11,7 +11,7 @@ import { useMyHuddle } from "./HuddleContext";
 import { HuddleDetails } from "./HuddleDetails";
 import { namesList } from "./huddleText";
 import { useHuddle, useHuddleNames, useMemberNames } from "./useHuddle";
-import { chooseDevice, deviceInUse, fullQualityMic, useHuddleDevices } from "./useHuddleDevices";
+import { chooseDevice, deviceChoices, fullQualityMic, useHuddleDevices } from "./useHuddleDevices";
 
 /**
  * Your huddle while you work, docked at the bottom of the sidebar on every
@@ -20,7 +20,7 @@ import { chooseDevice, deviceInUse, fullQualityMic, useHuddleDevices } from "./u
  */
 export function HuddleBar({ huddle }: { huddle: MyHuddle }) {
   const { session, navigate } = useWorkspace();
-  const { speaking, reconnecting, toggleMute, leave } = useMyHuddle();
+  const { speaking, reconnecting, isMicDown, isSpeakerDown, toggleMute, leave } = useMyHuddle();
   const roster = useHuddle(huddle.channel);
   const loaded = useHuddleDevices();
   const devices = loaded?.status === "shown" ? loaded.devices : undefined;
@@ -114,13 +114,33 @@ export function HuddleBar({ huddle }: { huddle: MyHuddle }) {
             </InlineNotice>
           </Notice>
         )}
+        {isMicDown && (
+          <Notice key="mic-down">
+            <InlineNotice
+              tone="warning"
+              action={{ label: "Choose another microphone", onClick: () => setDetailsOpen(true) }}
+            >
+              Your microphone isn't working. Trying again…
+            </InlineNotice>
+          </Notice>
+        )}
+        {isSpeakerDown && (
+          <Notice key="speaker-down">
+            <InlineNotice
+              tone="warning"
+              action={{ label: "Choose other speakers", onClick: () => setDetailsOpen(true) }}
+            >
+              Your speakers aren't working. Trying again…
+            </InlineNotice>
+          </Notice>
+        )}
         {huddle.output === "bluetooth_call_mode" && (
           <Notice key="call-quality">
             <InlineNotice
               tone="warning"
               action={
                 devices && goodMic
-                  ? { label: `Use ${goodMic.name}`, onClick: () => chooseDevice(devices, "input", goodMic) }
+                  ? { label: `Use ${goodMic.name}`, onClick: () => chooseDevice(devices, "input", goodMic.value) }
                   : undefined
               }
             >
@@ -152,19 +172,19 @@ export function HuddleBar({ huddle }: { huddle: MyHuddle }) {
               {
                 label: "Microphone",
                 icon: <Mic size={14} />,
-                choices: devices.inputs.map((device) => ({
-                  label: device.is_bluetooth ? `${device.name} (lowers sound quality)` : device.name,
-                  isChosen: device.id === deviceInUse(devices.inputs, devices.chosen.input)?.id,
-                  onSelect: () => chooseDevice(devices, "input", device),
+                choices: deviceChoices(devices, "input").map((choice) => ({
+                  label: choice.device?.is_bluetooth ? `${choice.label} (lowers sound quality)` : choice.label,
+                  isChosen: choice.isChosen,
+                  onSelect: () => chooseDevice(devices, "input", choice.value),
                 })),
               },
               {
                 label: "Speakers",
                 icon: <Volume2 size={14} />,
-                choices: devices.outputs.map((device) => ({
-                  label: device.name,
-                  isChosen: device.id === deviceInUse(devices.outputs, devices.chosen.output)?.id,
-                  onSelect: () => chooseDevice(devices, "output", device),
+                choices: deviceChoices(devices, "output").map((choice) => ({
+                  label: choice.label,
+                  isChosen: choice.isChosen,
+                  onSelect: () => chooseDevice(devices, "output", choice.value),
                 })),
               },
             ]}
