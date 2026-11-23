@@ -766,17 +766,8 @@ impl Workspace {
         let mut last_refresh = Instant::now();
         loop {
             tokio::select! {
-                event = events.recv() => match event {
-                    Some(event) => self.apply_media_event(event),
-                    None => return,
-                },
-                change = changes.recv() => {
-                    if matches!(change, Ok(Change::Members | Change::Channels) | Err(_))
-                        && let Err(error) = self.follow_membership()
-                    {
-                        warn!("couldn't update a huddle's audience: {error:#}");
-                    }
-                }
+                // Leaving after a sleep goes before anything else, a refresh included.
+                biased;
                 _ = sleep_check.tick() => {
                     let wall_elapsed = last_check_wall.elapsed().unwrap_or_default();
                     if is_back_from_sleep(wall_elapsed, last_check.elapsed()) {
@@ -788,6 +779,17 @@ impl Workspace {
                     }
                     last_check = Instant::now();
                     last_check_wall = SystemTime::now();
+                }
+                event = events.recv() => match event {
+                    Some(event) => self.apply_media_event(event),
+                    None => return,
+                },
+                change = changes.recv() => {
+                    if matches!(change, Ok(Change::Members | Change::Channels) | Err(_))
+                        && let Err(error) = self.follow_membership()
+                    {
+                        warn!("couldn't update a huddle's audience: {error:#}");
+                    }
                 }
                 _ = tick.tick() => {
                     // Membership can change without a local event, like a
