@@ -152,9 +152,9 @@ impl Store {
     }
 
     /// Keeps a member's picture unless a newer one is kept. Whichever loses
-    /// leaves the bucket, through its author's device; the same picture
-    /// arriving again changes nothing. Returns whether the picture shown
-    /// changed.
+    /// leaves the bucket, through its author's device, unless it is the one
+    /// still shown; the same picture arriving again changes nothing. Returns
+    /// whether the picture shown changed.
     pub(super) fn put_profile_picture(
         &self,
         member: &[u8],
@@ -167,16 +167,27 @@ impl Store {
         }) {
             return Ok(false);
         }
-        let is_newer = kept
+        // The later clock wins; a tie, which only a forged op makes, goes to
+        // the higher picture id, so every order ends the same.
+        let id_of = |picture: Option<&BlobRef>| picture.map_or(String::new(), |picture| picture.id.clone());
+        let incoming_id = id_of(picture);
+        let kept_id = kept
             .as_ref()
-            .is_none_or(|(_, kept_lamport)| *kept_lamport < lamport);
+            .map(|(kept_picture, _)| id_of(kept_picture.as_ref()));
+        let is_newer = kept.as_ref().is_none_or(|(kept_picture, kept_lamport)| {
+            (*kept_lamport, id_of(kept_picture.as_ref())) < (lamport, incoming_id.clone())
+        });
         if !is_newer {
-            if let Some(picture) = picture {
+            if let Some(picture) = picture
+                && kept_id.as_deref() != Some(picture.id.as_str())
+            {
                 self.request_blob_removal(member, &picture.id, member)?;
             }
             return Ok(false);
         }
-        if let Some((Some(old), _)) = &kept {
+        if let Some((Some(old), _)) = &kept
+            && old.id != incoming_id
+        {
             self.request_blob_removal(member, &old.id, member)?;
         }
         let encoded = picture.map(postcard::to_stdvec).transpose()?;
@@ -284,6 +295,59 @@ mod tests {
             media_type: "text/plain".into(),
             blob: blob::seal(&mut content.as_slice(), content.len() as u64, |_, _, _| Ok(())).unwrap(),
         }
+    }
+
+    fn picture(content: &[u8]) -> crate::files::blob::BlobRef {
+        blob::seal(&mut &content[..], content.len() as u64, |_, _, _| Ok(())).unwrap()
+    }
+
+    /// Only a forged op ties on lamport; still, every order shows the same
+    /// picture, and only the other one leaves the bucket.
+    #[test]
+    fn pictures_tied_on_the_clock_settle_the_same_in_any_order() {
+        let (first, second) = (picture(b"\x89PNG first"), picture(b"\x89PNG second"));
+        let winner = first.id.clone().max(second.id.clone());
+        let loser = first.id.clone().min(second.id.clone());
+        for order in [[&first, &second], [&second, &first]] {
+            let mut channel = TestChannel::new();
+            channel.apply(Op::ProfilePicture {
+                picture: Some(order[0].clone()),
+            });
+            channel.apply_again(Op::ProfilePicture {
+                picture: Some(order[1].clone()),
+            });
+            let member = channel.author;
+
+            let shown = channel.store.profile_picture(member.as_bytes()).unwrap().unwrap();
+            let removed: Vec<String> = channel
+                .store
+                .blob_removals()
+                .unwrap()
+                .into_iter()
+                .map(|removal| removal.blob_id)
+                .collect();
+            assert_eq!(shown.id, winner);
+            assert_eq!(removed, std::slice::from_ref(&loser));
+        }
+    }
+
+    /// The same blob id again (only a forged op reuses one) never sends the
+    /// picture still shown out of the bucket.
+    #[test]
+    fn the_picture_shown_never_leaves_the_bucket() {
+        let mut channel = TestChannel::new();
+        let shown = picture(b"\x89PNG mine");
+        channel.apply(Op::ProfilePicture {
+            picture: Some(shown.clone()),
+        });
+        let mut same_id = picture(b"\x89PNG other");
+        same_id.id = shown.id.clone();
+
+        channel.apply(Op::ProfilePicture {
+            picture: Some(same_id),
+        });
+
+        assert!(channel.store.blob_removals().unwrap().is_empty());
     }
 
     /// The delete can apply before the file: a rebuild or restore reads the
