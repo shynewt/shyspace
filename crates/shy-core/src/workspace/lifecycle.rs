@@ -418,6 +418,8 @@ impl Workspace {
                 events: broadcast::channel(1024).0,
                 wake: Notify::new(),
                 sync_lock: tokio::sync::Mutex::new(()),
+                push_now: Notify::new(),
+                push_lock: tokio::sync::Mutex::new(()),
                 recovery_lock: tokio::sync::Mutex::new(()),
                 status: Mutex::new(SyncStatus::default()),
                 refetched_gaps: Mutex::new(std::collections::HashSet::new()),

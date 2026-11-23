@@ -127,6 +127,7 @@ impl Workspace {
             self.send_live(envelope);
         }
         self.inner.wake.notify_one();
+        self.inner.push_now.notify_one();
         Ok(())
     }
 

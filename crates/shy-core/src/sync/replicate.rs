@@ -54,6 +54,7 @@ impl Workspace {
     /// Uploads our ops that aren't in the bucket yet, in as few segments as
     /// others can still read.
     pub(crate) async fn push(&self) -> Result<()> {
+        let _guard = self.inner.push_lock.lock().await;
         let me = self.me();
         let unpushed = self.state().store.unpushed(&me)?;
         for segment in split_into_segments(&unpushed)? {

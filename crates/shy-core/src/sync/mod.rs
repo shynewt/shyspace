@@ -109,6 +109,24 @@ impl Workspace {
             }
         });
 
+        // What we write goes up on its own, not behind a long pull.
+        let pusher = self.clone();
+        let mut push_stopped = self.inner.stopped.subscribe();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = pusher.inner.push_now.notified() => tokio::time::sleep(PUSH_DEBOUNCE).await,
+                    _ = push_stopped.changed() => break,
+                }
+                match pusher.push().await {
+                    Ok(()) => pusher.nudge_peers().await,
+                    Err(error) => {
+                        warn!("couldn't upload our changes yet; the next sync tries again: {error:#}")
+                    }
+                }
+            }
+        });
+
         let syncer = self.clone();
         let mut stopped = self.inner.stopped.subscribe();
         tokio::spawn(async move {

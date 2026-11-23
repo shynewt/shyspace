@@ -106,6 +106,11 @@ pub(crate) struct Inner {
     /// Wakes the sync loop early: after a local write or a peer's nudge.
     pub wake: Notify,
     pub sync_lock: tokio::sync::Mutex<()>,
+    /// Starts an upload of our new ops, apart from the sync pass, so a long
+    /// catch-up doesn't hold back what we write.
+    pub push_now: Notify,
+    /// One upload at a time, so the same ops never go up twice at once.
+    pub push_lock: tokio::sync::Mutex<()>,
     pub recovery_lock: tokio::sync::Mutex<()>,
     pub status: Mutex<SyncStatus>,
     /// Gaps (author, missing seq) already fetched again this run, so a gap

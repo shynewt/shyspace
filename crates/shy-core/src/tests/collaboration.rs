@@ -438,3 +438,141 @@ async fn a_segment_cut_short_is_read_again_whole() {
     assert!(texts.contains(&"one".to_string()) && texts.contains(&"two".to_string()));
     assert_eq!(admin.status().error, None);
 }
+
+/// A bucket whose listings under `ops/` wait while the gate is closed, as
+/// a long catch-up would.
+#[derive(Debug)]
+struct GatedStore {
+    inner: InMemory,
+    gate: tokio::sync::watch::Sender<bool>,
+}
+
+impl std::fmt::Display for GatedStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("gated test store")
+    }
+}
+
+#[async_trait::async_trait]
+impl object_store::ObjectStore for GatedStore {
+    async fn put_opts(
+        &self,
+        location: &object_store::path::Path,
+        payload: object_store::PutPayload,
+        opts: object_store::PutOptions,
+    ) -> object_store::Result<object_store::PutResult> {
+        self.inner.put_opts(location, payload, opts).await
+    }
+
+    async fn put_multipart_opts(
+        &self,
+        location: &object_store::path::Path,
+        opts: object_store::PutMultipartOptions,
+    ) -> object_store::Result<Box<dyn object_store::MultipartUpload>> {
+        self.inner.put_multipart_opts(location, opts).await
+    }
+
+    async fn get_opts(
+        &self,
+        location: &object_store::path::Path,
+        options: object_store::GetOptions,
+    ) -> object_store::Result<object_store::GetResult> {
+        self.inner.get_opts(location, options).await
+    }
+
+    fn delete_stream(
+        &self,
+        locations: futures_lite::stream::Boxed<object_store::Result<object_store::path::Path>>,
+    ) -> futures_lite::stream::Boxed<object_store::Result<object_store::path::Path>> {
+        self.inner.delete_stream(locations)
+    }
+
+    fn list(
+        &self,
+        prefix: Option<&object_store::path::Path>,
+    ) -> futures_lite::stream::Boxed<object_store::Result<object_store::ObjectMeta>> {
+        use futures_lite::StreamExt;
+        let listed = self.inner.list(prefix);
+        if !prefix.is_some_and(|prefix| prefix.as_ref().starts_with("ops/")) {
+            return listed;
+        }
+        let mut gate = self.gate.subscribe();
+        let mut listed = Some(listed);
+        Box::pin(
+            futures_lite::stream::once_future(async move {
+                let _ = gate.wait_for(|is_closed| !is_closed).await;
+            })
+            .flat_map(move |()| listed.take().expect("listed once")),
+        )
+    }
+
+    async fn list_with_delimiter(
+        &self,
+        prefix: Option<&object_store::path::Path>,
+    ) -> object_store::Result<object_store::ListResult> {
+        self.inner.list_with_delimiter(prefix).await
+    }
+
+    async fn copy_opts(
+        &self,
+        from: &object_store::path::Path,
+        to: &object_store::path::Path,
+        options: object_store::CopyOptions,
+    ) -> object_store::Result<()> {
+        self.inner.copy_opts(from, to, options).await
+    }
+}
+
+/// While a long catch-up holds the sync pass, what we write still goes up
+/// to the bucket.
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_go_up_while_a_catch_up_is_still_reading() {
+    use futures_lite::StreamExt;
+    use object_store::ObjectStore;
+    let store = Arc::new(GatedStore {
+        inner: InMemory::new(),
+        gate: tokio::sync::watch::Sender::new(false),
+    });
+    let bucket = Bucket::without_signing(store.clone());
+    let root = tempfile::tempdir().unwrap();
+    let admin = Workspace::create_with(
+        &data_dir(&root.path().join("ada")),
+        "workspace-id".into(),
+        "Acme",
+        crate::Profile {
+            name: "Ada",
+            is_bot: false,
+        },
+        test_bucket_config(),
+        connector(&bucket),
+        Networking::Online,
+    )
+    .await
+    .unwrap();
+    let segments = || async {
+        let prefix = object_store::path::Path::from("ops");
+        store.inner.list(Some(&prefix)).count().await
+    };
+    let wait_for_more_than = |count: usize| async move {
+        for _ in 0..200 {
+            if segments().await > count {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        false
+    };
+    assert!(wait_for_more_than(0).await, "the first ops went up");
+    let before = segments().await;
+
+    store.gate.send_replace(true);
+    let general = channel_id(&admin, "general");
+    admin
+        .send_message(&general, "written during a catch-up", None)
+        .unwrap();
+    let went_up = wait_for_more_than(before).await;
+    store.gate.send_replace(false);
+
+    assert!(went_up, "the message went up while the pull was still reading");
+    admin.shutdown().await.unwrap();
+}
