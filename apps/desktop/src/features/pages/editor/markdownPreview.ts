@@ -8,7 +8,7 @@ import type { syntaxTree } from "@codemirror/language";
 import type { Text } from "@codemirror/state";
 import { type CalloutKind, calloutMarker } from "../../../lib/callouts";
 import { isMentionLink, mentionedMemberId } from "../../../lib/mentions";
-import { parseFileImageUrl, unescapeLinkText } from "./images";
+import { fileIdOf, parseFileImageUrl, unescapeLinkText } from "./images";
 import { BARE_MESSAGE_LINK, BARE_PAGE_LINK, messageIdOf, pageIdOf } from "./links";
 
 export type SyntaxTree = ReturnType<typeof syntaxTree>;
@@ -30,6 +30,8 @@ export type PreviewItem =
   | { kind: "message"; from: number; to: number; messageId: string; label: string }
   /** `memberId` is null for @channel and @here. */
   | { kind: "mention"; from: number; to: number; label: string; memberId: string | null }
+  /** A link to one of the page's files, drawn as a chip; `label` is the link's text. */
+  | { kind: "file"; from: number; to: number; fileId: string; label: string }
   /** An image of one of the page's files; `width` is a percent of the column, or null for its own size. */
   | { kind: "image"; from: number; to: number; fileId: string; width: number | null; caption: string };
 
@@ -215,6 +217,12 @@ class PreviewBuilder {
     const pageId = pageIdOf(href);
     if (pageId && isOneLine) {
       this.add({ kind: "page", from: link.from, to: link.to, pageId });
+      return false;
+    }
+    const fileId = fileIdOf(href);
+    if (fileId && isOneLine) {
+      const label = unescapeLinkText(this.doc.sliceString(labelFrom, labelTo)).trim();
+      this.add({ kind: "file", from: link.from, to: link.to, fileId, label });
       return false;
     }
     const messageId = messageIdOf(href);

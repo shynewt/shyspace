@@ -46,6 +46,8 @@ function shownAs(item: PreviewItem): string | null {
       return `<message ${item.messageId}: ${item.label}>`;
     case "image":
       return `<image ${item.fileId} ${item.width ?? "auto"} "${item.caption}">`;
+    case "file":
+      return `<file ${item.fileId}: ${item.label}>`;
     case "mention":
       return item.label;
     case "callout":
@@ -126,6 +128,11 @@ test("widths outside 10 to 100 and other fragments are ignored", () => {
   for (const fragment of ["#width=5", "#width=101", "#width=60.5", "#w=60", "#width=60&x=1"]) {
     expect(rendered(`![x](shy://file/ab12${fragment})`)).toBe('<image ab12 auto "x">');
   }
+});
+
+test("a link to a page file becomes a file chip; in code it stays text", () => {
+  expect(rendered("see [q3 \\[draft\\].csv](shy://file/ab12) now")).toBe("see <file ab12: q3 [draft].csv> now");
+  expect(rendered("`[x](shy://file/ab12)`")).toBe("[x](shy://file/ab12)");
 });
 
 test("images from elsewhere, and in code, stay text", () => {

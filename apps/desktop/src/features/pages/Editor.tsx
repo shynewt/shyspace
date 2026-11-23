@@ -25,11 +25,12 @@ import {
   selectedImage,
   setImageWidth,
 } from "./editor/images";
-import { livePreview, setKnownMembers, setPageTitles } from "./editor/livePreview";
+import { livePreview, setKnownMembers, setPageFileNames, setPageTitles } from "./editor/livePreview";
 import type { CardAnchor } from "./editor/openLinks";
 import { type MenuKey, type Suggestion, suggestions } from "./editor/suggestions";
 import { pageTheme } from "./editor/theme";
 import { pageUploads } from "./editor/uploads";
+import { PageFileViewer } from "./PageFileViewer";
 import { PageImage } from "./PageImage";
 import { PAGE_TEXT } from "./pageText";
 import { stagePastedForPage, uploadIntoPage } from "./pageUploads";
@@ -113,6 +114,7 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
   const loadFiles = useCallback(() => api.pageFiles(pageId), [pageId]);
   const files = useLive(loadFiles, (change) => change.kind === "page_files" && change.page === pageId);
   const filesById = useMemo(() => new Map((files ?? []).map((file) => [file.id, file])), [files]);
+  const [viewingFile, setViewingFile] = useState<string | null>(null);
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -202,6 +204,7 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
                 }, reportError),
               onOpenMember: (memberId, anchor, openedBy) => setMemberCard({ memberId, anchor, openedBy }),
               onMisleadingLink: (linkText, url) => setMisleadingLink({ text: linkText, url }),
+              onOpenFile: setViewingFile,
               images: imageHost.current,
             }),
             Prec.highest(
@@ -291,10 +294,15 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
   }, [view, pages]);
 
   useEffect(() => {
+    view?.dispatch({ effects: setPageFileNames.of(new Map([...filesById].map(([id, file]) => [id, file.name]))) });
+  }, [view, filesById]);
+
+  useEffect(() => {
     if (members) view?.dispatch({ effects: setKnownMembers.of(new Set(members.map((member) => member.id))) });
   }, [view, members]);
 
   const selected = view ? selectedImage(view.state) : null;
+  const viewedFile = viewingFile ? filesById.get(viewingFile) : undefined;
   return (
     <div className="relative">
       <div ref={host} className="selectable min-h-[50vh]" />
@@ -315,6 +323,16 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
             portalKey(element),
           ),
         )}
+      {viewedFile && (
+        <PageFileViewer
+          pageId={pageId}
+          file={viewedFile}
+          onClose={() => {
+            setViewingFile(null);
+            view?.focus();
+          }}
+        />
+      )}
       <SuggestionMenu view={view} suggestion={suggestion} pageId={pageId} keys={menuKeys} />
       <ConfirmDialog
         open={misleadingLink !== null}

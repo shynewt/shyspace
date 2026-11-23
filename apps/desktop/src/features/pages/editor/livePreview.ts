@@ -16,16 +16,18 @@ import {
 } from "@codemirror/view";
 import { MOD_LABEL } from "../../../lib/shortcuts";
 import { CalloutLabelWidget } from "./callouts";
-import { messageIcon, pageIcon } from "./icons";
+import { fileIcon, messageIcon, pageIcon } from "./icons";
 import { type ImageHost, type ImageProps, imageHost } from "./images";
 import { externalUrl, linkAt } from "./links";
 import { previewItems } from "./markdownPreview";
 import {
+  fileOpener,
   type MemberOpener,
   type MisleadingLinkAsker,
   memberOpener,
   messageOpener,
   misleadingLinkAsker,
+  openFile,
   openLink,
   openMember,
   openMessage,
@@ -47,6 +49,18 @@ const pageTitles = StateField.define<ReadonlyMap<string, string>>({
   },
 });
 
+/** The page's own files by id, with their current names; links to any other file draw as unavailable. */
+export const setPageFileNames = StateEffect.define<ReadonlyMap<string, string>>();
+
+const pageFileNames = StateField.define<ReadonlyMap<string, string>>({
+  create: () => new Map(),
+  update: (names, transaction) => {
+    let next = names;
+    for (const effect of transaction.effects) if (effect.is(setPageFileNames)) next = effect.value;
+    return next;
+  },
+});
+
 /** The ids of the workspace's members, so only mentions of someone known open a card. */
 export const setKnownMembers = StateEffect.define<ReadonlySet<string>>();
 
@@ -64,18 +78,22 @@ export function livePreview({
   onOpenMessage,
   onOpenMember,
   onMisleadingLink,
+  onOpenFile,
   images,
 }: {
   onOpenPage: (pageId: string) => void;
   onOpenMessage: (messageId: string) => void;
   onOpenMember: MemberOpener;
   onMisleadingLink: MisleadingLinkAsker;
+  onOpenFile: (fileId: string) => void;
   /** Draws a page's images into their widgets. */
   images: ImageHost;
 }) {
   return [
     pageTitles,
+    pageFileNames,
     knownMembers,
+    fileOpener.of(onOpenFile),
     imageHost.of(images),
     pageOpener.of(onOpenPage),
     messageOpener.of(onOpenMessage),
@@ -133,6 +151,7 @@ const previewPlugin = ViewPlugin.fromClass(
         isRevealChanged ||
         syntaxTree(update.startState) !== syntaxTree(update.state) ||
         update.startState.field(pageTitles) !== update.state.field(pageTitles) ||
+        update.startState.field(pageFileNames) !== update.state.field(pageFileNames) ||
         update.startState.field(knownMembers) !== update.state.field(knownMembers)
       ) {
         this.build();
@@ -149,6 +168,7 @@ const previewPlugin = ViewPlugin.fromClass(
 
     private build() {
       const titles = this.view.state.field(pageTitles);
+      const fileNames = this.view.state.field(pageFileNames);
       const known = this.view.state.field(knownMembers);
       const decorations: Range<Decoration>[] = [];
       const chips: Range<Decoration>[] = [];
@@ -192,6 +212,12 @@ const previewPlugin = ViewPlugin.fromClass(
           }
           case "message": {
             const chip = Decoration.replace({ widget: new MessageChipWidget(item.messageId, item.label) });
+            decorations.push(chip.range(item.from, item.to));
+            chips.push(chip.range(item.from, item.to));
+            break;
+          }
+          case "file": {
+            const chip = Decoration.replace({ widget: new FileChipWidget(item.fileId, fileNames.get(item.fileId)) });
             decorations.push(chip.range(item.from, item.to));
             chips.push(chip.range(item.from, item.to));
             break;
@@ -330,6 +356,39 @@ class PageChipWidget extends WidgetType {
     chip.addEventListener("click", (event) => {
       event.preventDefault();
       openPage(view, this.pageId);
+    });
+    return chip;
+  }
+}
+
+class FileChipWidget extends WidgetType {
+  /** `name` is undefined when the file isn't one of this page's (deleted, elsewhere, or not arrived yet). */
+  constructor(
+    readonly fileId: string,
+    readonly name: string | undefined,
+  ) {
+    super();
+  }
+
+  eq(other: FileChipWidget) {
+    return other.fileId === this.fileId && other.name === this.name;
+  }
+
+  toDOM(view: EditorView) {
+    const chip = document.createElement("span");
+    chip.className = "cm-md-page";
+    if (this.name === undefined) {
+      chip.classList.add("cm-md-page-missing");
+      chip.textContent = "File unavailable";
+      chip.title = "This file was deleted, belongs somewhere else, or hasn't arrived on this device yet";
+      return chip;
+    }
+    chip.setAttribute("role", "link");
+    chip.append(fileIcon(), this.name);
+    chip.addEventListener("mousedown", (event) => event.preventDefault());
+    chip.addEventListener("click", (event) => {
+      event.preventDefault();
+      openFile(view, this.fileId);
     });
     return chip;
   }

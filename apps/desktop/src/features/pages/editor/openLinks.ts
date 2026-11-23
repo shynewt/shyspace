@@ -10,6 +10,17 @@ export const pageOpener = Facet.define<(pageId: string) => void, ((pageId: strin
   combine: (openers) => openers[0],
 });
 
+/** How the editor opens one of the page's files; given by the screen that hosts it. */
+export const fileOpener = Facet.define<(fileId: string) => void, ((fileId: string) => void) | undefined>({
+  combine: (openers) => openers[0],
+});
+
+export function openFile(view: EditorView, fileId: string): void {
+  const open = view.state.facet(fileOpener);
+  if (!open) throw new Error("the page editor was set up without a way to open files");
+  open(fileId);
+}
+
 /** How the editor opens a linked message; given by the screen that hosts it. */
 export const messageOpener = Facet.define<(messageId: string) => void, ((messageId: string) => void) | undefined>({
   combine: (openers) => openers[0],

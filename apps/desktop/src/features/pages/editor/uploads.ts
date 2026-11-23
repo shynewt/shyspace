@@ -6,7 +6,7 @@
  */
 import { type EditorState, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
-import { lucideIcon } from "./icons";
+import { fileIcon } from "./icons";
 
 type Placeholder = { id: number; name: string; at: number };
 
@@ -138,9 +138,4 @@ class UploadWidget extends WidgetType {
   ignoreEvent() {
     return true;
   }
-}
-
-/** Lucide's "file". */
-function fileIcon(): SVGSVGElement {
-  return lucideIcon(["M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", "M14 2v4a2 2 0 0 0 2 2h4"]);
 }

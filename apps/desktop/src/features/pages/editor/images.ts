@@ -13,6 +13,13 @@ const WIDTH_FRAGMENT = /^#width=(\d{2,3})$/;
 export const MIN_IMAGE_WIDTH = 10;
 export const MAX_IMAGE_WIDTH = 100;
 
+const FILE_LINK_URL = /^shy:\/\/file\/([0-9a-f]+)$/;
+
+/** The file a link (not an image) names. */
+export function fileIdOf(url: string): string | null {
+  return url.match(FILE_LINK_URL)?.[1] ?? null;
+}
+
 /** The file an image URL names, and its width when the fragment is one we write. */
 export function parseFileImageUrl(url: string): { fileId: string; width: number | null } | null {
   const match = url.match(FILE_IMAGE_URL);

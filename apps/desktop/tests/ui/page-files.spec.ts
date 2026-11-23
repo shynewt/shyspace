@@ -188,3 +188,33 @@ test("dragging an image's handle sets its width", async ({ page }) => {
     .poll(async () => Number((await page.evaluate(() => window.fake.pageText("Plan"))).match(/#width=(\d+)/)?.[1]))
     .toBeLessThan(80);
 });
+
+test("a file in a page is a chip with its current name that opens the viewer", async ({ page }) => {
+  await page.goto("");
+  await page.evaluate(() => {
+    const pageId = window.fake.seedPage("Plan", "");
+    const grace = window.fake.addMember("Grace");
+    const id = window.fake.files.receiveInPage(grace, pageId, { name: "q3.csv", type: "text/csv", bytes: [49] });
+    window.fake.receivePageEdit("Plan", { at: 0, insert: `Numbers: [q3.csv](shy://file/${id})` });
+  });
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Plan", exact: true }).click();
+
+  const chip = page.locator(".cm-content").getByRole("link", { name: "q3.csv" });
+  await expect(chip).toBeVisible();
+  await chip.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+});
+
+test("a link to a file from elsewhere is an unavailable chip that opens nothing", async ({ page }) => {
+  await page.goto("");
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const message = window.fake.receiveMessage(grace, "general", "numbers");
+    const chatFile = window.fake.files.receive(grace, message, { name: "q3.csv", type: "text/csv", bytes: [49] });
+    window.fake.seedPage("Plan", `Numbers: [q3.csv](shy://file/${chatFile})`);
+  });
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Plan", exact: true }).click();
+
+  await expect(lines(page).first()).toHaveText("Numbers: File unavailable");
+  await expect(page.locator(".cm-content").getByRole("link")).toHaveCount(0);
+});
