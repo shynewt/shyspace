@@ -26,7 +26,8 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use pacing::{Pacing, SHORT_WAIT, has_slept};
+pub(crate) use pacing::has_slept;
+use pacing::{Pacing, SHORT_WAIT};
 
 use crate::{
     ops::now_ms,

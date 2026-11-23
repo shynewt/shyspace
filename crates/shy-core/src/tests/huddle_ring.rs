@@ -8,7 +8,10 @@ use super::{
     support::*,
 };
 use crate::{
-    huddle::{beacon::Beacon, ring::RING_MS},
+    huddle::{
+        beacon::Beacon,
+        ring::{RING_MS, RING_QUIET_MS},
+    },
     views::{Change, NotifyLevel},
     workspace::Via,
 };
@@ -182,4 +185,63 @@ async fn a_call_that_doesnt_ring_doesnt_say_it_rings() {
         assert!(!matches!(change, Change::HuddleRinging { .. }), "{change:?}");
     }
     assert_eq!(bob.workspace.huddle_ringing(), None);
+}
+
+/// How many times `callee` was told of a huddle starting, since `changes` began.
+fn alerts(changes: &mut tokio::sync::broadcast::Receiver<Change>) -> usize {
+    let mut count = 0;
+    while let Ok(change) = changes.try_recv() {
+        if matches!(change, Change::HuddleStarted { .. }) {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn hang_up(caller: &Member, callee: &Member) {
+    caller.workspace.leave_huddle().unwrap();
+    carry(
+        &caller.workspace,
+        &[&callee.workspace],
+        Via::Direct(caller.workspace.me()),
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_caller_cant_ring_again_and_again() {
+    let (_root, [ada, bob, _carol]) = three_members().await;
+    let dm = dm_between(&ada, &bob).await;
+    let mut changes = bob.workspace.subscribe();
+    call(&ada, &bob, &dm);
+    assert_eq!(bob.media.rings_playing(), 1);
+    hang_up(&ada, &bob);
+
+    for _ in 0..3 {
+        call(&ada, &bob, &dm);
+        assert_eq!(
+            bob.media.rings_playing(),
+            0,
+            "a call right after an unanswered one stays quiet"
+        );
+        hang_up(&ada, &bob);
+    }
+    assert_eq!(alerts(&mut changes), 1, "one alert, not one per call");
+
+    bob.workspace.age_huddles(Duration::from_millis(RING_QUIET_MS));
+    call(&ada, &bob, &dm);
+    assert_eq!(bob.media.rings_playing(), 1, "a minute later, a call rings again");
+    assert_eq!(alerts(&mut changes), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_back_after_an_answered_one_rings() {
+    let (_root, [ada, bob, _carol]) = three_members().await;
+    let dm = dm_between(&ada, &bob).await;
+    call(&ada, &bob, &dm);
+    bob.workspace.join_huddle(&dm, false).unwrap();
+    bob.workspace.leave_huddle().unwrap();
+    hang_up(&ada, &bob);
+
+    call(&ada, &bob, &dm);
+    assert_eq!(bob.media.rings_playing(), 1);
 }

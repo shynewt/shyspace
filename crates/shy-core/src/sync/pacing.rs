@@ -71,7 +71,7 @@ impl Cadence {
 
 /// Whether the computer slept while we waited: the wall clock moved on
 /// much further than the monotonic one. A wall clock set back never counts.
-pub(super) fn has_slept(wall_elapsed: Duration, monotonic_elapsed: Duration) -> bool {
+pub(crate) fn has_slept(wall_elapsed: Duration, monotonic_elapsed: Duration) -> bool {
     wall_elapsed > monotonic_elapsed.saturating_add(SLEEP_GAP)
 }
 

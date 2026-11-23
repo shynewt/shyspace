@@ -1,12 +1,17 @@
 //! When an incoming huddle rings this device, and when the ring stops, and
 //! how often the join and leave sounds may play.
 
+use std::collections::HashMap;
+
 use iroh::PublicKey;
 
 use super::{book::Participant, media::Cue};
 
 /// How long a ring lasts if nobody answers.
 pub const RING_MS: u64 = 30 * 1000;
+/// After a call from someone this member didn't take, more calls from them
+/// stay quiet this long, so nobody can ring or alert another nonstop.
+pub const RING_QUIET_MS: u64 = 60 * 1000;
 /// Others coming and going within this make one sound, not a burst.
 pub const CUE_GAP_MS: u64 = 2 * 1000;
 
@@ -54,6 +59,29 @@ impl CueLimit {
         }
         self.last_ms = Some(now_ms);
         true
+    }
+}
+
+/// Callers whose calls stay quiet for now: each alert starts a quiet
+/// window for its caller, which this member joining that call ends early.
+#[derive(Debug, Default)]
+pub struct QuietCallers {
+    until_ms: HashMap<PublicKey, u64>,
+}
+
+impl QuietCallers {
+    /// Whether a call from `caller` at `now_ms` (a monotonic clock) may alert.
+    pub fn may_alert(&self, caller: &PublicKey, now_ms: u64) -> bool {
+        self.until_ms.get(caller).is_none_or(|until| now_ms >= *until)
+    }
+
+    pub fn alerted(&mut self, caller: PublicKey, now_ms: u64) {
+        self.until_ms.retain(|_, until| *until > now_ms);
+        self.until_ms.insert(caller, now_ms + RING_QUIET_MS);
+    }
+
+    pub fn answered(&mut self, caller: &PublicKey) {
+        self.until_ms.remove(caller);
     }
 }
 
@@ -147,5 +175,31 @@ mod tests {
         assert!(limit.allows(Cue::Left, 10_100));
         assert!(limit.allows(Cue::Joined, 10_200));
         assert!(!limit.allows(Cue::PeerJoined, 11_000), "right after your own");
+    }
+
+    #[test]
+    fn a_caller_is_quiet_for_a_while_after_an_alert() {
+        let ada = SecretKey::generate().public();
+        let bob = SecretKey::generate().public();
+        let mut quiet = QuietCallers::default();
+        assert!(quiet.may_alert(&ada, 0));
+        quiet.alerted(ada, 0);
+        assert!(!quiet.may_alert(&ada, RING_QUIET_MS - 1));
+        assert!(quiet.may_alert(&bob, 1), "others still alert");
+        assert!(quiet.may_alert(&ada, RING_QUIET_MS));
+
+        quiet.alerted(ada, 0);
+        quiet.answered(&ada);
+        assert!(quiet.may_alert(&ada, 1), "a call taken leaves no quiet");
+    }
+
+    #[test]
+    fn quiet_windows_that_ended_are_forgotten() {
+        let mut quiet = QuietCallers::default();
+        for _ in 0..100 {
+            quiet.alerted(SecretKey::generate().public(), 0);
+        }
+        quiet.alerted(SecretKey::generate().public(), RING_QUIET_MS);
+        assert_eq!(quiet.until_ms.len(), 1);
     }
 }

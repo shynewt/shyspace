@@ -5,10 +5,10 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use iroh::PublicKey;
 use tokio::sync::{mpsc, watch};
 use tracing::warn;
@@ -19,11 +19,12 @@ use crate::{
         beacon::{Beacon, BeaconBody, BeaconState, MEDIA_WIRE, Reach, SessionId, media_path_name},
         book::{EXPIRY_MS, HuddleBook, Participant, REFRESH_MS},
         media::{AudioDevice, Cue, DeviceChoice, Link, MediaCall, MediaEvent, MicState, OutputState},
-        ring::{CueLimit, IncomingHuddle},
+        ring::{CueLimit, IncomingHuddle, QuietCallers},
         rules::{MAX_PARTICIPANTS, Visibility, hearing_set, huddle_members},
     },
     ops::now_ms,
     private::ids::{PrivateKind, private_kind},
+    sync::has_slept,
     transport::direct::DirectMessage,
     views::{
         Change, Devices, Huddle, HuddleParticipant, HuddlePeer, HuddlePhase, MyHuddle, NotifyLevel, member_id,
@@ -61,6 +62,7 @@ pub(crate) struct HuddleState {
     sent: Vec<Beacon>,
     pub(super) ringing: Option<Ring>,
     cue_limit: CueLimit,
+    quiet_callers: QuietCallers,
 }
 
 impl Default for HuddleState {
@@ -74,6 +76,7 @@ impl Default for HuddleState {
             sent: Vec::new(),
             ringing: None,
             cue_limit: CueLimit::default(),
+            quiet_callers: QuietCallers::default(),
         }
     }
 }
@@ -81,6 +84,13 @@ impl Default for HuddleState {
 impl HuddleState {
     pub(super) fn now(&self) -> u64 {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// This member takes the call in `channel`: its callers may alert again.
+    fn answer(&mut self, channel: &str) {
+        for participant in self.roster(channel) {
+            self.quiet_callers.answered(&participant.member);
+        }
     }
 
     pub(super) fn roster(&self, channel: &str) -> Vec<Participant> {
@@ -112,6 +122,15 @@ struct MySession {
     speaking: BTreeSet<PublicKey>,
     peers: watch::Sender<BTreeMap<PublicKey, String>>,
     task: tokio::task::AbortHandle,
+}
+
+/// Whether this device slept since the last tick, so a session it was in
+/// must end rather than carry on with the microphone open. The monotonic
+/// clock stops during sleep on most systems, so the wall clock running
+/// ahead says so; a monotonic gap past expiry means the same (everyone else
+/// already saw this device leave).
+fn is_back_from_sleep(wall_elapsed: Duration, monotonic_elapsed: Duration) -> bool {
+    has_slept(wall_elapsed, monotonic_elapsed) || monotonic_elapsed >= Duration::from_millis(EXPIRY_MS)
 }
 
 impl Workspace {
@@ -221,6 +240,7 @@ impl Workspace {
             allowed.contains(&self.me()),
             "you aren't a member of this channel"
         );
+        self.huddles().answer(channel);
         ensure!(
             self.huddle(channel)?.participants.len() < MAX_PARTICIPANTS,
             "this huddle is full"
@@ -490,10 +510,14 @@ impl Workspace {
             allowed.contains(&body.member),
             "a beacon from someone who may not be in this huddle"
         );
-        ensure!(
-            visibility == Visibility::Workspace || via != Via::Gossip,
-            "a private huddle's beacon arrived over gossip"
-        );
+        // Each kind travels one way only, so a beacon sent straight to some
+        // devices can't make them see a public huddle others don't.
+        match (visibility, via) {
+            (Visibility::Workspace, Via::Direct(_)) => bail!("a public huddle's beacon arrived directly"),
+            (Visibility::Workspace, Via::Gossip) => {}
+            (Visibility::Members, Via::Gossip) => bail!("a private huddle's beacon arrived over gossip"),
+            (Visibility::Members, Via::Direct(_)) => {}
+        }
         let wall_ms = now_ms()?;
         let (expired, received, is_start) = {
             let mut huddles = self.huddles();
@@ -519,13 +543,16 @@ impl Workspace {
         if private_kind(channel) != Some(PrivateKind::Dm) {
             return Ok(());
         }
-        if self
-            .huddles()
-            .mine
-            .as_ref()
-            .is_some_and(|mine| mine.channel == channel)
         {
-            return Ok(());
+            let mut huddles = self.huddles();
+            if huddles.mine.as_ref().is_some_and(|mine| mine.channel == channel) {
+                return Ok(());
+            }
+            let now = huddles.now();
+            if !huddles.quiet_callers.may_alert(starter, now) {
+                return Ok(());
+            }
+            huddles.quiet_callers.alerted(*starter, now);
         }
         let member_name = {
             let state = self.state();
@@ -729,6 +756,7 @@ impl Workspace {
         let mut changes = self.subscribe();
         let mut tick = tokio::time::interval(TICK);
         let mut last_tick = Instant::now();
+        let mut last_tick_wall = SystemTime::now();
         let mut last_refresh = Instant::now();
         loop {
             tokio::select! {
@@ -744,14 +772,15 @@ impl Workspace {
                     }
                 }
                 _ = tick.tick() => {
-                    // A device that slept past expiry has left, for everyone else.
-                    if last_tick.elapsed() >= Duration::from_millis(EXPIRY_MS) {
+                    let wall_elapsed = last_tick_wall.elapsed().unwrap_or_default();
+                    if is_back_from_sleep(wall_elapsed, last_tick.elapsed()) {
                         if let Err(error) = self.leave_session(session) {
                             warn!("couldn't leave a huddle after sleeping: {error:#}");
                         }
                         return;
                     }
                     last_tick = Instant::now();
+                    last_tick_wall = SystemTime::now();
                     // Membership can change without a local event, like a
                     // removal learned from the bucket.
                     if let Err(error) = self.follow_membership() {
@@ -875,5 +904,23 @@ fn joined() -> BeaconState {
         camera: false,
         screen: false,
         reach: Reach::Direct,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_session_ends_after_the_computer_slept() {
+        let tick = Duration::from_secs(1);
+        assert!(!is_back_from_sleep(tick, tick));
+        // A lid closed for five minutes: the wall clock moved on, the monotonic one didn't.
+        assert!(is_back_from_sleep(Duration::from_secs(300), tick));
+        // A short nap, shorter than expiry, still ends it: the microphone shouldn't come back on its own.
+        assert!(is_back_from_sleep(Duration::from_secs(45), tick));
+        assert!(is_back_from_sleep(tick, Duration::from_millis(EXPIRY_MS)));
+        // A wall clock set back isn't sleep.
+        assert!(!is_back_from_sleep(Duration::ZERO, tick));
     }
 }

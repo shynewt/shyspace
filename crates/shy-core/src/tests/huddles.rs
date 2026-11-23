@@ -172,6 +172,24 @@ async fn a_removed_member_is_no_longer_heard_or_seen() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_public_huddles_beacon_only_travels_over_gossip() {
+    let (_root, [ada, bob, _carol]) = three_members().await;
+    let general = channel_id(&ada.workspace, "general");
+
+    ada.workspace.join_huddle(&general, false).unwrap();
+    let beacon = ada.workspace.take_sent_beacons().pop().unwrap();
+    let error = bob
+        .workspace
+        .receive_beacon(&beacon, Via::Direct(ada.workspace.me()))
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("arrived directly"), "{error:#}");
+    assert!(in_huddle(&bob.workspace, &general).is_empty());
+
+    bob.workspace.receive_beacon(&beacon, Via::Gossip).unwrap();
+    assert_eq!(in_huddle(&bob.workspace, &general), [ada.workspace.my_id()]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_private_huddle_stays_among_its_members() {
     let (_root, [ada, bob, carol]) = three_members().await;
     let plans = ada
