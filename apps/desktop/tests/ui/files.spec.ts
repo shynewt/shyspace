@@ -242,6 +242,8 @@ test("clicking an image opens it large, and Esc closes it", async ({ page }) => 
   const viewer = page.getByRole("dialog", { name: "photo.png" });
   await expect(viewer.getByRole("img", { name: "photo.png" })).toBeVisible();
   await expect(viewer.getByRole("button", { name: "Save photo.png" })).toBeVisible();
+  // The viewer takes focus once it's open, which is what lets the first Esc close it.
+  await expect(viewer).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(viewer).toHaveCount(0);
 });
