@@ -317,6 +317,88 @@ test("someone starting a huddle in a DM rings once, and the ring opens the DM", 
   await expect(page.getByRole("button", { name: "Join Grace" })).toBeVisible();
 });
 
+/** Grace starts a huddle in your DM with her, which rings; returns the DM's id and hers. */
+async function graceCalls(page: Page): Promise<{ dm: string; grace: string }> {
+  return page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const dm = window.fake.handle("open_dm", { members: [grace] }) as string;
+    window.fake.huddles.join(grace, dm);
+    return { dm, grace };
+  });
+}
+
+function incoming(page: Page) {
+  return page.getByRole("region", { name: "Incoming huddle" });
+}
+
+test("an incoming DM huddle shows a card while it rings, and Join answers it", async ({ page }) => {
+  await openApp(page);
+  await graceCalls(page);
+
+  await expect(incoming(page)).toContainText("Grace started a huddle");
+  await expect(announcement(page)).toHaveText("Grace started a huddle");
+  await workspaceNav(page).getByRole("button", { name: "Inbox" }).click();
+  await incoming(page).getByRole("button", { name: "Join" }).click();
+
+  await expect(incoming(page)).toHaveCount(0);
+  await expect(bar(page)).toBeVisible();
+  expect(await page.evaluate(() => window.fake.huddles.ringing)).toBeNull();
+});
+
+test("a window that opens while a huddle rings shows the card", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.prepareFake = (fake) => {
+      const grace = fake.addMember("Grace");
+      fake.huddles.join(grace, fake.handle("open_dm", { members: [grace] }) as string);
+    };
+  });
+  await openApp(page);
+  await expect(incoming(page)).toContainText("Grace started a huddle");
+});
+
+test("Decline stops the ring without joining, and the huddle stays there to join later", async ({ page }) => {
+  await openApp(page);
+  await graceCalls(page);
+
+  await incoming(page).getByRole("button", { name: "Decline" }).click();
+  await expect(incoming(page)).toHaveCount(0);
+  await expect(bar(page)).toHaveCount(0);
+  expect(await page.evaluate(() => window.fake.huddles.ringing)).toBeNull();
+
+  await workspaceNav(page)
+    .getByRole("button", { name: /^Grace, direct message/ })
+    .click();
+  await expect(page.getByRole("button", { name: "Join Grace" })).toBeVisible();
+});
+
+test("the card goes when the caller hangs up, and nothing rings while you're in a huddle", async ({ page }) => {
+  await openApp(page);
+  const { dm, grace } = await graceCalls(page);
+  await expect(incoming(page)).toBeVisible();
+  await page.evaluate(([channel, member]) => window.fake.huddles.leave(member, channel), [dm, grace]);
+  await expect(incoming(page)).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Start a huddle" }).click();
+  await expect(bar(page)).toBeVisible();
+  await page.evaluate(([channel, member]) => window.fake.huddles.join(member, channel), [dm, grace]);
+  await expect(
+    workspaceNav(page).getByRole("button", { name: /^Grace, direct message, huddle with Grace/ }),
+  ).toBeVisible();
+  await expect(incoming(page)).toHaveCount(0);
+});
+
+test("with the sidebar hidden, an incoming huddle rings in the header", async ({ page }) => {
+  await openApp(page);
+  await page.keyboard.press("Control+\\");
+  await graceCalls(page);
+
+  const pill = page.getByRole("group", { name: "Incoming huddle" });
+  await expect(pill).toContainText("Grace");
+  await pill.getByRole("button", { name: "Join Grace's huddle" }).click();
+  await expect(page.getByRole("group", { name: "Your huddle" })).toBeVisible();
+  await expect(pill).toHaveCount(0);
+});
+
 test("with the sidebar hidden, the huddle moves to a pill in the header", async ({ page }) => {
   await openApp(page);
   await page.getByRole("button", { name: "Start a huddle" }).click();

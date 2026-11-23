@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { api, type HuddlePeer, type MyHuddle, onChange } from "../../lib/api";
+import { api, type Change, type HuddlePeer, type IncomingHuddle, type MyHuddle, onChange } from "../../lib/api";
 import { channelReference } from "../../lib/channels";
 import { displayName } from "../../lib/people";
 import { usePreferences } from "../../lib/preferences";
@@ -17,6 +17,8 @@ const DEVICE_GRACE_MS = 2000;
 type HuddleValue = {
   /** Your huddle; null when you're in none, undefined until loaded. */
   mine: MyHuddle | null | undefined;
+  /** The huddle ringing for you right now, if any. */
+  incoming: IncomingHuddle | null;
   /** Who's talking right now, you included. */
   speaking: ReadonlySet<string>;
   /** Peers whose audio has been reconnecting for longer than the grace. */
@@ -26,6 +28,8 @@ type HuddleValue = {
   isSpeakerDown: boolean;
   join: (channel: string) => void;
   leave: () => void;
+  /** Stops the ring without joining. */
+  decline: () => void;
   toggleMute: () => void;
 };
 
@@ -63,6 +67,11 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   const [news, setNews] = useState<{ id: number; text: string } | null>(null);
   const say = useCallback((text: string) => setNews((last) => ({ id: (last?.id ?? 0) + 1, text })), []);
   useNews(mine, nameOf, placeOf, say);
+  const incoming = useLive(api.huddleRinging, isRingChange) ?? null;
+  const caller = incoming && displayName(incoming.member_name, incoming.member);
+  useEffect(() => {
+    if (caller) say(`${caller} started a huddle`);
+  }, [caller, say]);
   const isMicDown = useLasting(mine?.mic === "lost", DEVICE_GRACE_MS);
   const isSpeakerDown = useLasting(mine?.output === "lost", DEVICE_GRACE_MS);
   useEffect(() => {
@@ -98,6 +107,9 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   const leave = useCallback(() => {
     api.leaveHuddle().catch(reportError);
   }, []);
+  const decline = useCallback(() => {
+    api.declineHuddle().catch(reportError);
+  }, []);
   const toggleMute = useCallback(() => {
     const huddle = current.current;
     if (!huddle) return;
@@ -107,8 +119,8 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   useHuddleKeys(mine, join, leave, toggleMute);
 
   const value = useMemo(
-    () => ({ mine, speaking, reconnecting, isMicDown, isSpeakerDown, join, leave, toggleMute }),
-    [mine, speaking, reconnecting, isMicDown, isSpeakerDown, join, leave, toggleMute],
+    () => ({ mine, incoming, speaking, reconnecting, isMicDown, isSpeakerDown, join, leave, decline, toggleMute }),
+    [mine, incoming, speaking, reconnecting, isMicDown, isSpeakerDown, join, leave, decline, toggleMute],
   );
   return (
     <HuddleContext.Provider value={value}>
@@ -220,6 +232,10 @@ function useLongReconnects(peers: HuddlePeer[]): ReadonlySet<string> {
     };
   }, []);
   return long;
+}
+
+function isRingChange(change: Change): boolean {
+  return change.kind === "huddle_ringing" || change.kind === "huddle_ring_stopped";
 }
 
 /** True once `isOn` has held for `ms`; false again as soon as it stops. */

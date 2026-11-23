@@ -3,6 +3,7 @@ import { type ComponentProps, type ReactNode, useRef } from "react";
 import { Button, cx, springs, Tooltip } from "../../ui";
 import { useMyHuddle } from "../huddles/HuddleContext";
 import { HuddlePill } from "../huddles/HuddlePill";
+import { IncomingHuddlePill } from "../huddles/IncomingHuddle";
 import { SidebarToggle, useShellLayout } from "./ShellLayout";
 
 /** The bar at the top of a view or panel: one line, with a rule below. */
@@ -17,7 +18,7 @@ export const HEADER_BAR = "flex h-13 shrink-0 items-center gap-2 border-b border
  */
 export function ViewHeader({ children, className }: { children?: ReactNode; className?: string }) {
   const { sidebar } = useShellLayout();
-  const { mine } = useMyHuddle();
+  const { mine, incoming } = useMyHuddle();
   return (
     <header className={cx("@container/header px-5", HEADER_BAR, className)}>
       <AnimatePresence initial={false}>
@@ -25,7 +26,12 @@ export function ViewHeader({ children, className }: { children?: ReactNode; clas
       </AnimatePresence>
       <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
       <AnimatePresence initial={false}>
-        {!sidebar.isDocked && mine && <HuddlePill key="huddle" huddle={mine} />}
+        {!sidebar.isDocked &&
+          (mine ? (
+            <HuddlePill key="huddle" huddle={mine} />
+          ) : (
+            incoming && <IncomingHuddlePill key="incoming" incoming={incoming} />
+          ))}
       </AnimatePresence>
     </header>
   );

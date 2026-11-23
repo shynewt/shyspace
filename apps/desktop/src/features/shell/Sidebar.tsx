@@ -7,6 +7,7 @@ import { useLive } from "../../lib/useLive";
 import { Kbd, Logo } from "../../ui";
 import { HuddleBar } from "../huddles/HuddleBar";
 import { useMyHuddle } from "../huddles/HuddleContext";
+import { IncomingHuddleCard } from "../huddles/IncomingHuddle";
 import { ChannelSections } from "./ChannelSections";
 import { DirectMessages } from "./DirectMessages";
 import { MeMenu } from "./MeMenu";
@@ -18,7 +19,7 @@ import { WorkspaceMenu } from "./WorkspaceMenu";
 
 /** The sidebar's content; `ShellLayout` places it, docked or as a drawer. */
 export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefined; onOpenSearch: () => void }) {
-  const { mine } = useMyHuddle();
+  const { mine, incoming } = useMyHuddle();
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 pt-4 pr-2.5 pb-3 pl-4">
@@ -53,7 +54,13 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
         <PagesSection />
       </nav>
 
-      <AnimatePresence initial={false}>{mine && <HuddleBar key="huddle" huddle={mine} />}</AnimatePresence>
+      <AnimatePresence initial={false}>
+        {mine ? (
+          <HuddleBar key="huddle" huddle={mine} />
+        ) : (
+          incoming && <IncomingHuddleCard key="incoming" incoming={incoming} />
+        )}
+      </AnimatePresence>
       <div className="border-t border-line p-2">
         <MeMenu />
       </div>
