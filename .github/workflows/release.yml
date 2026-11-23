@@ -103,6 +103,15 @@ jobs:
           releaseDraft: true
           prerelease: true
           uploadWorkflowArtifacts: true
+      - name: Check the macOS app's signature
+        if: runner.os == 'macOS'
+        run: |
+          app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
+          test -n "$app"
+          # Ad-hoc signed: the bundle must be whole, or macOS calls it damaged.
+          codesign --verify --deep --strict --verbose=2 "$app"
+          # Without notarization Gatekeeper refuses it; shown for information only.
+          spctl -a -vv "$app" || true
       - name: Build the shy CLI
         run: cargo build --release -p shy-cli --features vendored-openssl
       - name: Attach the CLI to the draft release
