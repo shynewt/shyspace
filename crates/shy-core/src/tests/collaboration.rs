@@ -1209,3 +1209,63 @@ async fn catching_up_on_typing_writes_each_page_once_per_batch_not_per_keystroke
     let writes = writes.load(std::sync::atomic::Ordering::Relaxed);
     assert!(writes <= 4, "{writes} page writes for {KEYSTROKES} keystrokes");
 }
+
+/// When an app version changes the rules for showing ops, opening a store
+/// built under the old rules rebuilds its views from the log, keeping
+/// everything stored.
+#[tokio::test(flavor = "multi_thread")]
+async fn new_view_rules_rebuild_the_views_on_opening() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("ada");
+    let bucket = memory_bucket();
+    let admin = create_admin(&dir, &bucket).await;
+    let general = channel_id(&admin, "general");
+    admin.send_message(&general, "kept in the log", None).unwrap();
+    {
+        let state = admin.state();
+        state.store.execute_for_test("DELETE FROM messages");
+        state
+            .store
+            .set_meta(crate::storage::VIEW_RULES_META, &[0])
+            .unwrap();
+    }
+    drop(admin);
+
+    let reopened = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+
+    assert_eq!(texts_in(&reopened, &general), ["kept in the log"]);
+}
+
+/// Stores made before view rules were kept in `meta` have none: they are
+/// rebuilt once, and then hold the current rules.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_store_without_view_rules_is_rebuilt_once_and_records_them() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("ada");
+    let bucket = memory_bucket();
+    let admin = create_admin(&dir, &bucket).await;
+    let general = channel_id(&admin, "general");
+    admin.send_message(&general, "kept in the log", None).unwrap();
+    {
+        let state = admin.state();
+        state.store.execute_for_test("DELETE FROM messages");
+        state
+            .store
+            .execute_for_test("DELETE FROM meta WHERE key = 'view_rules'");
+    }
+    drop(admin);
+
+    let reopened = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+
+    assert_eq!(texts_in(&reopened, &general), ["kept in the log"]);
+    let rules = reopened
+        .state()
+        .store
+        .meta(crate::storage::VIEW_RULES_META)
+        .unwrap();
+    assert_eq!(rules.as_deref(), Some([crate::storage::VIEW_RULES].as_slice()));
+}

@@ -23,7 +23,7 @@ use crate::{
     ops::{Op, new_owned_id, new_random_id, now_ms},
     pages::Edit,
     storage::ApplyContext,
-    storage::Store,
+    storage::{Store, VIEW_RULES, VIEW_RULES_META},
     sync::SyncStatus,
     transport::{
         bucket::{BucketConfig, Connector, s3_connector},
@@ -468,12 +468,29 @@ impl Workspace {
                 fail_next_answer_upload: Default::default(),
             }),
         };
+        workspace.rebuild_views_if_rules_changed()?;
         workspace.announce_sealing_key()?;
         if let Some(net) = &workspace.inner.net {
             net.set_members(&workspace.current_members()?);
             workspace.spawn_background(incoming);
         }
         Ok(workspace)
+    }
+}
+
+impl Workspace {
+    /// Rebuilds the views from the log when they were built under other
+    /// rules for showing ops (by another version of the app).
+    fn rebuild_views_if_rules_changed(&self) -> Result<()> {
+        let state = self.state();
+        if state.store.meta(VIEW_RULES_META)?.as_deref() == Some([VIEW_RULES].as_slice()) {
+            return Ok(());
+        }
+        let context = self.apply_context();
+        state.store.atomically(|store| {
+            store.rebuild_views(context)?;
+            store.set_meta(VIEW_RULES_META, &[VIEW_RULES])
+        })
     }
 }
 

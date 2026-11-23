@@ -1,13 +1,17 @@
-//! The database schema. Until the first release it changes in place: there
-//! are no migrations, and a store made by a different build is refused
-//! ("recreate this workspace") rather than upgraded. That holds for the ops
-//! in the log too: the store version includes `crypto::OP_FORMAT`, raised
-//! whenever how ops are encoded changes.
+//! The database schema, as a list of migrations: a store's `user_version`
+//! is how many it has had. Stored data is kept from the internal pilot on,
+//! so a change is a new migration at the end (additive), never an edit to
+//! one already released. A store from a newer app is refused ("update
+//! shyspace"): everyone moves to new versions together. Migrations run in
+//! one transaction, so they can't use `VACUUM` or `PRAGMA foreign_keys`.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, ensure};
 use rusqlite::Connection;
 
-const SCHEMA: &str = r#"
+/// Every migration in order; the first is the schema as of the pilot.
+const MIGRATIONS: &[&str] = &[FIRST_SCHEMA];
+
+const FIRST_SCHEMA: &str = r#"
 CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);
 CREATE TABLE epoch_keys (epoch INTEGER PRIMARY KEY, key BLOB NOT NULL);
 CREATE TABLE epoch_members (epoch INTEGER NOT NULL, member BLOB NOT NULL, PRIMARY KEY (epoch, member));
@@ -119,19 +123,20 @@ CREATE INDEX messages_by_reply_to ON messages (reply_to, channel);
 INSERT INTO sidebar_sections (id, name, position) VALUES ('channels', 'Channels', 0);
 "#;
 
-/// Raised when the rules for showing ops change (what a view holds, not its
-/// tables), so a store built under other rules is refused like one with
-/// another schema.
-const VIEW_RULES: u8 = 1;
+/// Raised when the rules for showing ops change (what a view holds, not
+/// its tables): a store whose views were built under other rules has them
+/// rebuilt from its log on opening.
+pub(crate) const VIEW_RULES: u8 = 1;
+pub(crate) const VIEW_RULES_META: &str = "view_rules";
 
-/// What a store records about the build that made it: changes whenever the
-/// schema, the view rules or the op format do. Never 0, which means a new
-/// store.
-fn store_version() -> i32 {
+/// What stores made before migrations recorded instead of a count: a hash
+/// of the first schema and the rules and op format of then. They hold
+/// exactly the first migration, under view rules 1.
+fn fingerprint_before_migrations() -> i32 {
     let hash = blake3::Hasher::new()
-        .update(SCHEMA.as_bytes())
-        .update(&[VIEW_RULES])
-        .update(&crate::crypto::OP_FORMAT.to_le_bytes())
+        .update(FIRST_SCHEMA.as_bytes())
+        .update(&[1])
+        .update(&1_u32.to_le_bytes())
         .finalize();
     let mut first = [0; 4];
     first.copy_from_slice(&hash.as_bytes()[..4]);
@@ -141,22 +146,44 @@ fn store_version() -> i32 {
     }
 }
 
-/// Sets up a new store, or checks that an existing one was made by this
-/// build's schema and rules.
-pub(super) fn create_or_check(db: &mut Connection) -> Result<()> {
-    let version: i32 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version == store_version() {
+/// Sets up a new store, or brings an existing one up to date.
+pub(super) fn create_or_migrate(db: &mut Connection) -> Result<()> {
+    migrate(db, MIGRATIONS)
+}
+
+fn migrate(db: &mut Connection, migrations: &[&str]) -> Result<()> {
+    let mut applied: i32 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if applied == fingerprint_before_migrations() {
+        applied = 1;
+    }
+    let known = i32::try_from(migrations.len())?;
+    ensure!(
+        applied <= known,
+        "this workspace was opened by a newer version of shyspace; update shyspace"
+    );
+    let tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| row.get(0))?;
+    ensure!(
+        applied > 0 || tables == 0,
+        "this database isn't a shyspace workspace, or is damaged"
+    );
+    let stored: i32 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if stored == known {
         return Ok(());
     }
-    let tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| row.get(0))?;
-    if version != 0 || tables > 0 {
-        bail!("this workspace was made by a different build of shyspace; recreate this workspace");
-    }
+    let is_new = applied == 0;
     let transaction = db.transaction()?;
-    transaction
-        .execute_batch(SCHEMA)
-        .context("creating the database")?;
-    transaction.pragma_update(None, "user_version", store_version())?;
+    for (index, migration) in migrations.iter().enumerate().skip(usize::try_from(applied)?) {
+        transaction
+            .execute_batch(migration)
+            .with_context(|| format!("updating the database (step {})", index + 1))?;
+    }
+    if is_new {
+        transaction.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?)",
+            rusqlite::params![VIEW_RULES_META, [VIEW_RULES].as_slice()],
+        )?;
+    }
+    transaction.pragma_update(None, "user_version", known)?;
     transaction.commit()?;
     Ok(())
 }
@@ -165,11 +192,16 @@ pub(super) fn create_or_check(db: &mut Connection) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn version(db: &Connection) -> i32 {
+        db.pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap()
+    }
+
     #[test]
     fn a_new_store_gets_the_schema_once() {
         let mut db = Connection::open_in_memory().unwrap();
-        create_or_check(&mut db).unwrap();
-        create_or_check(&mut db).unwrap();
+        create_or_migrate(&mut db).unwrap();
+        create_or_migrate(&mut db).unwrap();
         let tables: i64 = db
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'",
@@ -178,18 +210,80 @@ mod tests {
             )
             .unwrap();
         assert!(tables > 40, "{tables} tables");
+        assert_eq!(version(&db), 1);
     }
 
     #[test]
-    fn a_store_from_another_build_is_refused_clearly() {
+    fn a_store_takes_the_migrations_added_after_it_was_made() {
         let mut db = Connection::open_in_memory().unwrap();
-        create_or_check(&mut db).unwrap();
-        db.pragma_update(None, "user_version", store_version().wrapping_add(1))
+        migrate(&mut db, &[FIRST_SCHEMA]).unwrap();
+        db.execute("INSERT INTO meta (key, value) VALUES ('kept', x'01')", [])
             .unwrap();
 
-        let error = create_or_check(&mut db).unwrap_err();
+        migrate(
+            &mut db,
+            &[FIRST_SCHEMA, "CREATE TABLE added (id TEXT PRIMARY KEY);"],
+        )
+        .unwrap();
 
-        assert!(error.to_string().contains("recreate this workspace"), "{error}");
+        assert_eq!(version(&db), 2);
+        db.execute("INSERT INTO added (id) VALUES ('new')", []).unwrap();
+        let kept: i64 = db
+            .query_row("SELECT COUNT(*) FROM meta WHERE key = 'kept'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(kept, 1, "what was stored is kept");
+    }
+
+    #[test]
+    fn a_store_from_a_newer_app_is_refused_clearly() {
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate(
+            &mut db,
+            &[FIRST_SCHEMA, "CREATE TABLE added (id TEXT PRIMARY KEY);"],
+        )
+        .unwrap();
+
+        let error = create_or_migrate(&mut db).unwrap_err();
+
+        assert!(error.to_string().contains("update shyspace"), "{error}");
+        assert_eq!(version(&db), 2, "left as it was");
+    }
+
+    /// Pilot stores hold this number or a count: a fingerprint computed
+    /// from the code alone would follow an edit to the first migration and
+    /// stop matching them.
+    #[test]
+    fn the_fingerprint_is_the_one_the_previous_build_wrote() {
+        assert_eq!(fingerprint_before_migrations(), 1_670_830_970);
+    }
+
+    #[test]
+    fn released_migrations_are_never_edited() {
+        let released = ["62e0a7c9d9b131e66b7c2bf74406100f17f7b660cff1f2f2dd9141f0f7267164"];
+        let hashes: Vec<String> = MIGRATIONS
+            .iter()
+            .take(released.len())
+            .map(|migration| blake3::hash(migration.as_bytes()).to_hex().to_string())
+            .collect();
+        assert_eq!(hashes, released);
+    }
+
+    #[test]
+    fn a_store_made_before_migrations_counts_as_the_first() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(FIRST_SCHEMA).unwrap();
+        db.pragma_update(None, "user_version", fingerprint_before_migrations())
+            .unwrap();
+        assert!(
+            fingerprint_before_migrations() > 1_000,
+            "can't be taken for a count"
+        );
+
+        create_or_migrate(&mut db).unwrap();
+
+        assert_eq!(version(&db), 1);
     }
 
     #[test]
@@ -198,8 +292,11 @@ mod tests {
         db.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);")
             .unwrap();
 
-        let error = create_or_check(&mut db).unwrap_err();
+        let error = create_or_migrate(&mut db).unwrap_err();
 
-        assert!(error.to_string().contains("recreate this workspace"), "{error}");
+        assert!(
+            error.to_string().contains("isn't a shyspace workspace"),
+            "{error}"
+        );
     }
 }

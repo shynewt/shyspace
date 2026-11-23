@@ -123,4 +123,4 @@ A file can also be shared into a page: then its place is the page and it has no 
 
 ## Database schema
 
-shyspace hasn't been released, so there are no migrations: `storage/schema.rs` holds one base schema, changed in place. A store records a fingerprint of the schema and of the rules that build its views (SQLite's `user_version`); one made by a different build is refused with "recreate this workspace" rather than upgraded or misread.
+Stored data is kept from the internal pilot on. `storage/schema.rs` holds the schema as a list of migrations, and a store's `user_version` is how many it has had: an older store takes the rest when it opens, and one from a newer app is refused with "update shyspace". A change is a new, additive migration at the end. The rules that build views from ops have their own number (`VIEW_RULES`, kept in `meta`); a store whose views were built under other rules has them rebuilt from its log when it opens. The op format (`crypto::OP_FORMAT`) isn't part of either: newer ops wait for the update, and a new format must keep reading every older one, since logs keep them.

@@ -26,7 +26,9 @@ pub(crate) fn header_bytes(author: &PublicKey, seq: u64, epoch: u64) -> Vec<u8> 
 }
 
 /// The format every op body is signed in, written before the op itself so
-/// any version can read it. Raised whenever how ops are encoded changes.
+/// any version can read it. Raised whenever how ops are encoded changes;
+/// logs and the bucket keep older ops for good (stored data is kept from
+/// the pilot on), so a new format must keep reading every older one.
 pub const OP_FORMAT: u32 = 1;
 
 /// A validly signed op in a newer format than this version's: a teammate's
@@ -200,6 +202,22 @@ mod tests {
                 is_bot: false,
             },
         }
+    }
+
+    /// Ops signed in format 1 stay in logs and the bucket for good, so
+    /// every later version must still read them.
+    #[test]
+    fn ops_signed_in_format_1_stay_readable() {
+        const FORMAT_1_PROFILE: &str = "010100000341646100";
+        let identity = SecretKey::generate();
+        let key = [7u8; 32];
+        let body = hex::decode(FORMAT_1_PROFILE).unwrap();
+        let envelope = seal_bytes(&identity, &key, 3, 1, body).unwrap();
+
+        let opened = open(&envelope, &key).unwrap();
+
+        assert_eq!(opened.body.op, sample_body().op);
+        assert_eq!(opened.body.lamport, 1);
     }
 
     #[test]

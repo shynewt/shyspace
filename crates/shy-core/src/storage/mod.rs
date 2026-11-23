@@ -36,6 +36,7 @@ pub use private_members::{Ending, Membership};
 pub use queries::SearchFilters;
 pub use reading::UnreadMention;
 pub use revisions::ItemKind;
+pub(crate) use schema::{VIEW_RULES, VIEW_RULES_META};
 pub use sealed::WaitingSealed;
 pub use sections::BUILTIN_SECTION;
 pub use snapshot::{snapshot_database, snapshot_store_without_content};
@@ -138,7 +139,7 @@ impl Store {
     pub fn open(path: &Path, key: &str) -> Result<Self> {
         let mut db = open_encrypted(path, key)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
-        schema::create_or_check(&mut db)?;
+        schema::create_or_migrate(&mut db)?;
         Ok(Self {
             db,
             settling: std::cell::Cell::new(Settling::Everything),
