@@ -57,6 +57,16 @@ impl ToRead {
     }
 }
 
+/// Adds a reason to read `author`'s log, merged with any already queued so
+/// each log is listed once per check.
+fn queue_read(to_read: &mut Vec<ToRead>, author: PublicKey, add_reason: impl FnOnce(ToRead) -> ToRead) {
+    let queued = match to_read.iter().position(|read| read.author == author) {
+        Some(index) => to_read.swap_remove(index),
+        None => ToRead::new(author),
+    };
+    to_read.push(add_reason(queued));
+}
+
 /// ETags are short; a longer version is junk.
 const MAX_VERSION_LENGTH: usize = 256;
 
@@ -191,13 +201,13 @@ impl Workspace {
             }
             match self.bucket().head(&head.author).await? {
                 Some(head_now) if head_now.last_seq > held => {
-                    to_read.push(ToRead::new(head.author).with_head(head.version));
+                    queue_read(&mut to_read, head.author, |read| read.with_head(head.version));
                 }
                 _ => self.note_seen_head(&head.author, &head.version),
             }
         }
         for (author, next_seq) in self.gaps_to_repair()? {
-            to_read.push(ToRead::new(author).with_gap(next_seq));
+            queue_read(&mut to_read, author, |read| read.with_gap(next_seq));
         }
         for author in &everyone {
             let held = self.state().store.last_seq(author)?;
@@ -211,7 +221,7 @@ impl Workspace {
                 .frozen_last_seq(author)?
                 .is_some_and(|last| last > held);
             if is_unfinished && self.removal_reads().get(author) != Some(&held) {
-                to_read.push(ToRead::new(*author).for_removal());
+                queue_read(&mut to_read, *author, ToRead::for_removal);
             }
         }
         let mut has_found_new = false;

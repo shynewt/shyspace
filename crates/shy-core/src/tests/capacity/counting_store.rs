@@ -76,6 +76,7 @@ pub struct CountingStore {
     inner: InMemory,
     counters: Arc<Counters>,
     fetched_keys: Mutex<Vec<String>>,
+    listed_prefixes: Mutex<Vec<String>>,
     /// Added to every request while set, to act like a bucket over the internet.
     delay_ms: AtomicU64,
 }
@@ -96,6 +97,17 @@ impl CountingStore {
     pub fn downloads_of(&self, key: &str) -> usize {
         let fetched = self.fetched_keys.lock().unwrap();
         fetched.iter().filter(|fetched| fetched.as_str() == key).count()
+    }
+
+    /// How many listings were made under exactly `prefix`.
+    pub fn listings_of(&self, prefix: &str) -> usize {
+        let listed = self.listed_prefixes.lock().unwrap();
+        listed.iter().filter(|listed| listed.as_str() == prefix).count()
+    }
+
+    fn note_listing(&self, prefix: Option<&Path>) {
+        let prefix = prefix.map(Path::to_string).unwrap_or_default();
+        self.listed_prefixes.lock().unwrap().push(prefix);
     }
 
     pub fn set_delay(&self, delay: Duration) {
@@ -182,6 +194,7 @@ impl ObjectStore for CountingStore {
     }
 
     fn list(&self, prefix: Option<&Path>) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        self.note_listing(prefix);
         self.counted_list(self.inner.list(prefix))
     }
 
@@ -190,6 +203,7 @@ impl ObjectStore for CountingStore {
         prefix: Option<&Path>,
         offset: &Path,
     ) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        self.note_listing(prefix);
         self.counted_list(self.inner.list_with_offset(prefix, offset))
     }
 

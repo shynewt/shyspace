@@ -1103,3 +1103,42 @@ async fn a_newcomer_reads_a_long_history_in_a_few_downloads() {
     assert_eq!(bob_held, bob.state().store.last_seq(&bob.me()).unwrap());
     assert!(downloads < 16, "{downloads} downloads for Bob's next 64 uploads");
 }
+
+/// An author whose head moved and whose log has a gap is read once in a
+/// check, not once for each reason.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_lists_each_log_once_whatever_the_reasons() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "second", None).unwrap();
+    bob.send_message(&general, "third", None).unwrap();
+    bob.sync().await;
+    admin
+        .inner
+        .fail_next_apply
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    // The head's read fails, so the head still counts as moved next time.
+    admin.check().await;
+    admin.state().store.execute_for_test("DELETE FROM pending_ops");
+    bob.send_message(&general, "fourth", None).unwrap();
+    let fourth = bob
+        .state()
+        .store
+        .unpushed(&bob.me())
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    admin.receive(fourth).unwrap();
+    let bob_log = format!("ops/{}", crate::views::member_id(&bob.me()));
+    let listed_before = store.listings_of(&bob_log);
+
+    admin.check().await;
+
+    assert_eq!(store.listings_of(&bob_log) - listed_before, 1);
+    assert!(texts(&admin, &general).contains(&"third".to_string()));
+}
