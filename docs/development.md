@@ -2,7 +2,7 @@
 
 ## Setup
 
-- Rust (stable), Node with pnpm, Podman or Docker.
+- Rust through rustup, Node with pnpm, Podman or Docker. `rust-toolchain.toml` pins the Rust version, the same for everyone and CI; `rustup toolchain install` in the repository installs it. Bumping it is a deliberate change that fixes any new warnings in the same commit.
 - Linux desktop builds need: `webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel` (Fedora names).
 - `cd apps/desktop && pnpm install`
 
@@ -53,7 +53,7 @@ Every member has a data directory in `/var/tmp/shyspace-demo/<name>` (or `$SHY_D
 
 ## Checks
 
-Run all of these before committing. CI (`.github/workflows/ci.yml`) is the backstop, not the first line: it runs on every push to main, on pull requests, weekly, and from the Actions tab's "Run workflow" button. The real-app job runs only from that button. A newer push cancels a pull request's older run, never main's, so every commit on main gets a verdict. Only main saves the Rust cache, which keeps branches from crowding it out. The jobs name exact runner images (`ubuntu-24.04`, never `ubuntu-latest`), because a moving label changes the build machine without a commit, and for Linux the oldest system the packages run on. Dependabot (`.github/dependabot.yml`) opens one pull request a week that updates the workflows' actions.
+Run all of these before committing. CI (`.github/workflows/ci.yml`) is the backstop, not the first line: it runs on every push to main, on pull requests, weekly, and from the Actions tab's "Run workflow" button. The real-app job runs only from that button. A newer push cancels a pull request's older run, never main's, so every commit on main gets a verdict. Only main saves the Rust cache, which keeps branches from crowding it out. The jobs name exact runner images (`ubuntu-24.04`, never `ubuntu-latest`), because a moving label changes the build machine without a commit, and for Linux the oldest system the packages run on. Dependabot (`.github/dependabot.yml`) opens one pull request a week that updates the workflows' actions. Every job installs Rust from `rust-toolchain.toml` with `rustup toolchain install`, so CI builds with exactly the pinned version.
 
 ```sh
 cargo fmt --check

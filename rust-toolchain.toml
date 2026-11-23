@@ -1,0 +1,6 @@
+# The one Rust version for everyone and every CI job. Bumping it is a
+# deliberate change that fixes any new warnings in the same commit.
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
