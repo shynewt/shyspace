@@ -5,15 +5,15 @@ import { type AlertTarget, api, type Change, onAnyWorkspaceChange } from "./api"
 import { alertTitle } from "./channels";
 import { displayName } from "./people";
 import { readPreferences } from "./preferences";
+import { shownView } from "./shownView";
 import { reportError } from "./toast";
 import { linkedMessageView, type View } from "./workspace";
 
 /** The workspaces on this device, as notifications need them. */
 export type AlertWorkspaces = {
-  shownId: string;
   /** Names by workspace id; a notification names its workspace once there are two or more. */
   names: ReadonlyMap<string, string>;
-  /** Shows another workspace, then opens `target` there. */
+  /** Shows a workspace (even the selected one, while adding another), then opens `target` there. */
   select: (workspaceId: string, target: AlertTarget) => void;
 };
 
@@ -23,22 +23,14 @@ type AlertChange = Extract<Change, { kind: "alert" } | { kind: "huddle_started" 
  * Shows a desktop notification for each alert the core raises in any
  * workspace (a message, or someone starting a huddle in a DM), unless you're
  * already looking at that channel. Clicking one opens its message, or the DM,
- * switching workspace first if it's in another.
+ * switching workspace first if it's in another. Runs at the app's level, so
+ * it keeps going while no workspace is shown, as while adding one.
  */
-export function useAlerts(
-  view: View | null,
-  navigate: (view: View) => void,
-  workspaces: AlertWorkspaces,
-  /** What a notification from another workspace asked to open, once this workspace is shown. */
-  openFirst: AlertTarget | null,
-) {
-  const firstTarget = useRef(openFirst);
-  const currentView = useRef(view);
+export function useAlerts(workspaces: AlertWorkspaces) {
   const currentWorkspaces = useRef(workspaces);
   useEffect(() => {
-    currentView.current = view;
     currentWorkspaces.current = workspaces;
-  }, [view, workspaces]);
+  }, [workspaces]);
 
   useEffect(() => {
     // Each alert is prepared at once but shown after the one before, so they
@@ -46,10 +38,11 @@ export function useAlerts(
     let lastShown: Promise<void> = Promise.resolve();
     return onAnyWorkspaceChange((workspaceId, change) => {
       if (workspaceId === null || (change.kind !== "alert" && change.kind !== "huddle_started")) return;
-      const { shownId, names } = currentWorkspaces.current;
-      const isShown = workspaceId === shownId;
-      const shown = currentView.current;
-      const isLooking = isShown && document.hasFocus() && shown?.kind === "channel" && shown.id === change.channel;
+      const { names } = currentWorkspaces.current;
+      const shown = shownView();
+      const isShown = workspaceId === shown?.workspaceId;
+      const view = shown?.view();
+      const isLooking = isShown && document.hasFocus() && view?.kind === "channel" && view.id === change.channel;
       if (isLooking) return;
       const author = authorOf(change);
       const prepared = Promise.all([
@@ -73,30 +66,30 @@ export function useAlerts(
   }, []);
 
   useEffect(() => {
-    const open = (target: AlertTarget) => {
-      if (target.kind === "channel") return navigate({ kind: "channel", id: target.id });
-      api
-        .linkedMessage(target.id)
-        .then((linked) => {
-          // A message deleted since its alert has nothing left to open.
-          if (linked) navigate(linkedMessageView(linked));
-        })
-        .catch(reportError);
-    };
-    if (firstTarget.current) {
-      open(firstTarget.current);
-      firstTarget.current = null;
-    }
     const opening = listen<{ workspace_id: string | null } & AlertTarget>("alert-opened", (event) => {
       const { workspace_id: workspaceId, ...target } = event.payload;
-      const { shownId, select } = currentWorkspaces.current;
-      if (workspaceId !== null && workspaceId !== shownId) return select(workspaceId, target);
-      open(target);
+      const shown = shownView();
+      if (shown && (workspaceId === null || workspaceId === shown.workspaceId)) {
+        return openAlertTarget(target, shown.navigate);
+      }
+      if (workspaceId !== null) currentWorkspaces.current.select(workspaceId, target);
     });
     return () => {
       opening.then((stop) => stop()).catch(reportError);
     };
-  }, [navigate]);
+  }, []);
+}
+
+/** Opens what a notification is about: its message, or its channel. */
+export function openAlertTarget(target: AlertTarget, navigate: (view: View) => void) {
+  if (target.kind === "channel") return navigate({ kind: "channel", id: target.id });
+  api
+    .linkedMessage(target.id)
+    .then((linked) => {
+      // A message deleted since its alert has nothing left to open.
+      if (linked) navigate(linkedMessageView(linked));
+    })
+    .catch(reportError);
 }
 
 function authorOf(change: AlertChange) {

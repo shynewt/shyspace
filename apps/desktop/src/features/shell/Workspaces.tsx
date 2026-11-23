@@ -10,6 +10,7 @@ import {
 } from "../../lib/api";
 import { saveEverythingBeforeSwitch } from "../../lib/beforeSwitch";
 import { reportError } from "../../lib/toast";
+import { useAlerts } from "../../lib/useAlerts";
 
 type WorkspacesValue = {
   /** Every workspace on this device, in rail order. */
@@ -48,7 +49,9 @@ function changesBadges(change: Change): boolean {
 
 /**
  * The workspaces on this device, for the rail, notifications and menus: kept
- * current from every workspace's changes, not only the shown one's.
+ * current from every workspace's changes, not only the shown one's. Mounted
+ * whenever a workspace exists, including while adding another, so
+ * notifications keep coming.
  */
 export function WorkspacesProvider({
   session,
@@ -89,7 +92,12 @@ export function WorkspacesProvider({
 
   const select = useCallback(
     (workspaceId: string, target?: AlertTarget) => {
-      if (workspaceId === session.workspace_id) return;
+      if (workspaceId === session.workspace_id) {
+        // Already selected, as while adding another: show it again, opening `target` there.
+        pendingTarget = target ?? null;
+        onSession(session);
+        return;
+      }
       saveEverythingBeforeSwitch()
         .then(() => api.selectWorkspace(workspaceId))
         .then((next) => {
@@ -97,7 +105,7 @@ export function WorkspacesProvider({
           onSession(next);
         }, reportError);
     },
-    [session.workspace_id, onSession],
+    [session, onSession],
   );
   const leave = useCallback(
     async (workspaceId: string) => {
@@ -113,6 +121,12 @@ export function WorkspacesProvider({
     },
     [session.workspace_id, onSession],
   );
+
+  const alertWorkspaces = useMemo(
+    () => ({ names: new Map(workspaces.map((workspace) => [workspace.workspace_id, workspace.name])), select }),
+    [workspaces, select],
+  );
+  useAlerts(alertWorkspaces);
 
   const value = useMemo(
     () => ({ workspaces, badges, shownId: session.workspace_id, select, leave, add: onAdd }),

@@ -217,3 +217,17 @@ test("each workspace reopens where you were in it", async ({ page }) => {
   await page.keyboard.press("Control+1");
   await expect(page.getByLabel("Page title")).toHaveValue("Plans");
 });
+
+test("notifications keep coming while adding a workspace, and one opens its workspace", async ({ page }) => {
+  await openApp(page);
+  const team = await addTeam(page);
+  await rail(page).getByRole("button", { name: "Add a workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Add a workspace" })).toBeVisible();
+
+  await page.evaluate((id) => window.fake.alertFrom(id, "Grace", "design", "While you were away"), team);
+  await expect
+    .poll(() => page.evaluate(() => window.fake.alertsShown.map((alert) => alert.title)))
+    .toEqual(["Team · Grace in #design"]);
+  await page.evaluate(() => window.fake.clickAlert(0));
+  await expect(rail(page).getByRole("button", { name: /^Team/ })).toHaveAttribute("aria-current", "page");
+});

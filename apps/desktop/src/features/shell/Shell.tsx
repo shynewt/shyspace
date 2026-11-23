@@ -5,8 +5,9 @@ import { api, type LaterItem, type Session } from "../../lib/api";
 import { useMembersWithCurrentStatus } from "../../lib/members";
 import type { SettingsTarget } from "../../lib/settings";
 import { SHORTCUTS } from "../../lib/shortcuts";
+import { showView } from "../../lib/shownView";
 import { showToast } from "../../lib/toast";
-import { useAlerts } from "../../lib/useAlerts";
+import { openAlertTarget } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
 import { useMouseBackAndForward } from "../../lib/useMouseBackAndForward";
 import { ScrollMemoryContext, useNavigation } from "../../lib/useNavigation";
@@ -140,16 +141,21 @@ export function Shell({ session }: { session: Session }) {
     [navigate],
   );
 
-  const [openFirst] = useState(takePendingTarget);
-  const alertWorkspaces = useMemo(
-    () => ({
-      shownId: spaces.shownId,
-      names: new Map(spaces.workspaces.map((workspace) => [workspace.workspace_id, workspace.name])),
-      select: spaces.select,
-    }),
-    [spaces.shownId, spaces.workspaces, spaces.select],
+  // What notifications above the shell need: where you are, and how to open something here.
+  const currentView = useRef(view);
+  currentView.current = view;
+  useEffect(
+    () => showView({ workspaceId: session.workspace_id, view: () => currentView.current, navigate }),
+    [session.workspace_id, navigate],
   );
-  useAlerts(view, navigate, alertWorkspaces, openFirst);
+  // A notification from this workspace clicked while another was shown: open it now.
+  const [openFirst] = useState(takePendingTarget);
+  const hasOpenedFirst = useRef(false);
+  useEffect(() => {
+    if (!openFirst || hasOpenedFirst.current) return;
+    hasOpenedFirst.current = true;
+    openAlertTarget(openFirst, navigate);
+  }, [openFirst, navigate]);
   useReminders(session.workspace_id, openSaved);
   usePresence();
 

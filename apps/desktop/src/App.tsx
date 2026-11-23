@@ -76,22 +76,17 @@ export function App() {
         {phase.kind === "onboarding" && (
           <Onboarding key="onboarding" onReady={(session) => setPhase({ kind: "ready", session })} />
         )}
-        {phase.kind === "adding" && (
-          <Onboarding
-            key="adding"
-            onReady={showSession}
-            onCancel={() => setPhase({ kind: "ready", session: phase.session })}
-            cancelLabel={`Back to ${phase.session.workspace_name}`}
-          />
-        )}
-        {phase.kind === "ready" && (
-          <WorkspacesProvider
-            key={`shell-${phase.session.workspace_id}`}
-            session={phase.session}
-            onSession={showSession}
-            onAdd={addWorkspace}
-          >
-            <Shell session={phase.session} />
+        {(phase.kind === "ready" || phase.kind === "adding") && (
+          <WorkspacesProvider key="workspaces" session={phase.session} onSession={showSession} onAdd={addWorkspace}>
+            {phase.kind === "adding" ? (
+              <Onboarding
+                onReady={showSession}
+                onCancel={() => setPhase({ kind: "ready", session: phase.session })}
+                cancelLabel={`Back to ${phase.session.workspace_name}`}
+              />
+            ) : (
+              <Shell key={phase.session.workspace_id} session={phase.session} />
+            )}
           </WorkspacesProvider>
         )}
       </AnimatePresence>
