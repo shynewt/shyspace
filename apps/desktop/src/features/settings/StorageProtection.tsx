@@ -115,8 +115,9 @@ function providerSteps(prefix: string): { provider: string; steps: ReactNode }[]
       provider: "Cloudflare R2",
       steps: (
         <>
-          In the bucket's Settings › Bucket lock rules, add a rule for {folder("ops/")} and one for {folder("mls/")}. R2
-          keeps no old versions, so back up {folder("files/")} another way.
+          In the bucket's Settings › Bucket lock rules, add a rule for {folder("ops/")}. Don't lock {folder("mls/")}:
+          membership changes repair it by overwriting. R2 keeps no old versions, so back up {folder("files/")} another
+          way.
         </>
       ),
     },

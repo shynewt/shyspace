@@ -115,6 +115,9 @@ test("the provider steps open from the keyboard and warn against locking everyth
   await expect(steps).toBeVisible();
   await expect(storage).toContainText("mc version enable");
   await expect(storage).toContainText("Don't lock the whole bucket");
+  // A lock refuses overwrites, and membership repairs mls/ by overwriting.
+  await expect(storage).toContainText(/Don't lock \S*mls\/: membership changes repair it by overwriting/);
+  await expect(storage).not.toContainText(/rule for \S*ops\/ and one for/);
 });
 
 test.describe("as a member", () => {
