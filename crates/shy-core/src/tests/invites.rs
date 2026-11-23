@@ -268,6 +268,11 @@ async fn a_join_cut_short_after_the_answer_finishes_on_the_next_open() {
     let admin = create_admin(&root.path().join("ada"), &bucket).await;
     let bob_dir = root.path().join("bob");
     let bob = join(&admin, &bob_dir, &bucket, "Bob", false).await;
+    assert_eq!(
+        admin.state().store.meta("pending_profile").unwrap(),
+        None,
+        "a create finishes its own"
+    );
     // As if the app stopped before the chosen name was sent.
     let chosen = serde_json::json!({ "name": "Bobby", "is_bot": false }).to_string();
     bob.state()

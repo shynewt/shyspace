@@ -147,15 +147,55 @@ pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) 
 }
 
 /// Writes a file only its owner can read.
+/// Written beside it and renamed over it, so a crash leaves the old file or
+/// the new one, never half of one.
 pub(crate) fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
     #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
+    let file_name = path.file_name().context("writing a file without a name")?;
+    let partial = path.with_file_name(format!("{}.partial", file_name.to_string_lossy()));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     options.mode(0o600);
     options
-        .open(path)
-        .and_then(|mut file| file.write_all(contents))
+        .open(&partial)
+        .and_then(|mut file| {
+            file.write_all(contents)?;
+            file.sync_all()
+        })
+        .and_then(|()| std::fs::rename(&partial, path))
         .with_context(|| format!("writing {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_private_file_is_replaced_whole_and_only_its_owner_reads_it() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("workspace.json");
+        write_private_file(&path, b"first").unwrap();
+        write_private_file(&path, b"second").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        let names: Vec<_> = std::fs::read_dir(folder.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            names,
+            ["workspace.json"],
+            "nothing half written is left beside it"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
 }

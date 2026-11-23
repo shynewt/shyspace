@@ -36,8 +36,9 @@ use crate::{
 pub(crate) const STORE_FILE: &str = "shy.db";
 pub(crate) const MLS_FILE: &str = "mls.db";
 const SIGNER_META: &str = "mls_signer_public";
-/// The name a joiner chose, until their Profile op is written: a join the
-/// admin answered is finished on the next start rather than undone.
+/// The name chosen when joining or creating, until its Profile op is
+/// written: a join the admin answered, or a create cut short, finishes on
+/// the next start rather than being undone.
 const PENDING_PROFILE_META: &str = "pending_profile";
 const LOCK_FILE: &str = "shyspace.lock";
 const ANSWER_POLL: Duration = Duration::from_secs(2);
@@ -243,12 +244,16 @@ impl Workspace {
             bucket: bucket_config,
         };
         config.save_in_store(&local.store)?;
-        config.mark_complete(&data.path)?;
-        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
-        workspace.write(Op::Profile {
+        let pending = PendingProfile {
             name,
             is_bot: profile.is_bot,
-        })?;
+        };
+        local
+            .store
+            .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
+        config.mark_complete(&data.path)?;
+        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
+        workspace.finish_pending_profile()?;
         workspace.write(Op::ChannelCreate {
             id: new_owned_id(&workspace.me()),
             name: "general".into(),
@@ -355,13 +360,19 @@ impl Workspace {
         let Some(bytes) = self.state().store.meta(PENDING_PROFILE_META)? else {
             return Ok(());
         };
+        let pending: PendingProfile =
+            serde_json::from_slice(&bytes).context("reading the name chosen when joining or creating")?;
         if self.state().mls.is_active() {
-            let pending: PendingProfile =
-                serde_json::from_slice(&bytes).context("reading the name chosen when joining")?;
-            self.write(Op::Profile {
+            let written = self.write(Op::Profile {
                 name: pending.name,
                 is_bot: pending.is_bot,
-            })?;
+            });
+            // Removed in the meantime (sync runs alongside): nothing to write.
+            if let Err(error) = written
+                && self.state().mls.is_active()
+            {
+                return Err(error);
+            }
         }
         self.state().store.delete_meta(PENDING_PROFILE_META)
     }
