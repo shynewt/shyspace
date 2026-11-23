@@ -1,3 +1,4 @@
+mod capacity;
 mod collaboration;
 mod drafts;
 mod editing;

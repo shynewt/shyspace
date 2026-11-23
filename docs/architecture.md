@@ -113,7 +113,7 @@ Deleting a file, its message or its channel removes it everywhere and queues its
 | `views.rs` | read models sent to the UI and agents |
 | `keys.rs` | the device key and where it's kept (keychain or file) |
 | `config.rs`, `identity.rs` | workspace settings (including the current bucket settings) and the identity key |
-| `tests/` | multi-member scenarios (`collaboration`, `private`) and attacks (`hardening`, `private_attacks`) |
+| `tests/` | multi-member scenarios (`collaboration`, `private`), attacks (`hardening`, `private_attacks`) and slow capacity probes (`capacity`, see `development.md`) |
 
 ## Database migrations
 

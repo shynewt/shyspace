@@ -58,6 +58,17 @@ cargo test --workspace
 python3 scripts/e2e_mcp.py
 ```
 
+## Capacity probes
+
+`crates/shy-core/src/tests/capacity/` builds large workspaces (years of messages, a newcomer catching up, many members, many files and one at the size limit) and prints how time, disk and bucket requests grow. The bucket is in memory, counts every request and can add a delay to each, as a bucket over the internet would. The probes are slow, so `cargo test` skips them; run one at a time, with temporary files on disk rather than in `/tmp` (RAM on many machines):
+
+```sh
+TMPDIR=/var/tmp/shyspace-capacity nice cargo test --release -p shy-core \
+    capacity::history -- --ignored --nocapture --test-threads=1
+```
+
+`SHY_CAPACITY_SCALE` multiplies every size (`0.1` for a quick run). They check that results are right at each size, but don't fail on timings, which depend on the machine.
+
 ## Testing the UI
 
 `pnpm test:ui` (in `apps/desktop`) runs the Playwright tests in `tests/ui/`. They load the real frontend from `tests/ui/app.html`, which answers every `invoke` from an in-memory fake (`tests/ui/fake/backend.ts`, through Tauri's `mockIPC`) instead of Rust. Tests act as other members through `window.fake` (for example `window.fake.receiveMessage(...)`). The fake copies only the behavior the screens rely on, so keep it in step with `src-tauri/src/lib.rs`. First run: `pnpm exec playwright install chromium-headless-shell`.
