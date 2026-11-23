@@ -100,7 +100,10 @@ impl Workspace {
     /// claims more than we hold, someone else wrote it, and we correct it.
     pub(crate) async fn write_head(&self) -> Result<()> {
         let me = self.me();
-        if let Some(current) = self.bucket().head(&me).await?
+        // Read once: our app writes our head only under the upload lock, and
+        // anyone else changing it in between is caught at the next check.
+        let current = self.bucket().head(&me).await?;
+        if let Some(current) = current
             && current.last_seq > self.state().store.last_seq(&me)?
             && let Some(error) = self.pull_author(&me).await?
         {
@@ -114,7 +117,7 @@ impl Workspace {
             last_seq: pushed,
             key: key_tag(&self.bucket_config()?.access_key_id),
         };
-        if self.bucket().head(&me).await? == Some(head) {
+        if current == Some(head) {
             self.inner.confirmed_head_seq.store(pushed, Ordering::SeqCst);
             return Ok(());
         }

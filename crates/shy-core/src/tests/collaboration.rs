@@ -1269,3 +1269,31 @@ async fn a_store_without_view_rules_is_rebuilt_once_and_records_them() {
         .unwrap();
     assert_eq!(rules.as_deref(), Some([crate::storage::VIEW_RULES].as_slice()));
 }
+
+/// An upload costs one segment, one head, and one read of our own head to
+/// check it: every request is paid for and waited on.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_makes_three_requests() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let general = channel_id(&admin, "general");
+    bob.push().await.unwrap();
+    bob.send_message(&general, "one more", None).unwrap();
+    assert_ne!(
+        bob.state().store.last_seq(&bob.me()).unwrap() % 16,
+        0,
+        "no pack is due"
+    );
+
+    let before = store.requests();
+    bob.push().await.unwrap();
+    let requests = store.requests().since(&before);
+
+    assert_eq!(
+        (requests.gets, requests.puts, requests.lists),
+        (1, 2, 0),
+        "{requests}"
+    );
+}
