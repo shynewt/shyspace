@@ -4,7 +4,7 @@
 //! Layout under the workspace prefix:
 //!   ops/<author>/<last seq>-<first seq>-<nonce>-<hash>   segments of envelopes
 //!   ops/forks/<author>/<seq>/<hash>       proof an author signed two versions of one op
-//!   mls/commit/<from epoch>[-<hash>]      admin-signed commits, one per epoch
+//!   mls/commit/<from epoch>               admin-signed commits, one per epoch
 //!   invites/<token>/request               a joiner's request (via presigned link)
 //!   invites/<token>/answer                the admin's answer (via presigned link)
 //!   peers/<endpoint id>                   gossip bootstrap hints
@@ -373,14 +373,6 @@ pub fn listing_after(author: &PublicKey, held: u64) -> String {
 
 /// Changes whenever the object is replaced: an overwrite always changes the
 /// ETag, and stores without one still change the size or time.
-/// Whether a create-only write failed because the object already exists.
-fn is_already_there(error: &anyhow::Error) -> bool {
-    matches!(
-        error.downcast_ref::<object_store::Error>(),
-        Some(object_store::Error::AlreadyExists { .. })
-    )
-}
-
 pub(super) fn object_version(meta: &object_store::ObjectMeta) -> String {
     meta.e_tag
         .clone()
@@ -451,9 +443,8 @@ impl Bucket {
         Ok(paths)
     }
 
-    /// Uploads `envelopes` as one segment; see [`split_into_segments`] for
-    /// keeping it readable.
-    /// Writes `envelopes` as a new segment, never over an existing object:
+    /// Writes `envelopes` as a new segment (see [`split_into_segments`] for
+    /// keeping it readable), never over an existing object:
     /// with a bucket policy refusing overwrites, nothing honest can be
     /// replaced. Its name holds a fresh random nonce, so nobody can put
     /// something there first.
@@ -572,45 +563,16 @@ impl Bucket {
         self.get_at_most(&Path::from(path), MAX_FORK_PROOF_BYTES).await
     }
 
-    /// Writes a commit create-only. Its slot is predictable, so someone may
-    /// have put something else there first: then it goes under
-    /// `mls/commit/<epoch>-<hash>`, which readers look at when the slot
-    /// doesn't hold a valid commit (`commit_alternatives`).
+    /// Commits are signed by the admin (checked by readers), so a plain put
+    /// is enough: every member puts a commit back if its slot goes missing
+    /// or holds something else (`republish_commits`). Not create-only: the
+    /// slot's name is predictable, so someone could otherwise take it first.
     pub async fn put_commit(&self, from_epoch: u64, signed_commit: Vec<u8>) -> Result<()> {
-        let slot = Path::from(format!("mls/commit/{}", padded(from_epoch)));
-        match self.put_new(&slot, signed_commit.clone()).await {
-            Ok(()) => Ok(()),
-            Err(error) if is_already_there(&error) => {
-                if self.get(&slot).await?.as_deref() == Some(signed_commit.as_slice()) {
-                    return Ok(());
-                }
-                let alternative = Path::from(format!(
-                    "mls/commit/{}-{}",
-                    padded(from_epoch),
-                    blake3::hash(&signed_commit).to_hex()
-                ));
-                match self.put_new(&alternative, signed_commit).await {
-                    Err(error) if is_already_there(&error) => Ok(()),
-                    written => written,
-                }
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    /// Commits written beside `from_epoch`'s slot because something else
-    /// took it; each is checked like the slot's.
-    pub async fn commit_alternatives(&self, from_epoch: u64) -> Result<Vec<Bytes>> {
-        let prefix = format!("mls/commit/{}-", padded(from_epoch));
-        let mut alternatives = Vec::new();
-        for path in self.list("mls/commit", None).await? {
-            if path.as_ref().starts_with(&prefix)
-                && let Some(bytes) = self.get(&path).await?
-            {
-                alternatives.push(bytes);
-            }
-        }
-        Ok(alternatives)
+        self.put(
+            &Path::from(format!("mls/commit/{}", padded(from_epoch))),
+            signed_commit,
+        )
+        .await
     }
 
     /// Commit slots in the bucket, valid or not, with their versions.

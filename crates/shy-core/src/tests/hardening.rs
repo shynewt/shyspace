@@ -3116,25 +3116,22 @@ async fn a_removal_that_cannot_be_finished_is_not_read_at_every_check() {
 }
 
 /// A commit slot's name is predictable, so junk could be put there before
-/// the admin's next commit. The junk stays, and the commit still reaches
-/// every member under another name.
+/// the admin's next commit. Commits are plain puts, so the commit replaces
+/// it and still reaches every member.
 #[tokio::test(flavor = "multi_thread")]
-async fn junk_put_first_at_a_commit_slot_neither_is_overwritten_nor_blocks_it() {
+async fn junk_put_first_at_a_commit_slot_does_not_block_the_commit() {
     let (root, bucket, admin, bob) = admin_and_bob().await;
     let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
     sync_all(&[&admin, &bob, &carol]).await;
     let next_slot = admin.state().mls.epoch().unwrap();
-    let slot = format!("mls/commit/{next_slot:020}");
-    bucket.put_raw(&slot, b"junk".to_vec()).await.unwrap();
+    bucket
+        .put_raw(&format!("mls/commit/{next_slot:020}"), b"junk".to_vec())
+        .await
+        .unwrap();
 
     admin.remove_member(&carol.my_id()).await.unwrap();
     bob.sync().await;
 
-    assert_eq!(
-        bucket.get_raw(&slot).await.unwrap().unwrap().as_ref(),
-        b"junk",
-        "not overwritten"
-    );
     let carol_is_active = bob
         .members()
         .unwrap()

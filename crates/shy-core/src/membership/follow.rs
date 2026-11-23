@@ -22,19 +22,8 @@ impl Workspace {
             let Some(bytes) = self.bucket().commit(epoch).await? else {
                 return Ok(());
             };
-            let verified = match commit::verify(&bytes, epoch, &admin) {
-                Ok(verified) => verified,
-                // Someone may have taken the slot before the admin wrote it;
-                // the admin then writes the commit beside it.
-                Err(error) => self
-                    .bucket()
-                    .commit_alternatives(epoch)
-                    .await?
-                    .iter()
-                    .find_map(|alternative| commit::verify(alternative, epoch, &admin).ok())
-                    .ok_or(error)
-                    .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?,
-            };
+            let verified = commit::verify(&bytes, epoch, &admin)
+                .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
             // Frozen logs first: if undoing a removed member's late ops fails,
             // nothing has moved on and the whole commit is retried.
             let is_rebuilt = {

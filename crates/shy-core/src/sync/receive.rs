@@ -8,7 +8,7 @@ use tracing::warn;
 use super::forks::SecondLook;
 use crate::{
     crypto::{self, EpochKey, NewerFormat, Unreadable},
-    ops::{Envelope, MAX_OP_BYTES, MAX_PAGE_UPDATE_BYTES, MAX_STORED_NUMBER, RuleViolation, VerifiedOp},
+    ops::{Envelope, MAX_PAGE_UPDATE_BYTES, MAX_STORED_NUMBER, RuleViolation, VerifiedOp},
     storage::{Applied, ApplyContext},
     transport::bucket::parse_segment_name,
     views::Change,
@@ -342,15 +342,15 @@ impl Workspace {
 }
 
 /// Signed junk its author can't take back: recorded as handled in its turn,
-/// so their later ops aren't held up. It's kept whole when it fits the op
-/// size limit (it never applies), so a real op for the same seq is still
-/// proved a fork. Before its turn it isn't kept, and gap repair reads it
+/// so their later ops aren't held up. It's kept whole when it fits the
+/// largest op any kind may be (it never applies), so a real op for the same
+/// seq is still proved a fork. Before its turn it isn't kept, and gap repair reads it
 /// again once later ops wait behind it.
 fn skip_unreadable(state: &State, envelope: &Envelope) -> Result<Vec<Change>> {
     let is_next = envelope.seq == 1 || state.store.is_applied(&envelope.author, envelope.seq - 1)?;
     if is_next {
         warn!("skipping a signed op that no version can read");
-        if envelope.ciphertext.len() <= MAX_OP_BYTES {
+        if envelope.ciphertext.len() <= MAX_PAGE_UPDATE_BYTES {
             state.store.insert_applied(envelope, true)?;
         } else {
             state.store.insert_refused(envelope)?;

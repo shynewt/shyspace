@@ -323,3 +323,21 @@ async fn junk_then_a_real_op_for_the_same_seq_is_proved_a_fork() {
 
     assert!(admin.state().store.is_forked(&bob.me(), seq).unwrap());
 }
+
+/// Junk is kept whole up to the largest op any kind may be (a page update,
+/// 4 MB), so junk just over a message's limit can't hide a fork either.
+#[tokio::test(flavor = "multi_thread")]
+async fn large_junk_then_a_real_op_for_the_same_seq_is_proved_a_fork() {
+    let fork = fork().await;
+    let (admin, bob) = (&fork.admin, &fork.bob);
+    let (epoch, key) = current_key(bob);
+    let seq = fork.for_admin.seq;
+    let junk = postcard::to_stdvec(&(crate::crypto::OP_FORMAT, "x".repeat(300 * 1024))).unwrap();
+    admin
+        .receive(crate::crypto::seal_bytes(&bob.inner.identity, &key, epoch, seq, junk).unwrap())
+        .unwrap();
+
+    admin.receive(fork.for_admin.clone()).unwrap();
+
+    assert!(admin.state().store.is_forked(&bob.me(), seq).unwrap());
+}

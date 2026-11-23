@@ -28,7 +28,7 @@ A French provider (EU jurisdiction), with no request fees.
 ## Others
 
 - **AWS S3:** the same with IAM: versioning on, a members' policy without `s3:DeleteObjectVersion`, and lifecycle expiry of noncurrent versions under `files/`. Don't set an Object Lock default retention: it covers the whole bucket. A US company, with request fees.
-- **Cloudflare R2:** no versioning. Add bucket lock rules for `<workspace id>/ops/` and `<workspace id>/mls/`; deleted files are gone at once, so back up `files/` another way. A US company, with request fees.
+- **Cloudflare R2:** no versioning. Add a bucket lock rule for `<workspace id>/ops/` only: an R2 lock refuses overwrites, and commits under `mls/` are repaired by overwriting, so locking `mls/` would let junk put at the next commit slot block membership changes for good. Deleted files are gone at once, so back up `files/` another way. A US company, with request fees.
 - **MinIO (self-hosted):** `mc version enable`, and a members' policy without `s3:DeleteObjectVersion`.
 
 Backblaze B2 can do this too, but its privacy notice describes sharing identifiers with advertising networks, so we don't recommend it for a privacy product.
