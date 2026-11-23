@@ -2017,6 +2017,29 @@ async fn an_edited_workspace_json_is_refused() {
     assert!(error.contains("changed outside the app"), "{error}");
 }
 
+/// A workspace from before the encrypted copy was kept records it on its
+/// first open, and is held to it from then on.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_older_workspace_keeps_its_identity_on_first_open() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let bob_dir = root.path().join("bob");
+    bob.state().store.delete_meta("workspace_identity").unwrap();
+    bob.shutdown().await.unwrap();
+    drop(bob);
+
+    let reopened = Workspace::open_with(&data_dir(&bob_dir), connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+    assert!(
+        reopened
+            .state()
+            .store
+            .meta("workspace_identity")
+            .unwrap()
+            .is_some()
+    );
+}
+
 /// A delete can reach a device before the file it removes (rebuilds and
 /// restores read the bucket in a new order, and gossip can race). The
 /// deleter's device still takes the file's pieces out of the bucket.
@@ -2063,7 +2086,18 @@ async fn claimed_times_cant_date_a_message_ahead_or_reorder_lists() {
     };
     let made_first = crate::ops::new_owned_id(&bob.me());
     let made_second = crate::ops::new_owned_id(&bob.me());
+    let page = admin.pages().unwrap()[0].id.clone();
+    let state = admin.page_state(&page).unwrap();
+    let page_edit = crate::pages::edit(state.as_deref(), crate::pages::Edit::Append("later")).unwrap();
     let ops = [
+        seal(
+            9_003,
+            a_year_ahead,
+            Op::DocUpdate {
+                page: page.clone(),
+                update: page_edit,
+            },
+        ),
         seal(
             9_000,
             a_year_ahead,
@@ -2110,4 +2144,17 @@ async fn claimed_times_cant_date_a_message_ahead_or_reorder_lists() {
         .find(|message| message.text == "from the future")
         .unwrap();
     assert!(shown.created_ms <= now_ms().unwrap());
+
+    // The same after the views are built again from the log.
+    admin.state().store.rebuild_views(admin.apply_context()).unwrap();
+    let edited = admin
+        .pages()
+        .unwrap()
+        .into_iter()
+        .find(|listed| listed.id == page)
+        .unwrap();
+    assert!(
+        edited.updated_ms <= now_ms().unwrap(),
+        "the page edit isn't dated ahead"
+    );
 }

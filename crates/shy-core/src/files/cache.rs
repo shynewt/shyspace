@@ -141,6 +141,7 @@ impl BlobCache {
         let replaced = file_size(&path);
         let partial = path.with_extension("partial");
         fs::write(&partial, sealed).context("caching a file piece")?;
+        self.size.note_change();
         fs::rename(&partial, &path).context("caching a file piece")?;
         self.size.change(sealed.len() as u64, replaced);
         Ok(())

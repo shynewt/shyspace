@@ -51,15 +51,21 @@ impl WorkspaceConfig {
         let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
         let settings: PublicSettings =
             serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))?;
-        let identity = serde_json::to_vec(&(&settings.workspace_id, settings.admin))?;
         match store.meta(IDENTITY_META)? {
-            Some(kept) => ensure!(
-                kept == identity,
-                "{} was changed outside the app: it no longer matches this workspace's encrypted settings",
-                path.display()
-            ),
+            Some(kept) => {
+                let (workspace_id, admin): (String, PublicKey) =
+                    serde_json::from_slice(&kept).context("reading this workspace's id and admin")?;
+                ensure!(
+                    workspace_id == settings.workspace_id && admin == settings.admin,
+                    "{} was changed outside the app: it no longer matches this workspace's encrypted settings",
+                    path.display()
+                );
+            }
             // Workspaces from before the copy was kept take the file as it is once.
-            None => store.set_meta(IDENTITY_META, &identity)?,
+            None => store.set_meta(
+                IDENTITY_META,
+                &serde_json::to_vec(&(&settings.workspace_id, settings.admin))?,
+            )?,
         }
         let bucket = store.meta(BUCKET_META)?.context("bucket settings are missing")?;
         Ok(Self {

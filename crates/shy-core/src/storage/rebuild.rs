@@ -160,7 +160,7 @@ impl Store {
             };
             match &verified.body.op {
                 Op::DocUpdate { page, update } => {
-                    self.gather_page_update(&mut pages, page, update, verified.body.timestamp_ms)?;
+                    self.gather_page_update(&mut pages, page, update, super::apply::shown_time(&verified)?)?;
                 }
                 _ => self.replay(&verified, context)?,
             }
