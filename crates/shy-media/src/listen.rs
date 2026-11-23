@@ -28,7 +28,9 @@ const LINK_EVERY: Duration = Duration::from_secs(1);
 /// After audio that won't decode, the pause before decoding the track
 /// afresh: doubled while it keeps failing, up to the most, and back to the
 /// least only after a while of good audio, so a peer mixing garbage into
-/// good audio costs little.
+/// good audio costs little. A catalog republish also restarts decoding
+/// (moq-mux sends one whenever a track's jitter or bitrate estimate moves),
+/// but nothing makes one follow a bad packet.
 const REDECODE_AFTER: Duration = Duration::from_millis(100);
 const REDECODE_AFTER_MOST: Duration = Duration::from_secs(2);
 const GOOD_FOR: Duration = Duration::from_secs(1);

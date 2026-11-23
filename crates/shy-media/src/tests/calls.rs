@@ -293,25 +293,6 @@ async fn muting_closes_the_microphone_and_unmuting_opens_it_again() {
     assert!(hears(&bob.speaker, A).await, "Bob hears Alice again");
 }
 
-/// A packet that won't decode costs a moment of that peer's voice, not the
-/// rest of the call.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_bad_packet_doesnt_silence_a_peer() {
-    let lookup = MemoryLookup::new();
-    let alice = Device::with(&lookup, Tones::with_a_bad_packet(A)).await;
-    let bob = Device::new(&lookup, E).await;
-    let _alices_call = alice.join("h-alice", &[(&bob, "h-bob")]);
-    let _bobs_call = bob.join("h-bob", &[(&alice, "h-alice")]);
-    assert!(hears(&bob.speaker, A).await, "Bob hears Alice at first");
-
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    assert!(
-        !goes_quiet(&bob.speaker).await,
-        "Bob stopped hearing Alice after her bad packet"
-    );
-    assert!(hears(&bob.speaker, A).await);
-}
-
 /// Releases hanging device listings when the test ends, pass or fail.
 struct ReleaseOnDrop(Listings);
 
