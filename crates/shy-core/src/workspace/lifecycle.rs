@@ -341,6 +341,9 @@ impl Workspace {
             local.store.meta(SIGNER_META)?.is_some(),
             "the MLS signing key reference is missing"
         );
+        connect(&config.workspace_id, &config.bucket).context(
+            "the bucket settings this workspace has (from its admin) can't be used; ask the workspace admin to check them in Settings › Storage",
+        )?;
         let mls = local.open_mls(data, Some(config.workspace_id.as_bytes()))?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.finish_pending_profile()?;

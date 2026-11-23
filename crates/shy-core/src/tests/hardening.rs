@@ -1943,3 +1943,65 @@ async fn a_reply_to_another_channel_shows_where_it_was_sent() {
             .is_err()
     );
 }
+
+/// Times come from their authors; arithmetic on extreme ones must not
+/// overflow (a debug build would panic while holding the state lock).
+#[tokio::test(flavor = "multi_thread")]
+async fn extreme_times_from_others_cause_no_overflow() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let mut heartbeat = bob.heartbeat(PresenceState::Online).unwrap();
+    for sent_ms in [i64::MIN, i64::MAX] {
+        heartbeat.sent_ms = sent_ms;
+        assert!(admin.receive_heartbeat(&heartbeat).is_err());
+    }
+
+    let general = channel_id(&admin, "general");
+    let (epoch, key) = current_key(&bob);
+    let seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    let from_the_start_of_time = OpBody {
+        lamport: 9_000,
+        timestamp_ms: i64::MIN,
+        op: Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: "very old news".into(),
+            reply_to: None,
+        },
+    };
+    admin
+        .receive(crypto::seal(&bob.inner.identity, &key, epoch, seq, &from_the_start_of_time).unwrap())
+        .unwrap();
+    assert!(texts_in(&admin, &general).contains(&"very old news".to_string()));
+}
+
+/// A device whose stored bucket settings can't connect (say an older version
+/// applied a bad admin op) says so plainly, and whom to ask, when it opens.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_that_cannot_connect_say_what_is_wrong_on_open() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let mut broken = bob.bucket_config().unwrap();
+    broken.endpoint = "http://198.51.100.7:9000".into();
+    bob.state()
+        .store
+        .set_meta("bucket_config", &serde_json::to_vec(&broken).unwrap())
+        .unwrap();
+    bob.shutdown().await.unwrap();
+    drop(bob);
+    let like_the_real_one: crate::transport::bucket::Connector = std::sync::Arc::new(
+        move |_: &str, settings: &crate::transport::bucket::BucketConfig| {
+            settings.endpoint_url()?;
+            Ok(bucket.clone())
+        },
+    );
+
+    let opened = Workspace::open_with(
+        &data_dir(&root.path().join("bob")),
+        like_the_real_one,
+        Networking::Offline,
+    )
+    .await;
+
+    let error = format!("{:#}", opened.err().unwrap());
+    assert!(error.contains("ask the workspace admin"), "{error}");
+    assert!(error.contains("https://"), "the reason stays: {error}");
+}
