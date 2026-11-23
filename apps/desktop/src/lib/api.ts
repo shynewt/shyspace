@@ -4,6 +4,19 @@ import { reportError } from "./toast";
 import type { RestartOutcome } from "./updateFlow";
 
 export type Session = { workspace_id: string; workspace_name: string; me: string; is_admin: boolean };
+/** A workspace on this device, in the order the rail shows them. */
+export type WorkspaceItem = {
+  workspace_id: string;
+  name: string;
+  /** The workspace's picture; null shows its generated letter tile. */
+  icon: string | null;
+  /** Beyond the first few, a workspace checks the bucket less often (messages still arrive at once). */
+  is_live: boolean;
+  /** Muted on this device: no notifications from it. */
+  is_muted: boolean;
+};
+/** What a workspace's rail icon shows: the same counts as its sidebar. */
+export type WorkspaceBadge = { workspace_id: string; unread: boolean; mentions: number };
 
 /** The workspace the app shows; changes from the others aren't passed on. */
 let selectedWorkspaceId: string | null = null;
@@ -325,6 +338,20 @@ export const api = {
   /** Shows how many things need you in the window title, the taskbar and the tray. */
   setAttentionCount: (count: number) => invoke<void>("set_attention_count", { count }),
   restoreWorkspace: (kit: string) => invoke<Session>("restore_workspace", { kit }).then(rememberSelected),
+  workspaces: () => invoke<WorkspaceItem[]>("workspaces"),
+  /** Shows another workspace; every other command then acts on it. */
+  selectWorkspace: (workspaceId: string) => invoke<Session>("select_workspace", { workspaceId }).then(rememberSelected),
+  moveWorkspace: (workspaceId: string, position: number) => invoke<void>("move_workspace", { workspaceId, position }),
+  /** Deletes the workspace from this device for good; resolves to what to show next, if any. */
+  leaveWorkspace: (workspaceId: string) =>
+    invoke<Session | null>("leave_workspace", { workspaceId }).then(rememberSelected),
+  workspaceBadges: () => invoke<WorkspaceBadge[]>("workspace_badges"),
+  setWorkspaceMuted: (workspaceId: string, muted: boolean) =>
+    invoke<void>("set_workspace_muted", { workspaceId, muted }),
+  markWorkspaceRead: (workspaceId: string) => invoke<void>("mark_workspace_read", { workspaceId }),
+  /** Holds every workspace's notifications until then; null lets them show again. */
+  setNotificationsPaused: (untilMs: number | null) => invoke<void>("set_notifications_paused", { untilMs }),
+  notificationsPaused: () => invoke<number | null>("notifications_paused"),
   testBucket: (bucket: BucketConfig) => invoke<void>("test_bucket", { bucket }),
   storageSettings: () => invoke<StorageSettings>("storage_settings"),
   /** The last check's result, without asking the bucket. */
@@ -389,11 +416,12 @@ export const api = {
   /** A desktop notification; a click on it opens `target` (sent back as an "alert-opened" event). */
   /** `picture` is PNG bytes shown with the notification, named for the member it shows. */
   showAlert: (
+    workspaceId: string,
     title: string,
     body: string,
     target: AlertTarget | null,
     picture: { member: string; png: number[] } | null,
-  ) => invoke<void>("show_alert", { workspaceId: selectedWorkspaceId, title, body, target, picture }),
+  ) => invoke<void>("show_alert", { workspaceId, title, body, target, picture }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>
@@ -503,19 +531,37 @@ export function framePastedFile(name: string, mediaType: string, bytes: Uint8Arr
 type ChangeListener = (change: Change) => void;
 const listeners = new Set<ChangeListener>();
 let isListening = false;
+/** Listeners for every workspace's changes, each told which workspace it came from. */
+const everyWorkspaceListeners = new Set<(workspaceId: string | null, change: Change) => void>();
 
-/** One native subscription, fanned out to every component that cares. */
+function listenOnce() {
+  if (isListening) return;
+  isListening = true;
+  listen<{ workspace_id: string | null; change: Change }>("change", (event) => {
+    const { workspace_id: workspaceId, change } = event.payload;
+    for (const notify of everyWorkspaceListeners) notify(workspaceId, change);
+    if (workspaceId !== null && workspaceId !== selectedWorkspaceId) return;
+    for (const notify of listeners) notify(change);
+  }).catch(reportError);
+}
+
+/** One native subscription, fanned out to every component that cares. Only the shown workspace's changes, and the app's own. */
 export function onChange(listener: ChangeListener): () => void {
-  if (!isListening) {
-    isListening = true;
-    listen<{ workspace_id: string | null; change: Change }>("change", (event) => {
-      const { workspace_id, change } = event.payload;
-      if (workspace_id !== null && workspace_id !== selectedWorkspaceId) return;
-      for (const notify of listeners) notify(change);
-    }).catch(reportError);
-  }
+  listenOnce();
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Changes from every workspace on this device, for what spans them: the rail's badges and notifications. */
+export function onAnyWorkspaceChange(listener: (workspaceId: string | null, change: Change) => void): () => void {
+  listenOnce();
+  everyWorkspaceListeners.add(listener);
+  return () => everyWorkspaceListeners.delete(listener);
+}
+
+/** The workspace the app shows, as the last session said. */
+export function shownWorkspaceId(): string | null {
+  return selectedWorkspaceId;
 }
 
 /** Files dropped on the window, already staged; and whether files are being dragged over it. */

@@ -28,10 +28,13 @@ export function useShellLayout(): ShellLayoutValue {
 export function ShellLayout({
   sidebar,
   sidebarContent,
+  rail,
   children,
 }: {
   sidebar: SidebarState;
   sidebarContent: ReactNode;
+  /** The workspaces, a column before the sidebar's content; it shows and hides with the sidebar. */
+  rail?: ReactNode;
   children: ReactNode;
 }) {
   const main = useRef<HTMLElement>(null);
@@ -44,13 +47,17 @@ export function ShellLayout({
     <ShellLayoutContext.Provider value={value}>
       <motion.div className="relative flex h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
         <AnimatePresence initial={false}>
-          {sidebar.isDocked && <DockedSidebar key="sidebar">{sidebarContent}</DockedSidebar>}
+          {sidebar.isDocked && (
+            <DockedSidebar key="sidebar" rail={rail}>
+              {sidebarContent}
+            </DockedSidebar>
+          )}
         </AnimatePresence>
         <main ref={main} tabIndex={-1} className="@container/main relative min-w-0 flex-1 bg-surface outline-none">
           {children}
         </main>
       </motion.div>
-      <SidebarDrawer sidebar={sidebar} main={main}>
+      <SidebarDrawer sidebar={sidebar} main={main} rail={rail}>
         {sidebarContent}
       </SidebarDrawer>
     </ShellLayoutContext.Provider>
@@ -62,7 +69,7 @@ export function ShellLayout({
  * it leaves the layout, so the content takes its new width at once instead of
  * on every frame, and it's inert, so nothing in it can be reached twice.
  */
-function DockedSidebar({ children }: { children: ReactNode }) {
+function DockedSidebar({ rail, children }: { rail: ReactNode; children: ReactNode }) {
   const isPresent = useIsPresent();
   return (
     <motion.aside
@@ -73,12 +80,10 @@ function DockedSidebar({ children }: { children: ReactNode }) {
       initial={{ x: "-100%" }}
       animate={{ x: 0, transition: instantAfterAKey(springs.move) }}
       exit={{ x: "-100%", transition: instantAfterAKey(tweens.exit) }}
-      className={cx(
-        "h-full w-sidebar-compact shrink-0 border-r border-line bg-bg sidebar-full:w-sidebar",
-        !isPresent && "absolute inset-y-0 left-0 z-20",
-      )}
+      className={cx("flex h-full shrink-0 bg-bg", !isPresent && "absolute inset-y-0 left-0 z-20")}
     >
-      {children}
+      {rail}
+      <div className="h-full w-sidebar-compact min-w-0 border-r border-line sidebar-full:w-sidebar">{children}</div>
     </motion.aside>
   );
 }
@@ -87,10 +92,12 @@ function DockedSidebar({ children }: { children: ReactNode }) {
 function SidebarDrawer({
   sidebar,
   main,
+  rail,
   children,
 }: {
   sidebar: SidebarState;
   main: RefObject<HTMLElement | null>;
+  rail: ReactNode;
   children: ReactNode;
 }) {
   const isOpen = sidebar.drawer === "open";
@@ -132,10 +139,11 @@ function SidebarDrawer({
             initial={{ x: "-100%" }}
             animate={{ x: 0, transition: instantAfterAKey(springs.move) }}
             data-sidebar
-            className="fixed inset-y-0 left-0 z-30 w-sidebar max-w-[calc(100%-3rem)] border-r border-line bg-bg shadow-float outline-none"
+            className="fixed inset-y-0 left-0 z-30 flex max-w-[calc(100%-3rem)] bg-bg shadow-float outline-none"
           >
             <RadixDialog.Title className="sr-only">Sidebar</RadixDialog.Title>
-            {children}
+            {rail}
+            <div className="h-full w-sidebar min-w-0 border-r border-line">{children}</div>
           </motion.div>
         </RadixDialog.Content>
       </RadixDialog.Portal>

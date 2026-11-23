@@ -11,7 +11,7 @@ const PREVIEW_CHARS = 140;
  * Fires reminders right when they come due while the app runs; ones missed
  * while it was closed fire at launch.
  */
-export function useReminders(onOpen: (item: LaterItem) => void) {
+export function useReminders(workspaceId: string, onOpen: (item: LaterItem) => void) {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let isStopped = false;
@@ -23,7 +23,13 @@ export function useReminders(onOpen: (item: LaterItem) => void) {
         const body = what.length > PREVIEW_CHARS ? `${what.slice(0, PREVIEW_CHARS - 1)}…` : what;
         showReminderToast(`Reminder: ${body}`, () => onOpen(item));
         api
-          .showAlert("Reminder", body, item.message ? { kind: "message", id: item.message.message.id } : null, null)
+          .showAlert(
+            workspaceId,
+            "Reminder",
+            body,
+            item.message ? { kind: "message", id: item.message.message.id } : null,
+            null,
+          )
           .catch(reportError);
       }
     };
@@ -49,5 +55,5 @@ export function useReminders(onOpen: (item: LaterItem) => void) {
       clearTimeout(timer);
       unsubscribe();
     };
-  }, [onOpen]);
+  }, [workspaceId, onOpen]);
 }

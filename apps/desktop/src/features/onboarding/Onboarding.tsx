@@ -1,7 +1,8 @@
+import { ArrowLeft } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { Session } from "../../lib/api";
-import { Logo, SegmentedControl, tweens } from "../../ui";
+import { Button, Logo, SegmentedControl, tweens } from "../../ui";
 import { CreateForm } from "./CreateForm";
 import { JoinForm } from "./JoinForm";
 import { RestoreForm } from "./RestoreForm";
@@ -14,7 +15,16 @@ const MODES: Array<{ value: Mode; label: string }> = [
   { value: "restore", label: "Restore admin" },
 ];
 
-export function Onboarding({ onReady }: { onReady: (session: Session) => void }) {
+/** Creating, joining or restoring a workspace; with `onCancel`, from inside the app, to add another. */
+export function Onboarding({
+  onReady,
+  onCancel,
+  cancelLabel,
+}: {
+  onReady: (session: Session) => void;
+  onCancel?: () => void;
+  cancelLabel?: string;
+}) {
   const [mode, setMode] = useState<Mode>("create");
   return (
     <motion.main
@@ -31,8 +41,14 @@ export function Onboarding({ onReady }: { onReady: (session: Session) => void })
           animate={{ opacity: 1, y: 0 }}
         >
           <Logo size={48} />
-          <h1 className="mt-4 text-2xl font-semibold tracking-tight">Welcome to shyspace</h1>
-          <p className="mt-1.5 text-muted">Chat, pages and agents, end-to-end encrypted. No server to run.</p>
+          <h1 className="mt-4 text-2xl font-semibold tracking-tight">
+            {onCancel ? "Add a workspace" : "Welcome to shyspace"}
+          </h1>
+          <p className="mt-1.5 text-muted">
+            {onCancel
+              ? "Create one, join with an invite, or restore one you're the admin of."
+              : "Chat, pages and agents, end-to-end encrypted. No server to run."}
+          </p>
         </motion.div>
 
         <motion.div
@@ -58,6 +74,11 @@ export function Onboarding({ onReady }: { onReady: (session: Session) => void })
             </AnimatePresence>
           </div>
         </motion.div>
+        {onCancel && (
+          <Button variant="ghost" icon={<ArrowLeft size={14} />} onClick={onCancel} className="mx-auto mt-4 flex">
+            {cancelLabel ?? "Back"}
+          </Button>
+        )}
       </div>
     </motion.main>
   );

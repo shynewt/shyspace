@@ -48,6 +48,7 @@ import { FakePrivate, NOT_PRIVATE } from "./private";
 import { search } from "./search";
 import { FakeSections } from "./sections";
 import { sentMessages } from "./sent";
+import { FakeWorkspaces, NOT_WORKSPACES } from "./workspaces";
 
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
 export const REJECTED_SECRET = "wrong-secret";
@@ -118,6 +119,13 @@ export class FakeBackend {
     members: () => this.members,
     notify: (change) => this.notify(change),
     privateView: (channel) => this.private.view(channel),
+  });
+  readonly workspaces = new FakeWorkspaces({
+    session: () => this.session,
+    setSession: (session) => {
+      this.session = session;
+    },
+    emitFrom: (workspaceId, change) => void emit("change", { workspace_id: workspaceId, change }),
   });
   private later = new FakeLater();
   private sections = new FakeSections();
@@ -244,12 +252,28 @@ export class FakeBackend {
   readonly alertPictures: (string | null)[] = [];
   /** What each alert in `alertsShown` opens when clicked, if anything. */
   readonly alertTargets: (AlertTarget | null)[] = [];
+  /** Which workspace each alert in `alertsShown` came from. */
+  readonly alertWorkspaces: string[] = [];
+
+  /** `author` writes in `channelName` of another workspace on this device, raising an alert there. */
+  alertFrom(workspaceId: string, author: string, channelName: string, preview: string): void {
+    const change: Change = {
+      kind: "alert",
+      channel: `${workspaceId}-${channelName}`,
+      channel_name: channelName,
+      message: `${workspaceId}-message`,
+      author: `${workspaceId}-${author}`,
+      author_name: author,
+      preview,
+    };
+    void emit("change", { workspace_id: workspaceId, change });
+  }
 
   /** Clicks the `index`th alert, as the notification server reports a click. */
   clickAlert(index: number): void {
     const target = this.alertTargets[index];
     if (!target) throw new Error(`fake backend: alert ${index} opens nothing`);
-    void emit("alert-opened", target);
+    void emit("alert-opened", { workspace_id: this.alertWorkspaces[index] ?? null, ...target });
   }
 
   /** Someone else made a private channel with you (and `others`) in it. */
@@ -389,6 +413,8 @@ export class FakeBackend {
     if (filesAnswer !== NOT_FILES) return filesAnswer;
     const huddlesAnswer = this.huddles.answer(command, args);
     if (huddlesAnswer !== NOT_HUDDLES) return huddlesAnswer;
+    const workspacesAnswer = this.workspaces.answer(command, args);
+    if (workspacesAnswer !== NOT_WORKSPACES) return workspacesAnswer;
     const privateAnswer = this.private.answer(command, args);
     if (privateAnswer !== NOT_PRIVATE) return privateAnswer;
     const chatAnswer = this.chat.answer(command, args);
@@ -548,6 +574,9 @@ export class FakeBackend {
       case "update_storage":
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
       case "show_alert":
+        // As in the core: a muted workspace, or the pause, holds it back.
+        if (this.workspaces.isSilenced(requireString(args, "workspaceId"))) return null;
+        this.alertWorkspaces.push(requireString(args, "workspaceId"));
         this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
         this.alertPictures.push(alertPicture(argument(args, "picture")));
         this.alertTargets.push(alertTarget(argument(args, "target")));

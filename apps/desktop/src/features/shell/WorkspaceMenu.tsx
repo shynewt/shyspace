@@ -1,7 +1,10 @@
-import { ChevronDown, Settings, UserCheck, UserPlus } from "lucide-react";
+import { ChevronDown, LogOut, Plus, Settings, UserCheck, UserPlus } from "lucide-react";
+import { useState } from "react";
 import { useWorkspace } from "../../lib/workspace";
 import { Menu, type MenuItem } from "../../ui";
 import { JoinRequestsBadge, useJoinRequests } from "../members/JoinRequests";
+import { LeaveWorkspaceDialog } from "./WorkspaceRail";
+import { useWorkspaces } from "./Workspaces";
 
 /** The workspace's name at the top of the sidebar, opening what concerns the whole workspace. */
 export function WorkspaceMenu() {
@@ -31,26 +34,39 @@ function AdminWorkspaceMenu() {
 
 function WorkspaceMenuButton({ items, waitingRequests }: { items: MenuItem[]; waitingRequests: number }) {
   const { session, openSettings } = useWorkspace();
+  const { workspaces, shownId, add } = useWorkspaces();
+  const [isLeaving, setLeaving] = useState(false);
+  const shown = workspaces.find((workspace) => workspace.workspace_id === shownId) ?? null;
   return (
-    <Menu
-      items={[
-        ...items,
-        {
-          label: "Workspace settings",
-          icon: <Settings size={14} />,
-          onSelect: () => openSettings({ section: "members" }),
-        },
-      ]}
-      trigger={
-        <button
-          type="button"
-          className="focus-ring-inset -mx-1.5 flex w-[calc(100%+0.75rem)] min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-surface-2 data-[state=open]:bg-surface-2"
-        >
-          <span className="truncate text-base font-semibold tracking-tight">{session.workspace_name}</span>
-          <ChevronDown size={14} className="shrink-0 text-decorative" />
-          <JoinRequestsBadge count={waitingRequests} />
-        </button>
-      }
-    />
+    <>
+      <Menu
+        items={[
+          ...items,
+          {
+            label: "Workspace settings",
+            icon: <Settings size={14} />,
+            onSelect: () => openSettings({ section: "members" }),
+          },
+          { label: "Add a workspace…", icon: <Plus size={14} />, onSelect: add },
+          {
+            label: "Leave workspace…",
+            icon: <LogOut size={14} />,
+            isDestructive: true,
+            onSelect: () => setLeaving(true),
+          },
+        ]}
+        trigger={
+          <button
+            type="button"
+            className="focus-ring-inset -mx-1.5 flex w-[calc(100%+0.75rem)] min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-surface-2 data-[state=open]:bg-surface-2"
+          >
+            <span className="truncate text-base font-semibold tracking-tight">{session.workspace_name}</span>
+            <ChevronDown size={14} className="shrink-0 text-decorative" />
+            <JoinRequestsBadge count={waitingRequests} />
+          </button>
+        }
+      />
+      <LeaveWorkspaceDialog workspace={isLeaving ? shown : null} onClose={() => setLeaving(false)} />
+    </>
   );
 }

@@ -1,66 +1,79 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { avatarPng } from "./alertPicture";
-import { type AlertTarget, api, onChange } from "./api";
+import { type AlertTarget, api, type Change, onAnyWorkspaceChange } from "./api";
 import { alertTitle } from "./channels";
 import { displayName } from "./people";
 import { readPreferences } from "./preferences";
 import { reportError } from "./toast";
 import { linkedMessageView, type View } from "./workspace";
 
+/** The workspaces on this device, as notifications need them. */
+export type AlertWorkspaces = {
+  shownId: string;
+  /** Names by workspace id; a notification names its workspace once there are two or more. */
+  names: ReadonlyMap<string, string>;
+  /** Shows another workspace, then opens `target` there. */
+  select: (workspaceId: string, target: AlertTarget) => void;
+};
+
+type AlertChange = Extract<Change, { kind: "alert" } | { kind: "huddle_started" }>;
+
 /**
- * Shows a desktop notification for each alert the core raises (a message, or
- * someone starting a huddle in a DM), unless you're already looking at that
- * channel. Clicking one opens its message, or the DM.
+ * Shows a desktop notification for each alert the core raises in any
+ * workspace (a message, or someone starting a huddle in a DM), unless you're
+ * already looking at that channel. Clicking one opens its message, or the DM,
+ * switching workspace first if it's in another.
  */
-export function useAlerts(view: View | null, navigate: (view: View) => void) {
+export function useAlerts(
+  view: View | null,
+  navigate: (view: View) => void,
+  workspaces: AlertWorkspaces,
+  /** What a notification from another workspace asked to open, once this workspace is shown. */
+  openFirst: AlertTarget | null,
+) {
+  const firstTarget = useRef(openFirst);
   const currentView = useRef(view);
+  const currentWorkspaces = useRef(workspaces);
   useEffect(() => {
     currentView.current = view;
-  }, [view]);
+    currentWorkspaces.current = workspaces;
+  }, [view, workspaces]);
 
   useEffect(() => {
     // Each alert is prepared at once but shown after the one before, so they
     // appear in the order their messages came, however long each took to prepare.
     let lastShown: Promise<void> = Promise.resolve();
-    return onChange((change) => {
-      if (change.kind !== "alert" && change.kind !== "huddle_started") return;
+    return onAnyWorkspaceChange((workspaceId, change) => {
+      if (workspaceId === null || (change.kind !== "alert" && change.kind !== "huddle_started")) return;
+      const { shownId, names } = currentWorkspaces.current;
+      const isShown = workspaceId === shownId;
       const shown = currentView.current;
-      const isLooking = document.hasFocus() && shown?.kind === "channel" && shown.id === change.channel;
+      const isLooking = isShown && document.hasFocus() && shown?.kind === "channel" && shown.id === change.channel;
       if (isLooking) return;
-      const author =
-        change.kind === "alert"
-          ? { id: change.author, name: change.author_name }
-          : { id: change.member, name: change.member_name };
-      // A huddle's ring carries no message text, so it shows whatever the text setting.
-      const body =
-        change.kind === "huddle_started"
-          ? "Started a huddle"
-          : readPreferences().alertsShowText
-            ? change.preview
-            : "New message";
-      const target: AlertTarget =
-        change.kind === "alert" ? { kind: "message", id: change.message } : { kind: "channel", id: change.channel };
-      const fallbackName = change.kind === "alert" ? change.channel_name : "";
+      const author = authorOf(change);
       const prepared = Promise.all([
-        api.channels(),
-        api.members(),
+        isShown ? titleInShown(change) : Promise.resolve(titleElsewhere(change)),
         avatarPng(author.id, displayName(author.name, author.id)),
       ]);
+      const workspaceName = names.size > 1 ? names.get(workspaceId) : undefined;
       lastShown = lastShown
         .then(() => prepared)
-        .then(([channels, members, png]) => {
-          const channel = channels.find((candidate) => candidate.id === change.channel);
-          const title = alertTitle(author, channel, members, fallbackName);
-          return api.showAlert(title, body, target, { member: author.id, png });
-        })
+        .then(([title, png]) =>
+          api.showAlert(
+            workspaceId,
+            workspaceName ? `${workspaceName} · ${title}` : title,
+            bodyOf(change),
+            targetOf(change),
+            { member: author.id, png },
+          ),
+        )
         .catch(reportError);
     });
   }, []);
 
   useEffect(() => {
-    const opening = listen<AlertTarget>("alert-opened", (event) => {
-      const target = event.payload;
+    const open = (target: AlertTarget) => {
       if (target.kind === "channel") return navigate({ kind: "channel", id: target.id });
       api
         .linkedMessage(target.id)
@@ -69,9 +82,50 @@ export function useAlerts(view: View | null, navigate: (view: View) => void) {
           if (linked) navigate(linkedMessageView(linked));
         })
         .catch(reportError);
+    };
+    if (firstTarget.current) {
+      open(firstTarget.current);
+      firstTarget.current = null;
+    }
+    const opening = listen<{ workspace_id: string | null } & AlertTarget>("alert-opened", (event) => {
+      const { workspace_id: workspaceId, ...target } = event.payload;
+      const { shownId, select } = currentWorkspaces.current;
+      if (workspaceId !== null && workspaceId !== shownId) return select(workspaceId, target);
+      open(target);
     });
     return () => {
       opening.then((stop) => stop()).catch(reportError);
     };
   }, [navigate]);
+}
+
+function authorOf(change: AlertChange) {
+  return change.kind === "alert"
+    ? { id: change.author, name: change.author_name }
+    : { id: change.member, name: change.member_name };
+}
+
+/** A huddle's ring carries no message text, so it shows whatever the text setting. */
+function bodyOf(change: AlertChange): string {
+  if (change.kind === "huddle_started") return "Started a huddle";
+  return readPreferences().alertsShowText ? change.preview : "New message";
+}
+
+function targetOf(change: AlertChange): AlertTarget {
+  return change.kind === "alert" ? { kind: "message", id: change.message } : { kind: "channel", id: change.channel };
+}
+
+/** "Grace in #general", or for a DM who it's from and with whom, from the shown workspace's channels. */
+async function titleInShown(change: AlertChange): Promise<string> {
+  const [channels, members] = await Promise.all([api.channels(), api.members()]);
+  const channel = channels.find((candidate) => candidate.id === change.channel);
+  return alertTitle(authorOf(change), channel, members, change.kind === "alert" ? change.channel_name : "");
+}
+
+/** The same for another workspace, from what the alert itself carries: its channel's name, empty for a DM. */
+function titleElsewhere(change: AlertChange): string {
+  const author = authorOf(change);
+  const name = displayName(author.name, author.id);
+  const channelName = change.kind === "alert" ? change.channel_name : "";
+  return channelName ? `${name} in #${channelName}` : name;
 }

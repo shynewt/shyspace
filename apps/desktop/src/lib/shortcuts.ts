@@ -39,7 +39,8 @@ export type ShortcutId =
   | "settings"
   | "toggleSidebar"
   | "huddle"
-  | "huddleMute";
+  | "huddleMute"
+  | "workspace";
 
 export type Shortcut = {
   id: ShortcutId;
@@ -120,6 +121,13 @@ export const SHORTCUTS: Shortcut[] = [
     keys: [MOD_LABEL, "Shift", "Space"],
     description: "Mute or unmute yourself in a huddle",
     matches: (event) => hasMod(event) && event.shiftKey && event.code === "Space",
+  },
+  {
+    id: "workspace",
+    keys: [MOD_LABEL, "1–9"],
+    description: "Go to a workspace, by its place in the rail",
+    // The digit row, so Shift's symbols and the keypad don't count.
+    matches: (event) => hasMod(event) && !event.shiftKey && !event.altKey && /^Digit[1-9]$/.test(event.code),
   },
   {
     id: "settings",

@@ -31,6 +31,8 @@ import { StatusDialog } from "./StatusDialog";
 import { useAttentionBadge } from "./useAttentionBadge";
 import { useSidebar } from "./useSidebar";
 import { ViewHeader } from "./ViewHeader";
+import { WorkspaceRail } from "./WorkspaceRail";
+import { takePendingTarget, useWorkspaces } from "./Workspaces";
 
 export function Shell({ session }: { session: Session }) {
   // Unread counts change as messages arrive.
@@ -49,6 +51,7 @@ export function Shell({ session }: { session: Session }) {
   );
   const view = entry?.view ?? null;
   const sidebar = useSidebar();
+  const spaces = useWorkspaces();
   /** What the search palette opens with; null while it's closed. */
   const [paletteQuery, setPaletteQuery] = useState<string | null>(null);
   const [isStatusOpen, setStatusOpen] = useState(false);
@@ -114,11 +117,16 @@ export function Shell({ session }: { session: Session }) {
           return setSettingsTarget((current) => current ?? { section: "profile" });
         case "toggleSidebar":
           return toggleSidebar();
+        case "workspace": {
+          const chosen = spaces.workspaces[Number(event.code.slice("Digit".length)) - 1];
+          if (chosen) spaces.select(chosen.workspace_id);
+          return;
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, channels, pages, sections, navigate, back, forward, toggleSidebar]);
+  }, [view, channels, pages, sections, navigate, back, forward, toggleSidebar, spaces]);
 
   useMouseBackAndForward(back, forward);
 
@@ -131,8 +139,17 @@ export function Shell({ session }: { session: Session }) {
     [navigate],
   );
 
-  useAlerts(view, navigate);
-  useReminders(openSaved);
+  const [openFirst] = useState(takePendingTarget);
+  const alertWorkspaces = useMemo(
+    () => ({
+      shownId: spaces.shownId,
+      names: new Map(spaces.workspaces.map((workspace) => [workspace.workspace_id, workspace.name])),
+      select: spaces.select,
+    }),
+    [spaces.shownId, spaces.workspaces, spaces.select],
+  );
+  useAlerts(view, navigate, alertWorkspaces, openFirst);
+  useReminders(session.workspace_id, openSaved);
   usePresence();
 
   const openSettings = useCallback((target: SettingsTarget = { section: "profile" }) => setSettingsTarget(target), []);
@@ -172,7 +189,11 @@ export function Shell({ session }: { session: Session }) {
     <WorkspaceContext.Provider value={context}>
       <HuddleProvider>
         <AttentionBadge />
-        <ShellLayout sidebar={sidebar} sidebarContent={<Sidebar status={status} onOpenSearch={() => openSearch()} />}>
+        <ShellLayout
+          sidebar={sidebar}
+          sidebarContent={<Sidebar status={status} onOpenSearch={() => openSearch()} />}
+          rail={spaces.workspaces.length > 1 ? <WorkspaceRail /> : null}
+        >
           {/* No exit animation: switching while a view fades in could leave AnimatePresence waiting forever on an exit, with nothing shown. */}
           {view && (
             <motion.div
