@@ -132,8 +132,9 @@ function pageOptions(query: string, pages: Page[], currentPage: string): Option[
         label: title,
         icon: <FileText size={15} />,
         detail: pages.find((candidate) => candidate.id === page.parent)?.title ?? "",
-        choose: (view, suggestion) =>
-          replaceTrigger(view, suggestion, `[${title.replace(/[[\]]/g, "")}](${pageLink(page.id)}) `),
+        // Titles come from other members: kept out of the markdown, they can't
+        // break the link. Its chip draws the page's current title.
+        choose: (view, suggestion) => replaceTrigger(view, suggestion, `[](${pageLink(page.id)}) `),
       };
     });
 }

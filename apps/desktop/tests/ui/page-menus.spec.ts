@@ -115,9 +115,23 @@ test("double brackets suggest pages and insert a link", async ({ page }) => {
   await expect(menu.getByRole("option")).toHaveText([/Roadmap/]);
   await menu.getByRole("option", { name: /Roadmap/ }).click();
 
-  await expect.poll(() => pageText(page)).toBe(`See [Roadmap](shy://page/${roadmap}) `);
+  await expect.poll(() => pageText(page)).toBe(`See [](shy://page/${roadmap}) `);
   await expect(editor(page).getByRole("link", { name: "Roadmap" })).toBeVisible();
 });
+
+for (const title of ["Plan \\", "Plan `v2", "Plan <https://evil.example>"]) {
+  test(`a linked page titled ${JSON.stringify(title)} still shows as a page link`, async ({ page }) => {
+    const target = await page.evaluate((title) => window.fake.seedPage(title, ""), title);
+    await newPage(page);
+    await page.keyboard.type("See [[plan");
+    await page.getByRole("listbox", { name: "Pages to link" }).getByRole("option").first().click();
+
+    // Titles come from other members, so the link carries only the page's id.
+    await expect.poll(() => pageText(page)).toBe(`See [](shy://page/${target}) `);
+    await expect(editor(page).getByRole("link", { name: title })).toBeVisible();
+    await expect(editor(page).getByRole("link")).toHaveCount(1);
+  });
+}
 
 test("link to page in the block menu moves on to picking the page", async ({ page }) => {
   const roadmap = await page.evaluate(() => window.fake.seedPage("Roadmap", ""));
@@ -126,7 +140,7 @@ test("link to page in the block menu moves on to picking the page", async ({ pag
   await page.keyboard.press("Enter");
   await expect(page.getByRole("listbox", { name: "Pages to link" })).toBeVisible();
   await page.keyboard.press("Enter");
-  await expect.poll(() => pageText(page)).toBe(`[Roadmap](shy://page/${roadmap}) `);
+  await expect.poll(() => pageText(page)).toBe(`[](shy://page/${roadmap}) `);
 });
 
 test("another member typing a slash doesn't open your menu", async ({ page }) => {
