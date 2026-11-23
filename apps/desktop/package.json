@@ -54,5 +54,10 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "webdriverio": "^10.2.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "minimatch@>=7.0.0 <11.0.1": "11.0.9"
+    }
   }
 }
