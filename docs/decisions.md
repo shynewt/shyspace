@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Huddles: no push-to-talk, no "you're muted" warning, no huddle status on profiles (2026-11)
+Muting closes the microphone, so the system's mic light goes dark; nothing can listen for "you're talking while muted", and push-to-talk would cut off the first words while the mic reopens. App-wide push-to-talk keys are also unreliable on Wayland. Instead, Mute says its state in words and is tinted while muted, which research found is what stops people talking on mute. Profiles and member lists don't say who is in a huddle: it would show who is talking with whom, and a private channel's huddle must stay hidden from non-members. Channels never ring; a DM rings once, since nagging about channel huddles is what people most often turn off elsewhere.
+
 ## Frequent things don't animate; scrims don't blur (2026-11)
 Animations felt slow in daily use, so how often something happens decides how much it moves (see Motion in `design-system.md`). The command palette opens and closes with no animation, since it's used many times a day. Whatever a key changes changes at once: a highlight moved by the arrows jumps instead of sliding, because keyboard users move fast and a slide makes them wait to see where they are. Scrims behind dialogs and the drawer only dim: a backdrop blur is redrawn on every frame, which WebKitGTK does slowly, and it made opening a dialog stutter.
 

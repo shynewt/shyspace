@@ -143,6 +143,7 @@ test("settings group your sections and the workspace's", async ({ page }) => {
     "Profile",
     "Appearance",
     "Notifications",
+    "Huddles",
     "Privacy & security",
     "Members",
     "Agents",

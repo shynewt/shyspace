@@ -25,6 +25,7 @@ export function Avatar({
   size = 32,
   presence,
   pictureUrl = null,
+  isSpeaking,
 }: {
   id: string;
   name: string;
@@ -34,6 +35,8 @@ export function Avatar({
   pictureUrl?: string | null;
   /** A small dot: green online, an amber ring when away, none when unreachable. */
   presence?: "online" | "away" | "unreachable";
+  /** A green ring while they talk in a huddle; pass it only where speaking can show. */
+  isSpeaking?: boolean;
 }) {
   const hue = avatarHue(id);
   return (
@@ -54,6 +57,15 @@ export function Avatar({
           alt=""
           draggable={false}
           className="absolute inset-0 size-full rounded-[30%] object-cover"
+        />
+      )}
+      {isSpeaking !== undefined && (
+        // Speaking flips many times a minute, so the ring only fades, briefly, and never pulses.
+        <span
+          className={cx(
+            "pointer-events-none absolute -inset-[3px] rounded-[34%] ring-2 ring-success transition-opacity",
+            isSpeaking ? "opacity-100" : "opacity-0",
+          )}
         />
       )}
       <AnimatePresence initial={false}>

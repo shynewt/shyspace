@@ -37,7 +37,9 @@ export type ShortcutId =
   | "nextUnread"
   | "cheatSheet"
   | "settings"
-  | "toggleSidebar";
+  | "toggleSidebar"
+  | "huddle"
+  | "huddleMute";
 
 export type Shortcut = {
   id: ShortcutId;
@@ -106,6 +108,18 @@ export const SHORTCUTS: Shortcut[] = [
     keys: [MOD_LABEL, "\\"],
     description: "Show or hide the sidebar",
     matches: (event) => hasMod(event) && !event.shiftKey && event.key === "\\",
+  },
+  {
+    id: "huddle",
+    keys: [MOD_LABEL, "Shift", "H"],
+    description: "Join or leave the huddle in this channel",
+    matches: (event) => hasMod(event) && event.shiftKey && event.key.toLowerCase() === "h",
+  },
+  {
+    id: "huddleMute",
+    keys: [MOD_LABEL, "Shift", "Space"],
+    description: "Mute or unmute yourself in a huddle",
+    matches: (event) => hasMod(event) && event.shiftKey && event.code === "Space",
   },
   {
     id: "settings",

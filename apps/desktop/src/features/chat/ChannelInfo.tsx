@@ -36,7 +36,7 @@ export function ChannelInfo() {
     },
   ];
   return (
-    <div className="ml-auto flex shrink-0 items-center gap-1.5">
+    <div className="flex shrink-0 items-center gap-1.5">
       {items.map((item) => (
         <div key={item.id} className="flex @max-header-pills/header:hidden">
           <Popover side="bottom" trigger={<HeaderAction look={item.look} icon={item.icon} label={item.label} />}>

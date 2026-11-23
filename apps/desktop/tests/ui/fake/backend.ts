@@ -9,6 +9,7 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 import type {
+  AlertTarget,
   BucketConfig,
   Change,
   LaterItem,
@@ -205,14 +206,14 @@ export class FakeBackend {
   readonly alertsShown: { title: string; body: string }[] = [];
   /** Whose picture each alert in `alertsShown` came with, if it was a PNG; null for none. */
   readonly alertPictures: (string | null)[] = [];
-  /** The message each alert in `alertsShown` was about, if any. */
-  private readonly alertMessages: (string | null)[] = [];
+  /** What each alert in `alertsShown` opens when clicked, if anything. */
+  readonly alertTargets: (AlertTarget | null)[] = [];
 
   /** Clicks the `index`th alert, as the notification server reports a click. */
   clickAlert(index: number): void {
-    const message = this.alertMessages[index];
-    if (!message) throw new Error(`fake backend: alert ${index} isn't about a message`);
-    void emit("alert-opened", message);
+    const target = this.alertTargets[index];
+    if (!target) throw new Error(`fake backend: alert ${index} opens nothing`);
+    void emit("alert-opened", target);
   }
 
   /** Someone else made a private channel with you (and `others`) in it. */
@@ -490,7 +491,7 @@ export class FakeBackend {
       case "show_alert":
         this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
         this.alertPictures.push(alertPicture(argument(args, "picture")));
-        this.alertMessages.push((argument(args, "message") as string | null) ?? null);
+        this.alertTargets.push(alertTarget(argument(args, "target")));
         return null;
       case "pages":
         return this.pages.map(({ doc: _doc, ...page }) => ({
@@ -773,6 +774,16 @@ export class FakeBackend {
   private notify(change: Change): void {
     void emit("change", change);
   }
+}
+
+/** A `show_alert` target, checked as the Tauri command's types would. */
+function alertTarget(value: unknown): AlertTarget | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || !("kind" in value) || !("id" in value) || typeof value.id !== "string") {
+    throw new Error("fake backend: an alert target is { kind, id }");
+  }
+  if (value.kind !== "message" && value.kind !== "channel") throw new Error("fake backend: unknown alert target");
+  return { kind: value.kind, id: value.id };
 }
 
 /** The member a `show_alert` picture is for, if it's PNG bytes. */

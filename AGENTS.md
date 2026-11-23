@@ -67,6 +67,19 @@ Inside `shy-core`, each file has one job (see the file map in `docs/architecture
 - Content from other members is untrusted: render markdown with `ChatMarkdown` (`lib/markdown.tsx`), which never injects HTML. No `dangerouslySetInnerHTML`.
 - Every interactive element is reachable by keyboard and has an accessible label.
 
+### Animation
+
+We have already fixed each of these once. Read Motion in `docs/design-system.md` before animating anything, and don't repeat them:
+
+- **How often decides how much.** Things done many times a day don't animate, or take at most 100 ms; occasional ones take 150 to 200 ms. A slow, frequent animation feels like lag.
+- **What a key changes changes at once.** Only a click may slide a highlight (`instantAfterAKey`).
+- **Only transform and opacity.** Animating width or height lays out the window on every frame, and blur or `backdrop-filter` stutters in WebKitGTK. Slide panels by transform; dim scrims, don't blur them.
+- **No exit that something waits on.** `AnimatePresence mode="wait"` left the main view blank when you switched quickly. Replace views at once and fade the new one in.
+- **No layout animations on list rows,** and no animated hover in long lists: they measured every render and made hover take 500 ms.
+- **Motion's tap gesture fires a fake `pointerdown` on Enter.** Radix triggers must ignore untrusted pointer events (see `ui/Menu.tsx`).
+- **Nothing loops forever** except a spinner while something loads. Show a state with a still change, not a pulse.
+- Durations, easings and springs come from `ui/motion.ts` only. Reduced motion is set once in `main.tsx`; don't override it. `tests/ui/design-rules.spec.ts` and `motion.spec.ts` enforce this, and a test runs on slow frames where timing matters.
+
 ## Comments
 
 - Default to none. Write one only for what the code can't say: a hidden invariant, a non-obvious reason, or an outside constraint.

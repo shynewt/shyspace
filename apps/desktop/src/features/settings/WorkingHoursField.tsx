@@ -1,9 +1,8 @@
 import { AnimatePresence, motion } from "motion/react";
-import { Switch } from "radix-ui";
 import { useId, useRef } from "react";
 import type { WorkingHours } from "../../lib/api";
 import { formatMinuteOfDay, MINUTES_PER_DAY, weekdayName } from "../../lib/localTime";
-import { cx, Select, springs } from "../../ui";
+import { cx, Select, Switch } from "../../ui";
 
 /** What turning working hours on suggests: Monday to Friday, 09:00 to 17:00. */
 export const SUGGESTED_HOURS: WorkingHours = { days: 0b001_1111, start_minute: 9 * 60, end_minute: 17 * 60 };
@@ -45,7 +44,6 @@ export function WorkingHoursField({
   onChange: (hours: WorkingHours | null) => void;
   error: string | null;
 }) {
-  const switchId = useId();
   const errorId = useId();
   const lastShared = useRef(value ?? SUGGESTED_HOURS);
   if (value) lastShared.current = value;
@@ -53,26 +51,11 @@ export function WorkingHoursField({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="flex items-center gap-3">
-        <Switch.Root
-          id={switchId}
-          checked={value !== null}
-          onCheckedChange={(isOn) => onChange(isOn ? lastShared.current : null)}
-          className="relative h-5 w-9 shrink-0 rounded-full bg-surface-3 transition-colors data-[state=checked]:bg-accent"
-        >
-          <Switch.Thumb asChild>
-            <motion.span
-              animate={{ x: value ? 18 : 2 }}
-              initial={false}
-              transition={springs.snappy}
-              className="block size-4 rounded-full bg-surface shadow-card"
-            />
-          </Switch.Thumb>
-        </Switch.Root>
-        <label htmlFor={switchId} className="text-sm">
-          Share working hours
-        </label>
-      </div>
+      <Switch
+        label="Share working hours"
+        checked={value !== null}
+        onChange={(isOn) => onChange(isOn ? lastShared.current : null)}
+      />
       <AnimatePresence initial={false}>
         {value && (
           <motion.div key="hours" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>

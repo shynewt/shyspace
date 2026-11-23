@@ -1,25 +1,38 @@
 import { AnimatePresence, motion } from "motion/react";
 import { type ComponentProps, type ReactNode, useRef } from "react";
 import { Button, cx, springs, Tooltip } from "../../ui";
+import { useMyHuddle } from "../huddles/HuddleContext";
+import { HuddlePill } from "../huddles/HuddlePill";
+import { IncomingHuddlePill } from "../huddles/IncomingHuddle";
 import { SidebarToggle, useShellLayout } from "./ShellLayout";
 
-/**
- * The bar at the top of a view (a channel, a page, Inbox, Later): one line,
- * starting with the sidebar toggle while the sidebar isn't docked. It's the
- * `header` container, so what's in it can fold labels away as it narrows;
- * the title should be the only thing that shrinks.
- */
 /** The bar at the top of a view or panel: one line, with a rule below. */
 export const HEADER_BAR = "flex h-13 shrink-0 items-center gap-2 border-b border-line";
 
+/**
+ * The bar at the top of a view (a channel, a page, Inbox, Later): one line.
+ * While the sidebar isn't docked it starts with the sidebar toggle and ends
+ * with your huddle, whose bar lives in the sidebar. It's the `header`
+ * container, so what's in it can fold labels away as it narrows; the title
+ * should be the only thing that shrinks.
+ */
 export function ViewHeader({ children, className }: { children?: ReactNode; className?: string }) {
   const { sidebar } = useShellLayout();
+  const { mine, incoming } = useMyHuddle();
   return (
     <header className={cx("@container/header px-5", HEADER_BAR, className)}>
       <AnimatePresence initial={false}>
         {!sidebar.isDocked && <HeaderSidebarToggle key="sidebar-toggle" />}
       </AnimatePresence>
-      {children}
+      <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
+      <AnimatePresence initial={false}>
+        {!sidebar.isDocked &&
+          (mine ? (
+            <HuddlePill key="huddle" huddle={mine} />
+          ) : (
+            incoming && <IncomingHuddlePill key="incoming" incoming={incoming} />
+          ))}
+      </AnimatePresence>
     </header>
   );
 }
