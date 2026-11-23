@@ -49,7 +49,10 @@ async function openAt(page: Page, size: { width: number; height: number }, view:
               : view === "page"
                 ? { kind: "page", id: pageId }
                 : { kind: view };
-        localStorage.setItem("shyspace.lastView", JSON.stringify({ me: fake.session?.me, view: target, anchor: null }));
+        localStorage.setItem(
+          `shyspace.lastView.${fake.session?.workspace_id}`,
+          JSON.stringify({ me: fake.session?.me, view: target, anchor: null }),
+        );
       };
     },
     { view, names: { channel: LONG_CHANNEL, page: LONG_PAGE, url: LONG_URL, code: LONG_CODE } },

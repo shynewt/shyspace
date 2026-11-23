@@ -10,32 +10,33 @@ import type { View } from "./workspace";
 
 export type LastView = { view: View; anchor: ScrollAnchor | null };
 
-const KEY = "shyspace.lastView";
+/** One saved view per workspace, under this prefix and the workspace's id. */
+const KEY_PREFIX = "shyspace.lastView.";
 let hasReportedFailure = false;
 
-/** Opens the next launch at the first channel, as after a screen failed to draw there. */
+/** Opens the next launch at the first channel, as after a screen failed to draw there. Every workspace's, since the one that failed isn't known then. */
 export function forgetLastView(): void {
   try {
-    localStorage.removeItem(KEY);
+    for (const key of Object.keys(localStorage)) if (key.startsWith(KEY_PREFIX)) localStorage.removeItem(key);
   } catch (error) {
     reportError(error);
   }
 }
 
-/** The last view saved by `me`, or null if there's none or it can't be read. */
-export function readLastView(me: string): LastView | null {
+/** The last view `me` saved in `workspaceId`, or null if there's none or it can't be read. */
+export function readLastView(workspaceId: string, me: string): LastView | null {
   // Unreadable storage only means opening at the first channel.
   try {
-    const stored = localStorage.getItem(KEY);
+    const stored = localStorage.getItem(KEY_PREFIX + workspaceId);
     return stored ? parseLastView(JSON.parse(stored), me) : null;
   } catch {
     return null;
   }
 }
 
-export function saveLastView(me: string, { view, anchor }: LastView): void {
+export function saveLastView(workspaceId: string, me: string, { view, anchor }: LastView): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ me, view: withoutFocus(view), anchor }));
+    localStorage.setItem(KEY_PREFIX + workspaceId, JSON.stringify({ me, view: withoutFocus(view), anchor }));
   } catch (error) {
     // Saved often (as you scroll); one warning is enough.
     if (hasReportedFailure) return;

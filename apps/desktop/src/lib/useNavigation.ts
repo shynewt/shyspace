@@ -40,7 +40,12 @@ const SAVE_AFTER_SCROLL_MS = 500;
  * where you left it, and the app reopening at the last place on launch.
  * `channels` and `pages` are undefined until loaded.
  */
-export function useNavigation(me: string, channels: Channel[] | undefined, pages: Page[] | undefined) {
+export function useNavigation(
+  workspaceId: string,
+  me: string,
+  channels: Channel[] | undefined,
+  pages: Page[] | undefined,
+) {
   const [shown, setShown] = useState<{ history: History; restore: ScrollRestore | null } | null>(null);
   const history = shown?.history ?? null;
   // Read and written synchronously, so quick presses of Back build on each other.
@@ -163,15 +168,15 @@ export function useNavigation(me: string, channels: Channel[] | undefined, pages
   // On launch, the last place if it still exists, or the first channel.
   useEffect(() => {
     if (historyRef.current || !channels || !pages) return;
-    const last = readLastView(me);
+    const last = readLastView(workspaceId, me);
     if (last && isAvailable(last.view)) showChecked(startHistory(last.view, last.anchor));
     else if (channels.length > 0) commit(startHistory({ kind: "channel", id: channels[0].id }));
-  }, [me, channels, pages, isAvailable, showChecked, commit]);
+  }, [workspaceId, me, channels, pages, isAvailable, showChecked, commit]);
 
   const save = useCallback(() => {
     const current = historyRef.current;
-    if (current) saveLastView(me, { view: currentEntry(current).view, anchor: captureCurrent() });
-  }, [me, captureCurrent]);
+    if (current) saveLastView(workspaceId, me, { view: currentEntry(current).view, anchor: captureCurrent() });
+  }, [workspaceId, me, captureCurrent]);
 
   useEffect(() => {
     if (history) save();

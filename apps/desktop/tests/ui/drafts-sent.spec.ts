@@ -230,7 +230,9 @@ test("Drafts & sent is a place in the history, and the app reopens there", async
   await page.keyboard.press("Alt+ArrowLeft");
   await expect(heading).toBeVisible();
 
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView") ?? "")).toContain('"drafts"');
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.w-acme") ?? ""))
+    .toContain('"drafts"');
   await page.reload();
   await expect(heading).toBeVisible();
 });

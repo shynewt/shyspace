@@ -202,3 +202,18 @@ test("what you read just before switching is saved in its own workspace first", 
   await expect(rail(page).getByRole("button", { name: /^Team/ })).toHaveAttribute("aria-current", "page");
   expect(await sentBefore(page, "mark_read", "select_workspace")).toBe(true);
 });
+
+test("each workspace reopens where you were in it", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => window.fake.seedPage("Plans", "Start"));
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Plans", exact: true }).click();
+  await expect(page.getByLabel("Page title")).toHaveValue("Plans");
+  await addTeam(page);
+
+  await page.keyboard.press("Control+2");
+  await expect(workspaceMenu(page, "Team")).toBeVisible();
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+
+  await page.keyboard.press("Control+1");
+  await expect(page.getByLabel("Page title")).toHaveValue("Plans");
+});

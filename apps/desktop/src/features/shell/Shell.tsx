@@ -45,6 +45,7 @@ export function Shell({ session }: { session: Session }) {
   const members = useMembersWithCurrentStatus(loadedMembers);
   const status = useLive(api.status, (change) => change.kind === "sync" || change.kind === "removed");
   const { entry, restore, navigate, back, forward, replace, scrollMemory } = useNavigation(
+    session.workspace_id,
     session.me,
     loadedChannels,
     loadedPages,
