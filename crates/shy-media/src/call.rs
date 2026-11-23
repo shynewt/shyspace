@@ -5,7 +5,7 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use iroh::PublicKey;
 use iroh_live::{Audience, Node, Publication};
 use shy_core::huddle::media::{DeviceChoice, DeviceList, MediaCall, MediaEvent, OutputState};
@@ -22,13 +22,12 @@ use crate::{
     backend::{Backend, Speaker},
     devices::{Resolved, ResolvedDevices, output_state, resolve, unchecked},
     listen::listen,
+    listing::DeviceListing,
     mic::{Mic, until},
 };
 
 /// How often the devices are listed, to notice one plugged in or removed.
 const DEVICE_CHECK_EVERY: Duration = Duration::from_secs(3);
-/// How long the system may take to list its devices.
-const LISTING_LIMIT: Duration = Duration::from_secs(5);
 /// How much of this device's voice is kept for a listener that falls
 /// behind. A listener let in later can ask for no more than this from
 /// before, so it stays well under a word.
@@ -231,7 +230,8 @@ struct DeviceCall<B: Backend> {
 /// Opens the speaker and the microphone and keeps them on the right devices.
 async fn run_devices<B: Backend>(mut call: DeviceCall<B>) {
     let mut output = OutputReport::new(call.events.clone());
-    let mut offered = list_devices(&call.backend).await;
+    let mut listing = DeviceListing::new(call.backend.clone());
+    let mut offered = listing.list_now().await;
     let mut resolved = resolve_against(&call.choice.borrow_and_update(), offered.as_ref());
     let speaker = loop {
         if let Some(speaker) = open_speaker(&*call.backend, &mut resolved).await {
@@ -239,7 +239,7 @@ async fn run_devices<B: Backend>(mut call: DeviceCall<B>) {
         }
         output.set(OutputState::Lost);
         tokio::time::sleep(DEVICE_CHECK_EVERY).await;
-        offered = list_devices(&call.backend).await;
+        offered = listing.list_now().await;
         resolved = resolve_against(&call.choice.borrow(), offered.as_ref());
     };
     call.speaker.send_replace(Some(speaker.clone()));
@@ -281,14 +281,14 @@ async fn run_devices<B: Backend>(mut call: DeviceCall<B>) {
             }
             report = mic.next_report() => mic.handle(report),
             () = until(retry_at) => {
-                if let Some(fresh) = list_devices(&call.backend).await {
-                    offered = Some(fresh);
-                }
+                // On the last list; a fresh one follows, without holding up the retry.
                 resolved.input = resolve_against(&call.choice.borrow(), offered.as_ref()).input;
                 mic.retry(&speaker, resolved.input.device.clone());
+                listing.start();
             }
-            _ = device_check.tick() => {
-                let Some(fresh) = list_devices(&call.backend).await else { continue };
+            _ = device_check.tick() => listing.start(),
+            listed = listing.finished(), if listing.is_running() => {
+                let Some(fresh) = listed else { continue };
                 let is_changed = offered.as_ref() != Some(&fresh);
                 if !is_changed && !speaker_lost {
                     continue;
@@ -392,20 +392,6 @@ async fn open_speaker<B: Backend>(backend: &B, resolved: &mut ResolvedDevices) -
             None
         }
     }
-}
-
-/// `None` when the system won't say in time; the reason is logged.
-async fn list_devices<B: Backend>(backend: &Arc<B>) -> Option<DeviceList> {
-    let backend = backend.clone();
-    let listing = tokio::task::spawn_blocking(move || backend.list_devices());
-    let listed = match tokio::time::timeout(LISTING_LIMIT, listing).await {
-        Ok(Ok(listed)) => listed,
-        Ok(Err(crashed)) => Err(anyhow!("listing the audio devices crashed: {crashed}")),
-        Err(_) => Err(anyhow!("listing the audio devices took too long")),
-    };
-    listed
-        .inspect_err(|error| warn!(error = %error, "the audio devices can't be listed"))
-        .ok()
 }
 
 /// Stops a task when dropped.

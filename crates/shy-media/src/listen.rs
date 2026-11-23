@@ -15,6 +15,7 @@ use tracing::debug;
 
 use crate::{
     backend::{Sink, Speaker},
+    mic::until,
     speaking::SpeakingDetector,
 };
 
@@ -24,6 +25,11 @@ const SUBSCRIBE_WAIT: Duration = Duration::from_secs(10);
 const RETRY_AFTER: Duration = Duration::from_secs(1);
 /// How often the link's route is looked at.
 const LINK_EVERY: Duration = Duration::from_secs(1);
+/// After audio that won't decode, the pause before decoding the track
+/// afresh: doubled while it keeps failing, up to the most, so a peer
+/// sending garbage costs little.
+const REDECODE_AFTER: Duration = Duration::from_millis(100);
+const REDECODE_AFTER_MOST: Duration = Duration::from_secs(2);
 
 /// Plays `peer`'s voice from `path` until dropped.
 pub(crate) async fn listen<S: Speaker>(
@@ -90,11 +96,23 @@ async fn play<S: Speaker>(subscription: &Subscription, speaker: &S, voice: &mut 
             return;
         }
     };
+    let decoding = || {
+        let mut options = decode::Options::new();
+        options.output.format = moq_audio::Format::F32;
+        options.start = decode::Start::Latest;
+        options
+    };
     let mut playing: Option<Playing<S::Sink>> = None;
+    // The track being played (its name and config), to decode again after a failure.
+    let mut current = None;
+    let mut redecode_at: Option<tokio::time::Instant> = None;
+    let mut redecode_after = REDECODE_AFTER;
     loop {
         tokio::select! {
             snapshot = catalog.next() => {
                 let Ok(Some(snapshot)) = snapshot else { return };
+                redecode_at = None;
+                current = None;
                 let Some((name, config)) = snapshot.audio.renditions.first_key_value() else {
                     // Muted: their track is gone until they unmute.
                     playing = None;
@@ -112,24 +130,36 @@ async fn play<S: Speaker>(subscription: &Subscription, speaker: &S, voice: &mut 
                     voice.incompatible();
                     continue;
                 }
-                let mut options = decode::Options::new();
-                options.output.format = moq_audio::Format::F32;
-                options.start = decode::Start::Latest;
-                let decoder = decode::Consumer::new(&broadcast, config, name, options).await;
+                let decoder = decode::Consumer::new(&broadcast, config, name, decoding()).await;
+                playing = start_playing(decoder, name, speaker, voice);
+                current = Some((name.clone(), config.clone()));
+            }
+            () = until(redecode_at), if playing.is_none() => {
+                redecode_at = None;
+                let Some((name, config)) = &current else { continue };
+                let decoder = decode::Consumer::new(&broadcast, config, name, decoding()).await;
                 playing = start_playing(decoder, name, speaker, voice);
             }
             read = async { playing.as_mut().expect("guarded").decoder.read().await }, if playing.is_some() => {
-                let Some(current) = playing.as_mut() else { continue };
+                let Some(now_playing) = playing.as_mut() else { continue };
                 match read {
                     Ok(Some(decode::Read::Frame(frame))) => {
-                        if let Err(error) = current.play(&frame.data, voice) {
+                        redecode_after = REDECODE_AFTER;
+                        if let Err(error) = now_playing.play(&frame.data, voice) {
                             debug!(error = %error, "a huddle peer's audio can't be played");
                         }
                     }
                     Ok(Some(_)) => {}
-                    Ok(None) | Err(_) => {
+                    Ok(None) => {
                         playing = None;
                         voice.stopped();
+                    }
+                    Err(error) => {
+                        debug!(error = %error, "a huddle peer's audio can't be decoded; starting it again");
+                        playing = None;
+                        voice.stopped();
+                        redecode_at = Some(tokio::time::Instant::now() + redecode_after);
+                        redecode_after = (redecode_after * 2).min(REDECODE_AFTER_MOST);
                     }
                 }
             }

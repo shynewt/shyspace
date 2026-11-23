@@ -15,7 +15,7 @@ use moq_mux::catalog::{self, CatalogFormat, Stream as _};
 use shy_core::huddle::media::{DeviceChoice, HuddleMedia, Link, MediaCall, MediaEvent, MicState};
 use tokio::sync::{mpsc, watch};
 
-use super::tones::{Recorder, Tones, pitch};
+use super::tones::{Listings, Recorder, Tones, pitch};
 use crate::{Media, WorkspaceMedia};
 
 const A: f32 = 440.0;
@@ -291,6 +291,70 @@ async fn muting_closes_the_microphone_and_unmuting_opens_it_again() {
         .event(|event| *event == MediaEvent::Mic(MicState::Live))
         .await;
     assert!(hears(&bob.speaker, A).await, "Bob hears Alice again");
+}
+
+/// A packet that won't decode costs a moment of that peer's voice, not the
+/// rest of the call.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bad_packet_doesnt_silence_a_peer() {
+    let lookup = MemoryLookup::new();
+    let alice = Device::with(&lookup, Tones::with_a_bad_packet(A)).await;
+    let bob = Device::new(&lookup, E).await;
+    let _alices_call = alice.join("h-alice", &[(&bob, "h-bob")]);
+    let _bobs_call = bob.join("h-bob", &[(&alice, "h-alice")]);
+    assert!(hears(&bob.speaker, A).await, "Bob hears Alice at first");
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(
+        !goes_quiet(&bob.speaker).await,
+        "Bob stopped hearing Alice after her bad packet"
+    );
+    assert!(hears(&bob.speaker, A).await);
+}
+
+/// Releases hanging device listings when the test ends, pass or fail.
+struct ReleaseOnDrop(Listings);
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+/// A sound server that stops answering device listings mid-call: muting
+/// still closes the microphone at once, and the device checks wait for the
+/// hanging listing instead of starting more.
+#[tokio::test(flavor = "multi_thread")]
+async fn muting_is_immediate_while_device_listings_hang() {
+    let lookup = MemoryLookup::new();
+    let tones = Tones::with_listings_hanging_after(A, 1);
+    let listings = tones.listings();
+    let _release = ReleaseOnDrop(listings.clone());
+    let alice = Device::with(&lookup, tones).await;
+    let bob = Device::new(&lookup, E).await;
+    let mut alices_call = alice.join("h-alice", &[(&bob, "h-bob")]);
+    let _bobs_call = bob.join("h-bob", &[(&alice, "h-alice")]);
+    alices_call
+        .event(|event| *event == MediaEvent::Mic(MicState::Live))
+        .await;
+    tokio::time::timeout(WITHIN, async {
+        while listings.started() < 2 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("a device check starts a listing, which hangs");
+
+    alice.media.set_muted(true).expect("mute");
+    tokio::time::timeout(
+        Duration::from_millis(500),
+        alices_call.event(|event| *event == MediaEvent::Mic(MicState::Off)),
+    )
+    .await
+    .expect("the microphone closes at once, not after the listing gives up");
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    assert_eq!(listings.started(), 2, "a hanging listing isn't joined by more");
 }
 
 #[tokio::test(flavor = "multi_thread")]

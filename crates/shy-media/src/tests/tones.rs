@@ -3,7 +3,10 @@
 
 use std::{
     f32::consts::TAU,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -27,6 +30,46 @@ pub(super) struct Tones {
     speaker: Recorder,
     /// Every microphone fails to open, as a broken one would.
     is_microphone_broken: bool,
+    /// The microphone sends one packet that won't decode, a second in.
+    sends_a_bad_packet: bool,
+    listings: Listings,
+}
+
+/// Device listings: how many started, and whether they hang (as a sound
+/// server that stopped answering would) until the test lets them go.
+#[derive(Clone, Default)]
+pub(super) struct Listings {
+    started: Arc<AtomicUsize>,
+    /// Listings after this many hang; `None` never hangs.
+    hang_after: Option<usize>,
+    released: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl Listings {
+    pub(super) fn started(&self) -> usize {
+        self.started.load(Ordering::SeqCst)
+    }
+
+    /// Lets every hanging listing finish, so no test thread outlives its test.
+    pub(super) fn release(&self) {
+        let (released, wake) = &*self.released;
+        *released.lock().expect("the release flag is never poisoned") = true;
+        wake.notify_all();
+    }
+
+    fn wait_if_hanging(&self) {
+        let count = self.started.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.hang_after.is_none_or(|after| count <= after) {
+            return;
+        }
+        let (released, wake) = &*self.released;
+        let mut is_released = released.lock().expect("the release flag is never poisoned");
+        while !*is_released {
+            is_released = wake
+                .wait(is_released)
+                .expect("the release flag is never poisoned");
+        }
+    }
 }
 
 impl Tones {
@@ -35,7 +78,31 @@ impl Tones {
             frequency,
             speaker: Recorder::default(),
             is_microphone_broken: false,
+            sends_a_bad_packet: false,
+            listings: Listings::default(),
         }
+    }
+
+    pub(super) fn with_a_bad_packet(frequency: f32) -> Self {
+        Self {
+            sends_a_bad_packet: true,
+            ..Self::new(frequency)
+        }
+    }
+
+    /// The first `after` device listings answer; every later one hangs.
+    pub(super) fn with_listings_hanging_after(frequency: f32, after: usize) -> Self {
+        Self {
+            listings: Listings {
+                hang_after: Some(after),
+                ..Listings::default()
+            },
+            ..Self::new(frequency)
+        }
+    }
+
+    pub(super) fn listings(&self) -> Listings {
+        self.listings.clone()
     }
 
     pub(super) fn with_a_broken_microphone(frequency: f32) -> Self {
@@ -55,6 +122,7 @@ impl Backend for Tones {
     type Voice = Playing;
 
     fn list_devices(&self) -> Result<DeviceList> {
+        self.listings.wait_if_hanging();
         let device = |id: &str| AudioDevice {
             id: id.into(),
             name: id.into(),
@@ -80,8 +148,13 @@ impl Backend for Tones {
     ) -> Result<Playing> {
         anyhow::ensure!(!self.is_microphone_broken, "the microphone is broken");
         let frequency = self.frequency;
+        let sends_a_bad_packet = self.sends_a_bad_packet;
         Ok(Playing(tokio::spawn(async move {
-            if let Err(error) = play_tone(outgoing, frequency, &reports).await {
+            let played = match sends_a_bad_packet {
+                true => play_tone_with_a_bad_packet(outgoing, frequency, &reports).await,
+                false => play_tone(outgoing, frequency, &reports).await,
+            };
+            if let Err(error) = played {
                 panic!("the test tone stopped: {error:#}");
             }
         })))
@@ -121,6 +194,57 @@ async fn play_tone(outgoing: Outgoing, frequency: f32, reports: &mpsc::Sender<Vo
             rms: rms(&samples),
             peak: LOUDNESS,
         });
+    }
+    Ok(())
+}
+
+/// The tone, encoded and published packet by packet as moq-audio's own
+/// producer would, except that one packet a second in is garbage.
+async fn play_tone_with_a_bad_packet(
+    outgoing: Outgoing,
+    frequency: f32,
+    reports: &mpsc::Sender<VoiceReport>,
+) -> Result<()> {
+    const BAD_FRAME: usize = 50;
+    const FRAMES_PER_GROUP: usize = 10;
+    let broadcast = outgoing.broadcast;
+    let clock = outgoing.catalog.clock();
+    let track = broadcast.create_track(outgoing.track, outgoing.catalog.track_info(0))?;
+    let mut track = outgoing.catalog.audio(
+        track,
+        moq_mux::container::legacy::Wire(moq_mux::container::Kind::Audio),
+        None,
+    )?;
+    let mut encoder = encode::Encoder::new(&encode::Config::new(RATE, Layout::Mono))?;
+    track.set(encoder.catalog())?;
+    let _ = reports.try_send(VoiceReport::Opened);
+    let per_frame = encoder.frame_size();
+    let mut every = tokio::time::interval(Duration::from_secs_f64(per_frame as f64 / f64::from(RATE)));
+    for frame in 0.. {
+        every.tick().await;
+        let samples: Vec<f32> = (0..per_frame)
+            .map(|index| {
+                let time = (frame * per_frame + index) as f32 / RATE as f32;
+                LOUDNESS * (TAU * frequency * time).sin()
+            })
+            .collect();
+        encoder.encode(&samples)?;
+        while let Some(packet) = encoder.receive()? {
+            let payload = match frame == BAD_FRAME {
+                true => Bytes::from_static(&[0xff, 0xff, 0xff, 0xff]),
+                false => packet.payload,
+            };
+            let keyframe = track.needs_keyframe();
+            track.write(moq_mux::container::Frame {
+                timestamp: clock.now(),
+                payload,
+                keyframe,
+                duration: None,
+            })?;
+        }
+        if frame % FRAMES_PER_GROUP == FRAMES_PER_GROUP - 1 {
+            track.cut(Some(clock.now()))?;
+        }
     }
     Ok(())
 }
