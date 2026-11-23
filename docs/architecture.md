@@ -66,7 +66,7 @@ Bucket requests cost money on some providers, so the loop reads as little as it 
 6. push our unpushed ops as segments, each under the 32 MB that readers accept;
 7. refresh the gossip allowlist to current members; every 10 minutes, connect to members listed in the bucket.
 
-A pull lists an author's segments past the highest seq we hold, fetches the ones that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
+A check lists an author's segments past the highest seq we hold; a sweep lists past what it has checked against the bucket, so ops that came only over gossip are compared with the bucket's copy (a segment whose range we hold is fetched only if its name's hash differs from our own copy's). Either fetches the ones that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
 
 An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried. If a second, different version of an op we already have arrives, signed by its author, neither version counts (see Forked logs in `security.md`).
 

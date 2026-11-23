@@ -261,3 +261,29 @@ async fn only_fork_proof_in(bucket: &Bucket) -> String {
     };
     proof.path.clone()
 }
+
+/// Ops heard live are still compared with the bucket's copy: a sweep reads
+/// past what it has checked against the bucket, not past what it holds, so a
+/// different version uploaded for the same seq is proved forked within one
+/// sweep, even though we hold everything that segment covers.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_version_heard_live_is_checked_against_the_bucket_within_a_sweep() {
+    let fork = fork().await;
+    let admin = &fork.admin;
+    admin.receive(fork.for_admin.clone()).unwrap();
+    admin.receive(fork.after.clone()).unwrap();
+    fork.bucket
+        .put_segment(&[fork.for_carol.clone(), fork.after.clone()])
+        .await
+        .unwrap();
+
+    admin.sync().await;
+
+    assert!(
+        admin
+            .state()
+            .store
+            .is_forked(&fork.bob.me(), fork.for_admin.seq)
+            .unwrap()
+    );
+}

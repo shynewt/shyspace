@@ -7,7 +7,7 @@ use tracing::warn;
 use super::peers::peers_to_dial;
 use crate::{
     ops::now_ms,
-    transport::bucket::{ListedObject, listing_after, parse_segment_name, split_into_segments},
+    transport::bucket::{ListedObject, SegmentName, listing_after, parse_segment_name, split_into_segments},
     views::member_id,
     workspace::Workspace,
 };
@@ -18,6 +18,33 @@ const MAX_SKIPPED_SEGMENTS: usize = 10_000;
 /// How often a sweep reads every author past what we hold, at most.
 const SWEEP_EVERY_MS: i64 = 60 * 60 * 1000;
 const LAST_SWEEP_META: &str = "last_sweep_ms";
+
+#[derive(Default)]
+struct SegmentsRead {
+    /// The first op that failed locally.
+    local_failure: Option<anyhow::Error>,
+    /// The (first, last) ranges of segments read whose ops all applied.
+    settled: Vec<(u64, u64)>,
+}
+
+fn checked_key(author: &PublicKey) -> String {
+    format!("checked_against_bucket/{}", member_id(author))
+}
+
+/// How far a log is checked against the bucket once `ranges` are: the
+/// furthest point reachable from `checked` through ranges that each start
+/// no later than right after it. Junk can't push it on, since only ranges
+/// that matched or applied count.
+fn checked_through(checked: u64, mut ranges: Vec<(u64, u64)>) -> u64 {
+    ranges.sort_unstable();
+    ranges.into_iter().fold(checked, |reached, (first, last)| {
+        if first <= reached.saturating_add(1) {
+            reached.max(last)
+        } else {
+            reached
+        }
+    })
+}
 
 impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
@@ -35,7 +62,7 @@ impl Workspace {
         let authors = self.state().store.everyone_ever()?;
         for author in authors {
             let held = self.state().store.last_seq(&author)?;
-            if let Some(error) = self.pull_author(&author).await? {
+            if let Some(error) = self.sweep_author(&author).await? {
                 local_failure.get_or_insert(error);
             }
             has_found_new |= self.state().store.last_seq(&author)? > held;
@@ -58,30 +85,103 @@ impl Workspace {
             .bucket()
             .list_segments(author, Some(&listing_after(author, held)))
             .await?;
-        let skipped = self.skipped_segments().clone();
         let worth_fetching = listed
             .into_iter()
-            .filter(|object| !skipped.contains(object))
             .filter(|object| parse_segment_name(author, &object.key).is_some_and(|name| name.last > held))
             .collect();
-        let mut segments = self.bucket().fetch_segments(author, worth_fetching);
-        let mut local_failure = None;
+        Ok(self.read_segments(author, worth_fetching).await?.local_failure)
+    }
+
+    /// Like `pull_author`, but lists past what we have checked against the
+    /// bucket rather than past what we hold, so ops we got only over gossip
+    /// are compared with the bucket's copy (#109): a segment whose range we
+    /// hold is fetched only if its name's hash differs from our own copy's,
+    /// and then the different version is proved forked.
+    async fn sweep_author(&self, author: &PublicKey) -> Result<Option<anyhow::Error>> {
+        let held = self.state().store.last_seq(author)?;
+        // We can't have checked what we no longer hold (a restore leaves the
+        // log out, and a fork drops ops).
+        let checked = self.checked_against_bucket(author)?.min(held);
+        let listed = self
+            .bucket()
+            .list_segments(author, Some(&listing_after(author, checked)))
+            .await?;
+        let mut matching = Vec::new();
+        let mut worth_fetching = Vec::new();
+        for object in listed {
+            let Some(name) = parse_segment_name(author, &object.key) else {
+                continue;
+            };
+            if name.last <= held && self.is_same_as_ours(author, &name)? {
+                matching.push((name.first, name.last));
+            } else {
+                worth_fetching.push(object);
+            }
+        }
+        let read = self.read_segments(author, worth_fetching).await?;
+        matching.extend(read.settled);
+        let checked_now = checked_through(checked, matching);
+        if checked_now > checked {
+            self.state()
+                .store
+                .set_meta(&checked_key(author), &checked_now.to_le_bytes())?;
+        }
+        Ok(read.local_failure)
+    }
+
+    /// Whether our copy of `name`'s range encodes to exactly the bytes its
+    /// hash names, as an honest upload of the same ops does.
+    fn is_same_as_ours(&self, author: &PublicKey, name: &SegmentName) -> Result<bool> {
+        let ours = self
+            .state()
+            .store
+            .envelopes_between(author, name.first, name.last)?;
+        let count = name.last - name.first + 1;
+        if u64::try_from(ours.len())? != count {
+            return Ok(false);
+        }
+        Ok(blake3::hash(&postcard::to_stdvec(&ours)?) == name.hash)
+    }
+
+    fn checked_against_bucket(&self, author: &PublicKey) -> Result<u64> {
+        let Some(saved) = self.state().store.meta(&checked_key(author))? else {
+            return Ok(0);
+        };
+        let bytes = <[u8; 8]>::try_from(saved.as_slice())
+            .map_err(|_| anyhow::anyhow!("unreadable bucket-checked mark for {author}"))?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    /// Fetches and applies `listed` segments of `author`'s. Unsettled ones
+    /// are skipped for the rest of the run.
+    async fn read_segments(&self, author: &PublicKey, listed: Vec<ListedObject>) -> Result<SegmentsRead> {
+        let skipped = self.skipped_segments().clone();
+        let listed = listed
+            .into_iter()
+            .filter(|object| !skipped.contains(object))
+            .collect();
+        let mut segments = self.bucket().fetch_segments(author, listed);
+        let mut read_all = SegmentsRead::default();
         while let Some(segment) = segments.next().await? {
             let read = self.receive_segment(author, &segment.listed.key, &segment.envelopes)?;
-            if !read.is_settled && !read.is_stopped {
+            if read.is_settled {
+                if let Some(name) = parse_segment_name(author, &segment.listed.key) {
+                    read_all.settled.push((name.first, name.last));
+                }
+            } else if !read.is_stopped {
                 let mut skipped = self.skipped_segments();
                 if skipped.len() < MAX_SKIPPED_SEGMENTS {
                     skipped.insert(segment.listed);
                 }
             }
             if let Some(error) = read.local_failure {
-                local_failure.get_or_insert(error);
+                read_all.local_failure.get_or_insert(error);
             }
             if read.is_stopped {
                 break;
             }
         }
-        Ok(local_failure)
+        Ok(read_all)
     }
 
     /// Whether a sweep is due: the hourly net under heads and hints, which
@@ -204,5 +304,24 @@ impl Workspace {
         {
             warn!("could not nudge peers: {error:#}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_checked_mark_moves_only_through_ranges_that_join_up() {
+        assert_eq!(checked_through(5, vec![(6, 9), (10, 12)]), 12);
+        assert_eq!(
+            checked_through(5, vec![(10, 12), (6, 9)]),
+            12,
+            "order doesn't matter"
+        );
+        assert_eq!(checked_through(5, vec![(3, 7)]), 7, "an overlap carries on");
+        assert_eq!(checked_through(5, vec![(8, 20)]), 5, "a gap stops it");
+        assert_eq!(checked_through(5, vec![(1, 4)]), 5, "it never moves back");
+        assert_eq!(checked_through(0, vec![(1, u64::MAX)]), u64::MAX);
     }
 }

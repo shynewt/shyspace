@@ -181,6 +181,14 @@ impl Store {
         )
     }
 
+    /// `author`'s envelopes from `first` to `last`, in order, as stored.
+    pub fn envelopes_between(&self, author: &PublicKey, first: u64, last: u64) -> Result<Vec<Envelope>> {
+        self.envelopes(
+            "SELECT envelope FROM ops WHERE author = ? AND seq BETWEEN ? AND ? ORDER BY seq",
+            params![author.as_bytes(), first, last],
+        )
+    }
+
     pub fn unpushed(&self, author: &PublicKey) -> Result<Vec<Envelope>> {
         self.envelopes(
             "SELECT envelope FROM ops WHERE author = ? AND pushed = 0 ORDER BY seq",

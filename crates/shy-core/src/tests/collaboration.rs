@@ -962,3 +962,35 @@ async fn an_idle_check_costs_the_same_however_many_members() {
         "only heads are listed between the 10-minute duties"
     );
 }
+
+/// An honest segment holding only ops we got live hashes the same as our own
+/// copy, so a sweep checks it against the bucket without fetching it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sweep_checks_segments_we_hold_without_fetching_them() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let general = channel_id(&admin, "general");
+    admin.sync().await;
+    let before = store.requests();
+    admin.sync().await;
+    let idle_sweep = store.requests().since(&before).gets;
+
+    for text in ["one", "two", "three"] {
+        bob.send_message(&general, text, None).unwrap();
+    }
+    for envelope in bob.state().store.unpushed(&bob.me()).unwrap() {
+        admin.receive(envelope).unwrap();
+    }
+    bob.sync().await;
+    let before = store.requests();
+    admin.sync().await;
+
+    assert_eq!(
+        store.requests().since(&before).gets,
+        idle_sweep,
+        "no segment fetched"
+    );
+}
