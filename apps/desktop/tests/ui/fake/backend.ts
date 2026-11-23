@@ -74,6 +74,8 @@ export class FakeBackend {
   restartedInto: string | null = null;
   /** Makes `restart_to_update` fail with this, as a declined admin password or a blocked installer would. */
   restartFails: string | null = null;
+  /** A huddle runs in another workspace on this device, so the core refuses to restart. */
+  huddleElsewhere = false;
   /** Keeps `restart_to_update` waiting, as the system's password prompt does, until `finishRestart()`. */
   holdRestart = false;
   private finishHeldRestart: (() => void) | null = null;
@@ -211,7 +213,7 @@ export class FakeBackend {
   }
 
   private restartToUpdate(): string {
-    if (this.huddles.answer("my_huddle", undefined) !== null) return "in_huddle";
+    if (this.huddleElsewhere || this.huddles.answer("my_huddle", undefined) !== null) return "in_huddle";
     if (this.readyUpdate === null) return "nothing_ready";
     if (this.restartFails !== null) throw new Error(this.restartFails);
     this.restartedInto = this.readyUpdate;

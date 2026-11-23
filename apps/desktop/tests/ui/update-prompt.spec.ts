@@ -103,3 +103,18 @@ test("the card and the header pill share one restart", async ({ page }) => {
   await expect(pill).toContainText("Couldn't update");
   await expect(pill).toContainText("the administrator password was declined");
 });
+
+test("a restart refused for a huddle the window doesn't show says so", async ({ page }) => {
+  await openWithUpdate(page);
+  // A huddle in another workspace on this device: the core refuses, though this one shows no call.
+  await page.evaluate(() => {
+    window.fake.huddleElsewhere = true;
+  });
+  await prompt(page).getByRole("button", { name: "Restart" }).click();
+  await expect(prompt(page)).toContainText("Restart after your huddle.");
+  await page.evaluate(() => {
+    window.fake.huddleElsewhere = false;
+  });
+  await prompt(page).getByRole("button", { name: "Restart" }).click();
+  await expect.poll(() => page.evaluate(() => window.fake.restartedInto)).toBe("0.2.0");
+});

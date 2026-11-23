@@ -9,12 +9,15 @@ import { useMyHuddle } from "../huddles/HuddleContext";
 function useRestart() {
   const { mine } = useMyHuddle();
   const restart = useRestartState();
-  return { restart, isInHuddle: Boolean(mine), run: restartToUpdate };
+  const isInHuddle = Boolean(mine);
+  // The core also refuses for a huddle this window doesn't show (another workspace's); Restart stays to try again.
+  const waitsForHuddle = isInHuddle || restart.kind === "after_huddle";
+  return { restart, isInHuddle, waitsForHuddle, run: restartToUpdate };
 }
 
 /** "Update ready", docked at the foot of the sidebar until you restart. No dismiss: it stays until acted on. */
 export function UpdateCard({ version }: { version: string }) {
-  const { restart, isInHuddle, run } = useRestart();
+  const { restart, isInHuddle, waitsForHuddle, run } = useRestart();
   return (
     <motion.section
       aria-labelledby="update-ready-title"
@@ -34,7 +37,7 @@ export function UpdateCard({ version }: { version: string }) {
       </div>
       {restart.kind !== "already" && (
         <>
-          {isInHuddle && restart.kind !== "restarting" && (
+          {waitsForHuddle && restart.kind !== "restarting" && (
             <p className="text-xs text-muted">Restart after your huddle.</p>
           )}
           <FormError message={restart.kind === "failed" && !isInHuddle ? errorMessage(restart.error) : null} />
@@ -55,7 +58,7 @@ export function UpdateCard({ version }: { version: string }) {
 
 /** The same, in the header while the sidebar (and so the card) is hidden. A failure shows in its label. */
 export function UpdatePill({ version }: { version: string }) {
-  const { restart, isInHuddle, run } = useRestart();
+  const { restart, isInHuddle, waitsForHuddle, run } = useRestart();
   if (restart.kind === "already") return null;
   const failure = restart.kind === "failed" ? errorMessage(restart.error) : null;
   return (
@@ -79,7 +82,7 @@ export function UpdatePill({ version }: { version: string }) {
         <>
           <CircleArrowUp size={13} className="shrink-0 text-accent" />
           <span className="@max-header-labels/header:hidden">
-            {isInHuddle ? "Update after your huddle" : "Update ready"}
+            {waitsForHuddle ? "Update after your huddle" : "Update ready"}
           </span>
         </>
       )}

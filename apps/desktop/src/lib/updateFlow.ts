@@ -15,6 +15,8 @@ export type RestartOutcome = "restarting" | "in_huddle" | "nothing_ready";
 export type RestartState =
   | { kind: "idle" }
   | { kind: "restarting" }
+  /** Refused for a huddle (in any workspace on this device); Restart can be tried once it's over. */
+  | { kind: "after_huddle" }
   | { kind: "already" }
   | { kind: "failed"; error: unknown };
 
@@ -61,8 +63,7 @@ export class UpdateFlow {
     this.setRestart({ kind: "restarting" });
     this.calls.restart().then(
       (outcome) => {
-        // A huddle refuses it; leaving the huddle is what makes Restart possible again.
-        if (outcome === "in_huddle") this.setRestart({ kind: "idle" });
+        if (outcome === "in_huddle") this.setRestart({ kind: "after_huddle" });
         if (outcome === "nothing_ready") this.setRestart({ kind: "already" });
       },
       (error: unknown) => this.setRestart({ kind: "failed", error }),

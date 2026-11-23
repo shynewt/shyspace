@@ -101,12 +101,12 @@ test("a failed restart can be tried again, and keeps its reason until then", asy
   expect(flow.restartState()).toEqual({ kind: "restarting" });
 });
 
-test("a huddle sends the restart back to waiting, and a taken update says it's already updating", async () => {
+test("a huddle holds the restart until after it, and a taken update says it's already updating", async () => {
   const held = heldRestart();
   const flow = new UpdateFlow(held.calls);
   flow.restartToUpdate();
   held.finish("in_huddle");
-  await expect.poll(() => flow.restartState()).toEqual({ kind: "idle" });
+  await expect.poll(() => flow.restartState()).toEqual({ kind: "after_huddle" });
   flow.restartToUpdate();
   held.finish("nothing_ready");
   await expect.poll(() => flow.restartState()).toEqual({ kind: "already" });
