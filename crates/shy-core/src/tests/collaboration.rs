@@ -1064,3 +1064,42 @@ async fn search_matches_only_the_text_people_see() {
     let snippet = &admin.search("budget", 10).unwrap()[0].snippet;
     assert!(!snippet.contains("**") && !snippet.contains("]("), "{snippet}");
 }
+
+/// Each author also uploads their log again in aligned packs of 16, 256 and
+/// 4096 ops, so a newcomer reads a long history in a few downloads rather
+/// than one per upload, and so does a member who fell behind.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_reads_a_long_history_in_a_few_downloads() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let general = channel_id(&admin, "general");
+    for number in 0..64 {
+        bob.send_message(&general, &format!("message {number}"), None)
+            .unwrap();
+        bob.push().await.unwrap();
+    }
+
+    let before = store.requests();
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    carol.sync().await;
+    let downloads = store.requests().since(&before).gets;
+
+    let bob_held = carol.state().store.last_seq(&bob.me()).unwrap();
+    assert_eq!(bob_held, bob.state().store.last_seq(&bob.me()).unwrap());
+    assert!(downloads < 40, "{downloads} downloads for Bob's 64 uploads");
+
+    for number in 0..64 {
+        bob.send_message(&general, &format!("later {number}"), None)
+            .unwrap();
+        bob.push().await.unwrap();
+    }
+    let before = store.requests();
+    carol.check().await;
+    let downloads = store.requests().since(&before).gets;
+
+    let bob_held = carol.state().store.last_seq(&bob.me()).unwrap();
+    assert_eq!(bob_held, bob.state().store.last_seq(&bob.me()).unwrap());
+    assert!(downloads < 16, "{downloads} downloads for Bob's next 64 uploads");
+}

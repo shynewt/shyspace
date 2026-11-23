@@ -1,16 +1,16 @@
-//! Moving envelopes between the local log, the bucket, and online peers.
+//! Moving envelopes between the local log and the bucket.
 
 use anyhow::Result;
 use iroh::PublicKey;
 use tracing::warn;
 
-use super::peers::peers_to_dial;
+use super::receive::SegmentRead;
 use crate::{
     crypto,
     ops::{Envelope, now_ms},
     transport::bucket::{
-        ListedObject, MAX_OBJECT_SIZE, SegmentName, listing_after, parse_segment_name, segment_hash,
-        split_into_segments,
+        FetchedSegment, ListedObject, MAX_OBJECT_SIZE, SegmentName, listing_after, parse_segment_name,
+        segment_hash, split_into_segments,
     },
     views::member_id,
     workspace::Workspace,
@@ -24,11 +24,11 @@ const SWEEP_EVERY_MS: i64 = 60 * 60 * 1000;
 const LAST_SWEEP_META: &str = "last_sweep_ms";
 
 #[derive(Default)]
-struct SegmentsRead {
+pub(super) struct SegmentsRead {
     /// The first op that failed locally.
-    local_failure: Option<anyhow::Error>,
+    pub local_failure: Option<anyhow::Error>,
     /// The (first, last) ranges of segments read that hold exactly our log.
-    matching: Vec<(u64, u64)>,
+    pub matching: Vec<(u64, u64)>,
 }
 
 fn checked_key(author: &PublicKey) -> String {
@@ -96,11 +96,34 @@ impl Workspace {
             .bucket()
             .list_segments(author, Some(&listing_after(author, held)))
             .await?;
-        let worth_fetching = listed
+        let candidates = self.named_unskipped(author, listed);
+        let chain = self.read_covering_chain(author, &candidates).await?;
+        if chain.is_stopped {
+            return Ok(chain.read.local_failure);
+        }
+        let held = self.state().store.last_seq(author)?;
+        let rest = candidates
             .into_iter()
-            .filter(|object| parse_segment_name(author, &object.key).is_some_and(|name| name.last > held))
+            .filter(|(object, name)| !chain.tried.contains(&object.key) && name.last > held)
+            .map(|(object, _)| object)
             .collect();
-        Ok(self.read_segments(author, worth_fetching).await?.local_failure)
+        let read = self.read_segments(author, rest).await?;
+        Ok(chain.read.local_failure.or(read.local_failure))
+    }
+
+    /// The listed objects whose names are `author`'s segments, with those
+    /// names, leaving out those already found unsettled this run.
+    fn named_unskipped(
+        &self,
+        author: &PublicKey,
+        listed: Vec<ListedObject>,
+    ) -> Vec<(ListedObject, SegmentName)> {
+        let skipped = self.skipped_segments().clone();
+        listed
+            .into_iter()
+            .filter(|object| !skipped.contains(object))
+            .filter_map(|object| parse_segment_name(author, &object.key).map(|name| (object, name)))
+            .collect()
     }
 
     /// Like `pull_author`, but lists past what we have checked against the
@@ -121,14 +144,13 @@ impl Workspace {
             .bucket()
             .list_segments(author, Some(&listing_after(author, checked)))
             .await?;
-        let skipped = self.skipped_segments().clone();
-        let mut matching = Vec::new();
+        let candidates = self.named_unskipped(author, listed);
+        let chain = self.read_covering_chain(author, &candidates).await?;
+        let mut matching = chain.read.matching;
+        let held = self.state().store.last_seq(author)?;
         let mut worth_fetching = Vec::new();
-        for object in listed {
-            let Some(name) = parse_segment_name(author, &object.key) else {
-                continue;
-            };
-            if skipped.contains(&object) {
+        for (object, name) in candidates {
+            if chain.is_stopped || chain.tried.contains(&object.key) {
                 continue;
             }
             if name.last <= held && self.is_same_as_ours(author, &name)? {
@@ -143,7 +165,7 @@ impl Workspace {
         if checked_now > checked {
             self.save_checked(author, checked_now)?;
         }
-        Ok(read.local_failure)
+        Ok(chain.read.local_failure.or(read.local_failure))
     }
 
     /// Whether our copy of `name`'s range encodes to exactly the bytes its
@@ -234,35 +256,41 @@ impl Workspace {
     /// Fetches and applies `listed` segments of `author`'s. Unsettled ones
     /// are skipped for the rest of the run.
     async fn read_segments(&self, author: &PublicKey, listed: Vec<ListedObject>) -> Result<SegmentsRead> {
-        let skipped = self.skipped_segments().clone();
-        let listed = listed
-            .into_iter()
-            .filter(|object| !skipped.contains(object))
-            .collect();
         let mut segments = self.bucket().fetch_segments(author, listed);
         let mut read_all = SegmentsRead::default();
         while let Some(segment) = segments.next().await? {
-            let read = self.receive_segment(author, &segment.listed.key, &segment.envelopes)?;
-            let name = parse_segment_name(author, &segment.listed.key);
-            let is_checked = read.is_settled && self.is_all_in_our_log(author, &segment.envelopes)?;
-            match name {
-                Some(name) if is_checked => read_all.matching.push((name.first, name.last)),
-                _ if !read.is_stopped => {
-                    let mut skipped = self.skipped_segments();
-                    if skipped.len() < MAX_SKIPPED_SEGMENTS {
-                        skipped.insert(segment.listed);
-                    }
-                }
-                _ => {}
-            }
-            if let Some(error) = read.local_failure {
-                read_all.local_failure.get_or_insert(error);
-            }
-            if read.is_stopped {
+            if self.take_segment(author, segment, &mut read_all)?.is_stopped {
                 break;
             }
         }
         Ok(read_all)
+    }
+
+    /// Applies one fetched segment of `author`'s, noting in `read_all` what
+    /// it found; one that doesn't settle is skipped for the rest of the run.
+    pub(super) fn take_segment(
+        &self,
+        author: &PublicKey,
+        segment: FetchedSegment,
+        read_all: &mut SegmentsRead,
+    ) -> Result<SegmentRead> {
+        let mut read = self.receive_segment(author, &segment.listed.key, &segment.envelopes)?;
+        let name = parse_segment_name(author, &segment.listed.key);
+        let is_checked = read.is_settled && self.is_all_in_our_log(author, &segment.envelopes)?;
+        match name {
+            Some(name) if is_checked => read_all.matching.push((name.first, name.last)),
+            _ if !read.is_stopped => {
+                let mut skipped = self.skipped_segments();
+                if skipped.len() < MAX_SKIPPED_SEGMENTS {
+                    skipped.insert(segment.listed);
+                }
+            }
+            _ => {}
+        }
+        if let Some(error) = read.local_failure.take() {
+            read_all.local_failure.get_or_insert(error);
+        }
+        Ok(read)
     }
 
     /// Whether a sweep is due: the hourly net under heads and hints, which
@@ -335,69 +363,25 @@ impl Workspace {
     }
 
     /// Uploads our ops that aren't in the bucket yet, in as few segments as
-    /// others can still read.
+    /// others can still read, then any packs due (see `packing`).
     pub(crate) async fn push(&self) -> Result<()> {
         let _guard = self.inner.push_lock.lock().await;
         let me = self.me();
+        // Before uploading, so a store that never packed starts from here.
+        let packed_through = self.packed_through()?;
         let unpushed = self.state().store.unpushed(&me)?;
-        if unpushed.is_empty() {
-            return Ok(());
-        }
-        for segment in split_into_segments(&unpushed)? {
-            let last = segment
-                .last()
-                .expect("split_into_segments never makes an empty segment")
-                .seq;
-            self.bucket().put_segment(segment).await?;
-            self.state().store.mark_pushed(&me, last)?;
-        }
-        self.write_head().await
-    }
-
-    /// Lets only current members gossip with us; local, so done every pass.
-    pub(super) fn refresh_gossip_members(&self) -> Result<()> {
-        if let Some(net) = &self.inner.net {
-            net.set_members(&self.current_members()?);
-        }
-        Ok(())
-    }
-
-    /// Connects to members who seem to be around (see `peers_to_dial`).
-    pub(super) async fn join_peers(&self) -> Result<()> {
-        let Some(net) = &self.inner.net else {
-            return Ok(());
-        };
-        let announcements = self.bucket().peers().await?;
-        let now = now_ms()?;
-        let to_dial = {
-            let mut last_dialed = self
-                .inner
-                .last_dialed_ms
-                .lock()
-                .expect("dial times lock poisoned by an earlier panic");
-            let to_dial = peers_to_dial(&announcements, &last_dialed, now);
-            for peer in &to_dial {
-                last_dialed.insert(*peer, now);
+        if !unpushed.is_empty() {
+            for segment in split_into_segments(&unpushed)? {
+                let last = segment
+                    .last()
+                    .expect("split_into_segments never makes an empty segment")
+                    .seq;
+                self.bucket().put_segment(segment).await?;
+                self.state().store.mark_pushed(&me, last)?;
             }
-            to_dial
-        };
-        net.join(to_dial).await
-    }
-
-    pub(super) async fn announce_self(&self) {
-        if let Err(error) = self.bucket().announce_peer(&self.me()).await {
-            warn!("could not announce ourselves in the bucket: {error:#}");
+            self.write_head().await?;
         }
-        self.nudge_peers().await;
-    }
-
-    /// Tells online peers to sync now rather than at their next interval.
-    pub(crate) async fn nudge_peers(&self) {
-        if let Some(net) = &self.inner.net
-            && let Err(error) = net.nudge().await
-        {
-            warn!("could not nudge peers: {error:#}");
-        }
+        self.upload_due_packs(packed_through).await
     }
 }
 

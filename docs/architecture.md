@@ -63,10 +63,10 @@ Bucket requests cost money on some providers, so the loop reads as little as it 
 3. admin only: refresh the recovery snapshot, then collect join requests and deliver answers;
 4. every 10 minutes and at sweeps: repair missing or altered commits (one listing of `mls/commit/`; only slots whose version changed since we found them right are fetched) and learn the forks proved in the bucket, putting there the proofs we have that it lacks (`sync/forks.rs`);
 5. read new segments: the logs whose heads moved (a check) or everyone who was ever a member, ourselves included (a sweep; newcomers need removed members' history, a restored device its own);
-6. push our unpushed ops as segments, each under the 32 MB that readers accept;
+6. push our unpushed ops as segments, each under the 32 MB that readers accept, then any packs due (below);
 7. refresh the gossip allowlist to current members; every 10 minutes, connect to members listed in the bucket.
 
-A check lists an author's segments past the highest seq we hold; a sweep lists past what it has checked against the bucket, so ops that came only over gossip are compared with the bucket's copy (a segment whose range we hold is fetched only if its name's hash differs from our own copy's). Either fetches the ones that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
+A check lists an author's segments past the highest seq we hold; a sweep lists past what it has checked against the bucket, so ops that came only over gossip are compared with the bucket's copy (a segment whose range we hold is fetched only if its name's hash differs from our own copy's). Either first fetches the covering chain: from what we hold, the object that reaches furthest (the narrower on a tie), then again from its end (`sync/packing.rs`); then it fetches the rest that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
 
 An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried. If a second, different version of an op we already have arrives, signed by its author, neither version counts (see Forked logs in `security.md`).
 
@@ -76,7 +76,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 
 | Path | Content |
 |---|---|
-| `ops/<author>/<last seq>-<first seq>-<nonce>-<hash>` | a segment of that author's envelopes, written create-only; the name leads with the last seq so a reader lists exactly what holds more than it has, holds a random nonce picked at upload so nobody can take the name first, and ends in a BLAKE3 hash of the nonce and the bytes |
+| `ops/<author>/<last seq>-<first seq>-<nonce>-<hash>` | a segment of that author's envelopes, written create-only; the name leads with the last seq so a reader lists exactly what holds more than it has, holds a random nonce picked at upload so nobody can take the name first, and ends in a BLAKE3 hash of the nonce and the bytes. Packs are segments too: when an author has pushed through a multiple of 16, 256 or 4096 ops, they upload that aligned range again as one object (if it fits), so a reader catching up fetches a few wide objects rather than one per upload |
 | `ops/forks/<author>/<seq>/<hash>` | proof that the author signed two versions of that op: both envelopes |
 | `mls/commit/<from epoch>` | admin-signed MLS commits; any member puts one back within 10 minutes if its slot goes missing or holds something else |
 | `invites/<token>/request` | a joiner's request, written through a presigned link |
@@ -103,7 +103,7 @@ Deleting a file, its message or its channel removes it everywhere and queues its
 |---|---|
 | `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `sent` (your own messages across the channels you can still read, newest first, paged and filtered by words), `presence` (heartbeats and status), `protection` (whether the bucket keeps deleted data), `files` (sharing, opening and removing files and pictures) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
-| `sync/` | the background loop, `receive` (verifying and applying others' ops), `forks` (two versions of one op), `replicate` (bucket pull and push, gossip peers) |
+| `sync/` | the background loop, `receive` (verifying and applying others' ops), `forks` (two versions of one op), `replicate` (bucket pull and push), `packing` (packs and the covering chain), `peers` (whom to dial over gossip) |
 | `storage/` | SQLite: `schema` (the base schema), `oplog`, `epochs`, `forks`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `profile_details`, `sent` (one member's messages, newest first), `files` (shared files, pictures, blobs waiting to leave the bucket), `rebuild` (undoing ops that turned out not to count), `search_index` (the full-text index, with each item's entry found by key), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
 | `transport/` | `bucket` (S3 layout and access), `blobs` (file pieces in the bucket), `gossip` (iroh) |
 | `private/` | private channels and DMs: `ids`, `ops` (what's inside sealed ops and grants), `crypto` (sealed content, key wraps, commitments), `sealing` (each member's key for receiving channel keys), `apply` (grants and waiting sealed ops), `rules` (which private ops count), `actions` (create, add, remove, leave, hand over, DMs), `reads` |

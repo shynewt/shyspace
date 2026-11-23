@@ -6,6 +6,7 @@ mod alerts;
 mod forks;
 mod heads;
 mod pacing;
+mod packing;
 mod peers;
 mod receive;
 mod replicate;

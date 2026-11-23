@@ -21,7 +21,7 @@ use crate::{
     DataDir, KeyStorage, Networking, Workspace, crypto,
     membership::commit::{self, FrozenAuthor},
     ops::{Envelope, Op, OpBody, now_ms},
-    transport::bucket::{Bucket, parse_segment_name},
+    transport::bucket::{Bucket, parse_segment_name, segment_name_for},
     views::PresenceState,
 };
 
@@ -2953,11 +2953,13 @@ async fn a_store_missing_its_identity_does_not_open() {
     assert!(error.contains("id and admin are missing"), "{error}");
 }
 
-/// A store whose next listing under a prefix fails, as a network blip would.
+/// A store whose next listing under a prefix, or next upload to a key
+/// starting with one, fails, as a network blip would.
 #[derive(Debug, Default)]
 struct FlakyStore {
     inner: InMemory,
     fail_next_list_under: Mutex<Option<String>>,
+    fail_next_put_under: Mutex<Option<String>>,
 }
 
 impl fmt::Display for FlakyStore {
@@ -2992,6 +2994,19 @@ impl ObjectStore for FlakyStore {
         payload: PutPayload,
         opts: PutOptions,
     ) -> object_store::Result<PutResult> {
+        let is_failing = {
+            let mut armed = self.fail_next_put_under.lock().unwrap();
+            let is_hit = armed
+                .as_deref()
+                .is_some_and(|armed| location.as_ref().starts_with(armed));
+            if is_hit {
+                *armed = None;
+            }
+            is_hit
+        };
+        if is_failing {
+            return Err(Self::failure());
+        }
         self.inner.put_opts(location, payload, opts).await
     }
     async fn put_multipart_opts(
@@ -3203,4 +3218,104 @@ async fn junk_kept_waiting_or_without_a_clock_is_skipped_too() {
             "kept waiting: {is_kept_waiting}, {texts:?}"
         );
     }
+}
+
+/// A pack whose upload failed is written at the next push, even with
+/// nothing new to upload.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pack_that_failed_to_upload_is_written_at_the_next_push() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let general = channel_id(&admin, "general");
+    let first_pack = format!("ops/{}/{:020}-{:020}-", crate::views::member_id(&bob.me()), 16, 1);
+    let packs = || async {
+        bucket
+            .list_segments(&bob.me(), None)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|object| object.key.starts_with(&first_pack))
+            .count()
+    };
+    bob.push().await.unwrap();
+    *store.fail_next_put_under.lock().unwrap() = Some(first_pack.clone());
+
+    let mut failed_pushes = 0;
+    while bob.state().store.last_seq(&bob.me()).unwrap() < 16 {
+        bob.send_message(&general, "filler", None).unwrap();
+        failed_pushes += usize::from(bob.push().await.is_err());
+    }
+    assert_eq!(
+        (failed_pushes, packs().await),
+        (1, 0),
+        "the failed pack is reported"
+    );
+
+    bob.push().await.unwrap();
+    assert_eq!(packs().await, 1);
+    bob.send_message(&general, "later", None).unwrap();
+    bob.push().await.unwrap();
+    assert_eq!(packs().await, 1, "a pack is written once");
+}
+
+/// Anyone with the bucket keys can name an object as if it held a wide range
+/// of someone's log, so a reader tries it before the honest packs. Each such
+/// name costs a download, plus at most a few wasted ones started after it,
+/// and hides nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn names_planted_as_wide_packs_hide_nothing_and_waste_little() {
+    const PLANTED: u64 = 10;
+    let (with_planted, is_complete) = newcomer_reading_with_planted_packs(PLANTED).await;
+    let (without, _) = newcomer_reading_with_planted_packs(0).await;
+
+    assert!(is_complete, "the newcomer read Bob's whole log");
+    let wasted = with_planted.saturating_sub(without + PLANTED);
+    assert!(
+        wasted <= 3 * 7,
+        "{wasted} downloads wasted beyond one per planted name"
+    );
+}
+
+/// How many downloads a newcomer makes catching up with Bob's log of 128
+/// messages, with `planted` junk names claiming ops 1 to 17 of it, so each
+/// is tried before the chain of honest packs after it; and whether it got
+/// all of the log.
+async fn newcomer_reading_with_planted_packs(planted: u64) -> (u64, bool) {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let general = channel_id(&admin, "general");
+    for number in 0..128 {
+        bob.send_message(&general, &format!("message {number}"), None)
+            .unwrap();
+        bob.push().await.unwrap();
+    }
+    let start = bob.state().store.envelopes_between(&bob.me(), 1, 8).unwrap();
+    let genuine_but_short = postcard::to_stdvec(&start).unwrap();
+    for number in 0..planted {
+        let nonce = [u8::try_from(number).unwrap(); 16];
+        let (name, bytes) = match number % 2 {
+            0 => (
+                segment_name_for(&bob.me(), 1, 17, &nonce, b"other"),
+                b"junk".to_vec(),
+            ),
+            _ => (
+                segment_name_for(&bob.me(), 1, 17, &nonce, &genuine_but_short),
+                genuine_but_short.clone(),
+            ),
+        };
+        bucket.put_raw(&name, bytes).await.unwrap();
+    }
+
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let before = store.requests();
+    carol.sync().await;
+    let downloads = store.requests().since(&before).gets;
+    let is_complete =
+        carol.state().store.last_seq(&bob.me()).unwrap() == bob.state().store.last_seq(&bob.me()).unwrap();
+    (downloads, is_complete)
 }
