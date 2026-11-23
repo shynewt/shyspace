@@ -53,7 +53,7 @@ Every member has a data directory in `/var/tmp/shyspace-demo/<name>` (or `$SHY_D
 
 ## Checks
 
-Run all of these before committing. CI (`.github/workflows/ci.yml`) is the backstop, not the first line: it runs on every push to main, on pull requests, weekly, and from the Actions tab's "Run workflow" button. The real-app job runs only from that button.
+Run all of these before committing. CI (`.github/workflows/ci.yml`) is the backstop, not the first line: it runs on every push to main, on pull requests, weekly, and from the Actions tab's "Run workflow" button. The real-app job runs only from that button. A newer push cancels a pull request's older run, never main's, so every commit on main gets a verdict. Only main saves the Rust cache, which keeps branches from crowding it out. The jobs name exact runner images (`ubuntu-24.04`, never `ubuntu-latest`), because a moving label changes the build machine without a commit, and for Linux the oldest system the packages run on. Dependabot (`.github/dependabot.yml`) opens one pull request a week that updates the workflows' actions.
 
 ```sh
 cargo fmt --check
@@ -91,11 +91,11 @@ To see every shared component, open the app with `#gallery` in development. To c
 
 ## Releasing
 
-Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft, pre-release GitHub release to look over and publish. The Actions tab's "Run workflow" button builds them as workflow artifacts only. macOS builds aren't signed yet, so testers allow the app once in System Settings › Privacy & Security › Open Anyway.
+Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft, pre-release GitHub release to look over and publish. Everything else builds them as workflow artifacts only: the Actions tab's "Run workflow" button, a pull request that changes the workflows or `tauri.conf.json`, and a weekly run on main that catches a retired runner image or a broken build before a release needs it. The build machines are `ubuntu-24.04`, `macos-26` and `windows-2025`; GitHub keeps two images per system and retires the oldest, so move them on when the weekly run warns. macOS builds aren't signed yet, so testers allow the app once in System Settings › Privacy & Security › Open Anyway.
 
 ## Building the macOS app by hand
 
-Until release builds run in CI, a tester with a Mac (Apple Silicon) can build the app once and share the `.dmg` with the others. It takes about 15 minutes the first time, mostly installing tools and compiling.
+The release workflow builds the `.dmg`, but a tester with a Mac (Apple Silicon) can also build it, for example to try a branch. It takes about 15 minutes the first time, mostly installing tools and compiling.
 
 1. Install Apple's command-line tools: `xcode-select --install`.
 2. Install Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`, then open a new terminal.

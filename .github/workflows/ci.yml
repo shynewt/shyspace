@@ -14,19 +14,29 @@ on:
   # The release workflow runs these same checks first.
   workflow_call:
 
+# Only what reading the code needs; a release adds its own write access to its build job.
+permissions:
+  contents: read
+
+# Named after the workflow that runs the checks: called from Release, this is
+# Release's run, so it never cancels or waits on CI's own run of the same ref.
+# Only a pull request's older run is cancelled; every push to main gets a verdict.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-checks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   rust:
     name: Rust (format, lint, test)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     env:
       # Line numbers for backtraces without full debug info, which fills the disk.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Room on the disk
         # The runner comes with toolchains we never use; the build needs the space.
         run: |
@@ -41,6 +51,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only main saves, so branches can't crowd its cache out of the 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: The desktop crate embeds the built frontend; give it an empty one
         run: mkdir -p apps/desktop/dist
       - run: cargo fmt --check
@@ -53,11 +66,14 @@ jobs:
   frontend:
     name: Frontend (types, lint, UI tests)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -100,6 +116,8 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Room on the disk
         # The runner comes with toolchains we never use; the build needs the space.
         run: |
@@ -123,6 +141,9 @@ jobs:
           echo "the bucket did not come up" && exit 1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only main saves, so branches can't crowd its cache out of the 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo install tauri-driver --locked
       - uses: pnpm/action-setup@v6
         with:

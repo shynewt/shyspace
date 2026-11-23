@@ -2,16 +2,21 @@ name: Release
 
 # Builds the desktop app and the `shy` CLI for Linux, macOS (Apple Silicon)
 # and Windows, after the same checks as CI. A version tag (v0.1.0) attaches
-# them to a draft GitHub release; the Actions tab's button builds them as
-# workflow artifacts only. A release is a deliberate step, so this never runs
-# on its own.
+# them to a draft GitHub release. Everything else builds them as workflow
+# artifacts only: the Actions tab's button, a pull request that changes the
+# workflows or the app's bundle settings, and a weekly run that notices a
+# retired runner or a broken build before a release needs it.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  pull_request:
+    paths: [".github/workflows/**", "apps/desktop/src-tauri/tauri.conf.json"]
+  schedule:
+    - cron: "0 5 * * 1"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -20,25 +25,40 @@ concurrency:
 jobs:
   checks:
     uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   build:
     name: Build (${{ matrix.name }})
     needs: checks
+    # Only this job writes: it attaches the builds to the draft release.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
+        # Explicit images, never -latest: a moving label would change the
+        # build machine, and with Linux the oldest system the packages run on.
         include:
           - name: Linux
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - name: macOS (Apple Silicon)
-            runner: macos-15
+            runner: macos-26
           - name: Windows
-            runner: windows-2022
+            runner: windows-2025
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
-      # The oldest supported Ubuntu, so the packages run on more distributions.
+        with:
+          persist-credentials: false
+      - name: Room on the disk
+        if: runner.os == 'Linux'
+        # The runner comes with toolchains we never use; the build needs the space.
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: System libraries
         if: runner.os == 'Linux'
         run: |
@@ -47,6 +67,9 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev patchelf rpm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The weekly run keeps the release cache warm; other runs only read it.
+          save-if: ${{ github.event_name == 'schedule' }}
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -65,6 +88,7 @@ jobs:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
           args: --features vendored-openssl
+          # Empty without a tag, so the action only keeps workflow artifacts.
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: shyspace ${{ github.ref_name }}
           releaseBody: "Internal test build. macOS: the app isn't signed yet. Open it once, then allow it in System Settings › Privacy & Security › Open Anyway."
@@ -78,12 +102,15 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Through the environment, never spliced into the script.
+          MATRIX_NAME: ${{ matrix.name }}
+          TAG: ${{ github.ref_name }}
         run: |
           binary=target/release/shy
           [ "$RUNNER_OS" = "Windows" ] && binary=target/release/shy.exe
-          suffix=$(echo "${{ matrix.name }}" | tr 'A-Z ' 'a-z-' | tr -d '()')
+          suffix=$(echo "$MATRIX_NAME" | tr 'A-Z ' 'a-z-' | tr -d '()')
           cp "$binary" "shy-$suffix${binary##*/shy}"
-          gh release upload "${{ github.ref_name }}" "shy-$suffix${binary##*/shy}" --clobber
+          gh release upload "$TAG" "shy-$suffix${binary##*/shy}" --clobber
       - name: Keep the CLI as a workflow artifact
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v7
@@ -91,3 +118,6 @@ jobs:
           name: shy-${{ runner.os }}
           path: target/release/shy*
           retention-days: 7
+      - name: Disk left
+        if: always() && runner.os == 'Linux'
+        run: df -h /
