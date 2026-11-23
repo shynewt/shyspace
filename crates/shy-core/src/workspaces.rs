@@ -51,6 +51,13 @@ pub enum DeviceKeys {
     Files(PathBuf),
 }
 
+/// What `open_all` opened, and what failed to open, with why.
+#[derive(Default)]
+pub struct Opened {
+    pub workspaces: Vec<Workspace>,
+    pub failed: Vec<(String, anyhow::Error)>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceEntry {
     pub workspace_id: String,
@@ -354,11 +361,8 @@ impl Workspaces {
 
     /// Opens every workspace here not open yet, the last used first, and
     /// selects the last used. One that fails to open doesn't stop the
-    /// others; returns those that failed, with why.
-    pub async fn open_all(
-        &self,
-        options: impl Fn() -> WorkspaceOptions,
-    ) -> Result<Vec<(String, anyhow::Error)>> {
+    /// others.
+    pub async fn open_all(&self, options: impl Fn() -> WorkspaceOptions) -> Result<Opened> {
         let recent = self.settings()?.recent;
         let mut ids: Vec<String> = self.list()?.into_iter().map(|entry| entry.workspace_id).collect();
         ids.sort_by_key(|id| {
@@ -367,19 +371,28 @@ impl Workspaces {
                 .position(|recent| recent == id)
                 .unwrap_or(usize::MAX)
         });
-        let mut failed = Vec::new();
+        let mut opened = Opened::default();
         for workspace_id in ids {
             if self.find(&workspace_id).is_some() {
                 continue;
             }
             let data = self.folder(&workspace_id)?;
             match Workspace::open_with(&data, self.connect.clone(), options()).await {
-                Ok(workspace) => self.open_lock().push(workspace),
-                Err(error) => failed.push((workspace_id, error)),
+                Ok(workspace) => {
+                    self.open_lock().push(workspace.clone());
+                    opened.workspaces.push(workspace);
+                }
+                Err(error) => opened.failed.push((workspace_id, error)),
             }
         }
         self.pace();
-        Ok(failed)
+        Ok(opened)
+    }
+
+    /// Takes every workspace out of the open ones, for the caller to shut
+    /// down; `open_all` opens them again.
+    pub fn close_all(&self) -> Vec<Workspace> {
+        std::mem::take(&mut *self.open_lock())
     }
 
     /// The open workspace `workspace_id`, if it is open.
@@ -388,6 +401,17 @@ impl Workspaces {
             .iter()
             .find(|workspace| workspace.workspace_id() == workspace_id)
             .cloned()
+    }
+
+    /// Every open workspace, the selected one first.
+    pub fn open_workspaces(&self) -> Vec<Workspace> {
+        self.open_lock().clone()
+    }
+
+    /// The folder joining with `invite_code` will use, so the joining
+    /// device's safety code can be shown while the admin decides.
+    pub fn folder_for_invite(&self, invite_code: &str) -> Result<DataDir> {
+        self.folder(&Invite::decode(invite_code)?.workspace_id)
     }
 
     /// The selected workspace: the one the app shows.

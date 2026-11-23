@@ -260,6 +260,7 @@ async fn the_most_recently_used_workspaces_run_live() {
             .open_all(|| Networking::Offline.into())
             .await
             .unwrap()
+            .failed
             .is_empty()
     );
 

@@ -18,12 +18,17 @@ pub async fn my_huddle(state: State<'_, AppState>) -> CommandResult<Option<MyHud
     Ok(current(&state).await?.my_huddle())
 }
 
+/// Joins a huddle in the selected workspace, leaving any huddle in the
+/// others first: audio is shared, so one huddle at a time.
 #[tauri::command]
 pub async fn join_huddle(state: State<'_, AppState>, channel: String, muted: bool) -> CommandResult<()> {
-    current(&state)
-        .await?
-        .join_huddle(&channel, muted)
-        .map_err(failed)
+    let workspace = current(&state).await?;
+    for other in state.open_workspaces() {
+        if other.workspace_id() != workspace.workspace_id() && other.my_huddle().is_some() {
+            other.leave_huddle().map_err(failed)?;
+        }
+    }
+    workspace.join_huddle(&channel, muted).map_err(failed)
 }
 
 #[tauri::command]

@@ -54,7 +54,8 @@ export async function answerWith(page: Page, command: string, value: unknown, ch
     ({ command, value, change }) => {
       const answer = window.fake.handle.bind(window.fake);
       window.fake.handle = (asked, args) => (asked === command ? structuredClone(value) : answer(asked, args));
-      return window.__TAURI_INTERNALS__.invoke("plugin:event|emit", { event: "change", payload: change });
+      const payload = { workspace_id: window.fake.session?.workspace_id ?? null, change };
+      return window.__TAURI_INTERNALS__.invoke("plugin:event|emit", { event: "change", payload });
     },
     { command, value, change },
   );

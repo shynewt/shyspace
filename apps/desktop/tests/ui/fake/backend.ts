@@ -635,7 +635,7 @@ export class FakeBackend {
       recovery_snapshot_bytes: null,
       recovery_snapshot_limit: RECOVERY_SNAPSHOT_LIMIT,
     };
-    this.session = { workspace_name: workspaceName, me, is_admin: true };
+    this.session = { workspace_id: "w-acme", workspace_name: workspaceName, me, is_admin: true };
     this.chat.createChannel("general");
     return this.session;
   }
@@ -688,7 +688,7 @@ export class FakeBackend {
       recovery_snapshot_bytes: null,
       recovery_snapshot_limit: RECOVERY_SNAPSHOT_LIMIT,
     };
-    this.session = { workspace_name: "Team", me, is_admin: false };
+    this.session = { workspace_id: "w-team", workspace_name: "Team", me, is_admin: false };
     return this.session;
   }
 
@@ -867,7 +867,7 @@ export class FakeBackend {
   }
 
   private notify(change: Change): void {
-    void emit("change", change);
+    void emit("change", { workspace_id: this.session?.workspace_id ?? null, change });
   }
 }
 

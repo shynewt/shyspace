@@ -11,7 +11,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 use shy_core::Workspace;
 
-use crate::{AppState, CommandResult, open_workspace, shut_down, tray};
+use crate::{AppState, CommandResult, open_workspaces, shut_down, tray};
 
 /// The update this run found, from download to restart.
 #[derive(Default)]
@@ -109,15 +109,15 @@ pub async fn restart_to_update(
     if cfg!(windows) {
         // The plugin's Windows install starts the installer and ends this
         // process at once, so unsent changes go first.
-        let Ok(workspace) = take_unless_in_huddle(&state).await else {
+        let Ok(workspaces) = take_unless_in_huddle(&state).await else {
             *pending.slot() = Some(Stage::Downloaded(downloaded));
             return Ok(RestartOutcome::InHuddle);
         };
-        shut_down(workspace).await;
+        shut_down(workspaces).await;
         if let Err(error) = install(&pending, downloaded).await {
             tracing::warn!("the update didn't install: {error}");
             tray::restore_after_cancelled_exit(&app);
-            open_workspace(&app, &state).await?;
+            open_workspaces(&app, &state).await?;
             return Err(error);
         }
     } else {
@@ -147,32 +147,28 @@ async fn install(pending: &PendingUpdate, downloaded: Box<Downloaded>) -> Comman
 /// The install can take a while (a password prompt, say), so a huddle may
 /// have started since the person asked; it isn't cut off.
 async fn restart_unless_in_huddle(app: &AppHandle, state: &AppState) -> CommandResult<RestartOutcome> {
-    let Ok(workspace) = take_unless_in_huddle(state).await else {
+    let Ok(workspaces) = take_unless_in_huddle(state).await else {
         return Ok(RestartOutcome::InHuddle);
     };
-    shut_down(workspace).await;
+    shut_down(workspaces).await;
     app.request_restart();
     Ok(RestartOutcome::Restarting)
 }
 
 async fn is_in_huddle(state: &AppState) -> bool {
-    match state.workspace.lock().await.as_ref() {
-        Some(workspace) => workspace.my_huddle().is_some(),
-        None => false,
-    }
+    state
+        .open_workspaces()
+        .iter()
+        .any(|workspace| workspace.my_huddle().is_some())
 }
 
 struct InHuddle;
 
-/// Takes the open workspace (if any) out of the app, so nothing else starts
-/// on it, unless the person is in a huddle.
-async fn take_unless_in_huddle(state: &AppState) -> Result<Option<Workspace>, InHuddle> {
-    let mut slot = state.workspace.lock().await;
-    if slot
-        .as_ref()
-        .is_some_and(|workspace| workspace.my_huddle().is_some())
-    {
+/// Takes the open workspaces out of the app, so nothing else starts on
+/// them, unless the person is in a huddle in one.
+async fn take_unless_in_huddle(state: &AppState) -> Result<Vec<Workspace>, InHuddle> {
+    if is_in_huddle(state).await {
         return Err(InHuddle);
     }
-    Ok(slot.take())
+    Ok(state.workspaces.close_all())
 }

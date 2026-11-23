@@ -3,7 +3,15 @@ import { listen } from "@tauri-apps/api/event";
 import { reportError } from "./toast";
 import type { RestartOutcome } from "./updateFlow";
 
-export type Session = { workspace_name: string; me: string; is_admin: boolean };
+export type Session = { workspace_id: string; workspace_name: string; me: string; is_admin: boolean };
+
+/** The workspace the app shows; changes from the others aren't passed on. */
+let selectedWorkspaceId: string | null = null;
+
+function rememberSelected<T extends Session | null>(session: T): T {
+  selectedWorkspaceId = session?.workspace_id ?? null;
+  return session;
+}
 export type NotifyLevel = "all" | "mentions" | "nothing";
 export type ChannelKind = "public" | "private" | "dm" | "notes";
 /**
@@ -240,6 +248,8 @@ export type Change =
   | { kind: "storage_protection" }
   /** The bucket key rotation (`storage_rotation`) changed. */
   | { kind: "key_rotation" }
+  /** The workspaces on this device changed: added, left, moved, selected, or run live or not. */
+  | { kind: "workspaces" }
   /** How far this device's upload into `channel` has got, in bytes of the files. */
   | { kind: "upload"; channel: string; sent: number; total: number }
   | { kind: "sync" }
@@ -305,15 +315,16 @@ export type AudioDevices = { inputs: AudioDevice[]; outputs: AudioDevice[]; chos
 export type AudioDeviceChoice = { input: string | null; output: string | null };
 
 export const api = {
-  session: () => invoke<Session | null>("session"),
+  session: () => invoke<Session | null>("session").then(rememberSelected),
   createWorkspace: (workspaceName: string, name: string, bucket: BucketConfig) =>
-    invoke<Session>("create_workspace", { workspaceName, name, bucket }),
-  joinWorkspace: (invite: string, name: string) => invoke<Session>("join_workspace", { invite, name }),
+    invoke<Session>("create_workspace", { workspaceName, name, bucket }).then(rememberSelected),
+  joinWorkspace: (invite: string, name: string) =>
+    invoke<Session>("join_workspace", { invite, name }).then(rememberSelected),
   /** Stops a join still waiting for the admin; `joinWorkspace` then fails. */
   cancelJoin: () => invoke<void>("cancel_join"),
   /** Shows how many things need you in the window title, the taskbar and the tray. */
   setAttentionCount: (count: number) => invoke<void>("set_attention_count", { count }),
-  restoreWorkspace: (kit: string) => invoke<Session>("restore_workspace", { kit }),
+  restoreWorkspace: (kit: string) => invoke<Session>("restore_workspace", { kit }).then(rememberSelected),
   testBucket: (bucket: BucketConfig) => invoke<void>("test_bucket", { bucket }),
   storageSettings: () => invoke<StorageSettings>("storage_settings"),
   /** The last check's result, without asking the bucket. */
@@ -382,7 +393,7 @@ export const api = {
     body: string,
     target: AlertTarget | null,
     picture: { member: string; png: number[] } | null,
-  ) => invoke<void>("show_alert", { title, body, target, picture }),
+  ) => invoke<void>("show_alert", { workspaceId: selectedWorkspaceId, title, body, target, picture }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>
@@ -497,8 +508,10 @@ let isListening = false;
 export function onChange(listener: ChangeListener): () => void {
   if (!isListening) {
     isListening = true;
-    listen<Change>("change", (event) => {
-      for (const notify of listeners) notify(event.payload);
+    listen<{ workspace_id: string | null; change: Change }>("change", (event) => {
+      const { workspace_id, change } = event.payload;
+      if (workspace_id !== null && workspace_id !== selectedWorkspaceId) return;
+      for (const notify of listeners) notify(change);
     }).catch(reportError);
   }
   listeners.add(listener);

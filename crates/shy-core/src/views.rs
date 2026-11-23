@@ -504,6 +504,9 @@ pub enum Change {
     StorageProtection,
     /// The bucket key rotation (`storage_rotation`) changed.
     KeyRotation,
+    /// The workspaces on this device changed: one was added, left, moved,
+    /// selected, or started or stopped running live.
+    Workspaces,
     /// How far this device's upload of files into `channel` (or a page) has
     /// got, in bytes of the files themselves.
     Upload {

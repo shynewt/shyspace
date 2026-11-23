@@ -18,9 +18,10 @@ use shy_core::{
     views::{
         Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
         OldKeyCheck, Page, PageEditorSession, PrivateMembers, ProtectionCheck, SearchHit, SectionSort,
-        SidebarSection, StatusUpdate, StorageRotation, StorageSettings,
+        SidebarSection, StatusUpdate, StorageRotation, StorageSettings, WorkspaceBadge, WorkspaceItem,
     },
     workspace::StorageUpdate,
+    workspaces::{DeviceKeys, Workspaces},
 };
 use shy_media::ShyMedia;
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, ipc::Response};
@@ -32,15 +33,35 @@ pub(crate) type CommandResult<T> = Result<T, String>;
 const EXIT_UPLOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub(crate) struct AppState {
-    data: DataDir,
-    workspace: Mutex<Option<Workspace>>,
-    /// Stops the join in progress, if one is waiting for the admin.
-    joining: std::sync::Mutex<Option<JoinCancel>>,
-    /// Huddle audio, shared by whichever workspace is open.
+    /// The app's data folder, holding every workspace on this device.
+    root: PathBuf,
+    workspaces: Workspaces,
+    /// Held while opening workspaces, so two opens don't race.
+    opening: Mutex<()>,
+    /// The join in progress, if one is waiting for the admin.
+    joining: std::sync::Mutex<Option<Joining>>,
+    /// Huddle audio, shared by every workspace: one huddle at a time.
     media: ShyMedia,
 }
 
+struct Joining {
+    cancel: JoinCancel,
+    /// Where the joined workspace will live, for its safety code.
+    folder: DataDir,
+}
+
+/// A change in one workspace, or (with no id) in the set of workspaces.
+#[derive(Serialize, Clone)]
+struct WorkspaceChange {
+    workspace_id: Option<String>,
+    change: shy_core::views::Change,
+}
+
 impl AppState {
+    pub(crate) fn open_workspaces(&self) -> Vec<Workspace> {
+        self.workspaces.open_workspaces()
+    }
+
     /// Online, with huddle audio served on the workspace's endpoint.
     fn online(&self) -> WorkspaceOptions {
         WorkspaceOptions::from(Networking::Online)
@@ -51,6 +72,7 @@ impl AppState {
 
 #[derive(Serialize)]
 struct Session {
+    workspace_id: String,
     workspace_name: String,
     me: String,
     is_admin: bool,
@@ -62,72 +84,187 @@ pub(crate) fn failed(error: anyhow::Error) -> String {
 
 fn session_of(workspace: &Workspace) -> Session {
     Session {
+        workspace_id: workspace.workspace_id().to_owned(),
         workspace_name: workspace.name().to_owned(),
         me: workspace.my_id(),
         is_admin: workspace.is_admin(),
     }
 }
 
+/// Sends every change of `workspace` to the UI, tagged with its id.
 fn forward_changes(app: &AppHandle, workspace: &Workspace) {
     let mut changes = workspace.subscribe();
+    let workspace_id = Some(workspace.workspace_id().to_owned());
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
-            match changes.recv().await {
-                Ok(change) => {
-                    let _ = app.emit("change", change);
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    let _ = app.emit("change", shy_core::views::Change::Sync);
-                }
+            let change = match changes.recv().await {
+                Ok(change) => change,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => shy_core::views::Change::Sync,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+            };
+            let tagged = WorkspaceChange {
+                workspace_id: workspace_id.clone(),
+                change,
+            };
+            let _ = app.emit("change", tagged);
         }
     });
 }
 
-async fn install(app: &AppHandle, state: &AppState, workspace: Workspace) -> Session {
-    activate(app, &mut *state.workspace.lock().await, workspace)
+/// Tells the UI the set of workspaces changed.
+fn emit_workspaces_changed(app: &AppHandle) {
+    let change = WorkspaceChange {
+        workspace_id: None,
+        change: shy_core::views::Change::Workspaces,
+    };
+    let _ = app.emit("change", change);
 }
 
-/// Makes `workspace` the open one and starts forwarding its changes to the UI.
-fn activate(app: &AppHandle, slot: &mut Option<Workspace>, workspace: Workspace) -> Session {
+/// Starts showing a workspace just added to this device.
+fn install(app: &AppHandle, workspace: &Workspace) -> Session {
+    forward_changes(app, workspace);
+    show_selected(app, workspace)
+}
+
+/// What the UI shows after the selected workspace changed.
+fn show_selected(app: &AppHandle, workspace: &Workspace) -> Session {
     app.state::<files::StagedFiles>().clear();
-    forward_changes(app, &workspace);
-    let session = session_of(&workspace);
-    *slot = Some(workspace);
-    session
+    emit_workspaces_changed(app);
+    session_of(workspace)
 }
 
+/// The selected workspace, which every command acts on.
 pub(crate) async fn current(state: &State<'_, AppState>) -> CommandResult<Workspace> {
     state
-        .workspace
-        .lock()
-        .await
-        .clone()
+        .workspaces
+        .selected()
         .ok_or_else(|| "no workspace is open".to_owned())
 }
 
 #[tauri::command]
 async fn session(app: AppHandle, state: State<'_, AppState>) -> CommandResult<Option<Session>> {
-    open_workspace(&app, &state).await
+    open_workspaces(&app, &state).await
 }
 
-/// Opens the workspace on this device, if there is one and it isn't open yet.
-pub(crate) async fn open_workspace(app: &AppHandle, state: &AppState) -> CommandResult<Option<Session>> {
-    // Held across the open, so two calls at once (React runs effects twice in
-    // development) wait for each other instead of both opening the folder.
-    let mut slot = state.workspace.lock().await;
-    if let Some(workspace) = slot.as_ref() {
-        return Ok(Some(session_of(workspace)));
-    }
-    if !Workspace::exists(&state.data.path) {
-        return Ok(None);
-    }
-    let workspace = Workspace::open(&state.data, state.online())
+/// Opens the workspaces on this device that aren't open yet (moving the
+/// single folder of earlier versions first), and returns what to show.
+pub(crate) async fn open_workspaces(app: &AppHandle, state: &AppState) -> CommandResult<Option<Session>> {
+    // Held across opening, so two calls at once (React runs effects twice in
+    // development) wait for each other instead of both opening the folders.
+    let _opening = state.opening.lock().await;
+    let single_folder = DataDir::new(state.root.join("workspace"), KeyStorage::Keychain);
+    state
+        .workspaces
+        .adopt_single_folder(&single_folder)
         .await
         .map_err(failed)?;
-    Ok(Some(activate(app, &mut slot, workspace)))
+    let opened = state
+        .workspaces
+        .open_all(|| state.online())
+        .await
+        .map_err(failed)?;
+    for (workspace_id, error) in opened.failed {
+        tracing::error!("couldn't open workspace {workspace_id}: {error:#}");
+    }
+    for workspace in &opened.workspaces {
+        forward_changes(app, workspace);
+    }
+    Ok(state
+        .workspaces
+        .selected()
+        .map(|workspace| session_of(&workspace)))
+}
+
+/// The workspaces on this device, in the order the person arranged them.
+#[tauri::command]
+fn workspaces(state: State<'_, AppState>) -> CommandResult<Vec<WorkspaceItem>> {
+    state.workspaces.rail().map_err(failed)
+}
+
+/// Shows another workspace; it becomes the one every command acts on.
+#[tauri::command]
+fn select_workspace(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> CommandResult<Session> {
+    let workspace = state.workspaces.select(&workspace_id).map_err(failed)?;
+    Ok(show_selected(&app, &workspace))
+}
+
+#[tauri::command]
+fn move_workspace(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+    position: usize,
+) -> CommandResult<()> {
+    state
+        .workspaces
+        .move_to(&workspace_id, position)
+        .map_err(failed)?;
+    emit_workspaces_changed(&app);
+    Ok(())
+}
+
+/// Deletes a workspace from this device for good (the UI confirms first).
+/// Returns what to show next, if any workspace is left.
+#[tauri::command]
+async fn leave_workspace(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> CommandResult<Option<Session>> {
+    state.workspaces.leave(&workspace_id).await.map_err(failed)?;
+    Ok(state
+        .workspaces
+        .selected()
+        .map(|workspace| show_selected(&app, &workspace)))
+}
+
+/// What each workspace's rail icon shows.
+#[tauri::command]
+fn workspace_badges(state: State<'_, AppState>) -> CommandResult<Vec<WorkspaceBadge>> {
+    state
+        .workspaces
+        .open_workspaces()
+        .iter()
+        .map(Workspace::badge)
+        .collect::<anyhow::Result<_>>()
+        .map_err(failed)
+}
+
+#[tauri::command]
+fn set_workspace_muted(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+    muted: bool,
+) -> CommandResult<()> {
+    match muted {
+        true => state.workspaces.mute(&workspace_id),
+        false => state.workspaces.unmute(&workspace_id),
+    }
+    .map_err(failed)?;
+    emit_workspaces_changed(&app);
+    Ok(())
+}
+
+/// Holds every workspace's notifications until `until_ms`, or lets them
+/// show again with none.
+#[tauri::command]
+fn set_notifications_paused(state: State<'_, AppState>, until_ms: Option<i64>) -> CommandResult<()> {
+    match until_ms {
+        Some(until_ms) => state.workspaces.pause_notifications(until_ms),
+        None => state.workspaces.resume_notifications(),
+    }
+    .map_err(failed)
+}
+
+#[tauri::command]
+fn notifications_paused(state: State<'_, AppState>) -> CommandResult<Option<i64>> {
+    state.workspaces.notifications_paused().map_err(failed)
 }
 
 #[tauri::command]
@@ -142,16 +279,12 @@ async fn create_workspace(
         name: name.trim(),
         is_bot: false,
     };
-    let workspace = Workspace::create(
-        &state.data,
-        workspace_name.trim(),
-        profile,
-        bucket,
-        state.online(),
-    )
-    .await
-    .map_err(failed)?;
-    Ok(install(&app, &state, workspace).await)
+    let workspace = state
+        .workspaces
+        .create(workspace_name.trim(), profile, bucket, state.online())
+        .await
+        .map_err(failed)?;
+    Ok(install(&app, &workspace))
 }
 
 #[tauri::command]
@@ -166,6 +299,7 @@ async fn join_workspace(
         is_bot: false,
     };
     let cancel = JoinCancel::new();
+    let folder = state.workspaces.folder_for_invite(&invite).map_err(failed)?;
     {
         let mut joining = state
             .joining
@@ -174,14 +308,20 @@ async fn join_workspace(
         if joining.is_some() {
             return Err("a join request is already waiting for the admin".to_owned());
         }
-        *joining = Some(cancel.clone());
+        *joining = Some(Joining {
+            cancel: cancel.clone(),
+            folder,
+        });
     }
-    let joined = Workspace::join_cancellable(&state.data, &invite, profile, state.online(), &cancel).await;
+    let joined = state
+        .workspaces
+        .join(&invite, profile, state.online(), &cancel)
+        .await;
     *state
         .joining
         .lock()
         .map_err(|_| "join state lock poisoned".to_owned())? = None;
-    Ok(install(&app, &state, joined.map_err(failed)?).await)
+    Ok(install(&app, &joined.map_err(failed)?))
 }
 
 /// How many things need you, shown outside the window.
@@ -197,8 +337,8 @@ fn cancel_join(state: State<'_, AppState>) -> CommandResult<()> {
         .joining
         .lock()
         .map_err(|_| "join state lock poisoned".to_owned())?;
-    if let Some(cancel) = joining.as_ref() {
-        cancel.cancel();
+    if let Some(joining) = joining.as_ref() {
+        joining.cancel.cancel();
     }
     Ok(())
 }
@@ -206,7 +346,15 @@ fn cancel_join(state: State<'_, AppState>) -> CommandResult<()> {
 /// Shown while waiting to join, for the admin to compare.
 #[tauri::command]
 async fn safety_code(state: State<'_, AppState>) -> CommandResult<String> {
-    state.data.safety_code().await.map_err(failed)
+    let folder = {
+        let joining = state
+            .joining
+            .lock()
+            .map_err(|_| "join state lock poisoned".to_owned())?;
+        let joining = joining.as_ref().ok_or("no join is waiting for the admin")?;
+        DataDir::new(joining.folder.path.clone(), joining.folder.keys.clone())
+    };
+    folder.safety_code().await.map_err(failed)
 }
 
 #[tauri::command]
@@ -215,10 +363,12 @@ async fn restore_workspace(
     state: State<'_, AppState>,
     kit: String,
 ) -> CommandResult<Session> {
-    let workspace = Workspace::restore(&state.data, &kit, state.online())
+    let workspace = state
+        .workspaces
+        .restore(&kit, state.online())
         .await
         .map_err(failed)?;
-    Ok(install(&app, &state, workspace).await)
+    Ok(install(&app, &workspace))
 }
 
 #[tauri::command]
@@ -455,16 +605,30 @@ async fn set_notify_level(
         .map_err(failed)
 }
 
-/// Shows a desktop notification. The UI decides when one is wanted.
+/// Shows a desktop notification. The UI decides when one is wanted; a
+/// muted workspace, or a pause on all, holds it back.
 #[tauri::command]
 fn show_alert(
     app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: Option<String>,
     title: String,
     body: String,
     target: Option<alerts::AlertTarget>,
     picture: Option<alerts::AlertPicture>,
 ) -> CommandResult<()> {
-    alerts::show(&app, title, body, target, picture)
+    let may_notify = match &workspace_id {
+        Some(workspace_id) => state.workspaces.may_notify(workspace_id),
+        None => state
+            .workspaces
+            .notifications_paused()
+            .map(|paused| paused.is_none()),
+    }
+    .map_err(failed)?;
+    if !may_notify {
+        return Ok(());
+    }
+    alerts::show(&app, workspace_id, title, body, target, picture)
 }
 
 #[tauri::command]
@@ -793,11 +957,12 @@ async fn set_profile_details(state: State<'_, AppState>, details: ProfileDetails
         .map_err(failed)
 }
 
-/// `SHY_DIR` lets several members run side by side on one machine.
+/// The app's data folder. `SHY_DIR` names another, so several members can
+/// run side by side on one machine.
 fn data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
     match std::env::var_os("SHY_DIR") {
         Some(dir) => Ok(PathBuf::from(dir)),
-        None => Ok(app.path().app_data_dir()?.join("workspace")),
+        None => Ok(app.path().app_data_dir()?),
     }
 }
 
@@ -814,10 +979,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(files::StagedFiles::default())
         .setup(|app| {
-            let dir = data_dir(app.handle())?;
+            let root = data_dir(app.handle())?;
             app.manage(AppState {
-                data: DataDir::new(dir, KeyStorage::Keychain),
-                workspace: Mutex::new(None),
+                workspaces: Workspaces::new(&root, DeviceKeys::Keychain),
+                root,
+                opening: Mutex::new(()),
                 joining: std::sync::Mutex::new(None),
                 media: ShyMedia::new(),
             });
@@ -884,6 +1050,14 @@ pub fn run() {
             storage_protection,
             check_storage_protection,
             update_storage,
+            workspaces,
+            select_workspace,
+            move_workspace,
+            leave_workspace,
+            workspace_badges,
+            set_workspace_muted,
+            set_notifications_paused,
+            notifications_paused,
             storage_rotation,
             check_old_key_deleted,
             cancel_storage_rotation,
@@ -977,21 +1151,30 @@ fn on_run_event(app: &AppHandle, event: tauri::RunEvent) {
 /// `EXIT_UPLOAD_LIMIT`.
 fn upload_before_exit(app: &AppHandle) {
     tauri::async_runtime::block_on(async {
-        let workspace = app.state::<AppState>().workspace.lock().await.take();
-        shut_down(workspace).await;
+        let workspaces = app.state::<AppState>().workspaces.close_all();
+        shut_down(workspaces).await;
     });
 }
 
-/// Shuts a workspace down, uploading what wasn't sent yet, within
+/// Shuts workspaces down together, uploading what wasn't sent yet, within
 /// `EXIT_UPLOAD_LIMIT`. What doesn't make it stays on disk and goes at the
 /// next start.
-pub(crate) async fn shut_down(workspace: Option<Workspace>) {
-    let Some(workspace) = workspace else {
-        return;
-    };
-    match tokio::time::timeout(EXIT_UPLOAD_LIMIT, workspace.shutdown()).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::warn!("could not upload unsent changes before closing: {error:#}"),
-        Err(_) => tracing::warn!("gave up uploading unsent changes: closing took too long"),
+pub(crate) async fn shut_down(workspaces: Vec<Workspace>) {
+    let mut shutdowns = tokio::task::JoinSet::new();
+    for workspace in workspaces {
+        shutdowns.spawn(async move { workspace.shutdown().await });
+    }
+    let finished = tokio::time::timeout(EXIT_UPLOAD_LIMIT, async {
+        while let Some(shutdown) = shutdowns.join_next().await {
+            match shutdown {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => tracing::warn!("could not upload unsent changes before closing: {error:#}"),
+                Err(error) => tracing::warn!("uploading before closing stopped: {error}"),
+            }
+        }
+    })
+    .await;
+    if finished.is_err() {
+        tracing::warn!("gave up uploading unsent changes: closing took too long");
     }
 }

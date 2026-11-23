@@ -29,15 +29,24 @@ pub enum AlertTarget {
     Channel(String),
 }
 
+/// What a clicked alert was about, and in which workspace, as the
+/// frontend gets it: `{ "workspace_id": …, "kind": …, "id": … }`.
+#[derive(Clone, Serialize)]
+struct OpenedAlert {
+    workspace_id: Option<String>,
+    #[serde(flatten)]
+    target: AlertTarget,
+}
+
 /// What each recent alert was about, by the alert's id.
 #[derive(Default)]
 pub struct AlertTargets {
     next_id: AtomicI32,
-    recent: Mutex<VecDeque<(i32, AlertTarget)>>,
+    recent: Mutex<VecDeque<(i32, OpenedAlert)>>,
 }
 
 impl AlertTargets {
-    fn remember(&self, target: AlertTarget) -> i32 {
+    fn remember(&self, target: OpenedAlert) -> i32 {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         // The list only ever holds whole entries, so a panic elsewhere can't leave it broken.
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
@@ -48,7 +57,7 @@ impl AlertTargets {
         id
     }
 
-    fn target_of(&self, id: i32) -> Option<AlertTarget> {
+    fn target_of(&self, id: i32) -> Option<OpenedAlert> {
         let recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         recent
             .iter()
@@ -87,9 +96,11 @@ pub struct AlertPicture {
     png: Vec<u8>,
 }
 
-/// Shows an alert; a click on it opens `target` if there is one.
+/// Shows an alert; a click on it opens `target` (in `workspace_id`'s
+/// workspace) if there is one.
 pub fn show(
     app: &AppHandle,
+    workspace_id: Option<String>,
     title: String,
     body: String,
     target: Option<AlertTarget>,
@@ -97,7 +108,8 @@ pub fn show(
 ) -> Result<(), String> {
     let mut builder = app.notification().builder().title(title).body(body);
     if let Some(target) = target {
-        builder = builder.id(app.state::<AlertTargets>().remember(target));
+        let opened = OpenedAlert { workspace_id, target };
+        builder = builder.id(app.state::<AlertTargets>().remember(opened));
     }
     if let Some(picture) = picture {
         builder = builder.icon(save_picture(app, &picture)?);
