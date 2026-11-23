@@ -123,6 +123,14 @@ impl Workspace {
                         continue;
                     }
                     let received = self.receive_locked(&state, envelope);
+                    #[cfg(test)]
+                    if self
+                        .inner
+                        .drop_segment_transaction
+                        .swap(false, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        store.execute_for_test("ROLLBACK");
+                    }
                     ensure!(
                         store.is_in_transaction(),
                         "the database gave up the segment's transaction; it is read again"

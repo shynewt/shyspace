@@ -25,7 +25,7 @@ use crate::{
 const INVITE_LIFETIME: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const MAX_REQUESTER_NAME: usize = 80;
 /// How often a pending join answer is put up again, in case someone removed it.
-const ANSWER_REFRESH_MS: i64 = 10 * 60 * 1000;
+const ANSWER_REFRESH: Duration = Duration::from_secs(10 * 60);
 
 /// What the admin still owes a joiner. Saved before the commit is applied and
 /// kept until the joiner posts, so neither a crash nor a failed upload strands
@@ -242,7 +242,6 @@ impl Workspace {
     /// removed it.
     async fn deliver_answers(&self) -> Result<()> {
         let deliveries = self.state().store.deliveries()?;
-        let now = now_ms()?;
         for (joiner, token, payload) in deliveries {
             if self.state().store.has_ops_from(&joiner)? {
                 self.bucket().delete_invite_answer(&token).await?;
@@ -254,7 +253,7 @@ impl Workspace {
             let is_recent = self
                 .answers_sent()
                 .get(&joiner)
-                .is_some_and(|sent_ms| now.saturating_sub(*sent_ms) < ANSWER_REFRESH_MS);
+                .is_some_and(|sent| sent.elapsed() < ANSWER_REFRESH);
             if is_recent {
                 continue;
             }
@@ -262,6 +261,7 @@ impl Workspace {
             let Some(sealed_grant) = delivery.sealed_grant else {
                 warn!("no grant sealed for {joiner}; they need a new invite");
                 self.state().store.delete_delivery(&joiner)?;
+                self.answers_sent().remove(&joiner);
                 continue;
             };
             let answer = Answer::Accepted {
@@ -271,14 +271,16 @@ impl Workspace {
             self.bucket()
                 .put_invite_answer(&token, postcard::to_stdvec(&answer)?)
                 .await?;
-            self.answers_sent().insert(joiner, now);
+            self.answers_sent().insert(joiner, tokio::time::Instant::now());
         }
         Ok(())
     }
 
-    fn answers_sent(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<iroh::PublicKey, i64>> {
+    fn answers_sent(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::HashMap<iroh::PublicKey, tokio::time::Instant>> {
         self.inner
-            .answers_sent_ms
+            .answers_sent
             .lock()
             .expect("sent answers lock poisoned by an earlier panic")
     }

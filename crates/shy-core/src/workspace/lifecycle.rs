@@ -253,6 +253,14 @@ impl Workspace {
             .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
         config.mark_complete(&data.path)?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
+        #[cfg(test)]
+        if CUT_SHORT_CREATES
+            .lock()
+            .expect("cut-short creates lock poisoned")
+            .contains(&data.path)
+        {
+            bail!("a simulated crash while creating");
+        }
         workspace.finish_pending_profile()?;
         workspace.write(Op::ChannelCreate {
             id: new_owned_id(&workspace.me()),
@@ -421,7 +429,7 @@ impl Workspace {
                 sync_lock: tokio::sync::Mutex::new(()),
                 push_now: Notify::new(),
                 push_lock: tokio::sync::Mutex::new(()),
-                answers_sent_ms: Default::default(),
+                answers_sent: Default::default(),
                 recovery_lock: tokio::sync::Mutex::new(()),
                 status: Mutex::new(SyncStatus::default()),
                 refetched_gaps: Mutex::new(std::collections::HashSet::new()),
@@ -442,6 +450,8 @@ impl Workspace {
                 fail_next_park: Default::default(),
                 #[cfg(test)]
                 fail_segment_save: Default::default(),
+                #[cfg(test)]
+                drop_segment_transaction: Default::default(),
             }),
         };
         workspace
@@ -493,6 +503,11 @@ async fn wait_for_answer(
         }
     }
 }
+
+/// Folders whose create stops just after it is complete, as if the app
+/// died then; keyed by folder so tests running alongside aren't touched.
+#[cfg(test)]
+pub(crate) static CUT_SHORT_CREATES: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
 
 #[derive(Serialize, Deserialize)]
 struct PendingProfile {

@@ -343,16 +343,23 @@ async fn a_create_cut_short_finishes_the_admins_name_on_the_next_open() {
     let root = tempfile::tempdir().unwrap();
     let bucket = memory_bucket();
     let ada_dir = root.path().join("ada");
-    let admin = create_admin(&ada_dir, &bucket).await;
-    // As if the app stopped before the chosen name was written.
-    let chosen = serde_json::json!({ "name": "Ada Lovelace", "is_bot": false }).to_string();
-    admin
-        .state()
-        .store
-        .set_meta("pending_profile", chosen.as_bytes())
-        .unwrap();
-    admin.shutdown().await.unwrap();
-    drop(admin);
+    let cut_short = || crate::workspace::CUT_SHORT_CREATES.lock().unwrap();
+    cut_short().push(ada_dir.clone());
+    let created = crate::Workspace::create_with(
+        &data_dir(&ada_dir),
+        "workspace-id".into(),
+        "Acme",
+        crate::Profile {
+            name: "Ada",
+            is_bot: false,
+        },
+        test_bucket_config(),
+        connector(&bucket),
+        crate::Networking::Offline,
+    )
+    .await;
+    cut_short().retain(|dir| *dir != ada_dir);
+    assert!(created.is_err(), "the create was cut short");
 
     let reopened = crate::Workspace::open_with(
         &data_dir(&ada_dir),
@@ -367,6 +374,6 @@ async fn a_create_cut_short_finishes_the_admins_name_on_the_next_open() {
             .members()
             .unwrap()
             .iter()
-            .any(|member| member.name == "Ada Lovelace")
+            .any(|member| member.name == "Ada")
     );
 }

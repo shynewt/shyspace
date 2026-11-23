@@ -14,6 +14,8 @@ mod storage;
 
 pub(crate) use actions::OpMaker;
 pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
+#[cfg(test)]
+pub(crate) use lifecycle::CUT_SHORT_CREATES;
 pub use lifecycle::{DataDir, JoinCancel};
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
 pub use presence::Heartbeat;
@@ -111,9 +113,10 @@ pub(crate) struct Inner {
     pub push_now: Notify,
     /// One upload at a time, so the same ops never go up twice at once.
     pub push_lock: tokio::sync::Mutex<()>,
-    /// When each pending join answer last went up, so it goes up again only
-    /// now and then rather than on every pass; in memory only.
-    pub answers_sent_ms: Mutex<std::collections::HashMap<iroh::PublicKey, i64>>,
+    /// When each pending join answer last went up (by a clock that never
+    /// goes back), so it goes up again only now and then rather than on
+    /// every pass; in memory only.
+    pub answers_sent: Mutex<std::collections::HashMap<iroh::PublicKey, tokio::time::Instant>>,
     pub recovery_lock: tokio::sync::Mutex<()>,
     pub status: Mutex<SyncStatus>,
     /// Gaps (author, missing seq) already fetched again this run, so a gap
@@ -143,6 +146,10 @@ pub(crate) struct Inner {
     /// the app died then.
     #[cfg(test)]
     pub fail_segment_save: std::sync::atomic::AtomicBool,
+    /// Makes SQLite give up the next downloaded segment's transaction while
+    /// it is applying an op, as a full disk can.
+    #[cfg(test)]
+    pub drop_segment_transaction: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]
