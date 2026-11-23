@@ -20,8 +20,17 @@ jobs:
   rust:
     name: Rust (format, lint, test)
     runs-on: ubuntu-24.04
+    env:
+      # Line numbers for backtraces without full debug info, which fills the disk.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v7
+      - name: Room on the disk
+        # The runner comes with toolchains we never use; the build needs the space.
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: System libraries for Tauri and SQLCipher
         run: |
           sudo apt-get update
@@ -35,6 +44,9 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: Disk left
+        if: always()
+        run: df -h /
 
   frontend:
     name: Frontend (types, lint, UI tests)
@@ -81,8 +93,17 @@ jobs:
     if: github.workflow == 'CI' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      # Line numbers for backtraces without full debug info, which fills the disk.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v7
+      - name: Room on the disk
+        # The runner comes with toolchains we never use; the build needs the space.
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: System libraries, WebKit's WebDriver, a virtual display and a keychain
         run: |
           sudo apt-get update
@@ -121,3 +142,6 @@ jobs:
           dbus-run-session -- sh -c '
             printf test | gnome-keyring-daemon --unlock --components=secrets >/dev/null
             xvfb-run -a pnpm test:app'
+      - name: Disk left
+        if: always()
+        run: df -h /
