@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig } from "vite";
-import app from "./vite.config";
+import app from "./vite.config.ts";
 
 /**
  * The app with its fake backend (tests/ui/app.html), built and served as one
