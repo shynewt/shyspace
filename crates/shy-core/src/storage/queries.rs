@@ -83,7 +83,7 @@ impl Store {
     pub fn channels(&self) -> Result<Vec<Channel>> {
         let mut statement = self.db.prepare(
             "SELECT c.id, COALESCE(n.name, c.name) FROM channels c
-                 LEFT JOIN channel_names n ON n.channel = c.id ORDER BY c.created_ms, c.id",
+                 LEFT JOIN channel_names n ON n.channel = c.id ORDER BY c.lamport, c.author, c.id",
         )?;
         let rows = statement.query_map([], |row| {
             Ok(Channel {
@@ -173,7 +173,7 @@ impl Store {
             // A sub-page of a deleted page shows at the top level.
             "SELECT id, CASE WHEN parent IN (SELECT id FROM deleted) THEN NULL ELSE parent END,
                     title, updated_ms
-             FROM pages WHERE created_ms IS NOT NULL ORDER BY created_ms, id",
+             FROM pages WHERE created_ms IS NOT NULL ORDER BY create_lamport, create_author, id",
         )?;
         let rows = statement.query_map([], |row| {
             Ok(Page {

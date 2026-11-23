@@ -2049,3 +2049,74 @@ async fn a_file_deleted_before_it_arrives_still_leaves_the_bucket() {
     assert!(admin.files().unwrap().is_empty() && bob.files().unwrap().is_empty());
     assert!(bucket.blob_ids(&bob.me()).await.unwrap().is_empty());
 }
+
+/// An op's time comes from its author's clock. A message can't show a time
+/// later than we got it, and lists keep the order ops were made in (their
+/// clocks), not the times their authors claim.
+#[tokio::test(flavor = "multi_thread")]
+async fn claimed_times_cant_date_a_message_ahead_or_reorder_lists() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let (epoch, key) = current_key(&bob);
+    let mut seq = bob.state().store.next_seq(&bob.me()).unwrap();
+    let a_year_ahead = now_ms().unwrap() + 365 * 24 * 60 * 60 * 1000;
+    let mut seal = |lamport: u64, timestamp_ms: i64, op: Op| {
+        let body = OpBody {
+            lamport,
+            timestamp_ms,
+            op,
+        };
+        let envelope = crypto::seal(&bob.inner.identity, &key, epoch, seq, &body).unwrap();
+        seq += 1;
+        envelope
+    };
+    let made_first = crate::ops::new_owned_id(&bob.me());
+    let made_second = crate::ops::new_owned_id(&bob.me());
+    let ops = [
+        seal(
+            9_000,
+            a_year_ahead,
+            Op::ChannelCreate {
+                id: made_first.clone(),
+                name: "first".into(),
+            },
+        ),
+        seal(
+            9_001,
+            1_000,
+            Op::ChannelCreate {
+                id: made_second.clone(),
+                name: "second".into(),
+            },
+        ),
+        seal(
+            9_002,
+            a_year_ahead,
+            Op::Message {
+                id: crate::ops::new_owned_id(&bob.me()),
+                channel: general.clone(),
+                text: "from the future".into(),
+                reply_to: None,
+            },
+        ),
+    ];
+    for envelope in ops {
+        admin.receive(envelope).unwrap();
+    }
+
+    let order: Vec<String> = admin
+        .channels()
+        .unwrap()
+        .into_iter()
+        .map(|channel| channel.id)
+        .collect();
+    let position = |id: &str| order.iter().position(|listed| listed == id).unwrap();
+    assert!(position(&made_first) < position(&made_second), "{order:?}");
+    let shown = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.text == "from the future")
+        .unwrap();
+    assert!(shown.created_ms <= now_ms().unwrap());
+}

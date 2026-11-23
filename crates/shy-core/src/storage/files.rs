@@ -59,7 +59,7 @@ impl Store {
                 ":media_type": clean_media_type(&file.media_type),
                 ":size": i64::try_from(file.blob.size)?,
                 ":blob": postcard::to_stdvec(&file.blob)?,
-                ":now": verified.body.timestamp_ms,
+                ":now": super::apply::shown_time(verified)?,
                 ":seq": verified.seq,
             },
         )?;
@@ -125,7 +125,7 @@ impl Store {
     pub fn files_of_message(&self, message: &str, channel: &str) -> Result<Vec<StoredFile>> {
         self.db
             .prepare(&format!(
-                "SELECT {FILE_COLUMNS} FROM {FILES} WHERE f.message = ? AND f.place = ? ORDER BY f.created_ms, f.id"
+                "SELECT {FILE_COLUMNS} FROM {FILES} WHERE f.message = ? AND f.place = ? ORDER BY f.seq, f.id"
             ))?
             .query_map([message, channel], stored_file)?
             .collect::<Result<_, _>>()
@@ -144,7 +144,9 @@ impl Store {
     pub fn all_files(&self) -> Result<Vec<StoredFile>> {
         self.db
             .prepare(&format!(
-                "SELECT {FILE_COLUMNS} FROM {FILES} ORDER BY f.created_ms DESC, f.id"
+                "SELECT {FILE_COLUMNS} FROM {FILES}
+                 LEFT JOIN messages sent ON sent.id = f.message
+                 ORDER BY COALESCE(sent.lamport, 0) DESC, f.author DESC, f.seq DESC, f.id"
             ))?
             .query_map([], stored_file)?
             .collect::<Result<_, _>>()

@@ -11,13 +11,19 @@ use crate::{
     files::MAX_PICTURE_BYTES,
     ops::{
         MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, Op, VerifiedOp, clean_channel_name,
-        clean_display_name, clean_emoji, clean_page_title, cut_to, is_owned_by, is_valid_status,
+        clean_display_name, clean_emoji, clean_page_title, cut_to, is_owned_by, is_valid_status, now_ms,
         rule_violation,
     },
     pages,
     private::{crypto::is_valid_sealing_public_key, ids::is_private_id},
     views::Change,
 };
+
+/// When an op shows as made: its author's clock, but never later than we
+/// got it, so nobody can date something ahead. Lists sort by op clocks.
+pub(super) fn shown_time(verified: &VerifiedOp) -> Result<i64> {
+    Ok(verified.body.timestamp_ms.min(now_ms()?))
+}
 
 /// A creation that conflicts with an existing id keeps the earliest one by
 /// (lamport, author), so every replica picks the same winner.
@@ -92,7 +98,7 @@ impl Store {
     pub fn apply(&self, verified: &VerifiedOp) -> Result<Option<Change>> {
         let author = verified.author.as_bytes().as_slice();
         let lamport = verified.body.lamport;
-        let now = verified.body.timestamp_ms;
+        let now = shown_time(verified)?;
         let created = match &verified.body.op {
             Op::ChannelCreate { id, .. } | Op::Message { id, .. } | Op::PageCreate { id, .. } => Some(id),
             Op::File { file } => Some(&file.id),
@@ -307,7 +313,7 @@ impl Store {
                      lamport = :lamport, author = :author WHERE {EARLIER_WINS}"
             ),
             named_params! {
-                ":id": id, ":name": name, ":now": verified.body.timestamp_ms,
+                ":id": id, ":name": name, ":now": shown_time(verified)?,
                 ":lamport": verified.body.lamport, ":author": verified.author.as_bytes().as_slice(),
             },
         )?;
