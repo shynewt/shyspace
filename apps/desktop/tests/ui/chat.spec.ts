@@ -78,6 +78,22 @@ test("the channel says when agents can read it", async ({ page }) => {
   await expect(page.getByText("1 agent can read this")).toBeVisible();
 });
 
+test("a private channel counts only the agents in it", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const claude = window.fake.addMember("Claude", { kind: "bot" });
+    window.fake.receivePrivateChannel(grace, "ops");
+    window.fake.receivePrivateChannel(grace, "ai-lab", [claude]);
+  });
+  const sidebar = page.getByRole("navigation", { name: "Workspace" });
+  await sidebar.getByRole("button", { name: /^ops/ }).click();
+  await expect(page.getByLabel("Message #ops")).toBeVisible();
+  await expect(page.getByText(/agents? can read this/)).toHaveCount(0);
+
+  await sidebar.getByRole("button", { name: /^ai-lab/ }).click();
+  await expect(page.getByText("1 agent can read this")).toBeVisible();
+});
+
 async function send(page: import("@playwright/test").Page, ...texts: string[]) {
   const composer = page.getByLabel("Message #general");
   for (const text of texts) {

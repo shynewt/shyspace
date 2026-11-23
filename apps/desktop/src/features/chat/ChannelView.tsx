@@ -329,7 +329,7 @@ export function ChannelView({
           {channel ? <ChannelTitle channel={channel} members={members} /> : <h1 className="text-lg">…</h1>}
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {channel && channel.kind !== "notes" && <HuddleButton channel={channel} />}
-            <ChannelInfo />
+            {channel && <ChannelInfo channel={channel} />}
           </div>
         </ViewHeader>
 

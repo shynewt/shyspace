@@ -1,6 +1,8 @@
 import { Bot, Info, Lock } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useCallback } from "react";
+import { api, type Channel } from "../../lib/api";
 import { useMembers } from "../../lib/members";
+import { useLive } from "../../lib/useLive";
 import { IconButton, Popover } from "../../ui";
 import { HeaderAction } from "../shell/ViewHeader";
 
@@ -11,9 +13,8 @@ type InfoItem = { id: string; icon: ReactNode; label: string; detail: string; lo
  * open their details, icons alone when the header is narrow, and one Info
  * button when it's narrower still.
  */
-export function ChannelInfo() {
-  const members = useMembers();
-  const agents = members?.filter((member) => member.active && member.is_bot).length ?? 0;
+export function ChannelInfo({ channel }: { channel: Channel }) {
+  const agents = useAgentsWhoCanRead(channel);
   const items: InfoItem[] = [
     ...(agents > 0
       ? [
@@ -67,4 +68,32 @@ function InfoDetails({ items }: { items: InfoItem[] }) {
       ))}
     </ul>
   );
+}
+
+/**
+ * How many agents can read `channel`: every active one in a public channel,
+ * and in a private channel or DM only those in it (invited ones too, as
+ * their key may be on its way).
+ */
+function useAgentsWhoCanRead(channel: Channel): number {
+  const members = useMembers();
+  const isPrivate = channel.kind === "private";
+  const loadPrivate = useCallback(
+    () => (isPrivate ? api.privateMembers(channel.id) : Promise.resolve(null)),
+    [isPrivate, channel.id],
+  );
+  const inPrivate = useLive(loadPrivate, (change) => change.kind === "channels" || change.kind === "members");
+  const agents = (members ?? []).filter((member) => member.active && member.is_bot);
+  switch (channel.kind) {
+    case "public":
+      return agents.length;
+    case "dm":
+      return agents.filter((agent) => channel.dm_members.includes(agent.id)).length;
+    case "private": {
+      const readers = new Set([...(inPrivate?.members ?? []), ...(inPrivate?.invited ?? [])]);
+      return agents.filter((agent) => readers.has(agent.id)).length;
+    }
+    case "notes":
+      return 0;
+  }
 }

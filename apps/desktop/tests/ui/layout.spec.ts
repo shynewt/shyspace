@@ -28,8 +28,9 @@ async function openAt(page: Page, size: { width: number; height: number }, view:
     ({ view, names }) => {
       window.prepareFake = (fake) => {
         const grace = fake.addMember("Grace");
-        fake.addMember("Helper", { kind: "bot" });
-        const channel = fake.receivePrivateChannel(grace, names.channel);
+        // In the channel, so its header carries the agent pill too.
+        const helper = fake.addMember("Helper", { kind: "bot" });
+        const channel = fake.receivePrivateChannel(grace, names.channel, [helper]);
         fake.receiveMessage(grace, names.channel, `Have a look ${names.url}`);
         fake.receiveMessage(grace, names.channel, names.code);
         const root = fake.receiveMessage(grace, names.channel, "Who owns the escalation rota?");
