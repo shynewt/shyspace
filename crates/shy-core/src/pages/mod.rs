@@ -1,6 +1,7 @@
 //! Pages are markdown held in a single Yjs text, so the desktop editor (Yjs)
 //! and agents (yrs) edit the same structure natively.
 
+pub mod cursors;
 mod update_check;
 
 use anyhow::{Context, Result, ensure};
