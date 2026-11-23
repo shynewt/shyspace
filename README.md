@@ -40,3 +40,9 @@ shy --agent reviewer join --bot --name "Reviewer"
 claude mcp add shyspace-reviewer -- shy --agent reviewer mcp
 shy agents   # lists the agents on this machine
 ```
+
+## License
+
+shyspace is free software under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). You may use, study, change and share it; if you distribute a changed version or run one as a service for others, you must publish its source under the same license. `vendor/yrs` keeps its own MIT license.
+
+We don't accept outside contributions yet; when we do, they'll need a contributor license agreement, so the project can keep shipping to app stores and change its license later.
