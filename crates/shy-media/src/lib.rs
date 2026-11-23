@@ -19,9 +19,12 @@ mod system;
 mod tests;
 mod wav;
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{
+    Arc, Mutex, MutexGuard,
+    atomic::{AtomicU64, Ordering},
+};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result};
 use iroh::{Endpoint, protocol::RouterBuilder};
 use iroh_live::{Node, NodeConfig};
 use shy_core::{
@@ -38,10 +41,8 @@ use crate::{
     system::System,
 };
 
-/// Huddle audio on this device's microphones and speakers. Make one per app
-/// and hand it to every workspace it opens: [`protocols`](Self::protocols)
-/// to serve media on the workspace's endpoint, and
-/// [`huddle_media`](Self::huddle_media) for the core to drive.
+/// Huddle audio on this device's microphones and speakers. Make one per app,
+/// and one [`WorkspaceAudio`] from it for each workspace that opens.
 #[derive(Clone)]
 pub struct ShyMedia(Arc<Media<System>>);
 
@@ -50,6 +51,24 @@ impl ShyMedia {
         Self(Arc::new(Media::new(System)))
     }
 
+    pub fn for_workspace(&self) -> WorkspaceAudio {
+        WorkspaceAudio(Arc::new(WorkspaceMedia::new(self.0.clone())))
+    }
+}
+
+impl Default for ShyMedia {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The device's huddle audio as one workspace uses it: served on that
+/// workspace's own endpoint, so its call, sounds and ring use its network
+/// and its device key, and only its call can be stopped or muted from it.
+#[derive(Clone)]
+pub struct WorkspaceAudio(Arc<WorkspaceMedia<System>>);
+
+impl WorkspaceAudio {
     /// The media protocol, admitted for workspace members only, with the
     /// policy that lets just the running call's listed peers in.
     pub fn protocols(&self) -> ExtraProtocols {
@@ -61,34 +80,77 @@ impl ShyMedia {
     }
 }
 
-impl Default for ShyMedia {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
+/// What the device has once, whatever the workspace: its audio devices and
+/// the one call it can be in.
 pub(crate) struct Media<B: Backend> {
     backend: Arc<B>,
-    access: Access,
-    /// The node on the open workspace's endpoint, and the runtime it runs on.
-    attached: Mutex<Option<(Node, Handle)>>,
-    running: Mutex<Option<Running<B::Speaker>>>,
+    active: Mutex<Option<Active<B::Speaker>>>,
     choice: Mutex<DeviceChoice>,
+    workspaces_made: AtomicU64,
+}
+
+/// The running call and the workspace it runs in.
+struct Active<S: Speaker> {
+    workspace: u64,
+    access: Access,
+    running: Running<S>,
+}
+
+impl<S: Speaker> Active<S> {
+    /// Cuts every peer off at once: closing the access, then withdrawing the
+    /// publication, decides every session again.
+    fn end(self) {
+        self.access.close();
+        drop(self.running);
+    }
 }
 
 impl<B: Backend> Media<B> {
     pub(crate) fn new(backend: B) -> Self {
         Self {
             backend: Arc::new(backend),
-            access: Access::default(),
-            attached: Mutex::new(None),
-            running: Mutex::new(None),
+            active: Mutex::new(None),
             choice: Mutex::new(DeviceChoice::default()),
+            workspaces_made: AtomicU64::new(0),
         }
     }
 
-    /// Each workspace that opens mounts a new node on its endpoint, which
-    /// replaces the last one's.
+    /// Ends the running call if `workspace` holds it, or any call when
+    /// `workspace` is `None`.
+    fn end_call(&self, workspace: Option<u64>) {
+        let ended = {
+            let mut active = lock(&self.active);
+            let is_ending = active
+                .as_ref()
+                .is_some_and(|call| workspace.is_none_or(|workspace| call.workspace == workspace));
+            if is_ending { active.take() } else { None }
+        };
+        if let Some(call) = ended {
+            call.end();
+        }
+    }
+}
+
+pub(crate) struct WorkspaceMedia<B: Backend> {
+    media: Arc<Media<B>>,
+    id: u64,
+    /// Who may connect to this workspace's node: the peers of its call.
+    access: Access,
+    /// The node on this workspace's endpoint, and the runtime it runs on.
+    attached: Mutex<Option<(Node, Handle)>>,
+}
+
+impl<B: Backend> WorkspaceMedia<B> {
+    pub(crate) fn new(media: Arc<Media<B>>) -> Self {
+        let id = media.workspaces_made.fetch_add(1, Ordering::Relaxed);
+        Self {
+            media,
+            id,
+            access: Access::default(),
+            attached: Mutex::new(None),
+        }
+    }
+
     pub(crate) fn protocols(self: &Arc<Self>) -> ExtraProtocols {
         let media = self.clone();
         ExtraProtocols::new(move |endpoint, router| media.attach(endpoint, router))
@@ -107,53 +169,73 @@ impl<B: Backend> Media<B> {
     fn attached(&self) -> Option<(Node, Handle)> {
         lock(&self.attached).clone()
     }
+
+    /// Runs `change` on the running call if it is this workspace's.
+    fn with_my_call(&self, change: impl FnOnce(&Running<B::Speaker>)) {
+        if let Some(call) = lock(&self.media.active)
+            .as_ref()
+            .filter(|call| call.workspace == self.id)
+        {
+            change(&call.running);
+        }
+    }
 }
 
-impl<B: Backend> HuddleMedia for Media<B> {
+impl<B: Backend> HuddleMedia for WorkspaceMedia<B> {
+    /// Ends any call first, whichever workspace holds it: one microphone,
+    /// so one call at a time.
     fn start(&self, call: MediaCall) -> Result<()> {
-        let Some((node, runtime)) = self.attached() else {
-            bail!("huddle audio isn't attached to a workspace's network");
-        };
-        *lock(&self.choice) = call.devices.clone();
+        let (node, runtime) = self
+            .attached()
+            .context("huddle audio isn't attached to this workspace's network")?;
+        self.media.end_call(None);
+        *lock(&self.media.choice) = call.devices.clone();
         let shared = Shared {
-            backend: self.backend.clone(),
+            backend: self.media.backend.clone(),
             node,
             access: self.access.clone(),
         };
         let running = call::start(shared, call, &runtime)?;
-        *lock(&self.running) = Some(running);
-        Ok(())
-    }
-
-    /// Cuts every peer off at once: ending the call withdraws its
-    /// publication and decides every session again.
-    fn stop(&self) {
-        self.access.close();
-        lock(&self.running).take();
-    }
-
-    fn set_muted(&self, muted: bool) -> Result<()> {
-        if let Some(running) = lock(&self.running).as_ref() {
-            running.set_muted(muted);
+        let replaced = lock(&self.media.active).replace(Active {
+            workspace: self.id,
+            access: self.access.clone(),
+            running,
+        });
+        if let Some(replaced) = replaced {
+            replaced.end();
         }
         Ok(())
     }
 
+    fn stop(&self) {
+        self.media.end_call(Some(self.id));
+    }
+
+    fn set_muted(&self, muted: bool) -> Result<()> {
+        self.with_my_call(|running| running.set_muted(muted));
+        Ok(())
+    }
+
+    /// The devices are the device's, so the choice applies to the call
+    /// wherever it is.
     fn set_devices(&self, choice: DeviceChoice) -> Result<()> {
-        *lock(&self.choice) = choice.clone();
-        if let Some(running) = lock(&self.running).as_ref() {
-            running.set_devices(choice);
+        *lock(&self.media.choice) = choice.clone();
+        if let Some(call) = lock(&self.media.active).as_ref() {
+            call.running.set_devices(choice);
         }
         Ok(())
     }
 
     fn list_devices(&self) -> Result<DeviceList> {
-        self.backend.list_devices()
+        self.media.backend.list_devices()
     }
 
     fn play_cue(&self, cue: Cue) {
         let Some(sound) = self.sound_setup() else {
-            debug!(?cue, "the huddle sound is skipped: no workspace network is up");
+            debug!(
+                ?cue,
+                "the huddle sound is skipped: this workspace's network is down"
+            );
             return;
         };
         sound.runtime.clone().spawn(async move {
@@ -165,7 +247,7 @@ impl<B: Backend> HuddleMedia for Media<B> {
 
     fn ring(&self) -> Ringing {
         let Some(sound) = self.sound_setup() else {
-            debug!("the ring is skipped: no workspace network is up");
+            debug!("the ring is skipped: this workspace's network is down");
             return Ringing::new(());
         };
         let task = sound.runtime.clone().spawn(async move {
@@ -177,8 +259,8 @@ impl<B: Backend> HuddleMedia for Media<B> {
     }
 }
 
-impl<B: Backend> Media<B> {
-    /// What a sound needs, unless no workspace is open or its network is
+impl<B: Backend> WorkspaceMedia<B> {
+    /// What a sound needs, unless this workspace's network isn't up or is
     /// closing (the app closing plays the leave sound as it shuts down).
     fn sound_setup(&self) -> Option<SoundSetup<B>> {
         let (node, runtime) = self.attached()?;
@@ -186,9 +268,11 @@ impl<B: Backend> Media<B> {
             return None;
         }
         Some(SoundSetup {
-            backend: self.backend.clone(),
-            speaker: lock(&self.running).as_ref().and_then(Running::speaker),
-            device: lock(&self.choice).output.clone(),
+            backend: self.media.backend.clone(),
+            speaker: lock(&self.media.active)
+                .as_ref()
+                .and_then(|call| call.running.speaker()),
+            device: lock(&self.media.choice).output.clone(),
             runtime,
         })
     }

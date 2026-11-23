@@ -16,7 +16,7 @@ use shy_core::huddle::media::{DeviceChoice, HuddleMedia, Link, MediaCall, MediaE
 use tokio::sync::{mpsc, watch};
 
 use super::tones::{Recorder, Tones, pitch};
-use crate::Media;
+use crate::{Media, WorkspaceMedia};
 
 const A: f32 = 440.0;
 const E: f32 = 660.0;
@@ -26,11 +26,12 @@ const WITHIN: Duration = Duration::from_secs(20);
 /// How long a test listens to be sure nothing arrives.
 const QUIET_FOR: Duration = Duration::from_secs(3);
 
+/// One workspace on a device: its own endpoint, sharing the device's audio.
 struct Device {
     id: PublicKey,
-    media: Arc<Media<Tones>>,
+    media: Arc<WorkspaceMedia<Tones>>,
     speaker: Recorder,
-    _router: Router,
+    router: Router,
 }
 
 impl Device {
@@ -39,20 +40,25 @@ impl Device {
     }
 
     async fn with(lookup: &MemoryLookup, tones: Tones) -> Self {
+        let speaker = tones.speaker();
+        Self::in_workspace(lookup, &Arc::new(Media::new(tones)), speaker).await
+    }
+
+    /// Another workspace on the device whose audio is `media`.
+    async fn in_workspace(lookup: &MemoryLookup, media: &Arc<Media<Tones>>, speaker: Recorder) -> Self {
         let endpoint = Endpoint::builder(presets::Minimal)
             .address_lookup(lookup.clone())
             .bind()
             .await
             .expect("bind a test endpoint");
         lookup.add_endpoint_info(endpoint.addr());
-        let speaker = tones.speaker();
-        let media = Arc::new(Media::new(tones));
+        let media = Arc::new(WorkspaceMedia::new(media.clone()));
         let router = media.attach(&endpoint, Router::builder(endpoint.clone())).spawn();
         Self {
             id: endpoint.id(),
             media,
             speaker,
-            _router: router,
+            router,
         }
     }
 
@@ -199,6 +205,35 @@ async fn an_outsider_who_knows_the_path_hears_nothing() {
         Err(_) => panic!("the outsider's attempt hung instead of being refused"),
     }
     assert_eq!(eve.speaker.total(), 0, "an outsider heard the call");
+}
+
+/// A device in two workspaces has an endpoint in each. A call runs on its
+/// own workspace's, though the other opened last, and the other stopping
+/// its huddle audio or closing its network leaves the call alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_runs_on_its_own_workspaces_network() {
+    let lookup = MemoryLookup::new();
+    let tones = Tones::new(A);
+    let speaker = tones.speaker();
+    let alices_audio = Arc::new(Media::new(tones));
+    let alice = Device::in_workspace(&lookup, &alices_audio, speaker.clone()).await;
+    let alice_elsewhere = Device::in_workspace(&lookup, &alices_audio, speaker).await;
+    let bob = Device::new(&lookup, E).await;
+    let _alices_call = alice.join("h-alice", &[(&bob, "h-bob")]);
+    let _bobs_call = bob.join("h-bob", &[(&alice, "h-alice")]);
+    assert!(hears(&bob.speaker, A).await, "Bob hears Alice");
+    assert!(hears(&alice.speaker, E).await, "Alice hears Bob");
+
+    alice_elsewhere.media.stop();
+    alice_elsewhere.media.set_muted(true).expect("mute elsewhere");
+    alice_elsewhere
+        .router
+        .shutdown()
+        .await
+        .expect("close the other network");
+
+    assert!(!goes_quiet(&bob.speaker).await, "Bob stopped hearing Alice");
+    assert!(is_hearing(&alice.speaker, E), "Alice stopped hearing Bob");
 }
 
 #[tokio::test(flavor = "multi_thread")]

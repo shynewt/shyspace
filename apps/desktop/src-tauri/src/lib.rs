@@ -56,11 +56,12 @@ impl AppState {
         self.workspaces.open_workspaces()
     }
 
-    /// Online, with huddle audio served on the workspace's endpoint.
+    /// Online, with huddle audio served on the workspace's own endpoint.
     fn online(&self) -> WorkspaceOptions {
+        let audio = self.media.for_workspace();
         WorkspaceOptions::from(Networking::Online)
-            .with_protocols(self.media.protocols())
-            .with_media(self.media.huddle_media())
+            .with_protocols(audio.protocols())
+            .with_media(audio.huddle_media())
     }
 }
 
