@@ -341,3 +341,43 @@ async fn large_junk_then_a_real_op_for_the_same_seq_is_proved_a_fork() {
 
     assert!(admin.state().store.is_forked(&bob.me(), seq).unwrap());
 }
+
+/// Once three planted names make a reader give up the covering chain, a
+/// pack that narrower segments cover is still compared in a sweep: a second
+/// version kept only in the pack must be proved a fork, not passed over
+/// while the checked mark moves past it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_version_in_a_covered_pack_is_compared_in_a_sweep() {
+    let fork = fork().await;
+    let (bob, carol) = (&fork.bob, &fork.carol);
+    for number in 0..3u8 {
+        let name =
+            crate::transport::bucket::segment_name_for(&bob.me(), 1, 1_000_000, &[number; 16], b"other");
+        fork.bucket.put_raw(&name, b"junk".to_vec()).await.unwrap();
+    }
+    fork.bucket
+        .put_segment(std::slice::from_ref(&fork.for_admin))
+        .await
+        .unwrap();
+    fork.bucket
+        .put_segment(std::slice::from_ref(&fork.after))
+        .await
+        .unwrap();
+    fork.bucket
+        .put_segment(&[fork.for_carol.clone(), fork.after.clone()])
+        .await
+        .unwrap();
+
+    carol.sync().await;
+    carol.sync().await;
+
+    assert_eq!(carol.state().store.last_seq(&bob.me()).unwrap(), fork.after.seq);
+    assert!(
+        carol
+            .state()
+            .store
+            .is_forked(&bob.me(), fork.for_admin.seq)
+            .unwrap(),
+        "the pack's version was never compared"
+    );
+}

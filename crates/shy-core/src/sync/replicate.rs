@@ -118,7 +118,8 @@ impl Workspace {
             .into_iter()
             .filter(|(object, name)| !chain.tried.contains(&object.key) && name.last > held)
             .collect();
-        chain.read.absorb(self.read_rest(author, rest).await?);
+        let (rest_read, _) = self.read_rest(author, rest).await?;
+        chain.read.absorb(rest_read);
         Ok(chain.read.local_failure)
     }
 
@@ -176,7 +177,19 @@ impl Workspace {
             }
             read.absorb(self.read_segments(author, differing).await?);
             if !read.is_stopped {
-                read.absorb(self.read_rest(author, past_held).await?);
+                let (rest_read, unread) = self.read_rest(author, past_held).await?;
+                read.absorb(rest_read);
+                // A covered pack left unread may still hold a second version
+                // of an op; compare it like any other object we hold.
+                let mut differing = Vec::new();
+                for (object, name) in unread {
+                    if self.is_same_as_ours(author, &name)? {
+                        read.matching.push((name.first, name.last));
+                    } else {
+                        differing.push(object);
+                    }
+                }
+                read.absorb(self.read_segments(author, differing).await?);
             }
         }
         let checked_now = checked_through(checked, read.matching);

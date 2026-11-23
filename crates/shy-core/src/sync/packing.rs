@@ -233,25 +233,25 @@ impl Workspace {
     /// those no narrower ones cover, then each covered one only if it still
     /// holds ops we lack. Honest packs repeat what segments hold, so when the
     /// chain was given up this reads the log about once, not several times.
+    /// Returns the covered ones not read, now within what we hold, for a
+    /// sweep to compare with our copy.
     pub(super) async fn read_rest(
         &self,
         author: &PublicKey,
         objects: Vec<(ListedObject, SegmentName)>,
-    ) -> Result<SegmentsRead> {
+    ) -> Result<(SegmentsRead, Vec<(ListedObject, SegmentName)>)> {
         let held = self.state().store.last_seq(author)?;
         let (uncovered, covered) = split_covered(held, objects);
         let mut read = self.read_segments(author, uncovered).await?;
         if read.is_stopped {
-            return Ok(read);
+            return Ok((read, Vec::new()));
         }
         let held = self.state().store.last_seq(author)?;
-        let still_needed = covered
-            .into_iter()
-            .filter(|(_, name)| name.last > held)
-            .map(|(object, _)| object)
-            .collect();
+        let (still_needed, unread): (Vec<_>, Vec<_>) =
+            covered.into_iter().partition(|(_, name)| name.last > held);
+        let still_needed = still_needed.into_iter().map(|(object, _)| object).collect();
         read.absorb(self.read_segments(author, still_needed).await?);
-        Ok(read)
+        Ok((read, unread))
     }
 }
 
