@@ -8,6 +8,8 @@ mod peers;
 mod receive;
 mod replicate;
 
+pub(crate) use replicate::Listing;
+
 use std::time::Duration;
 
 use serde::Serialize;

@@ -1,6 +1,7 @@
 //! Moving envelopes between the local log, the bucket, and online peers.
 
 use anyhow::Result;
+use iroh::PublicKey;
 use tracing::warn;
 
 use super::peers::peers_to_dial;
@@ -14,6 +15,17 @@ use crate::{
 /// At most this many skipped objects are remembered; past it, the rest are
 /// fetched again each pass rather than using unbounded memory.
 const MAX_SKIPPED_SEGMENTS: usize = 10_000;
+/// How often every author is listed whole, at most.
+const WHOLE_LISTING_EVERY_MS: i64 = 60 * 60 * 1000;
+const LAST_WHOLE_LISTING_META: &str = "last_whole_listing_ms";
+
+/// How much of an author's segments to list.
+pub(crate) enum Listing {
+    /// Only names that sort past what we hold.
+    PastHeld,
+    /// All of them, for older names we may hold part of.
+    Whole,
+}
 
 impl Workspace {
     /// Reads new segments from everyone who was ever a member: a newcomer
@@ -25,91 +37,120 @@ impl Workspace {
     /// reading back, unless it couldn't even be parked; the first such error
     /// is returned at the end.
     pub(crate) async fn pull(&self) -> Result<()> {
-        self.refetch_gaps()?;
+        let refetching = self.refetch_gaps()?;
+        let is_whole_listing_due = self.is_whole_listing_due()?;
         let mut local_failure = None;
         let authors = self.state().store.everyone_ever()?;
-        'authors: for author in authors {
-            let held = self.state().store.last_seq(&author)?;
-            let older_cursor = self.older_cursor(&author)?;
-            let after_held = listing_after(&author, held);
-            let offset = match &older_cursor {
-                Some(cursor) if *cursor < after_held => cursor.clone(),
-                _ => after_held,
+        for author in authors {
+            let listing = if is_whole_listing_due || refetching.contains(&author) {
+                Listing::Whole
+            } else {
+                Listing::PastHeld
             };
-            let skipped = self.skipped_segments().clone();
-            let mut segments = self
-                .bucket()
-                .segments_after(&author, &offset)
-                .await?
-                .without(&skipped);
-            let mut has_news_in_older_names = false;
-            while let Some(segment) = segments.next().await? {
-                let held_before = self.state().store.last_seq(&author)?;
-                let read = self.receive_segment(&author, &segment.listed.key, &segment.envelopes)?;
-                let is_older_name =
-                    parse_segment_name(&author, &segment.listed.key).is_some_and(|name| name.hash.is_none());
-                if is_older_name && self.state().store.last_seq(&author)? > held_before {
-                    has_news_in_older_names = true;
-                }
-                if !read.is_settled && !read.is_stopped {
-                    let mut skipped = self.skipped_segments();
-                    if skipped.len() < MAX_SKIPPED_SEGMENTS {
-                        skipped.insert(segment.listed);
-                    }
-                }
-                if let Some(error) = read.local_failure {
-                    local_failure.get_or_insert(error);
-                }
-                if read.is_stopped {
-                    continue 'authors;
-                }
+            if let Some(error) = self.pull_author(&author, listing).await? {
+                local_failure.get_or_insert(error);
             }
-            // Older names sort by their first seq, so one we hold part of sorts
-            // before what we hold; until a pass from the older cursor finds
-            // nothing more in them, keep listing from it.
-            if older_cursor.is_some() && !has_news_in_older_names {
-                self.state().store.forget_cursor(&author)?;
-            }
+        }
+        // A listing cut short by our own failure isn't done; try again next pass.
+        if is_whole_listing_due && local_failure.is_none() {
+            let now = now_ms()?;
+            self.state()
+                .store
+                .set_meta(LAST_WHOLE_LISTING_META, &now.to_le_bytes())?;
         }
         local_failure.map_or(Ok(()), Err)
     }
 
-    /// Where an older version resumed reading `author`, if it was a segment;
-    /// anything else (junk an older version trusted) is dropped.
-    fn older_cursor(&self, author: &iroh::PublicKey) -> Result<Option<String>> {
-        let Some(cursor) = self.state().store.cursor(author)? else {
-            return Ok(None);
-        };
-        if parse_segment_name(author, &cursor).is_some() {
-            return Ok(Some(cursor));
-        }
-        warn!(
-            "reading {author}'s history again: an older version resumed after {cursor}, which isn't a segment"
-        );
+    /// Reads `author`'s segments that may hold ops past what we hold; returns
+    /// the first op that failed locally. Only names that parse are fetched,
+    /// so junk costs a line in a listing, never a download.
+    pub(crate) async fn pull_author(
+        &self,
+        author: &PublicKey,
+        listing: Listing,
+    ) -> Result<Option<anyhow::Error>> {
+        // Older versions stored where they resumed; reading no longer uses it.
         self.state().store.forget_cursor(author)?;
-        Ok(None)
+        let held = self.state().store.last_seq(author)?;
+        let offset = match listing {
+            Listing::PastHeld => Some(listing_after(author, held)),
+            Listing::Whole => None,
+        };
+        let listed = self.bucket().list_segments(author, offset.as_deref()).await?;
+        let skipped = self.skipped_segments().clone();
+        let worth_fetching = listed
+            .into_iter()
+            .filter(|object| !skipped.contains(object))
+            .filter(|object| parse_segment_name(author, &object.key).is_some_and(|name| name.last > held))
+            .collect();
+        let mut segments = self.bucket().fetch_segments(author, worth_fetching);
+        let mut local_failure = None;
+        while let Some(segment) = segments.next().await? {
+            let read = self.receive_segment(author, &segment.listed.key, &segment.envelopes)?;
+            if !read.is_settled && !read.is_stopped {
+                let mut skipped = self.skipped_segments();
+                if skipped.len() < MAX_SKIPPED_SEGMENTS {
+                    skipped.insert(segment.listed);
+                }
+            }
+            if let Some(error) = read.local_failure {
+                local_failure.get_or_insert(error);
+            }
+            if read.is_stopped {
+                break;
+            }
+        }
+        Ok(local_failure)
+    }
+
+    /// Whether it's time to list every author whole: older names sort by
+    /// their first seq, so a segment from an older version that we hold part
+    /// of sorts before what we hold, and only a whole listing finds it. Timed
+    /// by the wall clock, saved, so a restart or sleep doesn't put it off; a
+    /// clock set back makes it due at once.
+    pub(crate) fn is_whole_listing_due(&self) -> Result<bool> {
+        let Some(saved) = self.state().store.meta(LAST_WHOLE_LISTING_META)? else {
+            return Ok(true);
+        };
+        let Ok(bytes) = <[u8; 8]>::try_from(saved.as_slice()) else {
+            warn!("the time of the last whole listing is unreadable; listing everyone whole");
+            return Ok(true);
+        };
+        let last_ms = i64::from_le_bytes(bytes);
+        let now = now_ms()?;
+        Ok(now < last_ms || now.saturating_sub(last_ms) >= WHOLE_LISTING_EVERY_MS)
+    }
+
+    /// As if the last whole listing had been at `last_ms`.
+    #[cfg(test)]
+    pub(crate) fn set_last_whole_listing(&self, last_ms: i64) {
+        self.state()
+            .store
+            .set_meta(LAST_WHOLE_LISTING_META, &last_ms.to_le_bytes())
+            .expect("the store is writable in tests");
     }
 
     /// Once per gap: if an author's next op went missing after we read past
-    /// it (a parked op pushed out by the cap), fetch their segments again
-    /// rather than skip the ones read this run.
-    fn refetch_gaps(&self) -> Result<()> {
+    /// it (a parked op pushed out by the cap), list their whole history and
+    /// fetch again what was skipped this run. Returns those authors.
+    fn refetch_gaps(&self) -> Result<Vec<PublicKey>> {
         let state = self.state();
         let mut refetched = self
             .inner
             .refetched_gaps
             .lock()
             .expect("gap list lock poisoned by an earlier panic");
+        let mut refetching = Vec::new();
         for (author, next_seq) in state.store.authors_missing_next_op()? {
             if refetched.insert((author, next_seq)) {
                 warn!("op {next_seq} from {author} went missing; reading their history again");
-                state.store.forget_cursor(&author)?;
                 let author_prefix = format!("ops/{}/", member_id(&author));
                 self.skipped_segments()
                     .retain(|listed| !listed.key.starts_with(&author_prefix));
+                refetching.push(author);
             }
         }
-        Ok(())
+        Ok(refetching)
     }
 
     fn skipped_segments(&self) -> std::sync::MutexGuard<'_, std::collections::HashSet<ListedObject>> {

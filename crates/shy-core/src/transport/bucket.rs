@@ -74,15 +74,6 @@ pub struct FetchedSegment {
 }
 
 impl SegmentFetch {
-    /// Leaves out `objects` (by key and version); call before fetching starts.
-    pub fn without(mut self, objects: &std::collections::HashSet<ListedObject>) -> Self {
-        self.listed = std::mem::take(&mut self.listed)
-            .filter(|listed| !objects.contains(listed))
-            .collect::<Vec<_>>()
-            .into_iter();
-        self
-    }
-
     /// The next segment, in order. An unreadable one, or one whose bytes
     /// don't match the hash in its name, comes back empty, so one bad object
     /// can't block everything after it.
@@ -427,11 +418,14 @@ impl Bucket {
         self.put(&path, bytes).await
     }
 
-    /// Objects under `author`'s segments whose keys sort after `offset`,
-    /// fetched a few at a time and handed over in order.
-    pub async fn segments_after(&self, author: &PublicKey, offset: &str) -> Result<SegmentFetch> {
+    /// Objects under `author`'s segments, all of them or those whose keys
+    /// sort after `offset`, in key order.
+    pub async fn list_segments(&self, author: &PublicKey, offset: Option<&str>) -> Result<Vec<ListedObject>> {
         let prefix = Path::from(format!("ops/{}", member_id(author)));
-        let mut stream = self.store.list_with_offset(Some(&prefix), &Path::from(offset));
+        let mut stream = match offset {
+            Some(offset) => self.store.list_with_offset(Some(&prefix), &Path::from(offset)),
+            None => self.store.list(Some(&prefix)),
+        };
         let mut listed = Vec::new();
         while let Some(meta) = stream.next().await {
             let meta = meta?;
@@ -441,12 +435,18 @@ impl Bucket {
             });
         }
         listed.sort_by(|one, other| one.key.cmp(&other.key));
-        Ok(SegmentFetch {
+        Ok(listed)
+    }
+
+    /// Fetches `listed` objects of `author`'s a few at a time, handing them
+    /// over in order.
+    pub fn fetch_segments(&self, author: &PublicKey, listed: Vec<ListedObject>) -> SegmentFetch {
+        SegmentFetch {
             bucket: self.clone(),
             author: *author,
             listed: listed.into_iter(),
             in_flight: VecDeque::new(),
-        })
+        }
     }
 
     /// Stores proof that `author` signed two versions of op `seq`. The proof
@@ -490,6 +490,11 @@ impl Bucket {
     #[cfg(test)]
     pub async fn put_raw(&self, path: &str, bytes: Vec<u8>) -> Result<()> {
         self.put(&Path::from(path), bytes).await
+    }
+
+    #[cfg(test)]
+    pub async fn get_raw(&self, path: &str) -> Result<Option<Bytes>> {
+        self.get(&Path::from(path)).await
     }
 
     #[cfg(test)]
@@ -928,10 +933,8 @@ mod tests {
             written.push(path.to_string());
         }
 
-        let mut fetching = bucket
-            .segments_after(&author, &listing_after(&author, 0))
-            .await
-            .unwrap();
+        let listed = bucket.list_segments(&author, None).await.unwrap();
+        let mut fetching = bucket.fetch_segments(&author, listed);
         let mut fetched = Vec::new();
         while let Some(segment) = fetching.next().await.unwrap() {
             fetched.push(segment.listed.key);
