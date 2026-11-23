@@ -274,3 +274,13 @@ test("declining a ring from another workspace declines it there", async ({ page 
   await expect(page.getByRole("region", { name: "Incoming huddle" })).toHaveCount(0);
   await expect(workspaceMenu(page, "Acme")).toBeVisible();
 });
+
+test("a channel in the shown workspace isn't taken for the call's, even with the same id", async ({ page }) => {
+  await openApp(page);
+  await addTeam(page);
+  await page.getByRole("button", { name: "Start a huddle" }).click();
+  await page.keyboard.press("Control+2");
+  await expect(workspaceMenu(page, "Team")).toBeVisible();
+  // The fake shares channel ids across workspaces, as two workspaces' ids could collide.
+  await expect(page.getByRole("main").getByRole("button", { name: "Leave the huddle" })).toHaveCount(0);
+});

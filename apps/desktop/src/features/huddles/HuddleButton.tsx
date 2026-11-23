@@ -19,12 +19,12 @@ const PILL =
  */
 export function HuddleButton({ channel }: { channel: Channel }) {
   const huddle = useHuddle(channel.id);
-  const { mine, join, leave } = useMyHuddle();
+  const { mine, isInHere, join, leave } = useMyHuddle();
   const nameOf = useHuddleNames();
   const avatarName = useMemberNames();
   if (!huddle) return null;
 
-  const isHere = mine?.channel === channel.id;
+  const isHere = isInHere(channel.id);
   const participants = huddle.participants;
   const others = participants
     .filter((participant) => !participant.is_me)
@@ -38,7 +38,7 @@ export function HuddleButton({ channel }: { channel: Channel }) {
     />
   );
 
-  if (isHere && mine.phase === "joining") {
+  if (isHere && mine?.phase === "joining") {
     return (
       <span className={cx(PILL, "bg-surface-2 text-muted")}>
         <Spinner size={13} />

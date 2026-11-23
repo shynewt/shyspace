@@ -27,6 +27,8 @@ type HuddleValue = {
   mine: MyHuddle | null | undefined;
   /** Your huddle is in another workspace than the one shown, so its people and place aren't in this one's lists. */
   isElsewhere: boolean;
+  /** Whether your huddle is in `channel` of the workspace shown (ids can repeat across workspaces). */
+  isInHere: (channel: string) => boolean;
   /** The huddle ringing for you right now, if any. */
   incoming: IncomingHuddle | null;
   /** Who's talking right now, you included. */
@@ -81,6 +83,10 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
     [channels, members, callPlace],
   );
   const isElsewhere = Boolean(mine && mine.workspace_id !== session.workspace_id);
+  const isInHere = useCallback(
+    (channel: string) => Boolean(mine && !isElsewhere && mine.channel === channel),
+    [mine, isElsewhere],
+  );
   const nameOf = useCallback(
     (member: string) => displayName(members?.find((candidate) => candidate.id === member)?.name ?? "", member),
     [members],
@@ -161,12 +167,13 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
     api.setHuddleMuted(!huddle.muted).catch(reportError);
   }, []);
 
-  useHuddleKeys(mine, join, leave, toggleMute);
+  useHuddleKeys(mine, isInHere, join, leave, toggleMute);
 
   const value = useMemo(
     () => ({
       mine,
       isElsewhere,
+      isInHere,
       incoming,
       speaking,
       reconnecting,
@@ -181,6 +188,7 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
     [
       mine,
       isElsewhere,
+      isInHere,
       incoming,
       speaking,
       reconnecting,
@@ -209,6 +217,7 @@ const NO_PEERS: HuddlePeer[] = [];
 /** Join or leave the huddle where you are, and mute, from the keyboard; the shell leaves these keys to us. */
 function useHuddleKeys(
   mine: MyHuddle | null | undefined,
+  isInHere: (channel: string) => boolean,
   join: (channel: string) => void,
   leave: () => void,
   toggleMute: () => void,
@@ -225,12 +234,12 @@ function useHuddleKeys(
       if (shortcut?.id !== "huddle") return;
       event.preventDefault();
       const here = view?.kind === "channel" ? channels.find((channel) => channel.id === view.id) : undefined;
-      if (mine && (!here || mine.channel === here.id)) return leave();
+      if (mine && (!here || isInHere(here.id))) return leave();
       if (here && here.kind !== "notes") join(here.id);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mine, view, channels, join, leave, toggleMute]);
+  }, [mine, isInHere, view, channels, join, leave, toggleMute]);
 }
 
 /**

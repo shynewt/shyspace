@@ -7,12 +7,14 @@ import { IconButton, tweens } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
 import { useMyHuddle } from "./HuddleContext";
 import { useGoToHuddle } from "./HuddleElsewhere";
+import { useOtherWorkspaceName } from "./IncomingHuddle";
 
 /** Your huddle in the header while the sidebar, and so its bar, is hidden: where, mute and leave. */
 export function HuddlePill({ huddle: mine }: { huddle: MyHuddle }) {
   const { toggleMute, leave, isElsewhere } = useMyHuddle();
   const { navigate } = useWorkspace();
   const goThere = useGoToHuddle(mine);
+  const otherWorkspace = useOtherWorkspaceName(mine.workspace_id);
   return (
     <motion.div
       role="group"
@@ -28,7 +30,7 @@ export function HuddlePill({ huddle: mine }: { huddle: MyHuddle }) {
         onClick={isElsewhere ? goThere : () => navigate({ kind: "channel", id: mine.channel })}
         className="min-w-0 max-w-40 truncate px-1 text-sm hover:underline"
       >
-        {isElsewhere ? mine.channel_name : <ChannelName channelId={mine.channel} />}
+        {isElsewhere ? `${otherWorkspace} · ${mine.channel_name}` : <ChannelName channelId={mine.channel} />}
       </button>
       <IconButton
         label={mine.muted ? "Unmute" : "Mute"}

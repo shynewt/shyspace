@@ -10,13 +10,13 @@ export type HuddleSummary = { count: number; isMine: boolean; label: string };
 
 export function useHuddleSummary(channel: string): HuddleSummary | null {
   const huddle = useHuddle(channel);
-  const { mine } = useMyHuddle();
+  const { isInHere } = useMyHuddle();
   const nameOf = useHuddleNames();
   if (!huddle || huddle.participants.length === 0) return null;
   const names = namesList(huddle.participants.map((participant) => nameOf(participant.member)));
   return {
     count: huddle.participants.length,
-    isMine: mine?.channel === channel,
+    isMine: isInHere(channel),
     label: `huddle with ${names}${huddle.is_full ? ", full" : ""}`,
   };
 }
