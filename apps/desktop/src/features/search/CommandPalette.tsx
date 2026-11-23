@@ -15,6 +15,8 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SearchHit } from "../../lib/api";
 import { useChannelNames } from "../../lib/channels";
 import { plainPreview } from "../../lib/markdown";
+import { useMembers } from "../../lib/members";
+import { displayName, formatWhen } from "../../lib/people";
 import { SETTINGS_SECTIONS } from "../../lib/settings";
 import { hasCommandModifier, shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
@@ -83,6 +85,7 @@ function PaletteBody({
 }) {
   const { channels, pages, navigate, session, openSettings } = useWorkspace();
   const names = useChannelNames();
+  const members = useMembers();
   const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [selected, setSelected] = useState(0);
@@ -103,6 +106,11 @@ function PaletteBody({
     const needle = query.trim().toLowerCase();
     const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
     const go = (view: View) => () => navigate(view);
+    const now = new Date();
+    const authorName = (id: string | null) => {
+      const member = members?.find((candidate) => candidate.id === id);
+      return member ? displayName(member.name, member.id) : "Someone";
+    };
     const actions: Item[] = [
       {
         title: "Open inbox",
@@ -180,7 +188,11 @@ function PaletteBody({
             onChoose: go({ kind: "page", id: hit.id }),
             icon: <FileText size={15} />,
             title: hit.title || "Untitled",
-            detail: snippet(hit.snippet),
+            detail: (
+              <>
+                Edited {formatWhen(hit.time_ms, now)} · {snippet(hit.snippet)}
+              </>
+            ),
             group: "In pages",
           },
         ];
@@ -192,13 +204,17 @@ function PaletteBody({
           onChoose: go({ kind: "channel", id: hit.channel, thread: hit.thread_root ?? undefined, focus: hit.id }),
           icon: <MessageSquare size={15} />,
           title: <ChannelName channelId={hit.channel} />,
-          detail: snippet(hit.snippet),
+          detail: (
+            <>
+              {authorName(hit.author)}, {formatWhen(hit.time_ms, now)} · {snippet(hit.snippet)}
+            </>
+          ),
           group: "In messages",
         },
       ];
     });
     return [...jumpTo, ...found, ...actions];
-  }, [query, hits, channels, names, pages, navigate, session.is_admin, onMarkAllRead, openSettings]);
+  }, [query, hits, channels, names, members, pages, navigate, session.is_admin, onMarkAllRead, openSettings]);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });

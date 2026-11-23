@@ -257,7 +257,8 @@ impl Store {
             .collect::<String>();
         let sql = if match_expression.is_empty() {
             format!(
-                "SELECT 'message', m.id, COALESCE(n.name, c.name, ''), COALESCE(e.text, m.text), m.channel
+                "SELECT 'message', m.id, COALESCE(n.name, c.name, ''), COALESCE(e.text, m.text), m.channel,
+                        m.author, m.created_ms
                  FROM messages m
                  LEFT JOIN message_edits e ON e.message = m.id
                  LEFT JOIN channels c ON c.id = m.channel
@@ -273,9 +274,11 @@ impl Store {
             values.insert(0, Box::new(match_expression));
             format!(
                 "SELECT s.kind, s.ref, COALESCE(NULLIF(s.title, ''), n.name, c.name, ''),
-                        snippet(search, 3, '\u{1}', '\u{2}', '…', 12), m.channel
+                        snippet(search, 3, '\u{1}', '\u{2}', '…', 12), m.channel,
+                        m.author, COALESCE(m.created_ms, p.updated_ms)
                  FROM search s
                  LEFT JOIN messages m ON s.kind = 'message' AND m.id = s.ref
+                 LEFT JOIN pages p ON s.kind = 'page' AND p.id = s.ref
                  LEFT JOIN channels c ON c.id = m.channel
                  LEFT JOIN channel_names n ON n.channel = m.channel
                  WHERE search MATCH ?{only_messages}{filter_sql} ORDER BY rank LIMIT ?"
@@ -291,6 +294,8 @@ impl Store {
                 snippet: row.get(3)?,
                 channel: row.get(4)?,
                 thread_root: None,
+                author: row.get::<_, Option<Vec<u8>>>(5)?.map(hex::encode),
+                time_ms: row.get(6)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

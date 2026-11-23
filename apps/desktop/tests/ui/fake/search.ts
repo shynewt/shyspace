@@ -6,9 +6,16 @@ const HIGHLIGHT_START = "\u0001";
 const HIGHLIGHT_END = "\u0002";
 
 type Searchable = {
-  messages: readonly { id: string; channel: string; text: string; reply_to: string | null; author: string }[];
+  messages: readonly {
+    id: string;
+    channel: string;
+    text: string;
+    reply_to: string | null;
+    author: string;
+    created_ms: number;
+  }[];
   channels: readonly { id: string; name: string }[];
-  pages: readonly { id: string; title: string; doc: Y.Doc }[];
+  pages: readonly { id: string; title: string; doc: Y.Doc; updated_ms: number }[];
 };
 
 /** Like the core: every term must start a word; matches are marked. */
@@ -27,6 +34,8 @@ export function search(query: string, { messages, channels, pages }: Searchable)
       snippet: highlight(message.text, terms),
       channel: message.channel,
       thread_root: rootOf(messages, message.id) === message.id ? null : rootOf(messages, message.id),
+      author: message.author,
+      time_ms: message.created_ms,
     });
   }
   for (const page of pages) {
@@ -39,6 +48,8 @@ export function search(query: string, { messages, channels, pages }: Searchable)
       snippet: highlight(body, terms),
       channel: null,
       thread_root: null,
+      author: null,
+      time_ms: page.updated_ms,
     });
   }
   return hits;

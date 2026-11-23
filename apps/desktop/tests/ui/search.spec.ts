@@ -17,6 +17,21 @@ test("search finds a message and jumps to its channel", async ({ page }) => {
   await expect(page.getByRole("article").getByText("The quarterly budget is ready")).toBeVisible();
 });
 
+test("search results say who wrote a message and when a page changed", async ({ page }) => {
+  await page.clock.install({ time: new Date(2026, 10, 23, 15, 30) });
+  await page.goto("");
+  await page.evaluate(() => {
+    window.fake.receiveMessage(window.fake.addMember("Grace"), "general", "The quarterly budget is ready");
+    window.fake.seedPage("Quarterly plan", "Budget first");
+  });
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+
+  await page.keyboard.press("Control+k");
+  await page.getByLabel("Search messages and pages").fill("quarterly");
+  await expect(page.getByRole("option", { name: /quarterly budget/ })).toContainText(/Grace, 3:30\sPM/);
+  await expect(page.getByRole("option").filter({ hasText: "Budget first" })).toContainText(/Edited 3:30\sPM/);
+});
+
 test("the palette runs actions", async ({ page }) => {
   await page.goto("");
   await expect(page.getByLabel("Message #general")).toBeVisible();

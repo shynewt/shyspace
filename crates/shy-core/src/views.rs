@@ -306,6 +306,10 @@ pub struct SearchHit {
     pub channel: Option<EntityId>,
     /// For a reply, the first message of its thread.
     pub thread_root: Option<EntityId>,
+    /// Who wrote a message; a page has no single author.
+    pub author: Option<String>,
+    /// When a message was sent, or a page last changed.
+    pub time_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

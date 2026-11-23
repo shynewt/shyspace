@@ -145,6 +145,10 @@ export type SearchHit = {
   snippet: string;
   channel: string | null;
   thread_root: string | null;
+  /** Who wrote a message; a page has no single author. */
+  author: string | null;
+  /** When a message was sent, or a page last changed. */
+  time_ms: number;
 };
 export type InviteState = "open" | "requested" | "accepted" | "rejected" | "revoked" | "expired";
 export type Invite = {

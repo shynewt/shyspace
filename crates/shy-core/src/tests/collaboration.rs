@@ -994,3 +994,33 @@ async fn a_sweep_checks_segments_we_hold_without_fetching_them() {
         "no segment fetched"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn search_hits_say_who_wrote_them_and_when() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let before = crate::ops::now_ms().unwrap();
+    bob.send_message(&general, "the quarterly numbers are in", None)
+        .unwrap();
+    let page = admin.create_page("Quarterly plan", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let after = crate::ops::now_ms().unwrap();
+
+    for query in ["quarterly", "from:bob"] {
+        let hits = admin.search(query, 10).unwrap();
+        let message = hits.iter().find(|hit| hit.kind == "message").unwrap();
+        assert_eq!(message.author.as_deref(), Some(bob.my_id().as_str()), "{query}");
+        assert!((before..=after).contains(&message.time_ms), "{query}");
+    }
+    let hits = admin.search("quarterly", 10).unwrap();
+    let page_hit = hits.iter().find(|hit| hit.kind == "page").unwrap();
+    assert_eq!(page_hit.id, page);
+    assert_eq!(page_hit.author, None);
+    let edited = admin
+        .pages()
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == page)
+        .unwrap();
+    assert_eq!(page_hit.time_ms, edited.updated_ms);
+}

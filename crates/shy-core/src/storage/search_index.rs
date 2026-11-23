@@ -50,6 +50,21 @@ mod tests {
         Store::open(&dir.path().join("db"), TEST_DB_KEY).unwrap()
     }
 
+    /// A message and a page with id `id`, the items search entries stand for.
+    fn add_message_and_page(store: &Store, id: &str) {
+        store
+            .db
+            .execute(
+                "INSERT INTO messages (id, channel, author, text, lamport, created_ms) VALUES (?, 'c', x'00', '', 1, 1)",
+                [id],
+            )
+            .unwrap();
+        store
+            .db
+            .execute("INSERT INTO pages (id) VALUES (?)", [id])
+            .unwrap();
+    }
+
     fn found(store: &Store, text: &str) -> Vec<(String, String)> {
         store
             .search(text, &SearchFilters::default(), 50)
@@ -63,6 +78,7 @@ mod tests {
     fn reindexing_and_removing_keep_one_entry_per_item() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&dir);
+        add_message_and_page(&store, "m1");
         store
             .index_for_search("message", "m1", "", "first draft")
             .unwrap();
