@@ -3,7 +3,7 @@
 ## Setup
 
 - Rust (stable), Node with pnpm, Podman or Docker.
-- Linux desktop builds need: `webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel` (Fedora names), and for huddle audio `alsa-lib-devel pipewire-devel clang` (Ubuntu: `libasound2-dev libpipewire-0.3-dev clang libclang-dev`). `clang-libs` alone isn't enough: generating the PipeWire bindings needs clang's own headers.
+- Linux desktop builds need: `webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel` (Fedora names), and for huddle audio `alsa-lib-devel pipewire-devel clang` (Ubuntu: `libasound2-dev libpipewire-0.3-dev clang libclang-dev`). `clang-libs` alone isn't enough: generating the PipeWire bindings needs clang's own headers. Those bindings also need a newer PipeWire than Ubuntu 22.04 has, which is one reason the Linux release builds on 24.04.
 - `cd apps/desktop && pnpm install`
 
 ## A local bucket
@@ -70,7 +70,7 @@ To see every shared component, open the app with `#gallery` in development. To c
 
 ## Releasing
 
-Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage; built on Ubuntu 24.04, because huddle audio's PipeWire bindings need its PipeWire, so they need glibc 2.39: Ubuntu 24.04, Debian 13, Fedora 40 or newer), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft, pre-release GitHub release to look over and publish. The Actions tab's "Run workflow" button builds them as workflow artifacts only. macOS builds aren't signed yet, so testers allow the app once in System Settings › Privacy & Security › Open Anyway. One release costs roughly 250–300 Actions minutes, because macOS minutes count ten times on a private repository.
+Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage; built on Ubuntu 24.04, so they need glibc 2.39: Ubuntu 24.04, Debian 13, Fedora 40 or newer), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft, pre-release GitHub release to look over and publish. Everything else builds them as workflow artifacts only: the Actions tab's "Run workflow" button, a pull request that changes the workflows or `tauri.conf.json`, and a weekly run on main that catches a retired runner image or a broken build before a release needs it. The build machines are `ubuntu-24.04`, `macos-26` and `windows-2025`; GitHub keeps two images per system and retires the oldest, so move them on when the weekly run warns. macOS builds aren't signed yet, so testers allow the app once in System Settings › Privacy & Security › Open Anyway.
 
 ## Building the macOS app by hand
 
