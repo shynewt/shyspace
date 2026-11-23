@@ -222,6 +222,7 @@ impl Workspace {
         connect: Connector,
         networking: Networking,
     ) -> Result<Self> {
+        let name = super::actions::checked_profile_name(profile.name)?;
         let bucket = connect(&workspace_id, &bucket_config)?;
         bucket
             .check_access()
@@ -237,10 +238,10 @@ impl Workspace {
             admin: local.identity.public(),
             bucket: bucket_config,
         };
-        config.save(&data.path, &local.store)?;
+        config.store_bucket(&local.store)?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
-            name: super::actions::checked_profile_name(profile.name)?,
+            name,
             is_bot: profile.is_bot,
         })?;
         workspace.write(Op::ChannelCreate {
@@ -249,6 +250,7 @@ impl Workspace {
         })?;
         let page = workspace.create_page("Getting started", None)?;
         workspace.edit_page(&page, Edit::Append(GETTING_STARTED))?;
+        workspace.inner.config.mark_complete(&data.path)?;
         Ok(workspace)
     }
 
@@ -262,6 +264,9 @@ impl Workspace {
         cancel: &JoinCancel,
     ) -> Result<Self> {
         ensure_not_expired(&invite, now_ms()?)?;
+        // Checked before the admin is asked: refused later, it would leave a
+        // spent invite and a half-made workspace.
+        let name = super::actions::checked_profile_name(profile.name)?;
         prepare_empty_dir(&data.path)?;
         let local = data.open_local().await?;
         let mut mls = local.open_mls(data, None)?;
@@ -272,7 +277,7 @@ impl Workspace {
                 .sign(&binding_message(mls.signer_public()))
                 .to_bytes()
                 .to_vec(),
-            name: profile.name.trim().to_owned(),
+            name: name.clone(),
             is_bot: profile.is_bot,
         };
         mailbox.post_request(postcard::to_stdvec(&request)?).await?;
@@ -300,13 +305,14 @@ impl Workspace {
             admin: invite.admin,
             bucket: grant.bucket,
         };
-        config.save(&data.path, &local.store)?;
+        config.store_bucket(&local.store)?;
         config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
-            name: super::actions::checked_profile_name(profile.name)?,
+            name,
             is_bot: profile.is_bot,
         })?;
+        workspace.inner.config.mark_complete(&data.path)?;
         Ok(workspace)
     }
 

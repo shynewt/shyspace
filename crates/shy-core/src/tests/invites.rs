@@ -216,3 +216,41 @@ async fn a_join_can_be_cancelled_while_it_waits_and_tried_again() {
             .any(|member| member.name == "Bob" && member.active)
     );
 }
+
+/// A name the app would refuse fails the join before the admin is asked, so
+/// the invite isn't spent and no half-made workspace is left behind; trying
+/// again with a good name works.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_name_the_app_refuses_fails_the_join_before_asking_the_admin() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let invite = admin
+        .create_test_invite("for Bob", Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let bob_dir = root.path().join("bob");
+
+    let joining = start_join(invite.clone(), &bob_dir, &bucket, &"B".repeat(200), false);
+    let refused = tokio::time::timeout(Duration::from_secs(10), joining)
+        .await
+        .expect("refused right away, not after waiting for the admin")
+        .unwrap();
+
+    assert!(refused.is_err());
+    assert!(!crate::Workspace::exists(&bob_dir), "no workspace was made");
+    admin.sync().await;
+    let state = admin
+        .invites()
+        .unwrap()
+        .into_iter()
+        .find(|listed| listed.token == token)
+        .unwrap()
+        .state;
+    assert_eq!(state, InviteState::Open, "the admin wasn't asked");
+
+    let again = start_join(invite, &bob_dir, &bucket, "Bob", false);
+    wait_for_request(&admin, &token).await;
+    admin.approve_invite(&token).await.unwrap();
+    assert!(again.await.unwrap().is_ok());
+}

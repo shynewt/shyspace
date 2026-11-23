@@ -57,10 +57,14 @@ impl WorkspaceConfig {
         })
     }
 
-    /// Saves the settings. Writing `workspace.json` last marks the directory
-    /// as a complete workspace.
-    pub fn save(&self, dir: &Path, store: &Store) -> Result<()> {
-        store.set_meta(BUCKET_META, &serde_json::to_vec(&self.bucket)?)?;
+    /// Keeps the bucket settings in the store, where syncing reads them.
+    pub fn store_bucket(&self, store: &Store) -> Result<()> {
+        store.set_meta(BUCKET_META, &serde_json::to_vec(&self.bucket)?)
+    }
+
+    /// Writes `workspace.json`, which marks the directory as a complete
+    /// workspace, so it comes last.
+    pub fn mark_complete(&self, dir: &Path) -> Result<()> {
         let settings = PublicSettings {
             workspace_id: self.workspace_id.clone(),
             name: self.name.clone(),
