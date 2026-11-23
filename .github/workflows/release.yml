@@ -31,7 +31,7 @@ jobs:
           - name: Linux
             runner: ubuntu-22.04
           - name: macOS (Apple Silicon)
-            runner: macos-14
+            runner: macos-15
           - name: Windows
             runner: windows-2022
     runs-on: ${{ matrix.runner }}
