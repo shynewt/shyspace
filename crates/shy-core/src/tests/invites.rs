@@ -515,3 +515,54 @@ async fn a_revoked_invite_isnt_checked_while_waiting() {
         "not even read"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declined_joiner_asks_again_with_a_new_safety_code_and_keeps_their_other_files() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob_dir = root.path().join("bob");
+    std::fs::create_dir_all(&bob_dir).unwrap();
+    std::fs::write(bob_dir.join("notes.txt"), "mine").unwrap();
+
+    let first_code = data_dir(&bob_dir).safety_code().await.unwrap();
+    let invite = admin.create_test_invite("", Duration::from_secs(600)).unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &bob_dir, &bucket, "Bob", false);
+    wait_for_request(&admin, &token).await;
+    admin.reject_invite(&token).await.unwrap();
+    let Err(declined) = joining.await.unwrap() else {
+        panic!("a declined join must not finish")
+    };
+    assert!(format!("{declined:#}").contains("declined"), "{declined:#}");
+
+    assert_eq!(
+        std::fs::read_to_string(bob_dir.join("notes.txt")).unwrap(),
+        "mine"
+    );
+    let left: Vec<String> = std::fs::read_dir(&bob_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left, ["notes.txt"], "only what the join made is gone");
+    let second_code = data_dir(&bob_dir).safety_code().await.unwrap();
+    assert_ne!(first_code, second_code, "a declined request leaves no key behind");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_join_cut_short_between_cleaning_up_and_forgetting_its_key_can_join_again() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob_dir = root.path().join("bob");
+    data_dir(&bob_dir).safety_code().await.unwrap();
+    // As if the files went and the app stopped before the key did.
+    std::fs::remove_dir_all(&bob_dir).unwrap();
+
+    let invite = admin.create_test_invite("", Duration::from_secs(600)).unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &bob_dir, &bucket, "Bob", false);
+    wait_for_request(&admin, &token).await;
+    admin.approve_invite(&token).await.unwrap();
+    joining.await.unwrap().unwrap();
+}

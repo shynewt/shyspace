@@ -4604,3 +4604,37 @@ async fn a_joiner_whose_safety_code_starts_like_a_members_is_refused() {
             .any(|member| member.id == hex::encode(mallory_key.public().as_bytes()))
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forged_decline_is_ignored_and_the_join_goes_on() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob_dir = root.path().join("bob");
+    let code = data_dir(&bob_dir).safety_code().await.unwrap();
+    let invite = admin
+        .create_test_invite("", std::time::Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &bob_dir, &bucket, "Bob", false);
+    wait_for_request(&admin, &token).await;
+
+    // Anyone with the bucket keys can write the answer slot.
+    let forged = crate::membership::invite::Answer::Rejected {
+        signature: vec![7; 64],
+    };
+    bucket
+        .put_invite_answer(&token, postcard::to_stdvec(&forged).unwrap())
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    assert!(!joining.is_finished(), "a forged decline doesn't end the join");
+
+    admin.approve_invite(&token).await.unwrap();
+    let bob = joining.await.unwrap().unwrap();
+    assert_eq!(
+        bob.safety_code(),
+        code,
+        "the key the admin approved is still there"
+    );
+}

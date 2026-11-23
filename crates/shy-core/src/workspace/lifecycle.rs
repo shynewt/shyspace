@@ -7,9 +7,10 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use iroh::SecretKey;
+use iroh::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, broadcast, mpsc, watch};
+use tracing::warn;
 
 use super::{Inner, Networking, Profile, State, Workspace, WorkspaceOptions};
 use crate::{
@@ -17,7 +18,7 @@ use crate::{
     identity,
     keys::{DeviceKey, KeyStorage},
     membership::{
-        invite::{Answer, Grant, Invite, JoinMailbox, JoinRequest, ensure_not_expired},
+        invite::{Answer, Grant, Invite, JoinMailbox, JoinRequest, declined_bytes, ensure_not_expired},
         mls::{Mls, binding_message},
     },
     ops::{Op, new_owned_id, new_random_id, now_ms},
@@ -101,6 +102,33 @@ impl DataDir {
     pub(crate) async fn use_identity_for_test(&self, identity: &iroh::SecretKey) -> Result<()> {
         std::fs::create_dir_all(&self.path)?;
         identity::store_for_test(&self.open_local().await?.store, identity)
+    }
+
+    /// Deletes a declined join: only the files a join makes (anything else
+    /// in the folder stays, and the folder with it), then the device key. A
+    /// key left by a crash in between opens nothing, and the next join works.
+    async fn forget_unfinished(&self) -> Result<()> {
+        for database in [STORE_FILE, MLS_FILE] {
+            // Journal files first, so a stop partway never leaves one behind
+            // for the next join's new database to find.
+            for suffix in ["-wal", "-shm", ""] {
+                remove_if_there(&self.path.join(format!("{database}{suffix}")))?;
+            }
+        }
+        remove_if_there(&self.path.join(LOCK_FILE))?;
+        match std::fs::remove_dir(&self.path) {
+            // Someone keeps other files there, which stay.
+            Err(error)
+                if !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::DirectoryNotEmpty | std::io::ErrorKind::NotFound
+                ) =>
+            {
+                return Err(anyhow::Error::new(error).context(format!("deleting {}", self.path.display())));
+            }
+            _ => {}
+        }
+        self.keys.forget(&self.path).await
     }
 
     /// This device's safety code, creating its identity if needed. A joiner
@@ -296,8 +324,30 @@ impl Workspace {
             name: name.clone(),
             is_bot: profile.is_bot,
         };
-        mailbox.post_request(postcard::to_stdvec(&request)?).await?;
-        let (welcome, sealed_grant) = wait_for_answer(&invite, mailbox, cancel).await?;
+        let asked = async {
+            mailbox.post_request(postcard::to_stdvec(&request)?).await?;
+            wait_for_answer(&invite, mailbox, cancel, &local.identity.public()).await
+        }
+        .await;
+        let (welcome, sealed_grant) = match asked {
+            Ok(answer) => answer,
+            // Declined (and signed so by the admin), the request is over:
+            // asking again gets a new key, and with it a new safety code, which
+            // the admin may need to see. A cancelled or expired one keeps its
+            // key, as the admin may still approve it.
+            Err(error) if error.downcast_ref::<Declined>().is_some() => {
+                drop(mls);
+                drop(local);
+                if let Err(cleanup) = data.forget_unfinished().await {
+                    warn!(
+                        "couldn't clear a declined join from {}: {cleanup:#}",
+                        data.path.display()
+                    );
+                }
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         mls.join(
             &welcome,
             invite.workspace_id.as_bytes(),
@@ -518,6 +568,7 @@ async fn wait_for_answer(
     invite: &Invite,
     mailbox: &impl JoinMailbox,
     cancel: &JoinCancel,
+    me: &PublicKey,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut cancelled = cancel.0.subscribe();
     loop {
@@ -536,18 +587,50 @@ async fn wait_for_answer(
                     welcome,
                     sealed_grant,
                 } => return Ok((welcome, sealed_grant)),
-                Answer::Rejected => bail!("the admin declined this request"),
+                Answer::Rejected { signature } => {
+                    if is_signed_decline(invite, me, &signature) {
+                        return Err(Declined.into());
+                    }
+                    warn!("ignoring a decline the admin didn't sign");
+                }
             }
         }
         ensure!(
             now_ms()? < invite.expires_ms,
-            "the invite expired before the admin answered"
+            "the invite expired before the admin answered; ask them for a new one"
         );
         tokio::select! {
             () = tokio::time::sleep(ANSWER_POLL) => {}
             _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => bail!("you cancelled the join request"),
         }
     }
+}
+
+/// The admin declined the join request, as their signature shows.
+#[derive(Debug)]
+struct Declined;
+
+impl std::fmt::Display for Declined {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("the admin declined this request")
+    }
+}
+
+impl std::error::Error for Declined {}
+
+/// Whether the invite's admin signed this decline of our request; anyone
+/// with the bucket keys can write the answer slot.
+fn is_signed_decline(invite: &Invite, me: &PublicKey, signature: &[u8]) -> bool {
+    let Ok(bytes) = declined_bytes(&invite.workspace_id, &invite.token, me) else {
+        return false;
+    };
+    let Ok(signature) = <[u8; 64]>::try_from(signature) else {
+        return false;
+    };
+    invite
+        .admin
+        .verify(&bytes, &iroh::Signature::from_bytes(&signature))
+        .is_ok()
 }
 
 /// Folders whose create stops just after it is complete, as if the app
@@ -559,6 +642,15 @@ pub(crate) static CUT_SHORT_CREATES: Mutex<Vec<std::path::PathBuf>> = Mutex::new
 struct PendingProfile {
     name: String,
     is_bot: bool,
+}
+
+fn remove_if_there(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(anyhow::Error::new(error).context(format!("deleting {}", path.display())))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn prepare_empty_dir(dir: &Path) -> Result<()> {

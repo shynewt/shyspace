@@ -65,11 +65,20 @@ pub struct JoinRequest {
 pub(crate) enum Answer {
     /// An MLS Welcome, and the grant encrypted for the group (the newcomer can
     /// decrypt it once the Welcome has made them a member).
-    Accepted {
-        welcome: Vec<u8>,
-        sealed_grant: Vec<u8>,
-    },
-    Rejected,
+    Accepted { welcome: Vec<u8>, sealed_grant: Vec<u8> },
+    /// Signed by the admin (see [`declined_bytes`]): an unsigned one could
+    /// make a joiner throw away the key the admin is about to approve.
+    Rejected { signature: Vec<u8> },
+}
+
+/// What the admin signs to decline `requester`'s request to join with `token`.
+pub(crate) fn declined_bytes(workspace_id: &str, token: &str, requester: &PublicKey) -> Result<Vec<u8>> {
+    Ok(postcard::to_stdvec(&(
+        "shyspace join declined v1",
+        workspace_id,
+        token,
+        requester.as_bytes(),
+    ))?)
 }
 
 #[derive(Debug, Serialize, Deserialize)]

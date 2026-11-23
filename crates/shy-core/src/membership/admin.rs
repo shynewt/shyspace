@@ -9,7 +9,7 @@ use tracing::warn;
 
 use super::{
     commit::{self, FrozenAuthor},
-    invite::{Answer, Grant, Invite, JoinRequest},
+    invite::{Answer, Grant, Invite, JoinRequest, declined_bytes},
     keyring::KeyHistory,
 };
 use crate::{
@@ -133,7 +133,7 @@ impl Workspace {
                 ensure!(
                     shown_safety_code(&safety_code(&member)) != shown,
                     "this request's safety code starts like a member's ({shown}), which could let them pass for that \
-                     member; ask them to start joining again, which gives them a new code"
+                     member; decline it and ask them to join again: a new request gets a new code"
                 );
             }
 
@@ -180,15 +180,21 @@ impl Workspace {
 
     pub async fn reject_invite(&self, token: &str) -> Result<()> {
         self.ensure_admin()?;
-        let changed = self.state().store.change_invite_state(
-            token,
-            &[InviteState::Requested],
-            InviteState::Rejected,
-        )?;
-        ensure!(changed, "this invite has no request waiting for a decision");
+        let requester = {
+            let state = self.state();
+            let requester = state.store.requester(token)?;
+            let changed =
+                state
+                    .store
+                    .change_invite_state(token, &[InviteState::Requested], InviteState::Rejected)?;
+            ensure!(changed, "this invite has no request waiting for a decision");
+            requester.context("this invite's request names no one")?
+        };
         self.emit(Change::Invites);
+        let bytes = declined_bytes(&self.inner.config.workspace_id, token, &requester)?;
+        let signature = self.inner.identity.sign(&bytes).to_bytes().to_vec();
         self.bucket()
-            .put_invite_answer(token, postcard::to_stdvec(&Answer::Rejected)?)
+            .put_invite_answer(token, postcard::to_stdvec(&Answer::Rejected { signature })?)
             .await?;
         self.bucket().delete_invite_request(token).await
     }

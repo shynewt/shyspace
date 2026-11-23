@@ -127,6 +127,25 @@ impl Store {
     }
 
     /// The request waiting on `token`, if it is still awaiting a decision.
+    /// Who asked to join with `token`, whatever the request's state.
+    pub fn requester(&self, token: &str) -> Result<Option<PublicKey>> {
+        let joiner: Option<Vec<u8>> = self
+            .db
+            .query_row("SELECT joiner FROM invites WHERE token = ?", [token], |row| {
+                row.get(0)
+            })
+            .optional()?
+            .flatten();
+        joiner
+            .map(|bytes| {
+                let bytes: [u8; 32] = bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("a stored requester key is malformed"))?;
+                Ok(PublicKey::from_bytes(&bytes)?)
+            })
+            .transpose()
+    }
+
     pub fn pending_request(&self, token: &str, now_ms: i64) -> Result<Option<PendingRequest>> {
         let row: Option<(Vec<u8>, Vec<u8>)> = self
             .db
