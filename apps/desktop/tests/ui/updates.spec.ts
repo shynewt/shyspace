@@ -64,6 +64,54 @@ test("checks that overlap share one request", async () => {
   expect(script.checks()).toBe(1);
 });
 
+/** Calls whose restart answers only when `finish` is called. */
+function heldRestart() {
+  let restarts = 0;
+  let finish: (outcome: RestartOutcome | Error) => void = () => {};
+  const calls: UpdateCalls = {
+    check: async () => "0.2.0",
+    restart: () => {
+      restarts += 1;
+      return new Promise<RestartOutcome>((resolve, reject) => {
+        finish = (outcome) => (outcome instanceof Error ? reject(outcome) : resolve(outcome));
+      });
+    },
+    warn: () => {},
+  };
+  return { calls, restarts: () => restarts, finish: (outcome: RestartOutcome | Error) => finish(outcome) };
+}
+
+test("one restart runs at a time, and everyone sees it", async () => {
+  const held = heldRestart();
+  const flow = new UpdateFlow(held.calls);
+  flow.restartToUpdate();
+  flow.restartToUpdate();
+  expect(held.restarts()).toBe(1);
+  expect(flow.restartState()).toEqual({ kind: "restarting" });
+});
+
+test("a failed restart can be tried again, and keeps its reason until then", async () => {
+  const held = heldRestart();
+  const flow = new UpdateFlow(held.calls);
+  flow.restartToUpdate();
+  held.finish(new Error("the administrator password was declined"));
+  await expect.poll(() => flow.restartState().kind).toBe("failed");
+  flow.restartToUpdate();
+  expect(held.restarts()).toBe(2);
+  expect(flow.restartState()).toEqual({ kind: "restarting" });
+});
+
+test("a huddle sends the restart back to waiting, and a taken update says it's already updating", async () => {
+  const held = heldRestart();
+  const flow = new UpdateFlow(held.calls);
+  flow.restartToUpdate();
+  held.finish("in_huddle");
+  await expect.poll(() => flow.restartState()).toEqual({ kind: "idle" });
+  flow.restartToUpdate();
+  held.finish("nothing_ready");
+  await expect.poll(() => flow.restartState()).toEqual({ kind: "already" });
+});
+
 test("the app looks for an update at launch", async ({ page }) => {
   await page.goto("");
   await expect(page.getByLabel("Message #general")).toBeVisible();

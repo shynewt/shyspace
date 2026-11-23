@@ -3,6 +3,7 @@ import { AnimatePresence } from "motion/react";
 import { useCallback } from "react";
 import { api, type SyncStatus } from "../../lib/api";
 import { shortcutKeys } from "../../lib/shortcuts";
+import { useReadyUpdate } from "../../lib/updates";
 import { useLive } from "../../lib/useLive";
 import { Kbd, Logo } from "../../ui";
 import { HuddleBar } from "../huddles/HuddleBar";
@@ -15,11 +16,13 @@ import { NavItem } from "./NavItem";
 import { PagesSection } from "./PagesSection";
 import { SidebarToggle } from "./ShellLayout";
 import { SyncIndicator } from "./SyncIndicator";
+import { UpdateCard } from "./UpdatePrompt";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 
 /** The sidebar's content; `ShellLayout` places it, docked or as a drawer. */
 export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefined; onOpenSearch: () => void }) {
   const { mine, incoming } = useMyHuddle();
+  const readyUpdate = useReadyUpdate();
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 pt-4 pr-2.5 pb-3 pl-4">
@@ -61,6 +64,7 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
           incoming && <IncomingHuddleCard key="incoming" incoming={incoming} />
         )}
       </AnimatePresence>
+      {readyUpdate && <UpdateCard version={readyUpdate} />}
       <div className="border-t border-line p-2">
         <MeMenu />
       </div>

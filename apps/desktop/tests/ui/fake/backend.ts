@@ -70,6 +70,11 @@ export class FakeBackend {
   updateChecks = 0;
   /** The version the app restarted into, once `restart_to_update` went through. */
   restartedInto: string | null = null;
+  /** Makes `restart_to_update` fail with this, as a declined admin password or a blocked installer would. */
+  restartFails: string | null = null;
+  /** Keeps `restart_to_update` waiting, as the system's password prompt does, until `finishRestart()`. */
+  holdRestart = false;
+  private finishHeldRestart: (() => void) | null = null;
   private members: Member[] = [];
   private pages: StoredPage[] = [];
   /** Each page editor session's page and Yjs client id, by its nonce. */
@@ -186,6 +191,21 @@ export class FakeBackend {
 
   approveJoin(): void {
     this.pendingJoin?.approve();
+  }
+
+  /** Lets a restart held by `holdRestart` go on. */
+  finishRestart(): void {
+    if (!this.finishHeldRestart) throw new Error("fake backend: no restart is waiting");
+    this.finishHeldRestart();
+    this.finishHeldRestart = null;
+  }
+
+  private restartToUpdate(): string {
+    if (this.huddles.answer("my_huddle", undefined) !== null) return "in_huddle";
+    if (this.readyUpdate === null) return "nothing_ready";
+    if (this.restartFails !== null) throw new Error(this.restartFails);
+    this.restartedInto = this.readyUpdate;
+    return "restarting";
   }
 
   /** Sets what checking the bucket finds, as a provider's settings would. */
@@ -383,10 +403,16 @@ export class FakeBackend {
         this.updateChecks += 1;
         return this.readyUpdate;
       case "restart_to_update":
-        if (this.huddles.answer("my_huddle", undefined) !== null) return "in_huddle";
-        if (this.readyUpdate === null) return "nothing_ready";
-        this.restartedInto = this.readyUpdate;
-        return "restarting";
+        if (!this.holdRestart) return this.restartToUpdate();
+        return new Promise((resolve, reject) => {
+          this.finishHeldRestart = () => {
+            try {
+              resolve(this.restartToUpdate());
+            } catch (error) {
+              reject(error);
+            }
+          };
+        });
       case "sidebar_sections":
         return this.sections.list(
           this.chat.channels.map((channel) => ({

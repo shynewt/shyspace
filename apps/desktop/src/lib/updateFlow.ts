@@ -6,6 +6,18 @@
 
 export type RestartOutcome = "restarting" | "in_huddle" | "nothing_ready";
 
+/**
+ * The one restart for the whole app: waiting for a click, under way (through
+ * any password prompt, and after, while the app quits), already taken
+ * elsewhere, or failed with the reason (the download is kept, so it can be
+ * tried again).
+ */
+export type RestartState =
+  | { kind: "idle" }
+  | { kind: "restarting" }
+  | { kind: "already" }
+  | { kind: "failed"; error: unknown };
+
 export type UpdateCalls = {
   /** The version downloaded and ready to install, or null while there's nothing newer. */
   check: () => Promise<string | null>;
@@ -21,11 +33,14 @@ export class UpdateFlow {
   private version: string | null = null;
   private readonly listeners = new Set<() => void>();
   private inFlight: Promise<void> | null = null;
+  private restart: RestartState = { kind: "idle" };
 
   constructor(private readonly calls: UpdateCalls) {}
 
   /** The version waiting for a restart, if one is downloaded. */
   readonly readyVersion = (): string | null => this.version;
+
+  readonly restartState = (): RestartState => this.restart;
 
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -40,8 +55,23 @@ export class UpdateFlow {
     return this.inFlight;
   }
 
-  restartToUpdate(): Promise<RestartOutcome> {
-    return this.calls.restart();
+  /** Installs the ready update and restarts; a restart already under way isn't started again. */
+  restartToUpdate(): void {
+    if (this.restart.kind === "restarting") return;
+    this.setRestart({ kind: "restarting" });
+    this.calls.restart().then(
+      (outcome) => {
+        // A huddle refuses it; leaving the huddle is what makes Restart possible again.
+        if (outcome === "in_huddle") this.setRestart({ kind: "idle" });
+        if (outcome === "nothing_ready") this.setRestart({ kind: "already" });
+      },
+      (error: unknown) => this.setRestart({ kind: "failed", error }),
+    );
+  }
+
+  private setRestart(state: RestartState): void {
+    this.restart = state;
+    for (const listener of this.listeners) listener();
   }
 
   private async check(): Promise<void> {

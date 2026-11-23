@@ -1,10 +1,12 @@
 import { AnimatePresence, motion } from "motion/react";
 import { type ComponentProps, type ReactNode, useRef } from "react";
+import { useReadyUpdate } from "../../lib/updates";
 import { Button, cx, springs, Tooltip } from "../../ui";
 import { useMyHuddle } from "../huddles/HuddleContext";
 import { HuddlePill } from "../huddles/HuddlePill";
 import { IncomingHuddlePill } from "../huddles/IncomingHuddle";
 import { SidebarToggle, useShellLayout } from "./ShellLayout";
+import { UpdatePill } from "./UpdatePrompt";
 
 /** The bar at the top of a view or panel: one line, with a rule below. */
 export const HEADER_BAR = "flex h-13 shrink-0 items-center gap-2 border-b border-line";
@@ -19,6 +21,7 @@ export const HEADER_BAR = "flex h-13 shrink-0 items-center gap-2 border-b border
 export function ViewHeader({ children, className }: { children?: ReactNode; className?: string }) {
   const { sidebar } = useShellLayout();
   const { mine, incoming } = useMyHuddle();
+  const readyUpdate = useReadyUpdate();
   return (
     <header className={cx("@container/header px-5", HEADER_BAR, className)}>
       <AnimatePresence initial={false}>
@@ -32,6 +35,7 @@ export function ViewHeader({ children, className }: { children?: ReactNode; clas
           ) : (
             incoming && <IncomingHuddlePill key="incoming" incoming={incoming} />
           ))}
+        {!sidebar.isDocked && readyUpdate && <UpdatePill key="update" version={readyUpdate} />}
       </AnimatePresence>
     </header>
   );

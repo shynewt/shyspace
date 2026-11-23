@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { api } from "./api";
-import { CHECK_EVERY_MS, type RestartOutcome, UpdateFlow } from "./updateFlow";
+import { CHECK_EVERY_MS, type RestartState, UpdateFlow } from "./updateFlow";
 
 const flow = new UpdateFlow({
   check: api.checkForUpdate,
@@ -22,7 +22,12 @@ export function useReadyUpdate(): string | null {
   return useSyncExternalStore(flow.subscribe, flow.readyVersion);
 }
 
-/** Installs the ready update and restarts; refused during a huddle. */
-export function restartToUpdate(): Promise<RestartOutcome> {
-  return flow.restartToUpdate();
+/** Where the app's one restart into the update stands. */
+export function useRestartState(): RestartState {
+  return useSyncExternalStore(flow.subscribe, flow.restartState);
+}
+
+/** Installs the ready update and restarts; refused during a huddle, and never started twice. */
+export function restartToUpdate(): void {
+  flow.restartToUpdate();
 }
