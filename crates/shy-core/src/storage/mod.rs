@@ -130,7 +130,11 @@ impl Store {
     }
 
     /// Runs `work` atomically: either everything it wrote is kept, or nothing.
+    /// Inside a transaction already, `work` runs in a savepoint of it.
     pub fn atomically<T>(&self, work: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
+        if !self.db.is_autocommit() {
+            return self.with_savepoint(work);
+        }
         let transaction = self.db.unchecked_transaction()?;
         let value = work(self)?;
         transaction.commit()?;

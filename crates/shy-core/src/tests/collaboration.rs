@@ -371,3 +371,70 @@ async fn an_op_that_cant_even_be_kept_is_read_again_next_time() {
         .collect();
     assert!(texts.contains(&"written while the disk was full".to_string()));
 }
+
+/// A downloaded segment applies in one transaction, but each op on its own:
+/// one that breaks a rule is skipped and the others around it still apply.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broken_op_in_a_downloaded_segment_skips_only_itself() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let admins = admin.send_message(&general, "Ada's own words", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let mut forger = Forger::new(&bob);
+    let message = |text: &str| crate::ops::Op::Message {
+        id: crate::ops::new_owned_id(&bob.me()),
+        channel: general.clone(),
+        text: text.into(),
+        reply_to: None,
+    };
+    let segment = [
+        forger.seal(message("before")),
+        forger.seal(crate::ops::Op::MessageEdit {
+            id: admins,
+            text: "not Bob's to edit".into(),
+        }),
+        forger.seal(message("after")),
+    ];
+    bucket.put_segment(&segment).await.unwrap();
+
+    admin.sync().await;
+
+    let texts = texts_in(&admin, &general);
+    assert!(texts.contains(&"before".to_string()) && texts.contains(&"after".to_string()));
+    assert!(texts.contains(&"Ada's own words".to_string()));
+    assert_eq!(admin.status().error, None);
+}
+
+/// If applying a segment stops before it is saved (the app dies, say),
+/// nothing of it stays and the next pull reads it again whole.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_segment_cut_short_is_read_again_whole() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mut forger = Forger::new(&bob);
+    let segment = ["one", "two"].map(|text| {
+        forger.seal(crate::ops::Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: text.into(),
+            reply_to: None,
+        })
+    });
+    bucket.put_segment(&segment).await.unwrap();
+
+    admin
+        .inner
+        .fail_segment_save
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.sync().await;
+    assert!(admin.status().error.is_some());
+    assert!(
+        !texts_in(&admin, &general).contains(&"one".to_string()),
+        "nothing of it stayed"
+    );
+
+    admin.sync().await;
+    let texts = texts_in(&admin, &general);
+    assert!(texts.contains(&"one".to_string()) && texts.contains(&"two".to_string()));
+    assert_eq!(admin.status().error, None);
+}

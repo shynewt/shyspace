@@ -3,10 +3,7 @@
 use anyhow::Result;
 use tracing::warn;
 
-use super::{
-    peers::peers_to_dial,
-    receive::{LocalFailure, NotKept},
-};
+use super::peers::peers_to_dial;
 use crate::{ops::now_ms, transport::bucket::split_into_segments, workspace::Workspace};
 
 impl Workspace {
@@ -24,26 +21,13 @@ impl Workspace {
             let cursor = self.state().store.cursor(&author)?;
             let mut segments = self.bucket().segments_after(&author, cursor.as_deref()).await?;
             while let Some((key, envelopes)) = segments.next().await? {
-                for envelope in envelopes {
-                    if envelope.author != author {
-                        warn!("segment {key} contains an op by someone else; skipping it");
-                        continue;
-                    }
-                    match self.receive(envelope) {
-                        Ok(()) => {}
-                        Err(error) if error.downcast_ref::<NotKept>().is_some() => {
-                            // The cursor stays before this segment, so the
-                            // next pull reads the op again.
-                            local_failure.get_or_insert(error);
-                            continue 'authors;
-                        }
-                        Err(error) if error.downcast_ref::<LocalFailure>().is_some() => {
-                            local_failure.get_or_insert(error);
-                        }
-                        Err(error) => warn!("dropping op from {key}: {error:#}"),
-                    }
+                let read = self.receive_segment(&author, &key, &envelopes)?;
+                if let Some(error) = read.local_failure {
+                    local_failure.get_or_insert(error);
                 }
-                self.state().store.set_cursor(&author, &key)?;
+                if read.is_stopped {
+                    continue 'authors;
+                }
             }
         }
         local_failure.map_or(Ok(()), Err)

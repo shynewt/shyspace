@@ -172,6 +172,16 @@ pub fn connector(bucket: &Bucket) -> Connector {
     Arc::new(move |_: &str, _: &BucketConfig| Ok(bucket.clone()))
 }
 
+/// The texts of the latest messages in `channel`, as `member` sees them.
+pub fn texts_in(member: &Workspace, channel: &str) -> Vec<String> {
+    member
+        .messages(channel, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect()
+}
+
 /// A workspace with an admin (Ada) and one member (Bob), in sync.
 pub async fn admin_and_bob() -> (tempfile::TempDir, Bucket, Workspace, Workspace) {
     let root = tempfile::tempdir().unwrap();

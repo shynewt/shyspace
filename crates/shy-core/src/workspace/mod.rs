@@ -131,6 +131,10 @@ pub(crate) struct Inner {
     /// Makes the next parking of an op fail as a full disk would.
     #[cfg(test)]
     pub fail_next_park: std::sync::atomic::AtomicBool,
+    /// Makes the next downloaded segment fail just before it is saved, as if
+    /// the app died then.
+    #[cfg(test)]
+    pub fail_segment_save: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]

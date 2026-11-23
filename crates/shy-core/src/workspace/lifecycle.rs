@@ -425,6 +425,8 @@ impl Workspace {
                 fail_next_apply: Default::default(),
                 #[cfg(test)]
                 fail_next_park: Default::default(),
+                #[cfg(test)]
+                fail_segment_save: Default::default(),
             }),
         };
         workspace

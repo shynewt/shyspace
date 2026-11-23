@@ -22,15 +22,6 @@ fn message(author: &Workspace, channel: &str, text: String) -> Op {
     }
 }
 
-fn texts_in(member: &Workspace, channel: &str) -> Vec<String> {
-    member
-        .messages(channel, None, 50)
-        .unwrap()
-        .into_iter()
-        .map(|message| message.text)
-        .collect()
-}
-
 /// The envelope a member keeps for `envelope`'s place in its author's log.
 fn kept(member: &Workspace, envelope: &Envelope) -> Envelope {
     member

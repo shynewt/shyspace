@@ -42,6 +42,16 @@ impl std::fmt::Display for NotKept {
     }
 }
 
+/// What applying a downloaded segment found.
+#[derive(Default)]
+pub(super) struct SegmentRead {
+    /// The first op that failed locally.
+    pub local_failure: Option<anyhow::Error>,
+    /// An op couldn't even be kept: the rest of the segment waits, and the
+    /// cursor stays before it.
+    pub is_stopped: bool,
+}
+
 /// What retrying parked ops found.
 pub(super) struct Pending {
     /// Authors held up by an op this version can't read: from a newer
@@ -55,29 +65,83 @@ impl Workspace {
     /// Takes an envelope from gossip or the bucket. It is stored only once it
     /// verifies; envelopes we can't apply yet are parked and retried.
     pub(crate) fn receive(&self, envelope: Envelope) -> Result<()> {
-        ensure!(
-            (1..=MAX_STORED_NUMBER).contains(&envelope.seq) && envelope.epoch <= MAX_STORED_NUMBER,
-            "op numbering out of range"
-        );
-        let changes = {
-            let state = self.state();
-            if state.store.is_applied(&envelope.author, envelope.seq)? {
-                match self.check_for_fork(&state, &envelope)? {
-                    SecondLook::Settled(changes) => changes,
-                    SecondLook::NotYet => {
-                        park(&state, &envelope)?;
-                        Vec::new()
-                    }
-                    SecondLook::Refused(reason) => bail!(reason),
-                }
-            } else {
-                self.receive_new(&state, &envelope)?
-            }
-        };
+        let changes = self.receive_locked(&self.state(), &envelope)?;
         for change in changes {
             self.emit(change);
         }
         Ok(())
+    }
+
+    fn receive_locked(&self, state: &State, envelope: &Envelope) -> Result<Vec<Change>> {
+        ensure!(
+            (1..=MAX_STORED_NUMBER).contains(&envelope.seq) && envelope.epoch <= MAX_STORED_NUMBER,
+            "op numbering out of range"
+        );
+        if !state.store.is_applied(&envelope.author, envelope.seq)? {
+            return self.receive_new(state, envelope);
+        }
+        Ok(match self.check_for_fork(state, envelope)? {
+            SecondLook::Settled(changes) => changes,
+            SecondLook::NotYet => {
+                park(state, envelope)?;
+                Vec::new()
+            }
+            SecondLook::Refused(reason) => bail!(reason),
+        })
+    }
+
+    /// Applies one downloaded segment of `author`'s ops in a single
+    /// transaction, so it costs one disk sync rather than one per op. Each op
+    /// still applies on its own (a savepoint): one that breaks a rule or fails
+    /// here is skipped or kept for later as when received alone. The cursor
+    /// moves past the segment in the same transaction, so if saving fails,
+    /// nothing of it stays and the next pull reads it again.
+    pub(super) fn receive_segment(
+        &self,
+        author: &PublicKey,
+        key: &str,
+        envelopes: &[Envelope],
+    ) -> Result<SegmentRead> {
+        let state = self.state();
+        let (read, changes) = state.store.atomically(|store| {
+            let mut read = SegmentRead::default();
+            let mut changes = Vec::new();
+            for envelope in envelopes {
+                if envelope.author != *author {
+                    warn!("segment {key} contains an op by someone else; skipping it");
+                    continue;
+                }
+                match self.receive_locked(&state, envelope) {
+                    Ok(more) => changes.extend(more),
+                    Err(error) if error.downcast_ref::<NotKept>().is_some() => {
+                        // The cursor stays before this segment, so the next
+                        // pull reads the op again.
+                        read.local_failure.get_or_insert(error);
+                        read.is_stopped = true;
+                        return Ok((read, changes));
+                    }
+                    Err(error) if error.downcast_ref::<LocalFailure>().is_some() => {
+                        read.local_failure.get_or_insert(error);
+                    }
+                    Err(error) => warn!("dropping op from {key}: {error:#}"),
+                }
+            }
+            store.set_cursor(author, key)?;
+            #[cfg(test)]
+            if self
+                .inner
+                .fail_segment_save
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                bail!("a simulated crash while saving a segment");
+            }
+            Ok((read, changes))
+        })?;
+        drop(state);
+        for change in changes {
+            self.emit(change);
+        }
+        Ok(read)
     }
 
     /// An op for a place in its author's log we haven't filled yet.

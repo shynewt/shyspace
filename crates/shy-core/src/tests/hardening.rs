@@ -519,15 +519,6 @@ async fn ordinary_ops_cannot_reach_private_ids() {
     assert!(!bob.state().store.is_deleted(&private).unwrap());
 }
 
-fn texts_in(member: &Workspace, channel: &str) -> Vec<String> {
-    member
-        .messages(channel, None, 50)
-        .unwrap()
-        .into_iter()
-        .map(|message| message.text)
-        .collect()
-}
-
 /// What every member should see the same, leaving out personal state.
 fn shared_view(member: &Workspace, channel: &str) -> Vec<(String, String, bool, u64)> {
     member
