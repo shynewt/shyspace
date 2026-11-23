@@ -24,7 +24,10 @@ impl Workspace {
         else {
             return Ok(None);
         };
-        if verified.author == self.me() || now_ms()? - verified.body.timestamp_ms > ALERT_WINDOW_MS {
+        // The author's time can be anything; saturate rather than overflow.
+        if verified.author == self.me()
+            || now_ms()?.saturating_sub(verified.body.timestamp_ms) > ALERT_WINDOW_MS
+        {
             return Ok(None);
         }
         // Only what was stored counts, and the scans below stay bounded.

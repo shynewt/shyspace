@@ -218,7 +218,7 @@ impl Workspace {
     pub fn receive_heartbeat(&self, heartbeat: &Heartbeat) -> Result<bool> {
         let now = now_ms()?;
         ensure!(
-            (heartbeat.sent_ms - now).abs() <= MAX_CLOCK_SKEW_MS,
+            heartbeat.sent_ms.abs_diff(now) <= MAX_CLOCK_SKEW_MS.unsigned_abs(),
             "heartbeat too old or from the future"
         );
         ensure!(
