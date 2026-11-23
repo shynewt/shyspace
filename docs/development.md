@@ -51,7 +51,7 @@ Every member has a data directory in `/var/tmp/shyspace-demo/<name>` (or `$SHY_D
 
 ## Checks
 
-Run all of these before committing. CI (`.github/workflows/ci.yml`) is the backstop, not the first line: it runs on pull requests, weekly on main, and from the Actions tab's "Run workflow" button, because Actions minutes are limited on a private repository. The real-app job runs only from that button.
+Run all of these before committing. CI (`.github/workflows/ci.yml`) is the backstop, not the first line: it runs on every push to main, on pull requests, weekly, and from the Actions tab's "Run workflow" button. The real-app job runs only from that button.
 
 ```sh
 cargo fmt --check
@@ -89,7 +89,7 @@ To see every shared component, open the app with `#gallery` in development. To c
 
 ## Releasing
 
-Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft, pre-release GitHub release to look over and publish. The Actions tab's "Run workflow" button builds them as workflow artifacts only. macOS builds aren't signed yet, so testers allow the app once in System Settings › Privacy & Security › Open Anyway. One release costs roughly 250–300 Actions minutes, because macOS minutes count ten times on a private repository.
+Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft, pre-release GitHub release to look over and publish. The Actions tab's "Run workflow" button builds them as workflow artifacts only. macOS builds aren't signed yet, so testers allow the app once in System Settings › Privacy & Security › Open Anyway.
 
 ## Building the macOS app by hand
 
@@ -98,7 +98,7 @@ Until release builds run in CI, a tester with a Mac (Apple Silicon) can build th
 1. Install Apple's command-line tools: `xcode-select --install`.
 2. Install Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`, then open a new terminal.
 3. Install Node 22 and pnpm, for example with Homebrew: `brew install node@22 pnpm`.
-4. Get the code: `git clone git@github.com:shynewt/shyspace.git && cd shyspace/apps/desktop` (it needs access to the private repository).
+4. Get the code: `git clone git@github.com:shynewt/shyspace.git && cd shyspace/apps/desktop`.
 5. Build: `pnpm install && pnpm tauri build --features vendored-openssl --bundles dmg`. macOS has no OpenSSL to link, so it's built in; that uses the Perl that comes with macOS.
 6. The disk image is in `target/release/bundle/dmg/` at the repository root (for example `shyspace_0.1.0_aarch64.dmg`). Share it privately.
 

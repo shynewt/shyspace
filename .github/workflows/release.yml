@@ -3,8 +3,8 @@ name: Release
 # Builds the desktop app and the `shy` CLI for Linux, macOS (Apple Silicon)
 # and Windows, after the same checks as CI. A version tag (v0.1.0) attaches
 # them to a draft GitHub release; the Actions tab's button builds them as
-# workflow artifacts only. macOS minutes count ten times on a private
-# repository, so this never runs on its own.
+# workflow artifacts only. A release is a deliberate step, so this never runs
+# on its own.
 on:
   push:
     tags: ["v*"]

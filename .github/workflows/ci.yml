@@ -1,9 +1,11 @@
 name: CI
 
 # Every check runs locally before each commit (AGENTS.md), so CI is the
-# backstop: on pull requests, weekly on main, and on demand. Actions minutes
-# are limited on a private repository.
+# backstop: on every push to main, on pull requests, weekly, and on demand.
 on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md"]
   pull_request:
     paths-ignore: ["docs/**", "**/*.md"]
   schedule:
