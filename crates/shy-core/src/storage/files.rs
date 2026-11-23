@@ -168,15 +168,22 @@ impl Store {
             return Ok(false);
         }
         // The later clock wins; a tie, which only a forged op makes, goes to
-        // the higher picture id, so every order ends the same.
-        let id_of = |picture: Option<&BlobRef>| picture.map_or(String::new(), |picture| picture.id.clone());
-        let incoming_id = id_of(picture);
+        // the larger encoded picture, so every order ends the same.
+        let encoded = picture.map(postcard::to_stdvec).transpose()?;
+        let kept_encoded = kept
+            .as_ref()
+            .map(|(kept_picture, _)| kept_picture.as_ref().map(postcard::to_stdvec).transpose())
+            .transpose()?;
+        let is_newer = match (&kept, &kept_encoded) {
+            (Some((_, kept_lamport)), Some(kept_encoded)) => {
+                (*kept_lamport, kept_encoded) < (lamport, &encoded)
+            }
+            _ => true,
+        };
+        let id_of = |picture: Option<&BlobRef>| picture.map(|picture| picture.id.clone());
         let kept_id = kept
             .as_ref()
-            .map(|(kept_picture, _)| id_of(kept_picture.as_ref()));
-        let is_newer = kept.as_ref().is_none_or(|(kept_picture, kept_lamport)| {
-            (*kept_lamport, id_of(kept_picture.as_ref())) < (lamport, incoming_id.clone())
-        });
+            .and_then(|(kept_picture, _)| id_of(kept_picture.as_ref()));
         if !is_newer {
             if let Some(picture) = picture
                 && kept_id.as_deref() != Some(picture.id.as_str())
@@ -185,12 +192,18 @@ impl Store {
             }
             return Ok(false);
         }
-        if let Some((Some(old), _)) = &kept
-            && old.id != incoming_id
+        if let Some(old_id) = kept_id
+            && Some(&old_id) != id_of(picture).as_ref()
         {
-            self.request_blob_removal(member, &old.id, member)?;
+            self.request_blob_removal(member, &old_id, member)?;
         }
-        let encoded = picture.map(postcard::to_stdvec).transpose()?;
+        if let Some(picture) = picture {
+            // A picture shown again (only a forged op reuses an id) stays.
+            self.db.execute(
+                "DELETE FROM blob_removals WHERE author = ? AND blob_id = ?",
+                params![member, picture.id],
+            )?;
+        }
         self.db.execute(
             "INSERT INTO profile_pictures (member, blob, lamport) VALUES (?1, ?2, ?3)
              ON CONFLICT (member) DO UPDATE SET blob = ?2, lamport = ?3",
@@ -342,12 +355,50 @@ mod tests {
         });
         let mut same_id = picture(b"\x89PNG other");
         same_id.id = shown.id.clone();
-
         channel.apply(Op::ProfilePicture {
             picture: Some(same_id),
         });
-
         assert!(channel.store.blob_removals().unwrap().is_empty());
+
+        // Replaced, then shown again: it stays, and only the other one goes.
+        let other = picture(b"\x89PNG between");
+        channel.apply(Op::ProfilePicture {
+            picture: Some(other.clone()),
+        });
+        channel.apply(Op::ProfilePicture { picture: Some(shown) });
+        let removed: Vec<String> = channel
+            .store
+            .blob_removals()
+            .unwrap()
+            .into_iter()
+            .map(|removal| removal.blob_id)
+            .collect();
+        assert_eq!(removed, [other.id]);
+    }
+
+    /// Two pictures sharing an id but not a key, tied on the clock (only a
+    /// forged op), still settle the same in either order.
+    #[test]
+    fn pictures_sharing_an_id_settle_the_same_in_any_order() {
+        let first = picture(b"\x89PNG first");
+        let mut second = picture(b"\x89PNG second");
+        second.id = first.id.clone();
+        let shown = [[&first, &second], [&second, &first]].map(|order| {
+            let mut channel = TestChannel::new();
+            channel.apply(Op::ProfilePicture {
+                picture: Some(order[0].clone()),
+            });
+            channel.apply_again(Op::ProfilePicture {
+                picture: Some(order[1].clone()),
+            });
+            channel
+                .store
+                .profile_picture(channel.author.as_bytes())
+                .unwrap()
+                .unwrap()
+                .key
+        });
+        assert_eq!(shown[0], shown[1]);
     }
 
     /// The delete can apply before the file: a rebuild or restore reads the

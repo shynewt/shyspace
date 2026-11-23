@@ -2025,3 +2025,27 @@ async fn an_edited_workspace_json_is_refused() {
     let error = format!("{:#}", opened.err().unwrap());
     assert!(error.contains("changed outside the app"), "{error}");
 }
+
+/// A delete can reach a device before the file it removes (rebuilds and
+/// restores read the bucket in a new order, and gossip can race). The
+/// deleter's device still takes the file's pieces out of the bucket.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_deleted_before_it_arrives_still_leaves_the_bucket() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let file = crate::workspace::NewFile {
+        name: "notes.txt".into(),
+        media_type: "text/plain".into(),
+        source: crate::workspace::FileSource::Bytes(b"notes".to_vec()),
+    };
+    bob.send_files(&general, "", None, vec![file]).await.unwrap();
+    let shared = bob.files().unwrap().remove(0).id;
+    assert_eq!(bucket.blob_ids(&bob.me()).await.unwrap().len(), 1);
+
+    admin.write(Op::Delete { id: shared }).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    sync_all(&[&admin, &bob]).await;
+
+    assert!(admin.files().unwrap().is_empty() && bob.files().unwrap().is_empty());
+    assert!(bucket.blob_ids(&bob.me()).await.unwrap().is_empty());
+}

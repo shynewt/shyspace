@@ -65,6 +65,12 @@ impl CacheSize {
         kept.bytes = (kept.changes == changes_before).then_some(bytes);
     }
 
+    /// Marks a change about to happen, so a count running meanwhile isn't
+    /// trusted even if the change is counted after it.
+    fn note_change(&self) {
+        self.lock().changes += 1;
+    }
+
     /// Adds `added` and takes away `removed` bytes, if the size is known.
     fn change(&self, added: u64, removed: u64) {
         let mut kept = self.lock();
@@ -143,6 +149,7 @@ impl BlobCache {
     pub fn forget_chunk(&self, blob: &BlobKey, index: u32) -> Result<()> {
         let path = self.chunk_path(blob, index);
         let removed = file_size(&path);
+        self.size.note_change();
         match fs::remove_file(path) {
             Ok(()) => {
                 self.size.change(0, removed);
@@ -167,6 +174,7 @@ impl BlobCache {
     pub fn forget(&self, blob: &BlobKey) -> Result<()> {
         let dir = self.blob_dir(blob);
         let removed = dir_size(&dir);
+        self.size.note_change();
         match fs::remove_dir_all(dir) {
             Ok(()) => {
                 match removed {
