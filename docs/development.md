@@ -92,7 +92,7 @@ To see every shared component, open the app with `#gallery` in development. To c
 
 ## Releasing
 
-Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage; built on Ubuntu 24.04, so they need glibc 2.39: Ubuntu 24.04, Debian 13, Fedora 40 or newer), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft GitHub release to look over and publish. Everything else builds them as workflow artifacts only: the Actions tab's "Run workflow" button, a pull request that changes the workflows or `tauri.conf.json`, and a weekly run on main that catches a retired runner image or a broken build before a release needs it. The build machines are `ubuntu-24.04`, `macos-26` and `windows-2025`; GitHub keeps two images per system and retires the oldest, so move them on when the weekly run warns. macOS builds are signed ad hoc (`bundle.macOS.signingIdentity: "-"` in `tauri.conf.json`), with no Apple identity and no notarization, so macOS refuses them at first; the release workflow checks the signature is whole, since a broken one makes macOS call the app damaged. Testers follow "Building the macOS app by hand" below, from "The app isn't signed".
+Push a version tag that matches the version in `apps/desktop/src-tauri/tauri.conf.json` (`git tag v0.1.0 && git push origin v0.1.0`). `.github/workflows/release.yml` runs the CI checks, then builds the app and the `shy` CLI for Linux (`.deb`, `.rpm`, AppImage; built on Ubuntu 24.04, so they need glibc 2.39: Ubuntu 24.04, Debian 13, Fedora 40 or newer), macOS on Apple Silicon (`.dmg`) and Windows (installer), with OpenSSL built in (`--features vendored-openssl`), and attaches them to a draft GitHub release to look over and publish. Everything else builds them as workflow artifacts only: the Actions tab's "Run workflow" button, a pull request that changes the workflows or `tauri.conf.json`, and a weekly run on main that catches a retired runner image or a broken build before a release needs it. The build machines are `ubuntu-24.04`, `macos-26` and `windows-2025`; GitHub keeps two images per system and retires the oldest, so move them on when the weekly run warns. macOS builds are signed ad hoc (`bundle.macOS.signingIdentity: "-"` in `tauri.conf.json`), with no Apple identity and no notarization, so macOS refuses them at first; the release workflow checks the signature is whole, since a broken one makes macOS call the app damaged. To open one, follow "Building the macOS app by hand" below, from "The app isn't signed".
 
 ### Updates
 
@@ -116,7 +116,7 @@ cat ~/.tauri/shyspace-updater.key.pub
 
 ## Building the macOS app by hand
 
-The release workflow builds the `.dmg`, but a tester with a Mac (Apple Silicon) can also build it, for example to try a branch. It takes about 15 minutes the first time, mostly installing tools and compiling.
+The release workflow builds the `.dmg`, but anyone with a Mac (Apple Silicon) can also build it, for example to try a branch. It takes about 15 minutes the first time, mostly installing tools and compiling.
 
 1. Install Apple's command-line tools: `xcode-select --install`.
 2. Install Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`, then open a new terminal.
