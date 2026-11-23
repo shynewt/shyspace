@@ -141,6 +141,8 @@ pub(crate) struct Inner {
     pub confirmed_head_seq: std::sync::atomic::AtomicU64,
     /// The latest signed hint per author: (seq, head version).
     pub heard_hints: Mutex<std::collections::HashMap<PublicKey, (u64, String)>>,
+    /// What each author has in the bucket, for relaying ops that never got there.
+    pub relays: Mutex<crate::sync::RelayState>,
     /// Fork proof objects in the bucket already looked at, by path, with the
     /// version we saw: our own found intact, and ones found overwritten.
     pub seen_fork_proofs: Mutex<std::collections::HashMap<String, String>>,

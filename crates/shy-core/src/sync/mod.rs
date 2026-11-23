@@ -10,9 +10,11 @@ mod pacing;
 mod packing;
 mod peers;
 mod receive;
+pub(crate) mod relay;
 mod replicate;
 
 pub use heads::Hint;
+pub use relay::RelayState;
 
 use std::time::Duration;
 
@@ -363,6 +365,7 @@ impl Workspace {
                 pulled,
                 tended,
                 self.push().await,
+                self.relay_live_only_ops().await,
                 // After the push, so a delete is out before its file goes.
                 self.remove_unused_blobs().await,
                 self.refresh_gossip_members(),

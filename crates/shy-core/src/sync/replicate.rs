@@ -202,7 +202,7 @@ impl Workspace {
     /// Whether our copy of `name`'s range encodes to exactly the bytes its
     /// hash names, as an honest upload of the same ops does. A range bigger
     /// than any segment can't be, so it isn't loaded.
-    fn is_same_as_ours(&self, author: &PublicKey, name: &SegmentName) -> Result<bool> {
+    pub(super) fn is_same_as_ours(&self, author: &PublicKey, name: &SegmentName) -> Result<bool> {
         let size = self
             .state()
             .store

@@ -160,6 +160,7 @@ impl Workspace {
             .context("bad hint signature")?;
         self.heard_hints()
             .insert(hint.author, (hint.seq, hint.head_version.clone()));
+        self.note_uploaded(&hint.author, hint.seq);
         Ok(hint.seq > self.state().store.last_seq(&hint.author)?)
     }
 

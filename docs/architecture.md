@@ -64,7 +64,8 @@ Bucket requests cost money on some providers, so the loop reads as little as it 
 4. every 10 minutes and at sweeps: repair missing or altered commits (one listing of `mls/commit/`; only slots whose version changed since we found them right are fetched) and learn the forks proved in the bucket, putting there the proofs we have that it lacks (`sync/forks.rs`);
 5. read new segments: the logs whose heads moved (a check) or everyone who was ever a member, ourselves included (a sweep; newcomers need removed members' history, a restored device its own);
 6. push our unpushed ops as segments, each under the 32 MB that readers accept, then any packs due (below);
-7. refresh the gossip allowlist to current members; every 10 minutes, connect to members listed in the bucket.
+7. relay others' ops the bucket still lacks a while after they reached us live (`sync/relay.rs`): their device may have died before uploading. We go once the members online whose keys are closer to the author's have had their turn (2 minutes, then a minute each), after looking in the bucket, so usually one member uploads them;
+8. refresh the gossip allowlist to current members; every 10 minutes, connect to members listed in the bucket.
 
 A check lists an author's segments past the highest seq we hold; a sweep lists past what it has checked against the bucket, so ops that came only over gossip are compared with the bucket's copy (a segment whose range we hold is fetched only if its name's hash differs from our own copy's). Either first fetches the covering chain: from what we hold, the object that reaches furthest (the narrower on a tie), then again from its end (`sync/packing.rs`); then it fetches the rest that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
 
@@ -76,7 +77,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 
 | Path | Content |
 |---|---|
-| `ops/<author>/<last seq>-<first seq>-<nonce>-<hash>` | a segment of that author's envelopes, written create-only; the name leads with the last seq so a reader lists exactly what holds more than it has, holds a random nonce picked at upload so nobody can take the name first, and ends in a BLAKE3 hash of the nonce and the bytes. Packs are segments too: when an author has pushed through a multiple of 16, 256 or 4096 ops, they upload that aligned range again as one object (if it fits), so a reader catching up fetches a few wide objects rather than one per upload |
+| `ops/<author>/<last seq>-<first seq>-<nonce>-<hash>` | a segment of that author's envelopes, written create-only; the name leads with the last seq so a reader lists exactly what holds more than it has, holds a random nonce picked at upload so nobody can take the name first, and ends in a BLAKE3 hash of the nonce and the bytes. Packs are segments too: when an author has pushed through a multiple of 16, 256 or 4096 ops, they upload that aligned range again as one object (if it fits), so a reader catching up fetches a few wide objects rather than one per upload. Usually written by the author; any member may relay the author's own signed ops there when the author's upload never came, and readers check every op either way |
 | `ops/forks/<author>/<seq>/<hash>` | proof that the author signed two versions of that op: both envelopes |
 | `mls/commit/<from epoch>` | admin-signed MLS commits; any member puts one back within 10 minutes if its slot goes missing or holds something else |
 | `invites/<token>/request` | a joiner's request, written through a presigned link |

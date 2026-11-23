@@ -2954,12 +2954,14 @@ async fn a_store_missing_its_identity_does_not_open() {
 }
 
 /// A store whose next listing under a prefix fails, as a network blip
-/// would, and which can refuse every upload to keys starting with one.
+/// would, and which can refuse every upload to keys starting with one. It
+/// records the prefix of every listing.
 #[derive(Debug, Default)]
 struct FlakyStore {
     inner: InMemory,
     fail_next_list_under: Mutex<Option<String>>,
     refuse_puts_under: Mutex<Option<String>>,
+    listed_prefixes: Mutex<Vec<String>>,
 }
 
 impl fmt::Display for FlakyStore {
@@ -2969,6 +2971,16 @@ impl fmt::Display for FlakyStore {
 }
 
 impl FlakyStore {
+    fn note_listing(&self, prefix: Option<&Path>) {
+        let prefix = prefix.map(Path::to_string).unwrap_or_default();
+        self.listed_prefixes.lock().unwrap().push(prefix);
+    }
+
+    fn listings_of(&self, prefix: &str) -> usize {
+        let listed = self.listed_prefixes.lock().unwrap();
+        listed.iter().filter(|listed| listed.as_str() == prefix).count()
+    }
+
     fn is_failing(&self, prefix: Option<&Path>) -> bool {
         let mut armed = self.fail_next_list_under.lock().unwrap();
         let is_hit = matches!((armed.as_deref(), prefix), (Some(armed), Some(prefix)) if prefix.as_ref().starts_with(armed));
@@ -3022,6 +3034,7 @@ impl ObjectStore for FlakyStore {
         self.inner.delete_stream(locations)
     }
     fn list(&self, prefix: Option<&Path>) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        self.note_listing(prefix);
         match self.is_failing(prefix) {
             true => Box::pin(stream::once(Err(Self::failure()))),
             false => self.inner.list(prefix),
@@ -3032,6 +3045,7 @@ impl ObjectStore for FlakyStore {
         prefix: Option<&Path>,
         offset: &Path,
     ) -> stream::Boxed<object_store::Result<ObjectMeta>> {
+        self.note_listing(prefix);
         match self.is_failing(prefix) {
             true => Box::pin(stream::once(Err(Self::failure()))),
             false => self.inner.list_with_offset(prefix, offset),
@@ -3468,4 +3482,256 @@ async fn skipped_objects_are_read_again_once_a_new_epoch_key_arrives() {
     admin.remove_member(&dave.my_id()).await.unwrap();
 
     assert_eq!(junk_downloads_by_bob().await, 1);
+}
+
+/// `author` sends `text` live to `holders`, and their device dies before it
+/// reaches the bucket. Returns the op.
+async fn send_live_then_die(
+    store: &FlakyStore,
+    author: &Workspace,
+    holders: &[&Workspace],
+    text: &str,
+) -> Envelope {
+    *store.refuse_puts_under.lock().unwrap() =
+        Some(format!("ops/{}/", crate::views::member_id(&author.me())));
+    let general = channel_id(author, "general");
+    author.send_message(&general, text, None).unwrap();
+    let envelope = author
+        .state()
+        .store
+        .unpushed(&author.me())
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    for holder in holders {
+        holder.receive(envelope.clone()).unwrap();
+    }
+    assert!(author.shutdown().await.is_err(), "the upload never happened");
+    *store.refuse_puts_under.lock().unwrap() = None;
+    envelope
+}
+
+fn see_each_other_online(members: &[&Workspace]) {
+    for from in members {
+        let beat = from.heartbeat(PresenceState::Online).unwrap();
+        for to in members.iter().filter(|to| to.me() != from.me()) {
+            to.receive_heartbeat(&beat).unwrap();
+        }
+    }
+}
+
+/// Checks enough times, with enough time passing, for every member in line
+/// to have had their turn to relay.
+async fn let_relays_happen(members: &[&Workspace]) {
+    use crate::sync::relay::{RELAY_AFTER_MS, RELAY_STEP_MS};
+    for member in members {
+        member.check().await;
+    }
+    let waits = std::iter::once(RELAY_AFTER_MS).chain(std::iter::repeat_n(RELAY_STEP_MS, members.len()));
+    for wait in waits {
+        // All at once, as members' checks would be.
+        let checks: Vec<_> = members
+            .iter()
+            .map(|member| {
+                member.backdate_relay_waits(wait);
+                let member = (*member).clone();
+                tokio::spawn(async move { member.check().await })
+            })
+            .collect();
+        for check in checks {
+            check.await.unwrap();
+        }
+    }
+}
+
+fn objects_of(listed: &[crate::transport::bucket::ListedObject], author: &Workspace) -> usize {
+    let prefix = format!("ops/{}/", crate::views::member_id(&author.me()));
+    listed
+        .iter()
+        .filter(|object| object.key.starts_with(&prefix))
+        .count()
+}
+
+/// The admin's device dies right after sending an op live. A member who got
+/// it relays it to the bucket, so the admin restored from the kit continues
+/// after it instead of reusing its seq (which every device would prove a
+/// fork), and a newcomer gets it too.
+#[tokio::test(flavor = "multi_thread")]
+async fn ops_only_sent_live_are_relayed_so_a_restore_continues_after_them() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let admin_id = admin.me();
+    let general = channel_id(&admin, "general");
+    let live_only = send_live_then_die(&store, &admin, &[&bob, &carol], "only sent live").await;
+    drop(admin);
+
+    see_each_other_online(&[&bob, &carol]);
+    let_relays_happen(&[&bob, &carol]).await;
+    let restored = Workspace::restore_with(
+        &data_dir(&root.path().join("ada-new-laptop")),
+        &kit,
+        connector(&bucket),
+        Networking::Offline,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(restored.state().store.last_seq(&admin_id).unwrap(), live_only.seq);
+    restored
+        .send_message(&general, "after the restore", None)
+        .unwrap();
+    sync_all(&[&restored, &bob]).await;
+    let texts = texts_in(&bob, &general);
+    assert!(
+        texts.contains(&"only sent live".to_string()) && texts.contains(&"after the restore".to_string())
+    );
+    for seq in [live_only.seq, live_only.seq + 1] {
+        assert!(!bob.state().store.is_forked(&admin_id, seq).unwrap(), "seq {seq}");
+    }
+    let dave = join(&restored, &root.path().join("dave"), &bucket, "Dave", false).await;
+    dave.sync().await;
+    assert!(texts_in(&dave, &general).contains(&"only sent live".to_string()));
+}
+
+/// Members online wait their turn by how close their key is to the
+/// author's and look in the bucket first, so five members holding the same
+/// live-only op don't all upload it.
+#[tokio::test(flavor = "multi_thread")]
+async fn five_members_holding_the_same_live_only_op_relay_it_about_once() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let mut others = Vec::new();
+    for name in ["Carol", "Dave", "Erin", "Frank"] {
+        others.push(join(&admin, &root.path().join(name), &bucket, name, false).await);
+    }
+    let holders: Vec<&Workspace> = std::iter::once(&admin).chain(others.iter()).collect();
+    let everyone: Vec<&Workspace> = std::iter::once(&bob).chain(holders.iter().copied()).collect();
+    sync_all(&everyone).await;
+    let before = objects_of(&bucket.list_segments(&bob.me(), None).await.unwrap(), &bob);
+
+    send_live_then_die(&store, &bob, &holders, "only sent live").await;
+    see_each_other_online(&holders);
+    let_relays_happen(&holders).await;
+
+    let relayed = objects_of(&bucket.list_segments(&bob.me(), None).await.unwrap(), &bob) - before;
+    assert!((1..=2).contains(&relayed), "{relayed} relay uploads");
+}
+
+/// Junk put under the author's name, even names claiming exactly the
+/// missing op, can't make a member think it is already in the bucket.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_under_an_author_neither_stops_nor_spoils_a_relay() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+
+    let live_only = send_live_then_die(&store, &bob, &[&carol], "only sent live").await;
+    let seq = live_only.seq;
+    let mismatched = segment_name_for(&bob.me(), seq, seq, &[1; 16], b"other");
+    bucket.put_raw(&mismatched, b"junk".to_vec()).await.unwrap();
+    let matching_junk = segment_name_for(&bob.me(), seq, seq, &[2; 16], b"junk");
+    bucket.put_raw(&matching_junk, b"junk".to_vec()).await.unwrap();
+    let_relays_happen(&[&carol]).await;
+
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    dave.sync().await;
+    assert!(texts_in(&dave, &general).contains(&"only sent live".to_string()));
+}
+
+/// Only ops a member verified and applied are relayed, never parked ones,
+/// and each only once: a deleted head can't make members upload again.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_applied_ops_are_relayed_and_only_once() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let bob_objects = async || objects_of(&bucket.list_segments(&bob.me(), None).await.unwrap(), &bob);
+    let before = bob_objects().await;
+
+    *store.refuse_puts_under.lock().unwrap() = Some(format!("ops/{}/", crate::views::member_id(&bob.me())));
+    bob.send_message(&general, "first", None).unwrap();
+    bob.send_message(&general, "second", None).unwrap();
+    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
+    let (first, second) = (
+        unpushed[unpushed.len() - 2].clone(),
+        unpushed[unpushed.len() - 1].clone(),
+    );
+    assert!(bob.shutdown().await.is_err());
+    *store.refuse_puts_under.lock().unwrap() = None;
+    carol.receive(second).unwrap();
+    let_relays_happen(&[&carol]).await;
+    assert_eq!(bob_objects().await, before, "a parked op isn't relayed");
+
+    carol.receive(first).unwrap();
+    let_relays_happen(&[&carol]).await;
+    assert_eq!(bob_objects().await, before + 1);
+
+    let bob_log = format!("ops/{}", crate::views::member_id(&bob.me()));
+    bucket.delete_head(&bob.me()).await.unwrap();
+    let listed_before = store.listings_of(&bob_log);
+    let_relays_happen(&[&carol]).await;
+    assert_eq!(
+        store.listings_of(&bob_log),
+        listed_before,
+        "not even looked for again"
+    );
+    assert_eq!(bob_objects().await, before + 1, "relayed once");
+}
+
+/// An op refused for its size is kept only as its header, which is no op at
+/// all for anyone else, so it isn't relayed; the ops around it are.
+#[tokio::test(flavor = "multi_thread")]
+async fn ops_kept_without_their_content_are_not_relayed() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FlakyStore::default());
+    let bucket = Bucket::without_signing(store.clone());
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let message = |text: String| Op::Message {
+        id: crate::ops::new_owned_id(&bob.me()),
+        channel: general.clone(),
+        text,
+        reply_to: None,
+    };
+    let mut forger = Forger::new(&bob);
+    let huge = forger.seal(message("x".repeat(crate::ops::MAX_OP_BYTES)));
+    let after = forger.seal(message("after the huge one".into()));
+    carol.receive(huge.clone()).unwrap();
+    carol.receive(after.clone()).unwrap();
+
+    let_relays_happen(&[&carol]).await;
+
+    let relayed: Vec<_> = bucket
+        .list_segments(&bob.me(), None)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|object| parse_segment_name(&bob.me(), &object.key))
+        .filter(|name| name.last >= huge.seq)
+        .map(|name| (name.first, name.last))
+        .collect();
+    assert_eq!(relayed, [(after.seq, after.seq)]);
 }
