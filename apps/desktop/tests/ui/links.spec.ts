@@ -13,11 +13,25 @@ test.beforeEach(async ({ page, context, browserName }) => {
   await page.getByRole("button", { name: "general", exact: true }).click();
 });
 
+/**
+ * Copies with `copy` and returns the text once it's on the clipboard: the app
+ * writes it asynchronously, after the click. The text must differ from what
+ * the clipboard held before.
+ */
+async function copied(page: Page, copy: () => Promise<void>): Promise<string> {
+  const readClipboard = () => page.evaluate(() => navigator.clipboard.readText());
+  const before = await readClipboard();
+  await copy();
+  await expect.poll(readClipboard).not.toBe(before);
+  return readClipboard();
+}
+
 async function copyFromMessage(page: Page, text: string, action: string) {
-  await page.getByRole("article").filter({ hasText: text }).first().hover();
-  await page.getByRole("button", { name: "More actions" }).click();
-  await page.getByRole("menuitem", { name: action }).click();
-  return page.evaluate(() => navigator.clipboard.readText());
+  return copied(page, async () => {
+    await page.getByRole("article").filter({ hasText: text }).first().hover();
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: action }).click();
+  });
 }
 
 test("copy text gives the message's raw markdown", async ({ page }) => {
@@ -117,9 +131,10 @@ async function copyPageLink(page: Page, title: string) {
   await page.getByLabel("Page title").fill(title);
   await page.getByLabel("Page title").press("Enter");
   const sidebar = page.getByRole("navigation", { name: "Workspace" });
-  await sidebar.getByRole("button", { name: title, exact: true }).click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Copy link" }).click();
-  return page.evaluate(() => navigator.clipboard.readText());
+  return copied(page, async () => {
+    await sidebar.getByRole("button", { name: title, exact: true }).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Copy link" }).click();
+  });
 }
 
 test("a link on a line of its own shows only as its card", async ({ page }) => {

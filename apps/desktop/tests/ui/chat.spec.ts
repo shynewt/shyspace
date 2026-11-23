@@ -151,7 +151,7 @@ test("a tall code block folds until opened, and copies its code", async ({ page,
 
   await block.hover();
   await message.getByRole("button", { name: "Copy code" }).click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(code);
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(code);
 });
 
 test("an opened code block stays open when a new message arrives", async ({ page }) => {
