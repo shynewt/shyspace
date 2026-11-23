@@ -1,6 +1,12 @@
 import { expect, type Page, test } from "@playwright/test";
 import { allowClipboard, openedLinks, recordOpenedLinks } from "./support";
 
+declare global {
+  interface Window {
+    linkedMessageLoads: number;
+  }
+}
+
 test.beforeEach(async ({ page, context, browserName }) => {
   await allowClipboard(context, browserName);
   await page.goto("");
@@ -46,6 +52,58 @@ test("a link to a message you can't see says why it might be hidden", async ({ p
     "A message you can't seeIt may be in a private channel you're not in, or deleted.",
   );
   await expect(message.getByRole("button", { name: /Message from/ })).toHaveCount(0);
+});
+
+test("a message with many message links shows three as cards and the rest as links", async ({ page }) => {
+  const ids = await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    return ["one", "two", "three", "four", "five"].map((word) => window.fake.receiveMessage(grace, "general", word));
+  });
+  await send(page, "general", `Read these:\n${ids.map((id) => `shy://message/${id}`).join("\n")}`);
+
+  const message = page.getByRole("article").filter({ hasText: "Read these" });
+  await expect(message.getByRole("button", { name: "Message from Grace in #general" })).toHaveCount(3);
+  await expect(message.getByRole("button", { name: /Message from/ }).first()).toContainText("one");
+  await expect(message.getByRole("button", { name: "a message", exact: true })).toHaveCount(2);
+});
+
+test("a message with many page links shows three as cards and the rest as links", async ({ page }) => {
+  const ids = await page.evaluate(() =>
+    [1, 2, 3, 4, 5].map((number) => window.fake.handle("create_page", { title: `Part ${number}`, parent: null })),
+  );
+  await send(page, "general", `Chapters:\n${ids.map((id) => `shy://page/${id}`).join("\n")}`);
+
+  const message = page.getByRole("article").filter({ hasText: "Chapters" });
+  await expect(message.getByRole("button", { name: /^Part \d.*Empty page$/ })).toHaveCount(3);
+  await expect(message.getByRole("button", { name: "Part 4", exact: true })).toBeVisible();
+  await expect(message.getByRole("button", { name: "Part 5", exact: true })).toBeVisible();
+});
+
+test("a message card reloads only for changes in its channel", async ({ page }) => {
+  const { grace, linked } = await page.evaluate(() => {
+    window.fake.handle("create_channel", { name: "random" });
+    const grace = window.fake.addMember("Grace");
+    return { grace, linked: window.fake.receiveMessage(grace, "general", "The plan is to ship on Friday") };
+  });
+  await send(page, "general", `See shy://message/${linked}`);
+  await expect(page.getByRole("button", { name: "Message from Grace in #general" })).toContainText("ship on Friday");
+  await page.evaluate(() => {
+    const fake = window.fake;
+    const handle = fake.handle.bind(fake);
+    window.linkedMessageLoads = 0;
+    fake.handle = (command, args) => {
+      if (command === "linked_message") window.linkedMessageLoads += 1;
+      return handle(command, args);
+    };
+  });
+
+  await page.evaluate((author) => window.fake.receiveMessage(author, "random", "elsewhere"), grace);
+  const sidebar = page.getByRole("navigation", { name: "Workspace" });
+  await expect(sidebar.getByRole("button", { name: /^random, 1 unread/ })).toBeVisible();
+  expect(await page.evaluate(() => window.linkedMessageLoads)).toBe(0);
+
+  await page.evaluate((author) => window.fake.receiveMessage(author, "general", "here"), grace);
+  await expect.poll(() => page.evaluate(() => window.linkedMessageLoads)).toBeGreaterThan(0);
 });
 
 async function send(page: Page, channel: string, text: string) {

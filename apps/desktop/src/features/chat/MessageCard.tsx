@@ -1,7 +1,7 @@
 import { Lock, Quote } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useMemo } from "react";
-import { api } from "../../lib/api";
+import { api, type LinkedMessage } from "../../lib/api";
 import { channelReference } from "../../lib/channels";
 import { plainPreview } from "../../lib/markdown";
 import { useMembers } from "../../lib/members";
@@ -17,7 +17,11 @@ export function MessageCard({ messageId }: { messageId: string }) {
   const members = useMembers();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const loadLinked = useCallback(() => api.linkedMessage(messageId), [messageId]);
-  const linked = useLive(loadLinked, (change) => change.kind === "messages");
+  // One that's missing could arrive in any channel; one that's shown changes only with its own.
+  const linked: LinkedMessage | null | undefined = useLive(
+    loadLinked,
+    (change) => change.kind === "messages" && (!linked || change.channel === linked.message.channel),
+  );
   if (linked === undefined) return null;
   if (linked === null) {
     return (

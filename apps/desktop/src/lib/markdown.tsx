@@ -32,10 +32,10 @@ const ANY_PAGE_LINK = new RegExp(`shy://page/(${PAGE_ID})`, "g");
 const ANY_MESSAGE_LINK = new RegExp(`shy://message/(${MESSAGE_ID})`, "g");
 const BARE_PAGE_LINK = new RegExp(`(?<!\\]\\()shy://page/(${PAGE_ID})`, "g");
 const BARE_MESSAGE_LINK = new RegExp(`(?<!\\]\\()shy://message/(${MESSAGE_ID})`, "g");
-/** A link alone on its line: the card under the message shows it instead. */
-const PAGE_LINK_LINE = new RegExp(`^[ \\t]*shy://page/(${PAGE_ID})[ \\t]*(?:\\n|$)`, "gm");
-const MESSAGE_LINK_LINE = new RegExp(`^[ \\t]*shy://message/${MESSAGE_ID}[ \\t]*(?:\\n|$)`, "gm");
+/** A link alone on its line, which a card under the message can stand in for. */
+const APP_LINK_LINE = new RegExp(`^[ \\t]*(shy://(?:page/${PAGE_ID}|message/${MESSAGE_ID}))[ \\t]*(?:\\n|$)`, "gm");
 const SAFE_EXTERNAL = /^(https?:|mailto:)/i;
+const NO_CARDS: ReadonlySet<string> = new Set();
 
 /** Previews show a line or two; reading further into a long (or hostile) message only costs time. */
 const PREVIEW_SOURCE_CHARS = 1000;
@@ -57,6 +57,7 @@ export function ChatMarkdown({
   onOpenPage,
   onOpenMessage,
   renderMemberMention,
+  cardLinks = NO_CARDS,
 }: {
   text: string;
   /** Mentions of this member stand out. */
@@ -66,14 +67,15 @@ export function ChatMarkdown({
   onOpenMessage: (id: string) => void;
   /** Draws a mention of a member, like a button opening their card; plain text without it. */
   renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
+  /** Links drawn as cards under the text; one alone on its line leaves the text. */
+  cardLinks?: ReadonlySet<string>;
 }) {
   // A bare page link gets an empty label, which the link fills with the page's
   // title as it draws: titles come from other members, so one never goes into
   // the markdown source, where `<https://…>`, a backtick or a final `\` would
   // be read as markup.
   const source = withPlainLineEnds(text)
-    .replace(PAGE_LINK_LINE, (line: string, id: string) => (pageTitle(id) === undefined ? line : ""))
-    .replace(MESSAGE_LINK_LINE, "")
+    .replace(APP_LINK_LINE, (line: string, link: string) => (cardLinks.has(link) ? "" : line))
     .replace(BARE_PAGE_LINK, (_, id: string) => `[](${PAGE_LINK_PREFIX}${id})`)
     .replace(BARE_MESSAGE_LINK, (link: string) => `[a message](${link})`);
   // Checked as the parser will see it.

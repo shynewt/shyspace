@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { api, type Message, messageLink } from "../../lib/api";
+import { api, type Message, messageLink, pageLink } from "../../lib/api";
 import { ChatMarkdown, messageIdsIn, pageIdsIn, plainPreview } from "../../lib/markdown";
 import { useMember } from "../../lib/members";
 import { displayName, formatFullDate, formatTime } from "../../lib/people";
@@ -45,6 +45,8 @@ import { describeSaved, SavedLabel } from "./SavedLabel";
 import { ThreadSummary } from "./ThreadSummary";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
+/** Each card loads its own data, so one message can't make the app load thousands; the rest stay links in the text. */
+const MAX_CARDS_PER_MESSAGE = 3;
 
 export const MessageItem = memo(function MessageItem({
   message,
@@ -73,8 +75,24 @@ export const MessageItem = memo(function MessageItem({
   const openMenu = useCallback(() => setMenuOpen(true), []);
   useContextMenu(article, openMenu);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
-  const linkedMessages = useMemo(() => messageIdsIn(message.text).filter((id) => id !== message.id), [message]);
-  const linkedPages = useMemo(() => pageIdsIn(message.text).filter((id) => titles.has(id)), [message.text, titles]);
+  const linkedMessages = useMemo(
+    () =>
+      messageIdsIn(message.text)
+        .filter((id) => id !== message.id)
+        .slice(0, MAX_CARDS_PER_MESSAGE),
+    [message],
+  );
+  const linkedPages = useMemo(
+    () =>
+      pageIdsIn(message.text)
+        .filter((id) => titles.has(id))
+        .slice(0, MAX_CARDS_PER_MESSAGE),
+    [message.text, titles],
+  );
+  const cardLinks = useMemo(
+    () => new Set([...linkedPages.map(pageLink), ...linkedMessages.map(messageLink)]),
+    [linkedPages, linkedMessages],
+  );
   const name = displayName(message.author_name, message.author);
   const author = useMember(message.author);
   const savedDescription = describeSaved(message.saved);
@@ -154,6 +172,7 @@ export const MessageItem = memo(function MessageItem({
                 pageTitle={(id) => titles.get(id)}
                 onOpenPage={(id) => navigate({ kind: "page", id })}
                 onOpenMessage={openLinkedMessage}
+                cardLinks={cardLinks}
                 renderMemberMention={(memberId, label, className) => (
                   <ProfileCard memberId={memberId} onMention={onMention}>
                     <ProfileCardTrigger className={className}>{label}</ProfileCardTrigger>
