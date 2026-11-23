@@ -465,3 +465,44 @@ async fn a_leave_that_cant_finish_keeps_the_workspace_and_it_opens_again() {
         "still on this device, and it opens again"
     );
 }
+
+/// A leave cut short while deleting (a file held by another program, or a
+/// crash) finishes the next time the workspaces open, key included; until
+/// then, the same workspace can't be added again over its old data.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leave_cut_short_while_deleting_finishes_later() {
+    use crate::workspaces::LeaveStep;
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let admin = workspaces
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap();
+    let workspace_id = admin.workspace_id().to_owned();
+    let kit = admin.recovery_kit().await.unwrap();
+    drop(admin);
+    let folder = workspaces.folder(&workspace_id).unwrap();
+
+    workspaces
+        .leave_until(&workspace_id, LeaveStep::MarkerDeleted)
+        .await
+        .unwrap();
+    assert!(folder.path.exists() && names(&workspaces).is_empty());
+    let Err(again) = workspaces.restore(&kit, Networking::Offline).await else {
+        panic!("restored over a folder still being deleted");
+    };
+    assert!(again.to_string().contains("still being deleted"), "{again:#}");
+
+    let workspaces = device.workspaces();
+    workspaces.open_all(|| Networking::Offline.into()).await.unwrap();
+
+    assert!(!folder.path.exists());
+    assert!(
+        !device
+            .root
+            .path()
+            .join(format!("keys/{workspace_id}.key"))
+            .exists()
+    );
+    workspaces.restore(&kit, Networking::Offline).await.unwrap();
+}

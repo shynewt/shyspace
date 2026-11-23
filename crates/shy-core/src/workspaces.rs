@@ -77,6 +77,10 @@ struct DeviceSettings {
     muted: Vec<String>,
     #[serde(default)]
     notifications_paused_until_ms: Option<i64>,
+    /// Workspaces whose folder is being deleted: a leave cut short is
+    /// finished from here.
+    #[serde(default)]
+    leaving: Vec<String>,
     /// The single folder of earlier versions was moved (or there was none),
     /// so start-up needn't look for it again.
     #[serde(default)]
@@ -297,8 +301,17 @@ impl Workspaces {
     /// folder, then its device key (a key left by a crash in between opens
     /// nothing). The next most recently used is then the selected one. If
     /// the folder is still in use elsewhere, leaving fails and the workspace
-    /// stays here, closed; `open_all` opens it again.
+    /// stays here, closed; `open_all` opens it again. Once deleting starts,
+    /// it is recorded, so a leave cut short (a file held by another program,
+    /// a crash) finishes later (`finish_leaving`).
     pub async fn leave(&self, workspace_id: &str) -> Result<()> {
+        self.leave_until(workspace_id, LeaveStep::Done).await
+    }
+
+    pub(crate) async fn leave_until(&self, workspace_id: &str, stop_after: LeaveStep) -> Result<()> {
+        if self.settings()?.leaving.iter().any(|id| id == workspace_id) {
+            return self.finish_leaving().await;
+        }
         let data = self.folder(workspace_id)?;
         let stored_id = WorkspaceConfig::peek(&data.path)?.map(|(stored_id, _)| stored_id);
         ensure!(
@@ -319,26 +332,57 @@ impl Workspaces {
                 Ok(Err(error)) => tracing::warn!("leaving a workspace with changes not uploaded: {error:#}"),
                 Err(_) => tracing::warn!("leaving a workspace whose upload didn't finish in time"),
             }
+            workspace.stop_background();
         }
         self.pace();
         {
             // While the folder is locked, nothing can open it; without its
             // workspace.json, nothing will after.
             let _lock = self.wait_until_closed(&data).await?;
+            self.update_settings(|settings| settings.leaving.push(workspace_id.to_owned()))?;
             let marker = data.path.join(crate::config::CONFIG_FILE);
             std::fs::remove_file(&marker).with_context(|| format!("deleting {}", marker.display()))?;
         }
-        std::fs::remove_dir_all(&data.path).with_context(|| format!("deleting {}", data.path.display()))?;
-        data.keys.forget(&data.path).await?;
-        self.update_settings(|settings| {
-            for ids in [
-                &mut settings.workspace_ids,
-                &mut settings.recent,
-                &mut settings.muted,
-            ] {
-                ids.retain(|id| id != workspace_id);
+        if stop_after == LeaveStep::MarkerDeleted {
+            return Ok(());
+        }
+        self.finish_leaving().await
+    }
+
+    /// Finishes every leave that started deleting: the folder, then the
+    /// key, then the record of it. One that fails again stays recorded.
+    async fn finish_leaving(&self) -> Result<()> {
+        let mut first_failure = None;
+        for workspace_id in self.settings()?.leaving {
+            let data = self.folder(&workspace_id)?;
+            let deleted = match std::fs::remove_dir_all(&data.path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => {
+                    Err(anyhow::Error::new(error).context(format!("deleting {}", data.path.display())))
+                }
+            };
+            let finished = match deleted {
+                Ok(()) => data.keys.forget(&data.path).await,
+                Err(error) => Err(error),
+            };
+            match finished {
+                Ok(()) => self.update_settings(|settings| {
+                    for ids in [
+                        &mut settings.leaving,
+                        &mut settings.workspace_ids,
+                        &mut settings.recent,
+                        &mut settings.muted,
+                    ] {
+                        ids.retain(|id| *id != workspace_id);
+                    }
+                })?,
+                Err(error) => {
+                    first_failure.get_or_insert(error);
+                }
             }
-        })
+        }
+        first_failure.map_or(Ok(()), Err)
     }
 
     /// The folder's lock, once a closing workspace's tasks let go of it.
@@ -423,9 +467,14 @@ impl Workspaces {
         Ok(Some(workspace_id))
     }
 
-    /// A folder for a new workspace, refused if this device already has it.
+    /// A folder for a new workspace, refused if this device already has it,
+    /// or is still deleting it.
     fn prepare_folder(&self, workspace_id: &str) -> Result<DataDir> {
         let data = self.folder(workspace_id)?;
+        ensure!(
+            !self.settings()?.leaving.iter().any(|id| id == workspace_id),
+            "this workspace is still being deleted from this device; try again after restarting shyspace"
+        );
         ensure!(
             !Workspace::exists(&data.path),
             "this workspace is already on this device"
@@ -490,6 +539,9 @@ impl Workspaces {
     /// selects the last used. One that fails to open doesn't stop the
     /// others.
     pub async fn open_all(&self, options: impl Fn() -> WorkspaceOptions) -> Result<Opened> {
+        if let Err(error) = self.finish_leaving().await {
+            tracing::error!("couldn't finish deleting a workspace that was left: {error:#}");
+        }
         let recent = self.settings()?.recent;
         let mut ids: Vec<String> = self.list()?.into_iter().map(|entry| entry.workspace_id).collect();
         ids.sort_by_key(|id| {
@@ -650,6 +702,13 @@ impl Workspaces {
             .lock()
             .expect("open workspaces lock poisoned by an earlier panic")
     }
+}
+
+/// How far a leave gets before stopping, to test a crash part way.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeaveStep {
+    MarkerDeleted,
+    Done,
 }
 
 /// How far a folder move gets before stopping, to test a crash part way.

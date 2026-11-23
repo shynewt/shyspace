@@ -235,10 +235,15 @@ async fn leave_workspace(
         .workspaces
         .selected()
         .map(|workspace| workspace.workspace_id().to_owned());
-    {
+    let left = {
         // Not alongside an open, which could reopen the folder being deleted.
         let _opening = state.opening.lock().await;
-        state.workspaces.leave(&workspace_id).await.map_err(failed)?;
+        state.workspaces.leave(&workspace_id).await
+    };
+    if let Err(error) = left {
+        // It may have closed before failing, so the shown one may differ.
+        emit_workspaces_changed(&app);
+        return Err(failed(error));
     }
     let Some(shown) = state.workspaces.selected() else {
         emit_workspaces_changed(&app);
@@ -307,11 +312,14 @@ async fn create_workspace(
         name: name.trim(),
         is_bot: false,
     };
-    let workspace = state
-        .workspaces
-        .create(workspace_name.trim(), profile, bucket, state.online())
-        .await
-        .map_err(failed)?;
+    let workspace = {
+        let _opening = state.opening.lock().await;
+        state
+            .workspaces
+            .create(workspace_name.trim(), profile, bucket, state.online())
+            .await
+            .map_err(failed)?
+    };
     Ok(install(&app, &workspace))
 }
 
@@ -381,11 +389,14 @@ async fn restore_workspace(
     state: State<'_, AppState>,
     kit: String,
 ) -> CommandResult<Session> {
-    let workspace = state
-        .workspaces
-        .restore(&kit, state.online())
-        .await
-        .map_err(failed)?;
+    let workspace = {
+        let _opening = state.opening.lock().await;
+        state
+            .workspaces
+            .restore(&kit, state.online())
+            .await
+            .map_err(failed)?
+    };
     Ok(install(&app, &workspace))
 }
 
@@ -1186,7 +1197,8 @@ fn upload_before_exit(app: &AppHandle) {
 /// next start.
 pub(crate) async fn shut_down(workspaces: Vec<Workspace>) {
     let mut shutdowns = tokio::task::JoinSet::new();
-    for workspace in workspaces {
+    for workspace in &workspaces {
+        let workspace = workspace.clone();
         shutdowns.spawn(async move { workspace.shutdown().await });
     }
     let finished = tokio::time::timeout(EXIT_UPLOAD_LIMIT, async {
@@ -1201,5 +1213,8 @@ pub(crate) async fn shut_down(workspaces: Vec<Workspace>) {
     .await;
     if finished.is_err() {
         tracing::warn!("gave up uploading unsent changes: closing took too long");
+        for workspace in &workspaces {
+            workspace.stop_background();
+        }
     }
 }
