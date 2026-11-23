@@ -1,5 +1,5 @@
 import type { Invite, Member } from "../../../src/lib/api";
-import { type Kind, noDetails, randomHex } from "./helpers";
+import { fakeSafetyCode, type Kind, noDetails, randomHex } from "./helpers";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -62,6 +62,7 @@ export class FakeInvites {
       presence: "unreachable",
       details: noDetails(),
       picture: null,
+      safety_code: fakeSafetyCode(invite.requester_id),
     };
   }
 

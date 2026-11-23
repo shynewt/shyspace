@@ -131,3 +131,34 @@ test("arrows held with Ctrl or Super don't move through the suggestions", async 
 
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
 });
+
+test("picking one of two people who share a name mentions that one", async ({ page }) => {
+  const [second, code] = await page.evaluate(() => {
+    const another = window.fake.addMember("Grace");
+    const members = window.fake.handle("members", {}) as { id: string; name: string; safety_code: string }[];
+    const graces = members.filter((member) => member.name === "Grace");
+    const found = graces.find((member) => member.id === another);
+    return [another, found?.safety_code.slice(0, 4) ?? ""];
+  });
+  const composer = page.getByLabel("Message #general");
+  await composer.pressSequentially("Thanks @Grace");
+  const suggestions = page.getByRole("listbox", { name: "People and pages to mention" });
+  await suggestions.getByRole("option", { name: new RegExp(`Grace·${code}`) }).click();
+  await expect(composer).toHaveValue(`Thanks @Grace·${code} `);
+  await composer.pressSequentially("again");
+  await composer.press("Enter");
+
+  const sent = `Thanks [@Grace·${code}](shy://member/${second}) again`;
+  await expect
+    .poll(() =>
+      page.evaluate((text) => {
+        try {
+          window.fake.messageWithText(text);
+          return true;
+        } catch {
+          return false;
+        }
+      }, sent),
+    )
+    .toBe(true);
+});

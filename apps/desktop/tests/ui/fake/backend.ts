@@ -33,6 +33,7 @@ import { FakeDrafts } from "./drafts";
 import { FakeFiles, NOT_FILES } from "./files";
 import {
   argument,
+  fakeSafetyCode,
   type Kind,
   noDetails,
   ownedId,
@@ -169,6 +170,7 @@ export class FakeBackend {
       presence: "unreachable",
       details: noDetails(),
       picture: null,
+      safety_code: fakeSafetyCode(id),
     });
     this.notify({ kind: "members" });
     return id;
@@ -653,6 +655,7 @@ export class FakeBackend {
         presence: "online",
         details: noDetails(),
         picture: null,
+        safety_code: fakeSafetyCode(me),
       },
     ];
     this.storage = {
@@ -693,6 +696,7 @@ export class FakeBackend {
         presence: "unreachable",
         details: noDetails(),
         picture: null,
+        safety_code: fakeSafetyCode(admin),
       },
       {
         id: me,
@@ -704,6 +708,7 @@ export class FakeBackend {
         presence: "online",
         details: noDetails(),
         picture: null,
+        safety_code: fakeSafetyCode(me),
       },
     ];
     this.chat.addChannel(ownedId(admin), "general");

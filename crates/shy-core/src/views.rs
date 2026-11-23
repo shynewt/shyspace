@@ -261,6 +261,8 @@ pub struct Member {
     /// Their picture's id, if they shared one; it changes with the picture,
     /// so it can key a cache (`Workspace::profile_picture`).
     pub picture: Option<String>,
+    /// The code compared when they joined; it tells apart members who share a name.
+    pub safety_code: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

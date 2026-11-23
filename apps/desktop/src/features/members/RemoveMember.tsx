@@ -1,7 +1,8 @@
 import { UserMinus } from "lucide-react";
 import { useState } from "react";
 import { api, type Member } from "../../lib/api";
-import { displayName } from "../../lib/people";
+import { useMembers } from "../../lib/members";
+import { distinctName } from "../../lib/people";
 import { showToast } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, IconButton } from "../../ui";
@@ -10,7 +11,8 @@ import { ConfirmDialog, IconButton } from "../../ui";
 export function RemoveMemberButton({ member }: { member: Member }) {
   const { session } = useWorkspace();
   const [isConfirming, setConfirming] = useState(false);
-  const name = displayName(member.name, member.id);
+  const members = useMembers();
+  const name = distinctName(member, members ?? []);
   return (
     <>
       <IconButton label={`Remove ${name}`} icon={<UserMinus size={15} />} onClick={() => setConfirming(true)} />

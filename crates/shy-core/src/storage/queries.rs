@@ -220,9 +220,14 @@ impl Store {
                 presence: PresenceState::default(),
                 details: crate::profile::ProfileDetails::default(),
                 picture: None,
+                safety_code: String::new(),
             })
         })?;
-        Ok(rows.collect::<Result<_, _>>()?)
+        let mut members: Vec<Member> = rows.collect::<Result<_, _>>()?;
+        for member in &mut members {
+            member.safety_code = crate::views::safety_code(&crate::views::parse_member_id(&member.id)?);
+        }
+        Ok(members)
     }
 
     /// Messages and pages matching `text` (each word as a prefix). With

@@ -160,6 +160,8 @@ export type Member = {
   details: ProfileDetails;
   /** Their picture's id, if they shared one; it changes with the picture. */
   picture: string | null;
+  /** The code compared when they joined ("1234 5678 …"); it tells apart members who share a name. */
+  safety_code: string;
 };
 export type SearchHit = {
   kind: "message" | "page";

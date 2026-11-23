@@ -6,6 +6,7 @@ import { type Member, PAGE_LINK_PREFIX, type Page } from "../../lib/api";
 import { emojiQueryAt } from "../../lib/emojiQuery";
 import { useMembers } from "../../lib/members";
 import { exactlyNamed, mentionQueryAt, withMentionLinks, withTypedMentions } from "../../lib/mentions";
+import { mentionName } from "../../lib/people";
 import { usePreferences, validRecentEmoji, withRecentEmoji } from "../../lib/preferences";
 import { hasCommandModifier } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
@@ -65,7 +66,12 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     (): PersonWithMember[] =>
       members
         .filter((member) => member.active && member.id !== session.me && member.name)
-        .map((member) => ({ kind: "person", name: member.name, member, detail: "" })),
+        .map((member) => {
+          const name = mentionName(member, members);
+          // Someone who shares a name shows the start of their safety code, to tell them apart.
+          const detail = name === member.name ? "" : `Safety code ${member.safety_code.slice(0, 9)}`;
+          return { kind: "person", name, member, detail };
+        }),
     [members, session.me],
   );
   const recentEmoji = validRecentEmoji(preferences.recentEmoji);

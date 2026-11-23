@@ -228,3 +228,19 @@ test("missing a new key says so above the composer", async ({ page }) => {
   await expect(page.getByText("You can't read new messages here")).toHaveCount(1);
   await expect(page.getByLabel("Message #ops")).toBeVisible();
 });
+
+test("people who share a name are told apart by their safety codes", async ({ page }) => {
+  const codes = await page.evaluate(() => {
+    const first = window.fake.addMember("Grace");
+    const second = window.fake.addMember("Grace");
+    const members = window.fake.handle("members", {}) as { id: string; safety_code: string }[];
+    return [first, second].map((id) => members.find((member) => member.id === id)?.safety_code.slice(0, 9) ?? "");
+  });
+  await openNewChannelMenu(page);
+  await page.getByRole("menuitem", { name: "New private channel" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "New private channel" });
+  for (const code of codes) {
+    await expect(dialog.getByRole("button", { name: `Add Grace · ${code}` })).toBeVisible();
+  }
+});

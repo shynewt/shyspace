@@ -1,6 +1,6 @@
 import { Check, Plus } from "lucide-react";
 import { api, type Member } from "../../lib/api";
-import { displayName } from "../../lib/people";
+import { distinctName } from "../../lib/people";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, Spinner } from "../../ui";
@@ -45,7 +45,7 @@ export function MemberPicker({
         members={members}
         actions={(member) => {
           const isChosen = chosen.has(member.id);
-          const name = displayName(member.name, member.id);
+          const name = distinctName(member, members);
           return (
             <Button
               size="sm"

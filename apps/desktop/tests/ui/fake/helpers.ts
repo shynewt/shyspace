@@ -114,3 +114,9 @@ export function requireDetails(args: InvokeArgs | undefined): ProfileDetails {
   };
   return details;
 }
+
+/** Twenty digits in groups of four from a member id, like the core's safety codes (not the same digits). */
+export function fakeSafetyCode(id: string): string {
+  const digits = Array.from(id.slice(0, 20), (char) => (Number.parseInt(char, 16) % 10).toString()).join("");
+  return digits.padEnd(20, "0").match(/.{4}/g)?.join(" ") ?? digits;
+}

@@ -1,4 +1,4 @@
-import type { PresenceState } from "./api";
+import type { Member, PresenceState } from "./api";
 
 const PRESENCE_LABELS: Record<PresenceState, string> = {
   online: "Online",
@@ -12,6 +12,23 @@ export function presenceLabel(presence: PresenceState): string {
 
 export function displayName(name: string, id: string) {
   return name.trim() || `member ${id.slice(0, 6)}`;
+}
+
+/** Whether another active member shows under the same name, so a name alone can't tell them apart. */
+function sharesName(member: Member, members: readonly Member[]): boolean {
+  const name = displayName(member.name, member.id);
+  return members.some((other) => other.id !== member.id && other.active && displayName(other.name, other.id) === name);
+}
+
+/** A member's name, with the start of their safety code when another member shares it: "Grace · 1234 5678". */
+export function distinctName(member: Member, members: readonly Member[]): string {
+  const name = displayName(member.name, member.id);
+  return sharesName(member, members) ? `${name} · ${member.safety_code.slice(0, 9)}` : name;
+}
+
+/** The word a mention of `member` is written as: their name, or "Grace·1234" when another member shares it. */
+export function mentionName(member: Member, members: readonly Member[]): string {
+  return sharesName(member, members) ? `${member.name}·${member.safety_code.slice(0, 4)}` : member.name;
 }
 
 export function formatTime(ms: number) {

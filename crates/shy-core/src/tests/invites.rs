@@ -160,6 +160,15 @@ async fn the_admin_sees_the_safety_code_the_joiner_sees() {
     admin.approve_invite(&token).await.unwrap();
     let bob = joining.await.unwrap().unwrap();
     assert_eq!(bob.safety_code(), bob_code);
+    // The member list shows the same code, to tell same-named members apart.
+    sync_all(&[&admin, &bob]).await;
+    let listed = admin
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| member.id == bob.my_id())
+        .unwrap();
+    assert_eq!(listed.safety_code, bob_code);
 }
 
 #[tokio::test(flavor = "multi_thread")]

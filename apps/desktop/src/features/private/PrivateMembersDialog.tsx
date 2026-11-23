@@ -1,7 +1,7 @@
 import { Crown, Ellipsis, LogOut, UserMinus, UserPlus } from "lucide-react";
 import { useCallback, useState } from "react";
 import { api, type Channel, type Member } from "../../lib/api";
-import { displayName } from "../../lib/people";
+import { distinctName } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
@@ -74,7 +74,7 @@ function PrivateMembers({ channel, onLeft }: { channel: Channel; onLeft: () => v
       setAdding((current) => new Set([...current].filter((id) => id !== member.id)));
     }
   };
-  const nameOf = (member: Member) => displayName(member.name, member.id);
+  const nameOf = (member: Member) => distinctName(member, everyone ?? []);
 
   return (
     <div className="flex flex-col gap-4">
