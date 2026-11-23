@@ -134,8 +134,12 @@ def main() -> int:
     joiner = None
     try:
         started = time.time()
-        joiner = subprocess.Popen([SHY, *member_args("agent"), "join", "--name", "Claude", "--bot", invite],
-                                  stdout=subprocess.DEVNULL, stderr=open(WORK_DIR / "join.log", "w"))
+        # The invite goes through standard input, the way that keeps it out of shell history.
+        joiner = subprocess.Popen([SHY, *member_args("agent"), "join", "--name", "Claude", "--bot"],
+                                  stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                  stderr=open(WORK_DIR / "join.log", "w"), text=True)
+        joiner.stdin.write(invite + "\n")
+        joiner.stdin.close()
         token = wait_for_request()
         check(joiner.poll() is None, "the agent waits for approval")
         run_shy(*member_args("admin"), "invite", "approve", token)

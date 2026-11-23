@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 use shy_core::{BucketConfig, DataDir, KeyStorage, Networking, Profile, Workspace, workspace::StorageUpdate};
 
 const RECOVERY_KIT_VARIABLE: &str = "SHY_RECOVERY_KIT";
+const INVITE_VARIABLE: &str = "SHY_INVITE";
 
 #[derive(Parser)]
 #[command(
@@ -43,8 +44,10 @@ enum Command {
         bucket: BucketArgs,
     },
     /// Join a workspace with an invite code. Waits until the admin approves.
+    /// Leave the code off to keep it out of shell history: it is then read
+    /// from SHY_INVITE or standard input.
     Join {
-        invite: String,
+        invite: Option<String>,
         #[arg(long)]
         name: String,
         /// Mark this member as a bot in everyone's member list.
@@ -172,6 +175,10 @@ async fn main() -> Result<()> {
             println!("Invite people with `shy invite create`.");
         }
         Command::Join { invite, name, bot } => {
+            let invite = match invite {
+                Some(invite) => invite,
+                None => read_secret(INVITE_VARIABLE, "invite code")?,
+            };
             let code = data.safety_code().await?;
             eprintln!("Asking to join. Your safety code is {code}");
             eprintln!("The admin should see the same code before approving. Waiting…");
@@ -207,7 +214,7 @@ async fn main() -> Result<()> {
             eprintln!("Keep this secret: it restores the admin role and holds the bucket credentials.");
         }
         Command::Restore => {
-            let kit = read_recovery_kit()?;
+            let kit = read_secret(RECOVERY_KIT_VARIABLE, "recovery kit")?;
             let workspace = Workspace::restore(&data, &kit, Networking::Offline).await?;
             println!(
                 "Restored the admin of \"{}\" into {}",
@@ -219,7 +226,7 @@ async fn main() -> Result<()> {
             let agents = agents::list()?;
             if agents.is_empty() {
                 println!(
-                    "No named agents yet. Create one with `shy --agent <name> join --bot --name <Name> <invite>`."
+                    "No named agents yet. Create one with `shy --agent <name> join --bot --name <Name>` and paste the invite."
                 );
             }
             for (name, workspace) in agents {
@@ -329,24 +336,37 @@ fn report_sync_error(workspace: &Workspace) -> Result<()> {
 
 /// The recovery kit from `SHY_RECOVERY_KIT`, or else the first line of
 /// standard input.
-fn read_recovery_kit() -> Result<String> {
-    if let Ok(kit) = std::env::var(RECOVERY_KIT_VARIABLE)
-        && !kit.trim().is_empty()
-    {
-        return Ok(kit.trim().to_owned());
+/// Reads a secret from `variable` or else one line of standard input, so
+/// it never sits in shell history or other users' process lists.
+fn read_secret(variable: &str, what: &str) -> Result<String> {
+    let from_variable = std::env::var(variable).ok();
+    let is_variable_blank = from_variable
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty());
+    if is_variable_blank && std::io::stdin().is_terminal() {
+        eprintln!("Paste the {what}, then press Enter:");
     }
-    if std::io::stdin().is_terminal() {
-        eprintln!("Paste the recovery kit, then press Enter:");
+    secret_from(from_variable, std::io::stdin().lock(), variable, what)
+}
+
+fn secret_from(
+    from_variable: Option<String>,
+    mut input: impl std::io::BufRead,
+    variable: &str,
+    what: &str,
+) -> Result<String> {
+    if let Some(value) = from_variable.filter(|value| !value.trim().is_empty()) {
+        return Ok(value.trim().to_owned());
     }
-    let mut kit = String::new();
-    std::io::stdin()
-        .read_line(&mut kit)
-        .context("reading the recovery kit from standard input")?;
-    let kit = kit.trim();
-    if kit.is_empty() {
-        bail!("no recovery kit: pipe it to standard input or set {RECOVERY_KIT_VARIABLE}");
+    let mut line = String::new();
+    input
+        .read_line(&mut line)
+        .with_context(|| format!("reading the {what} from standard input"))?;
+    let line = line.trim();
+    if line.is_empty() {
+        bail!("no {what}: pipe it to standard input or set {variable}");
     }
-    Ok(kit.to_owned())
+    Ok(line.to_owned())
 }
 
 #[cfg(test)]
@@ -379,5 +399,33 @@ mod tests {
         assert!(secrets >= 2, "found {secrets} secret arguments");
         let restore = cli.find_subcommand("restore").unwrap();
         assert_eq!(restore.get_arguments().count(), 0, "the kit isn't an argument");
+    }
+
+    /// The invite can stay out of shell history: left off the command line,
+    /// it is read from SHY_INVITE or standard input.
+    #[test]
+    fn join_works_without_the_invite_on_the_command_line() {
+        let cli = Cli::try_parse_from(["shy", "join", "--name", "Claude"]).unwrap();
+        assert!(matches!(cli.command, Command::Join { invite: None, .. }));
+    }
+
+    #[test]
+    fn a_secret_comes_from_the_variable_first_then_one_line_of_input() {
+        let from_variable = secret_from(
+            Some(" shy1abc \n".into()),
+            &b"ignored\n"[..],
+            INVITE_VARIABLE,
+            "invite",
+        );
+        assert_eq!(from_variable.unwrap(), "shy1abc");
+
+        let from_input = secret_from(None, &b"  shy1def\nsecond line\n"[..], INVITE_VARIABLE, "invite");
+        assert_eq!(from_input.unwrap(), "shy1def");
+
+        let blank_variable = secret_from(Some("  ".into()), &b"shy1ghi\n"[..], INVITE_VARIABLE, "invite");
+        assert_eq!(blank_variable.unwrap(), "shy1ghi");
+
+        let error = secret_from(None, &b"\n"[..], INVITE_VARIABLE, "invite").unwrap_err();
+        assert!(error.to_string().contains(INVITE_VARIABLE), "{error}");
     }
 }
