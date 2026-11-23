@@ -4294,7 +4294,18 @@ async fn reactions_and_status_emoji_cant_read_as_words() {
     let message = admin.send_message(&general, "news", None).unwrap();
     sync_all(&[&admin, &bob]).await;
 
-    for label in ["✓ approved by admin", "(you)", "Admin", "ok", "1", "#"] {
+    // Regional-indicator letters spell words when joined or chained, not just flags.
+    for label in [
+        "✓ approved by admin",
+        "(you)",
+        "Admin",
+        "ok",
+        "1",
+        "#",
+        "🇴\u{200D}🇰",
+        "🇴🇰🇦🇾",
+        "🇫",
+    ] {
         assert!(bob.react(&message, label, true).is_err(), "{label}");
         let status = crate::views::StatusUpdate {
             emoji: label,
@@ -4397,4 +4408,53 @@ async fn an_approval_waits_for_a_sync_pass_in_progress() {
 
     assert_eq!(admin.current_members().unwrap().len(), members_before + 1);
     joining.await.unwrap().unwrap();
+}
+
+/// Keys found by trying seeds until two safety codes began alike, as someone
+/// about to join could, to pass for a member who shares their name.
+fn seeded_key(seed: u64) -> iroh::SecretKey {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&seed.to_le_bytes());
+    iroh::SecretKey::from_bytes(&bytes)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_joiner_whose_safety_code_starts_like_a_members_is_refused() {
+    let (bob_key, mallory_key) = (seeded_key(2479), seeded_key(9890));
+    let shown =
+        |key: &iroh::SecretKey| crate::views::shown_safety_code(&crate::views::safety_code(&key.public()));
+    assert_eq!(
+        shown(&bob_key),
+        shown(&mallory_key),
+        "the two keys' codes start alike"
+    );
+
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob_dir = root.path().join("bob");
+    data_dir(&bob_dir).use_identity_for_test(&bob_key).await.unwrap();
+    let bob = join(&admin, &bob_dir, &bucket, "Grace", false).await;
+    assert_eq!(bob.me(), bob_key.public());
+
+    let mallory_dir = root.path().join("mallory");
+    data_dir(&mallory_dir)
+        .use_identity_for_test(&mallory_key)
+        .await
+        .unwrap();
+    let invite = admin
+        .create_test_invite("", std::time::Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let _joining = start_join(invite, &mallory_dir, &bucket, "Grace", false);
+    wait_for_request(&admin, &token).await;
+    let refused = admin.approve_invite(&token).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("safety code"), "{refused:#}");
+    assert!(
+        !admin
+            .members()
+            .unwrap()
+            .iter()
+            .any(|member| member.id == hex::encode(mallory_key.public().as_bytes()))
+    );
 }

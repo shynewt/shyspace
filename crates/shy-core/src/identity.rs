@@ -22,3 +22,9 @@ pub fn load_or_create(store: &Store) -> Result<SecretKey> {
     store.set_meta(IDENTITY_META, Zeroizing::new(identity.to_bytes()).as_slice())?;
     Ok(identity)
 }
+
+/// Makes `identity` this store's identity, for tests that need a chosen key.
+#[cfg(test)]
+pub fn store_for_test(store: &Store, identity: &SecretKey) -> Result<()> {
+    store.set_meta(IDENTITY_META, Zeroizing::new(identity.to_bytes()).as_slice())
+}

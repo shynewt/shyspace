@@ -26,9 +26,15 @@ export function distinctName(member: Member, members: readonly Member[]): string
   return sharesName(member, members) ? `${name} · ${member.safety_code.slice(0, 9)}` : name;
 }
 
-/** The word a mention of `member` is written as: their name, or "Grace·1234" when another member shares it. */
+/**
+ * The word a mention of `member` is written as: their name, or "Grace·12345678"
+ * when another member shares it. Those are the digits the app shows, which no
+ * two members' codes may share.
+ */
 export function mentionName(member: Member, members: readonly Member[]): string {
-  return sharesName(member, members) ? `${member.name}·${member.safety_code.slice(0, 4)}` : member.name;
+  return sharesName(member, members)
+    ? `${member.name}·${member.safety_code.replace(/ /g, "").slice(0, 8)}`
+    : member.name;
 }
 
 export function formatTime(ms: number) {

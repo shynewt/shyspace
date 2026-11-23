@@ -96,6 +96,13 @@ impl DataDir {
         self.path.join(MLS_FILE)
     }
 
+    /// Gives this device `identity` before it joins, for tests that need a chosen key.
+    #[cfg(test)]
+    pub(crate) async fn use_identity_for_test(&self, identity: &iroh::SecretKey) -> Result<()> {
+        std::fs::create_dir_all(&self.path)?;
+        identity::store_for_test(&self.open_local().await?.store, identity)
+    }
+
     /// This device's safety code, creating its identity if needed. A joiner
     /// shows it while waiting, so the admin can check who is asking.
     pub async fn safety_code(&self) -> Result<String> {

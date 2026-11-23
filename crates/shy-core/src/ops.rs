@@ -379,16 +379,14 @@ impl From<StatusAlerts> for NotifyLevel {
     }
 }
 
-/// A status shows next to the author's name everywhere: bounded, on one
-/// line, and free of characters that hide or reorder text. Emoji keep their
-/// joiners (U+200D) and variation selectors.
 /// Whether `text` is only emoji, with their joiners, variation selectors,
 /// skin tones and keycaps, so it can't read as words: no letters, no digits
-/// outside a keycap (1️⃣), no spaces and no ASCII punctuation. A few emoji that
-/// Unicode files as letters, like ℹ️, don't pass.
+/// outside a keycap (1️⃣), no spaces, no ASCII punctuation, and at most one
+/// flag. A few emoji that Unicode files as letters, like ℹ️, don't pass.
 pub fn is_emoji_only(text: &str) -> bool {
     let chars: Vec<char> = text.chars().collect();
     !chars.is_empty()
+        && has_at_most_one_flag(&chars)
         && chars.iter().enumerate().all(|(index, &c)| {
             if c.is_ascii_digit() || c == '#' || c == '*' {
                 return matches!(
@@ -400,6 +398,25 @@ pub fn is_emoji_only(text: &str) -> bool {
         })
 }
 
+/// Regional-indicator letters make a flag in pairs, but joined or chained
+/// they spell words ("🇴🇰🇦🇾"), so there may only be one pair, side by side.
+fn has_at_most_one_flag(chars: &[char]) -> bool {
+    let letters: Vec<usize> = chars
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| ('\u{1F1E6}'..='\u{1F1FF}').contains(*c))
+        .map(|(index, _)| index)
+        .collect();
+    match letters.as_slice() {
+        [] => true,
+        [first, second] => second - first == 1,
+        _ => false,
+    }
+}
+
+/// A status shows next to the author's name everywhere: bounded, on one
+/// line, and free of characters that hide or reorder text. Its emoji is
+/// emoji only, so it can't read as words beside the name.
 pub fn is_valid_status(emoji: &str, text: &str) -> bool {
     let is_sneaky = |c: char| {
         c.is_control()

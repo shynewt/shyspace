@@ -24,6 +24,12 @@ pub fn safety_code(member: &PublicKey) -> String {
         .join(" ")
 }
 
+/// How much of a safety code the app shows to tell same-named members apart:
+/// its first two groups ("1234 5678"). No two members' codes may start alike.
+pub fn shown_safety_code(code: &str) -> String {
+    code.chars().take(9).collect()
+}
+
 pub fn parse_member_id(id: &str) -> Result<PublicKey> {
     let bytes: [u8; 32] = hex::decode(id)
         .context("member id is not hex")?

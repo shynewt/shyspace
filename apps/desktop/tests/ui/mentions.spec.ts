@@ -138,7 +138,7 @@ test("picking one of two people who share a name mentions that one", async ({ pa
     const members = window.fake.handle("members", {}) as { id: string; name: string; safety_code: string }[];
     const graces = members.filter((member) => member.name === "Grace");
     const found = graces.find((member) => member.id === another);
-    return [another, found?.safety_code.slice(0, 4) ?? ""];
+    return [another, found?.safety_code.replace(/ /g, "").slice(0, 8) ?? ""];
   });
   const composer = page.getByLabel("Message #general");
   await composer.pressSequentially("Thanks @Grace");

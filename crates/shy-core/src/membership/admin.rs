@@ -17,7 +17,7 @@ use crate::{
     ops::{new_random_id, now_ms},
     storage::Store,
     transport::bucket::InviteLinks,
-    views::{self, Change, InviteState, parse_member_id},
+    views::{self, Change, InviteState, parse_member_id, safety_code, shown_safety_code},
     workspace::{State, Workspace},
 };
 
@@ -126,6 +126,16 @@ impl Workspace {
                 "the stored request doesn't match its requester"
             );
             ensure!(!state.mls.is_member(&claimed)?, "this person is already a member");
+            // Same-named members are told apart by the start of their safety
+            // code, so no two may share it; trying keys can make one that does.
+            let shown = shown_safety_code(&safety_code(&claimed));
+            for member in state.mls.members()? {
+                ensure!(
+                    shown_safety_code(&safety_code(&member)) != shown,
+                    "this request's safety code starts like a member's ({shown}), which could let them pass for that \
+                     member; ask them to start joining again, which gives them a new code"
+                );
+            }
 
             let from_epoch = state.mls.epoch()?;
             let (commit, welcome) = state.mls.add_member(key_package)?;
