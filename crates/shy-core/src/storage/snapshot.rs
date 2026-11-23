@@ -11,15 +11,15 @@ use super::{open_encrypted, private::PRIVATE_STATE_TABLES, rebuild::SHARED_VIEW_
 /// The op log and how far we've read the bucket: a restore reads them again.
 const OP_LOG_TABLES: &[&str] = &["ops", "pending_ops", "forks", "fork_proofs_checked"];
 
-/// This device's own state (read positions, alerts, follows, drafts, Later,
-/// sidebar order), which a new device starts without.
+/// This device's own state (read positions, alerts, follows, drafts,
+/// Later), which a new device starts without. The sidebar's sections and
+/// which channel sits in each are kept together, so they come back as one.
 const PERSONAL_TABLES: &[&str] = &[
     "read_markers",
     "channel_notify",
     "thread_follows",
     "drafts",
     "later",
-    "sidebar_placement",
 ];
 
 /// Everything a snapshot leaves out: what replaying the bucket gives back
@@ -62,7 +62,7 @@ mod tests {
     use crate::storage::{Store, TEST_DB_KEY};
 
     /// What a snapshot keeps: the keys, the membership and its history,
-    /// invites and their pending welcomes, and settings.
+    /// invites and their pending welcomes, settings, and the admin's sidebar.
     const TABLES_KEPT: &[&str] = &[
         "commits",
         "deliveries",
@@ -73,6 +73,7 @@ mod tests {
         "members",
         "meta",
         "sealing_secrets",
+        "sidebar_placement",
         "sidebar_sections",
     ];
 

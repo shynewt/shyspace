@@ -245,3 +245,29 @@ async fn the_admin_sees_how_close_the_snapshot_is_to_what_restore_reads() {
         "members have none"
     );
 }
+
+/// The sidebar is personal, but the admin's own sections come back as the
+/// snapshot had them, with their channels in them, not empty.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restored_admin_gets_their_sidebar_sections_with_their_channels() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let section = admin.create_section("Daily").unwrap();
+    admin.move_channel(&general, Some(&section)).unwrap();
+    let kit = admin.recovery_kit().await.unwrap();
+    sync_all(&[&admin, &bob]).await;
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let restored = Workspace::restore_with(&new_device, &kit, connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+
+    let daily = restored
+        .sidebar_sections()
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == section)
+        .expect("the section came back");
+    assert_eq!(daily.channels, [general]);
+}
