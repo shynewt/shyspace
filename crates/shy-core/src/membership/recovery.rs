@@ -49,6 +49,11 @@ struct RecoveryKit {
     recovery_key: [u8; 32],
 }
 
+/// The workspace a recovery kit restores, read without restoring anything.
+pub(crate) fn kit_workspace_id(recovery_kit: &str) -> Result<String> {
+    Ok(RecoveryKit::decode(recovery_kit)?.workspace_id)
+}
+
 impl RecoveryKit {
     fn encode(&self) -> Result<Zeroizing<String>> {
         let bytes = Zeroizing::new(postcard::to_stdvec(self)?);

@@ -118,7 +118,7 @@ impl DataDir {
 
     /// Two processes on one folder would corrupt it (and fight over the same
     /// network identity), so the folder is locked while it's open.
-    fn lock(&self) -> Result<std::fs::File> {
+    pub(crate) fn lock(&self) -> Result<std::fs::File> {
         let path = self.path.join(LOCK_FILE);
         let file = std::fs::File::create(&path).with_context(|| format!("creating {}", path.display()))?;
         match file.try_lock() {

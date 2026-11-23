@@ -20,6 +20,7 @@ pub mod sync;
 pub mod transport;
 pub mod views;
 pub mod workspace;
+pub mod workspaces;
 
 #[cfg(test)]
 mod tests;

@@ -128,11 +128,22 @@ impl std::fmt::Display for MissingKey {
 impl std::error::Error for MissingKey {}
 
 /// One keychain entry per data directory, so several workspaces (or test
-/// members) on one machine don't share a key.
+/// members) on one machine don't share a key. A directory not made yet is
+/// named through its parent, as it will resolve once made.
 fn keychain_account(dir: &Path) -> Result<String> {
-    let canonical = dir
-        .canonicalize()
-        .with_context(|| format!("resolving {}", dir.display()))?;
+    let canonical = match dir.canonicalize() {
+        Ok(canonical) => canonical,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) else {
+                return Err(error).with_context(|| format!("resolving {}", dir.display()));
+            };
+            parent
+                .canonicalize()
+                .with_context(|| format!("resolving {}", parent.display()))?
+                .join(name)
+        }
+        Err(error) => return Err(error).with_context(|| format!("resolving {}", dir.display())),
+    };
     let digest = blake3::hash(canonical.as_os_str().as_encoded_bytes());
     Ok(format!("device-key-{}", &digest.to_hex()[..32]))
 }

@@ -38,9 +38,18 @@ impl WorkspaceConfig {
 
     /// The workspace's name, read without unlocking anything (it's public).
     pub fn peek_name(dir: &Path) -> Result<Option<String>> {
+        Ok(Self::peek(dir)?.map(|(_, name)| name))
+    }
+
+    /// The workspace's id and name, read without unlocking anything.
+    pub fn peek(dir: &Path) -> Result<Option<(String, String)>> {
         let path = dir.join(CONFIG_FILE);
         match std::fs::read(&path) {
-            Ok(bytes) => Ok(Some(serde_json::from_slice::<PublicSettings>(&bytes)?.name)),
+            Ok(bytes) => {
+                let settings = serde_json::from_slice::<PublicSettings>(&bytes)
+                    .with_context(|| format!("parsing {}", path.display()))?;
+                Ok(Some((settings.workspace_id, settings.name)))
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
         }

@@ -280,6 +280,10 @@ impl Workspace {
         &self.inner.config.name
     }
 
+    pub fn workspace_id(&self) -> &str {
+        &self.inner.config.workspace_id
+    }
+
     pub fn is_admin(&self) -> bool {
         self.inner.config.admin == self.me()
     }
