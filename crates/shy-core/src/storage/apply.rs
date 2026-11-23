@@ -10,8 +10,8 @@ use crate::{
     config,
     files::MAX_PICTURE_BYTES,
     ops::{
-        MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, Op, VerifiedOp, clean_channel_name,
-        clean_display_name, clean_emoji, clean_page_title, cut_to, is_owned_by, is_valid_status, now_ms,
+        MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, Op, VerifiedOp, clean_display_name,
+        clean_emoji, clean_page_title, cut_to, is_owned_by, is_valid_channel_name, is_valid_status, now_ms,
         rule_violation,
     },
     pages,
@@ -138,7 +138,10 @@ impl Store {
                 Change::Members
             }
             Op::ChannelCreate { id, name } => {
-                self.show_channel(id, &clean_channel_name(name), verified)?;
+                if !is_valid_channel_name(name) {
+                    return Err(rule_violation("invalid channel name"));
+                }
+                self.show_channel(id, name, verified)?;
                 Change::Channels
             }
             Op::Message {

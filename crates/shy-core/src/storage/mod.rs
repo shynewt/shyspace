@@ -49,7 +49,7 @@ use rusqlite::{Connection, OptionalExtension, Params, params};
 /// A fixed key for databases that only live inside tests.
 #[cfg(test)]
 impl Store {
-    /// Runs raw SQL, to set up states older versions left behind.
+    /// Runs raw SQL, to set up states a test needs.
     pub(crate) fn execute_for_test(&self, sql: &str) {
         self.db.execute_batch(sql).expect("test SQL");
     }
@@ -122,7 +122,7 @@ impl Store {
     pub fn open(path: &Path, key: &str) -> Result<Self> {
         let mut db = open_encrypted(path, key)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
-        schema::migrate(&mut db)?;
+        schema::create_or_check(&mut db)?;
         Ok(Self {
             db,
             settling: std::cell::Cell::new(Settling::Everything),

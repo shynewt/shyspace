@@ -109,3 +109,5 @@ yrs split and joined text pieces at a cost that grew with the square of their nu
 ## Page editor ids bound to authors (2026-11)
 A member could write page updates under another editor's Yjs client id, so devices disagreed and the victim's edits were refused (#187). Each update now carries a nonce, and its client id is a hash of the author, page and nonce, which every device can check from the op alone. We didn't use random ids, or let the first member to use an id own it: both depend on arrival order, which was the bug. The id has 53 bits because Yjs keeps client ids as JavaScript-safe integers, which leaves room for a precomputed attack (#210).
 
+## No migrations before the first release (2026-11)
+shyspace has no users yet, so the database schema (`storage/schema.rs`) is one base schema changed in place, and nothing carries data from older builds forward. A store records a fingerprint of its schema and view rules; one made by a different build is refused with "recreate this workspace" rather than upgraded or misread. This keeps upgrade code from piling up while the format still changes weekly. Migrations start with the first release.

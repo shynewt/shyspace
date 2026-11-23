@@ -435,36 +435,6 @@ async fn crafted_page_updates_cannot_crash_or_exhaust_a_device() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn page_updates_kept_before_the_page_rules_are_dropped_once() {
-    let (_root, _bucket, admin, bob) = admin_and_bob().await;
-    let page = admin.pages().unwrap()[0].id.clone();
-    let state = admin.page_state(&page).unwrap();
-    let mut with_trailing_bytes = page_update_bytes(
-        &bob,
-        &page,
-        state.as_deref(),
-        crate::pages::Edit::Append("PLANTED"),
-    );
-    with_trailing_bytes.push(0);
-    let kept = Forger::new(&bob).seal(Op::DocUpdate {
-        page: page.clone(),
-        nonce: NONCE,
-        update: with_trailing_bytes,
-    });
-    admin.state().store.insert_applied(&kept, true).unwrap();
-    admin.state().store.set_meta("views_version", &[4]).unwrap();
-
-    let rebuilt = admin
-        .state()
-        .store
-        .rebuild_if_rules_changed(admin.apply_context())
-        .unwrap();
-
-    assert!(rebuilt);
-    assert!(!admin.page_text(&page).unwrap().contains("PLANTED"));
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn malformed_sealing_keys_from_others_are_skipped() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let announced = admin.state().store.sealing_key_of(&bob.me()).unwrap();
@@ -1298,12 +1268,16 @@ async fn a_lost_op_is_fetched_again_from_the_bucket() {
     );
 }
 
+/// Channel names from anyone follow one rule, created or renamed: a creation
+/// whose name breaks it (control or invisible characters, punctuation the
+/// rule doesn't allow) is skipped, the same on every device.
 #[tokio::test(flavor = "multi_thread")]
-async fn channels_named_before_the_naming_rule_still_show_for_everyone() {
+async fn channels_created_with_names_that_break_the_rule_are_skipped() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let (epoch, key) = current_key(&bob);
     let first_seq = bob.state().store.next_seq(&bob.me()).unwrap();
-    for (offset, name) in ["q&a", "\u{202e}evil\u{200b}name"].into_iter().enumerate() {
+    let names = ["q&a", "\u{202e}evil\u{200b}name", "plain-name"];
+    for (offset, name) in names.into_iter().enumerate() {
         let body = OpBody {
             lamport: 9_000 + offset as u64,
             timestamp_ms: 0,
@@ -1318,16 +1292,18 @@ async fn channels_named_before_the_naming_rule_still_show_for_everyone() {
             .unwrap();
     }
 
-    let names: Vec<_> = admin
+    let shown: Vec<_> = admin
         .channels()
         .unwrap()
         .into_iter()
         .map(|channel| channel.name)
         .collect();
-    assert!(names.contains(&"q&a".to_string()), "{names:?}");
+    assert!(shown.contains(&"plain-name".to_string()), "{shown:?}");
     assert!(
-        names.contains(&"evilname".to_string()),
-        "invisible characters are dropped: {names:?}"
+        !shown
+            .iter()
+            .any(|name| name.contains("q&a") || name.contains("evil")),
+        "{shown:?}"
     );
 }
 
@@ -1685,7 +1661,7 @@ async fn ops_naming_huge_ids_are_skipped_and_huge_parents_dropped() {
             active: true,
         }))
         .unwrap();
-    // Shown as a plain message, as older versions show a reply whose parent is missing.
+    // Shown as a plain message, like a reply whose parent is missing.
     let reply = admin
         .messages(&general, None, 50)
         .unwrap()
@@ -1746,46 +1722,6 @@ async fn your_own_name_and_emoji_over_the_limit_are_refused() {
         })
         .unwrap();
     admin.react(&message, "👍🏽", true).unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn names_stored_by_an_older_version_are_cleaned_once_on_upgrade() {
-    let root = tempfile::tempdir().unwrap();
-    let bucket = memory_bucket();
-    let dir = root.path().join("ada");
-    let admin = create_admin(&dir, &bucket).await;
-    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
-    sync_all(&[&admin, &bob]).await;
-    admin
-        .receive(Forger::new(&bob).seal(Op::Profile {
-            name: "Bob\u{202E}nimda".into(),
-            is_bot: false,
-        }))
-        .unwrap();
-    // As an older version stored it: whole, and with no record of the rules.
-    admin.state().store.execute_for_test(
-        "UPDATE profiles SET name = 'Bob' || char(8238) || 'nimda' WHERE name LIKE 'Bobnimda%';
-         DELETE FROM meta WHERE key = 'views_version';",
-    );
-    let name_of_bob = |member: &Workspace| {
-        member
-            .members()
-            .unwrap()
-            .into_iter()
-            .find(|candidate| candidate.id == bob.my_id())
-            .unwrap()
-            .name
-    };
-    assert!(
-        name_of_bob(&admin).contains('\u{202E}'),
-        "the old state is set up"
-    );
-    drop(admin);
-
-    let reopened = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline)
-        .await
-        .unwrap();
-    assert_eq!(name_of_bob(&reopened), "Bobnimda");
 }
 
 fn details_of(member: &Workspace, id: &str) -> crate::profile::ProfileDetails {
@@ -2375,8 +2311,8 @@ async fn extreme_times_from_others_cause_no_overflow() {
     assert!(texts_in(&admin, &general).contains(&"very old news".to_string()));
 }
 
-/// A device whose stored bucket settings can't connect (say an older version
-/// applied a bad admin op) says so plainly, and whom to ask, when it opens.
+/// A device whose stored bucket settings can't connect says so plainly, and
+/// whom to ask, when it opens.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_that_cannot_connect_say_what_is_wrong_on_open() {
     let (root, bucket, _admin, bob) = admin_and_bob().await;
@@ -2425,29 +2361,6 @@ async fn an_edited_workspace_json_is_refused() {
 
     let error = format!("{:#}", opened.err().unwrap());
     assert!(error.contains("changed outside the app"), "{error}");
-}
-
-/// A workspace from before the encrypted copy was kept records it on its
-/// first open, and is held to it from then on.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_older_workspace_keeps_its_identity_on_first_open() {
-    let (root, bucket, _admin, bob) = admin_and_bob().await;
-    let bob_dir = root.path().join("bob");
-    bob.state().store.delete_meta("workspace_identity").unwrap();
-    bob.shutdown().await.unwrap();
-    drop(bob);
-
-    let reopened = Workspace::open_with(&data_dir(&bob_dir), connector(&bucket), Networking::Offline)
-        .await
-        .unwrap();
-    assert!(
-        reopened
-            .state()
-            .store
-            .meta("workspace_identity")
-            .unwrap()
-            .is_some()
-    );
 }
 
 /// A delete can reach a device before the file it removes (rebuilds and
@@ -2986,4 +2899,26 @@ async fn the_admin_repairs_commits_only_after_its_snapshot_is_up() {
     admin.make_slow_duties_due();
     admin.sync().await;
     assert!(bucket.commit(epoch).await.unwrap().is_some(), "after it");
+}
+
+/// The workspace's id and admin are kept in the encrypted store from the
+/// start; a store without them doesn't open, rather than taking whatever
+/// the plain settings file says.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_store_missing_its_identity_does_not_open() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let dir = root.path().join("ada");
+    let admin = create_admin(&dir, &bucket).await;
+    admin
+        .state()
+        .store
+        .execute_for_test("DELETE FROM meta WHERE key = 'workspace_identity'");
+    admin.shutdown().await.unwrap();
+    drop(admin);
+
+    let opened = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline).await;
+
+    let error = format!("{:#}", opened.err().expect("refused"));
+    assert!(error.contains("id and admin are missing"), "{error}");
 }

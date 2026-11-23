@@ -462,10 +462,6 @@ impl Workspace {
                 fail_next_answer_upload: Default::default(),
             }),
         };
-        workspace
-            .state()
-            .store
-            .rebuild_if_rules_changed(workspace.apply_context())?;
         workspace.announce_sealing_key()?;
         if let Some(net) = &workspace.inner.net {
             net.set_members(&workspace.current_members()?);

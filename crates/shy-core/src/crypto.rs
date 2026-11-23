@@ -87,15 +87,9 @@ pub(crate) fn seal_bytes(
     })
 }
 
-/// Opens an op arriving from someone else.
+/// Opens an op, arriving or from our own log: only its exact encoding counts.
 pub fn open(envelope: &Envelope, epoch_key: &EpochKey) -> Result<VerifiedOp> {
     parse_body(envelope, open_body(envelope, epoch_key, Encoding::Exact)?)
-}
-
-/// Opens an op already in our log. Versions before the exact-encoding rule
-/// may have kept one padded within its size limit.
-pub fn open_kept(envelope: &Envelope, epoch_key: &EpochKey) -> Result<VerifiedOp> {
-    parse_body(envelope, open_body(envelope, epoch_key, Encoding::Any)?)
 }
 
 /// What `envelope`'s author signed, unparsed, so ops of kinds a newer

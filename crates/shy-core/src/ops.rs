@@ -125,9 +125,7 @@ pub enum Op {
     Sealed {
         payload: crate::private::crypto::SealedPayload,
     },
-    /// The author's own profile details. The latest one wins. A variant of
-    /// its own, because adding fields to `Profile` would stop old `Profile`
-    /// ops from decoding.
+    /// The author's own profile details. The latest one wins.
     ProfileDetails {
         details: crate::profile::ProfileDetails,
     },
@@ -273,8 +271,8 @@ pub struct VerifiedOp {
 
 const MAX_CHANNEL_NAME_CHARS: usize = 80;
 /// Longest message or edit, like Slack's. Longer text from others is cut
-/// rather than refused, so devices that accepted it before this limit and
-/// devices after it don't disagree about whether the message exists.
+/// rather than refused, the same on every device, so the message still
+/// exists and its author's later ops aren't held up.
 pub const MAX_MESSAGE_CHARS: usize = 40_000;
 pub const MAX_PAGE_TITLE_CHARS: usize = 200;
 
@@ -410,24 +408,15 @@ pub fn normalize_channel_name(raw: &str) -> anyhow::Result<String> {
     Ok(name)
 }
 
-/// Renames from anyone must follow the rule new names follow. Names reach
-/// everyone's sidebar: no control or invisible characters, bounded length.
+/// The rule every channel name from anyone follows, created or renamed. Names
+/// reach everyone's sidebar: no control or invisible characters, bounded
+/// length.
 pub fn is_valid_channel_name(name: &str) -> bool {
     let length = name.chars().count();
     (1..=MAX_CHANNEL_NAME_CHARS).contains(&length)
         && name
             .chars()
             .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
-}
-
-/// Channels created before the naming rule may hold any text, and every
-/// member must still list them the same way: instead of rejecting a
-/// created name, drop control and invisible characters and cut it short.
-pub fn clean_channel_name(raw: &str) -> String {
-    raw.chars()
-        .filter(|c| !c.is_control() && !is_invisible_format_char(*c))
-        .take(MAX_CHANNEL_NAME_CHARS)
-        .collect()
 }
 
 /// Zero-width and text-direction characters, which can disguise a name.
@@ -480,18 +469,6 @@ mod tests {
                 name: "Ada".into(),
                 is_bot: false
             }
-        );
-    }
-
-    #[test]
-    fn profile_details_keep_their_slot_after_every_older_kind() {
-        let op = Op::ProfileDetails {
-            details: crate::profile::ProfileDetails::default(),
-        };
-        let encoded = postcard::to_stdvec(&op).unwrap();
-        assert_eq!(
-            encoded[0], 15,
-            "variants are positional; append new ones after it"
         );
     }
 }

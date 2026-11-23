@@ -852,9 +852,8 @@ async fn a_check_repairs_a_gap() {
     }
 }
 
-/// A removed member's last segment without a head (an older version, or a
-/// crash before the head) still reaches others at a check, up to the frozen
-/// end of their log.
+/// A removed member's last segment without a head (a crash before the head)
+/// still reaches others at a check, up to the frozen end of their log.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_removed_members_headless_segment_arrives_at_a_check() {
     let (root, bucket, admin, bob) = admin_and_bob().await;

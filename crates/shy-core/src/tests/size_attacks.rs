@@ -221,34 +221,6 @@ async fn a_key_grant_to_the_most_people_fits_the_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_oversized_op_kept_by_an_older_version_is_skipped_on_rebuild() {
-    let (_root, _bucket, admin, bob) = admin_and_bob().await;
-    let general = channel_id(&admin, "general");
-    let mut forger = Forger::new(&bob);
-    // One refused under the limit, kept as a header only.
-    admin
-        .receive(forger.seal(message(&bob, &general, "y".repeat(MAX_OP_BYTES))))
-        .unwrap();
-    // One an older version applied and kept whole, before it knew the limit.
-    let kept_whole = forger.seal(message(&bob, &general, "z".repeat(MAX_OP_BYTES)));
-    admin.state().store.insert_applied(&kept_whole, true).unwrap();
-    admin.state().store.set_meta("views_version", &[1]).unwrap();
-
-    let rebuilt = admin
-        .state()
-        .store
-        .rebuild_if_rules_changed(admin.apply_context())
-        .unwrap();
-
-    assert!(rebuilt, "the new limit rebuilds older stores once");
-    assert!(
-        !texts_in(&admin, &general)
-            .iter()
-            .any(|text| text.starts_with("zzz"))
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn padding_someone_elses_op_past_the_limit_doesnt_get_it_refused() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");

@@ -104,7 +104,7 @@ Deleting a file, its message or its channel removes it everywhere and queues its
 | `workspace/` | the public API: `lifecycle` (create, join, open), `actions` (writes), `reads`, `sent` (your own messages across the channels you can still read, newest first, paged and filtered by words), `presence` (heartbeats and status), `protection` (whether the bucket keeps deleted data), `files` (sharing, opening and removing files and pictures) |
 | `membership/` | `mls` (OpenMLS wrapper), `invite`, `commit` (admin-signed commits), `keyring` (history for newcomers), `admin` (invites, approvals, removals), `follow` (members applying commits), `recovery` (admin recovery kit and snapshots) |
 | `sync/` | the background loop, `receive` (verifying and applying others' ops), `forks` (two versions of one op), `replicate` (bucket pull and push, gossip peers) |
-| `storage/` | SQLite: `schema` (migrations), `oplog`, `epochs`, `forks`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `profile_details`, `sent` (one member's messages, newest first), `files` (shared files, pictures, blobs waiting to leave the bucket), `rebuild` (undoing ops that turned out not to count), `search_index` (the full-text index, with each item's entry found by key), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
+| `storage/` | SQLite: `schema` (the base schema), `oplog`, `epochs`, `forks`, `apply` (folding ops into views), `revisions` (edits, renames, deletes), `profile_details`, `sent` (one member's messages, newest first), `files` (shared files, pictures, blobs waiting to leave the bucket), `rebuild` (undoing ops that turned out not to count), `search_index` (the full-text index, with each item's entry found by key), `private`, `private_members` and `sealed` (private channel state), `sealing`, `queries` |
 | `transport/` | `bucket` (S3 layout and access), `blobs` (file pieces in the bucket), `gossip` (iroh) |
 | `private/` | private channels and DMs: `ids`, `ops` (what's inside sealed ops and grants), `crypto` (sealed content, key wraps, commitments), `sealing` (each member's key for receiving channel keys), `apply` (grants and waiting sealed ops), `rules` (which private ops count), `actions` (create, add, remove, leave, hand over, DMs), `reads` |
 | `files/` | shared files and pictures: `blob` (the encrypted format), `cache` (sealed pieces on this device) |
@@ -117,6 +117,6 @@ Deleting a file, its message or its channel removes it everywhere and queues its
 | `config.rs`, `identity.rs` | workspace settings (including the current bucket settings) and the identity key |
 | `tests/` | multi-member scenarios (`collaboration`, `private`), attacks (`hardening`, `private_attacks`) and slow capacity probes (`capacity`, see `development.md`) |
 
-## Database migrations
+## Database schema
 
-The schema is a list of migrations in `storage/schema.rs`, applied in order and tracked by SQLite's `user_version`. Never edit a released migration; append a new one. A database from a newer version is refused rather than misread.
+shyspace hasn't been released, so there are no migrations: `storage/schema.rs` holds one base schema, changed in place. A store records a fingerprint of the schema and of the rules that build its views (SQLite's `user_version`); one made by a different build is refused with "recreate this workspace" rather than upgraded or misread.

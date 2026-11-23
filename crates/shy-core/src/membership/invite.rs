@@ -41,7 +41,7 @@ impl Invite {
         let payload = code
             .trim()
             .strip_prefix(PREFIX)
-            .context("not a shyspace invite code (or one from an older version)")?;
+            .context("not a shyspace invite code")?;
         let bytes = URL_SAFE_NO_PAD
             .decode(payload)
             .context("invite code is damaged")?;

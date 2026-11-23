@@ -73,8 +73,7 @@ pub enum PrivateOp {
     /// inside the channel.
     Content(Op),
     /// Takes over a channel whose owner was removed from the workspace (see
-    /// `private/succession.rs`). Last, so older versions read it as a kind
-    /// they don't know yet.
+    /// `private/succession.rs`).
     Succeed {
         position: u64,
     },

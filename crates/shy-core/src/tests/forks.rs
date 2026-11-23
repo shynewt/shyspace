@@ -216,23 +216,6 @@ async fn two_versions_waiting_for_their_turn_still_prove_the_fork() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_padded_op_an_older_version_kept_still_rebuilds() {
-    let fork = fork().await;
-    let (admin, general) = (&fork.admin, &fork.general);
-    let (_, epoch_key) = current_key(admin);
-    let padded = encrypted_again(&fork.for_admin, &epoch_key, 100);
-    admin.state().store.insert_applied(&padded, true).unwrap();
-
-    let context = admin.apply_context();
-    admin
-        .state()
-        .store
-        .atomically(|store| store.rebuild_views(context))
-        .unwrap();
-    assert_eq!(texts(admin, general), ["version for the admin"]);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn an_overwritten_proof_is_put_back_and_still_learned() {
     let fork = fork().await;
     let (admin, carol, general) = (&fork.admin, &fork.carol, &fork.general);

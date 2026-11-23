@@ -14,7 +14,7 @@ use super::{
     rules::Verdict,
 };
 use crate::{
-    ops::{MAX_STORED_NUMBER, Op, OpBody, RuleViolation, VerifiedOp, clean_channel_name, rule_violation},
+    ops::{MAX_STORED_NUMBER, Op, OpBody, RuleViolation, VerifiedOp, is_valid_channel_name, rule_violation},
     storage::{Applied, ApplyContext, Ending, Membership, Origin, Settling, Store, StoredKey, WaitingSealed},
     views::Change,
 };
@@ -282,6 +282,9 @@ impl Store {
                 commitment,
                 members,
             } => {
+                if !is_valid_channel_name(name) {
+                    return Err(rule_violation("invalid channel name"));
+                }
                 self.record_private_channel(channel, PrivateKind::Channel, origin)?;
                 self.record_position(channel, 1, origin)?;
                 self.set_owner_from(channel, 1, author, origin)?;
@@ -299,7 +302,7 @@ impl Store {
                     };
                     self.record_add(channel, &invitee.member, membership, origin)?;
                 }
-                self.show_channel(channel, &clean_channel_name(name), verified)?;
+                self.show_channel(channel, name, verified)?;
                 applied.changes.push(Change::Channels);
             }
             PrivateOp::Add {

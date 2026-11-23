@@ -89,7 +89,7 @@ impl Store {
     }
 
     /// An op from the log, or `None` for one that never counts: refused for
-    /// its size (kept without content, or kept whole by an older version),
+    /// its size (kept without content),
     /// or one its author also signed another version of.
     pub(crate) fn open_stored(&self, bytes: &[u8]) -> Result<Option<VerifiedOp>> {
         let envelope: Envelope = postcard::from_bytes(bytes).context("reading a stored op")?;
@@ -99,8 +99,9 @@ impl Store {
         let key = self
             .epoch_key(envelope.epoch)?
             .with_context(|| format!("no key for epoch {} of a stored op", envelope.epoch))?;
-        let verified = crypto::open_kept(&envelope, &key).context("opening a stored op")?;
-        Ok(envelope.fits_size_limit(&verified.body.op).then_some(verified))
+        Ok(Some(
+            crypto::open(&envelope, &key).context("opening a stored op")?,
+        ))
     }
 
     /// Records an op refused for its size as handled, keeping only its

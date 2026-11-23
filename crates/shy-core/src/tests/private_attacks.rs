@@ -1094,3 +1094,33 @@ async fn an_owner_op_with_a_huge_number_does_not_stall_its_author() {
         later_ops_still_arrive(&bob, &carol, poison, &mut forger).await;
     }
 }
+
+/// A private channel's name follows the same rule as any channel's: one
+/// created with a name that breaks it (punctuation the rule doesn't allow,
+/// invisible characters) is skipped, even by its members.
+#[tokio::test(flavor = "multi_thread")]
+async fn private_channels_created_with_names_that_break_the_rule_are_skipped() {
+    let (_root, _bucket, admin, bob, _carol, _dave) = four_members().await;
+    let mut forger = Forger::new(&bob);
+    for (name, is_shown) in [("q&a", false), ("\u{202e}evil", false), ("fine-name", true)] {
+        let key = new_channel_key();
+        let invitees = [Invitee {
+            member: admin.me(),
+            after_seq: own_last_seq(&admin),
+        }];
+        let channel = private_channel_id(&bob.me(), &commitment(&key), name, &invitees).unwrap();
+        let first = StoredKey {
+            channel: channel.clone(),
+            generation: 1,
+            key,
+        };
+        admin
+            .receive(forger.seal(forged_grant(&bob, &admin, &channel, 1, key)))
+            .unwrap();
+        admin
+            .receive(forged_create(&mut forger, &first, name, &[&admin]))
+            .unwrap();
+
+        assert_eq!(listed(&admin, &channel).is_some(), is_shown, "{name}");
+    }
+}

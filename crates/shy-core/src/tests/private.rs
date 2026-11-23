@@ -222,7 +222,7 @@ async fn a_new_dm_key_skips_members_removed_from_the_workspace() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_dm_message_sealed_with_someone_elses_key_still_counts() {
-    // Versions before #72 write with whichever key the DM's opener made.
+    // Any member's DM key counts, not only the writer's own.
     let (_root, _bucket, admin, bob, carol) = three_members().await;
     let dm = bob.open_dm(&[carol.my_id()]).unwrap();
     sync_all(&[&admin, &bob, &carol]).await;
@@ -238,12 +238,12 @@ async fn a_dm_message_sealed_with_someone_elses_key_still_counts() {
         PrivateOp::Content(Op::Message {
             id: new_private_message_id(&dm, &carol.me()),
             channel: dm.clone(),
-            text: "from an older version".into(),
+            text: "sealed with the opener's key".into(),
             reply_to: None,
         }),
     );
     bob.receive(old_style).unwrap();
-    assert_eq!(texts(&bob, &dm), ["from an older version"]);
+    assert_eq!(texts(&bob, &dm), ["sealed with the opener's key"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
