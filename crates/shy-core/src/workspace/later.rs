@@ -54,6 +54,18 @@ impl Workspace {
         Ok(items)
     }
 
+    /// When the next reminder not yet due comes due, if any is set.
+    pub fn next_reminder_ms(&self) -> Result<Option<i64>> {
+        let now = now_ms()?;
+        Ok(self
+            .later()?
+            .iter()
+            .filter(|item| !item.is_done)
+            .filter_map(|item| item.remind_ms)
+            .filter(|remind_ms| *remind_ms > now)
+            .min())
+    }
+
     /// Saved items whose reminder came due, each handed out once. Reminders
     /// due while the app was closed come out at the next call.
     pub fn take_due_reminders(&self) -> Result<Vec<LaterItem>> {

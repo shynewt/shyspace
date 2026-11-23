@@ -16,9 +16,10 @@ use shy_core::{
     profile::ProfileDetails,
     sync::SyncStatus,
     views::{
-        Channel, Draft, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor, NotifyLevel,
-        OldKeyCheck, Page, PageEditorSession, PrivateMembers, ProtectionCheck, SearchHit, SectionSort,
-        SidebarSection, StatusUpdate, StorageRotation, StorageSettings, WorkspaceBadge, WorkspaceItem,
+        Channel, Draft, DueReminder, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor,
+        NotifyLevel, OldKeyCheck, Page, PageEditorSession, PrivateMembers, ProtectionCheck, SearchHit,
+        SectionSort, SidebarSection, StatusUpdate, StorageRotation, StorageSettings, WorkspaceBadge,
+        WorkspaceItem,
     },
     workspace::StorageUpdate,
     workspaces::{DeviceKeys, Workspaces},
@@ -751,8 +752,15 @@ async fn later(state: State<'_, AppState>) -> CommandResult<Vec<LaterItem>> {
 }
 
 #[tauri::command]
-async fn take_due_reminders(state: State<'_, AppState>) -> CommandResult<Vec<LaterItem>> {
-    current(&state).await?.take_due_reminders().map_err(failed)
+/// Reminders that came due in any workspace, each with its workspace.
+async fn take_due_reminders(state: State<'_, AppState>) -> CommandResult<Vec<DueReminder>> {
+    state.workspaces.take_due_reminders().map_err(failed)
+}
+
+/// When the next reminder in any workspace comes due, for one app-wide timer.
+#[tauri::command]
+fn next_reminder_ms(state: State<'_, AppState>) -> CommandResult<Option<i64>> {
+    state.workspaces.next_reminder_ms().map_err(failed)
 }
 
 #[tauri::command]
@@ -839,8 +847,9 @@ async fn clear_status(state: State<'_, AppState>) -> CommandResult<()> {
 }
 
 #[tauri::command]
+/// Away or back is about the person, so it shows in every workspace.
 async fn set_away(state: State<'_, AppState>, away: bool) -> CommandResult<()> {
-    current(&state).await?.set_away(away);
+    state.workspaces.set_away(away);
     Ok(())
 }
 
@@ -1091,6 +1100,7 @@ pub fn run() {
             move_workspace,
             leave_workspace,
             mark_workspace_read,
+            next_reminder_ms,
             workspace_badges,
             set_workspace_muted,
             set_notifications_paused,

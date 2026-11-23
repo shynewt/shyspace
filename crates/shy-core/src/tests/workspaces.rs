@@ -552,3 +552,139 @@ async fn finishing_a_leave_in_one_folder_spares_a_workspace_made_there_since() {
         "the new workspace was deleted"
     );
 }
+
+fn with_fake_media(media: &crate::huddle::media::fake::FakeMedia) -> crate::WorkspaceOptions {
+    crate::WorkspaceOptions::from(Networking::Offline).with_media(std::sync::Arc::new(media.clone()))
+}
+
+/// The one call this device can be in follows its workspace: shown, muted
+/// and left from wherever the person is, even with another selected; and
+/// joining a call in one workspace leaves the call in the other.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_follows_its_workspace_when_another_is_selected() {
+    let device = Device::new();
+    let media = crate::huddle::media::fake::FakeMedia::default();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), with_fake_media(&media))
+        .await
+        .unwrap();
+    let beta = workspaces
+        .create("Beta", profile(), test_bucket_config(), with_fake_media(&media))
+        .await
+        .unwrap();
+    let acme_general = channel_id(&acme, "general");
+    workspaces
+        .join_huddle(acme.workspace_id(), &acme_general, false)
+        .unwrap();
+    workspaces.select(beta.workspace_id()).unwrap();
+
+    let call = workspaces.my_huddle().unwrap().expect("in a call");
+    assert_eq!(call.workspace_id, acme.workspace_id());
+    assert_eq!(call.channel_name, "#general");
+    workspaces.in_huddle().unwrap().set_huddle_muted(true).unwrap();
+    assert!(acme.my_huddle().unwrap().muted);
+
+    let beta_general = channel_id(&beta, "general");
+    workspaces
+        .join_huddle(beta.workspace_id(), &beta_general, false)
+        .unwrap();
+    assert!(acme.my_huddle().is_none(), "one call at a time");
+    assert_eq!(
+        workspaces.my_huddle().unwrap().unwrap().workspace_id,
+        beta.workspace_id()
+    );
+
+    workspaces.in_huddle().unwrap().leave_huddle().unwrap();
+    assert!(workspaces.my_huddle().unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn being_away_shows_in_every_workspace() {
+    use crate::views::PresenceState;
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let mut opened = Vec::new();
+    for name in ["Acme", "Beta"] {
+        let workspace = workspaces
+            .create(name, profile(), test_bucket_config(), Networking::Offline)
+            .await
+            .unwrap();
+        opened.push(workspace);
+    }
+
+    workspaces.set_away(true);
+
+    for workspace in &opened {
+        let now = crate::ops::now_ms().unwrap();
+        assert_eq!(workspace.presence_of(&workspace.me(), now), PresenceState::Away);
+    }
+}
+
+/// Reminders come due in any workspace, each named with its workspace, and
+/// the app learns when the next one is due without asking each workspace.
+#[tokio::test(flavor = "multi_thread")]
+async fn reminders_come_due_from_every_workspace() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let now = crate::ops::now_ms().unwrap();
+    let mut ids = Vec::new();
+    for (name, remind_ms) in [("Acme", now - 1_000), ("Beta", now - 1_000)] {
+        let workspace = workspaces
+            .create(name, profile(), test_bucket_config(), Networking::Offline)
+            .await
+            .unwrap();
+        let general = channel_id(&workspace, "general");
+        let message = workspace.send_message(&general, "remind me", None).unwrap();
+        workspace.save_for_later(&message, Some(remind_ms)).unwrap();
+        let later = workspace.send_message(&general, "and later", None).unwrap();
+        workspace.save_for_later(&later, Some(now + 60_000)).unwrap();
+        ids.push(workspace.workspace_id().to_owned());
+    }
+
+    let mut due: Vec<String> = workspaces
+        .take_due_reminders()
+        .unwrap()
+        .into_iter()
+        .map(|reminder| reminder.workspace_id)
+        .collect();
+    due.sort();
+    ids.sort();
+
+    assert_eq!(due, ids, "one from each, each with its workspace");
+    assert!(
+        workspaces.take_due_reminders().unwrap().is_empty(),
+        "handed out once"
+    );
+    assert_eq!(workspaces.next_reminder_ms().unwrap(), Some(now + 60_000));
+}
+
+/// The rail's attention count is the window badge's, per workspace:
+/// mentions and thread replies outside DMs, unread messages in DMs that
+/// aren't muted, and reminders that came due.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_badge_counts_its_attention_as_the_window_badge_does() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mention = bob
+        .send_message(
+            &general,
+            &format!("[@Ada](shy://member/{}) look", admin.my_id()),
+            None,
+        )
+        .unwrap();
+    let dm = bob.open_dm(&[admin.my_id()]).unwrap();
+    bob.send_message(&dm, "one", None).unwrap();
+    bob.send_message(&dm, "two", None).unwrap();
+    sync_all(&[&bob, &admin]).await;
+    // Saving it for later doesn't read it.
+    admin
+        .save_for_later(&mention, Some(crate::ops::now_ms().unwrap() - 1_000))
+        .unwrap();
+
+    assert_eq!(
+        admin.badge().unwrap().attention,
+        4,
+        "1 mention, 2 in the DM, 1 reminder"
+    );
+}

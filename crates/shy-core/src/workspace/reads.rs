@@ -18,14 +18,37 @@ use crate::{
 };
 
 impl Workspace {
-    /// What this workspace's rail icon shows, counted as its sidebar does.
+    /// What this workspace's rail icon shows, counted as its sidebar and
+    /// the window badge do.
     pub fn badge(&self) -> Result<WorkspaceBadge> {
+        let channels = self.channels()?;
+        let is_dm = |channel: &str| {
+            channels
+                .iter()
+                .any(|candidate| candidate.id == channel && candidate.kind == ChannelKind::Dm)
+        };
+        let outside_dms = self
+            .inbox()?
+            .attention
+            .iter()
+            .filter(|item| !is_dm(&item.message.channel))
+            .count();
+        let now = now_ms()?;
+        let due = self
+            .later()?
+            .iter()
+            .filter(|item| !item.is_done && item.remind_ms.is_some_and(|remind_ms| remind_ms <= now))
+            .count();
         let mut badge = WorkspaceBadge {
             workspace_id: self.workspace_id().to_owned(),
             unread: false,
             mentions: 0,
+            attention: u32::try_from(outside_dms.saturating_add(due)).unwrap_or(u32::MAX),
         };
-        for channel in self.channels()? {
+        for channel in channels {
+            if channel.kind == ChannelKind::Dm && channel.notify != NotifyLevel::Nothing {
+                badge.attention = badge.attention.saturating_add(channel.unread);
+            }
             let is_muted = channel.notify == NotifyLevel::Nothing;
             let mentions = match (channel.kind, is_muted) {
                 (_, true) => 0,
@@ -36,6 +59,31 @@ impl Workspace {
             badge.unread |= mentions > 0 || (!is_muted && channel.unread > 0);
         }
         Ok(badge)
+    }
+
+    /// A place's name as people see it: "#design", or a DM's people
+    /// (other than you) by name.
+    pub fn place_name(&self, channel: &str) -> Result<String> {
+        let place = self
+            .channels()?
+            .into_iter()
+            .find(|candidate| candidate.id == channel)
+            .context("no such channel here")?;
+        if place.kind != ChannelKind::Dm {
+            return Ok(format!("#{}", place.name));
+        }
+        let members = self.members()?;
+        let names: Vec<String> = place
+            .dm_members
+            .iter()
+            .map(|id| {
+                members
+                    .iter()
+                    .find(|member| member.id == *id)
+                    .map_or_else(|| id.clone(), |member| member.name.clone())
+            })
+            .collect();
+        Ok(names.join(", "))
     }
 
     pub fn channels(&self) -> Result<Vec<Channel>> {

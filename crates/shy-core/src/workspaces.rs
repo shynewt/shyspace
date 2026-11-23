@@ -27,7 +27,7 @@ use crate::{
     ops::{new_random_id, now_ms},
     sync::Cadence,
     transport::bucket::{Connector, s3_connector},
-    views::WorkspaceItem,
+    views::{DueReminder, WorkspaceHuddle, WorkspaceItem, WorkspaceRing},
 };
 
 const FOLDERS: &str = "workspaces";
@@ -697,6 +697,83 @@ impl Workspaces {
     pub fn may_notify(&self, workspace_id: &str) -> Result<bool> {
         let is_muted = self.settings()?.muted.iter().any(|id| id == workspace_id);
         Ok(!is_muted && self.notifications_paused()?.is_none())
+    }
+
+    /// The open workspace holding this device's call: there is one at most.
+    pub fn in_huddle(&self) -> Option<Workspace> {
+        self.open_workspaces()
+            .into_iter()
+            .find(|workspace| workspace.my_huddle().is_some())
+    }
+
+    /// This device's call, wherever it is, with where.
+    pub fn my_huddle(&self) -> Result<Option<WorkspaceHuddle>> {
+        let Some(workspace) = self.in_huddle() else {
+            return Ok(None);
+        };
+        let Some(huddle) = workspace.my_huddle() else {
+            return Ok(None);
+        };
+        Ok(Some(WorkspaceHuddle {
+            workspace_id: workspace.workspace_id().to_owned(),
+            channel_name: workspace.place_name(&huddle.channel)?,
+            huddle,
+        }))
+    }
+
+    /// A call ringing in any workspace.
+    pub fn ringing(&self) -> Option<WorkspaceRing> {
+        self.open_workspaces().into_iter().find_map(|workspace| {
+            workspace.huddle_ringing().map(|ring| WorkspaceRing {
+                workspace_id: workspace.workspace_id().to_owned(),
+                ring,
+            })
+        })
+    }
+
+    /// Joins a call in `workspace_id`'s workspace, leaving any call in the
+    /// others first: there is one microphone, so one call at a time.
+    pub fn join_huddle(&self, workspace_id: &str, channel: &str, muted: bool) -> Result<()> {
+        let workspace = self.find(workspace_id).context("that workspace isn't open")?;
+        for other in self.open_workspaces() {
+            if other.workspace_id() != workspace_id && other.my_huddle().is_some() {
+                other.leave_huddle()?;
+            }
+        }
+        workspace.join_huddle(channel, muted)
+    }
+
+    /// Away (or back) is about the person, so it shows in every workspace.
+    pub fn set_away(&self, is_away: bool) {
+        for workspace in self.open_workspaces() {
+            workspace.set_away(is_away);
+        }
+    }
+
+    /// Reminders that came due in any workspace, each handed out once.
+    pub fn take_due_reminders(&self) -> Result<Vec<DueReminder>> {
+        let mut due = Vec::new();
+        for workspace in self.open_workspaces() {
+            for item in workspace.take_due_reminders()? {
+                due.push(DueReminder {
+                    workspace_id: workspace.workspace_id().to_owned(),
+                    item,
+                });
+            }
+        }
+        Ok(due)
+    }
+
+    /// When the next reminder in any workspace comes due.
+    pub fn next_reminder_ms(&self) -> Result<Option<i64>> {
+        let mut next = None;
+        for workspace in self.open_workspaces() {
+            next = match (next, workspace.next_reminder_ms()?) {
+                (Some(earliest), Some(candidate)) => Some(std::cmp::min(earliest, candidate)),
+                (earliest, candidate) => earliest.or(candidate),
+            };
+        }
+        Ok(next)
     }
 
     /// The most recently used run live, the rest in the background.

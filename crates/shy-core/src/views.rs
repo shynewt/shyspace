@@ -389,6 +389,35 @@ pub struct WorkspaceBadge {
     pub unread: bool,
     /// Mentions of you, plus unread messages in DMs that aren't muted.
     pub mentions: u32,
+    /// What needs you, counted as the window badge counts: mentions and
+    /// followed replies outside DMs, unread messages in unmuted DMs, and
+    /// reminders that came due.
+    pub attention: u32,
+}
+
+/// This device's call, with the workspace it's in and the place's name
+/// ("#design", or a DM's people), for showing it while another is selected.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WorkspaceHuddle {
+    pub workspace_id: String,
+    pub channel_name: String,
+    #[serde(flatten)]
+    pub huddle: MyHuddle,
+}
+
+/// A call ringing in one of the workspaces.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WorkspaceRing {
+    pub workspace_id: String,
+    #[serde(flatten)]
+    pub ring: IncomingHuddle,
+}
+
+/// A reminder that came due, in one of the workspaces.
+#[derive(Debug, Clone, Serialize)]
+pub struct DueReminder {
+    pub workspace_id: String,
+    pub item: LaterItem,
 }
 
 /// A change of bucket key under way, after a member was removed (they keep
