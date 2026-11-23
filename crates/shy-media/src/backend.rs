@@ -2,7 +2,7 @@
 //! microphones and speakers (`system`); tests use generated tones instead,
 //! so two endpoints can talk without any audio device.
 
-use std::future::Future;
+use std::{future::Future, time::Duration};
 
 use anyhow::Result;
 use iroh_live::moq_net::broadcast;
@@ -72,10 +72,16 @@ pub(crate) trait Speaker: Clone + Send + Sync + 'static {
     fn switch(&self, device: Option<String>) -> impl Future<Output = Result<()>> + Send;
 }
 
-/// One stream into the speaker's mix.
+/// One stream into the speaker's mix. It holds only a moment of sound, so a
+/// longer sound is written as it plays (`playout`).
 pub(crate) trait Sink: Send + 'static {
-    /// Takes interleaved samples in the layout the sink was made with.
-    fn write(&mut self, samples: &[f32]) -> Result<()>;
+    /// Takes interleaved samples in the layout the sink was made with, and
+    /// returns how many sample frames it took: none before the device starts
+    /// reading, and fewer than given once it's full.
+    fn write(&mut self, samples: &[f32]) -> Result<usize>;
+
+    /// How far ahead of the speaker the written sound is.
+    fn buffered(&self) -> Duration;
 
     /// Waits until what was written has played.
     fn finish(self) -> impl Future<Output = ()> + Send;

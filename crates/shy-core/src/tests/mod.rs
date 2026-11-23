@@ -5,6 +5,7 @@ mod file_attacks;
 mod files;
 mod forks;
 mod hardening;
+mod huddle_ring;
 mod huddle_sounds;
 mod huddles;
 mod inbox;

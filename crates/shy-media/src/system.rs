@@ -217,17 +217,14 @@ impl Speaker for SystemSpeaker {
 pub(crate) struct SystemSink(playback::Sink);
 
 impl Sink for SystemSink {
-    fn write(&mut self, samples: &[f32]) -> Result<()> {
+    fn write(&mut self, samples: &[f32]) -> Result<usize> {
         let bytes: Vec<u8> = samples.iter().flat_map(|sample| sample.to_ne_bytes()).collect();
         let written = self.0.write(&bytes).context("playing audio")?;
-        // Live audio that can't keep up is dropped rather than played late.
-        if written.dropped_sample_frames > 0 {
-            debug!(
-                dropped = written.dropped_sample_frames,
-                "the speaker dropped late audio"
-            );
-        }
-        Ok(())
+        Ok(written.accepted_sample_frames)
+    }
+
+    fn buffered(&self) -> Duration {
+        self.0.buffered()
     }
 
     async fn finish(self) {

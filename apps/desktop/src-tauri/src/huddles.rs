@@ -32,6 +32,12 @@ pub async fn leave_huddle(state: State<'_, AppState>) -> CommandResult<()> {
 }
 
 #[tauri::command]
+pub async fn decline_huddle(state: State<'_, AppState>) -> CommandResult<()> {
+    current(&state).await?.decline_huddle();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn set_huddle_muted(state: State<'_, AppState>, muted: bool) -> CommandResult<()> {
     current(&state).await?.set_huddle_muted(muted).map_err(failed)
 }

@@ -424,6 +424,11 @@ pub enum Change {
         member: String,
         member_name: String,
     },
+    /// The ring for an incoming huddle stopped: answered, declined, the
+    /// caller left, or nobody answered in time.
+    HuddleRingStopped {
+        channel: EntityId,
+    },
     /// The microphones and speakers offered, or the choice among them, changed.
     HuddleDevices,
     /// Whether huddles play join and leave sounds on this device changed.

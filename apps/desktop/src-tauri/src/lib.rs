@@ -812,6 +812,7 @@ pub fn run() {
             huddles::my_huddle,
             huddles::join_huddle,
             huddles::leave_huddle,
+            huddles::decline_huddle,
             huddles::set_huddle_muted,
             huddles::huddle_devices,
             huddles::set_huddle_devices,

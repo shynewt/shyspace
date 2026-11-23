@@ -2,6 +2,7 @@
 
 mod actions;
 mod files;
+mod huddle_ring;
 mod huddles;
 mod inbox;
 mod later;

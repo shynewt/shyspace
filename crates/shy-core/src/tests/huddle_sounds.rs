@@ -8,7 +8,7 @@ use super::{
     support::*,
 };
 use crate::{
-    huddle::{book::EXPIRY_MS, media::Cue},
+    huddle::{book::EXPIRY_MS, media::Cue, ring::CUE_GAP_MS},
     views::Change,
     workspace::Via,
 };
@@ -23,16 +23,40 @@ async fn joining_and_leaving_play_their_sounds() {
     assert_eq!(ada.media.cues(), [Cue::Joined, Cue::Left]);
 }
 
+/// Moves `member`'s huddle clock past the gap between sounds.
+fn wait_out_the_gap(member: &crate::Workspace) {
+    member.age_huddles(Duration::from_millis(CUE_GAP_MS));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn others_coming_and_going_play_their_sounds() {
     let (_root, [ada, bob, _carol]) = three_members().await;
     let general = channel_id(&ada.workspace, "general");
     ada.workspace.join_huddle(&general, false).unwrap();
+    wait_out_the_gap(&ada.workspace);
     bob.workspace.join_huddle(&general, false).unwrap();
     carry(&bob.workspace, &[&ada.workspace], Via::Gossip);
+    wait_out_the_gap(&ada.workspace);
     bob.workspace.leave_huddle().unwrap();
     carry(&bob.workspace, &[&ada.workspace], Via::Gossip);
     assert_eq!(ada.media.cues(), [Cue::Joined, Cue::PeerJoined, Cue::PeerLeft]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn people_coming_and_going_together_make_one_sound() {
+    let (_root, [ada, bob, carol]) = three_members().await;
+    let general = channel_id(&ada.workspace, "general");
+    ada.workspace.join_huddle(&general, false).unwrap();
+    wait_out_the_gap(&ada.workspace);
+    for other in [&bob, &carol] {
+        other.workspace.join_huddle(&general, false).unwrap();
+        carry(&other.workspace, &[&ada.workspace], Via::Gossip);
+    }
+    // Bob drops and is back at once.
+    bob.workspace.leave_huddle().unwrap();
+    bob.workspace.join_huddle(&general, false).unwrap();
+    carry(&bob.workspace, &[&ada.workspace], Via::Gossip);
+    assert_eq!(ada.media.cues(), [Cue::Joined, Cue::PeerJoined]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -54,6 +78,7 @@ async fn several_people_leaving_at_once_make_one_sound() {
     let general = channel_id(&ada.workspace, "general");
     ada.workspace.join_huddle(&general, false).unwrap();
     for other in [&bob, &carol] {
+        wait_out_the_gap(&ada.workspace);
         other.workspace.join_huddle(&general, false).unwrap();
         carry(&other.workspace, &[&ada.workspace], Via::Gossip);
     }

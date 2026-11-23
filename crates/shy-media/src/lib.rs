@@ -11,11 +11,13 @@ mod cues;
 mod devices;
 mod listen;
 mod mic;
+mod playout;
 mod silence;
 mod speaking;
 mod system;
 #[cfg(test)]
 mod tests;
+mod wav;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -24,7 +26,7 @@ use iroh::{Endpoint, protocol::RouterBuilder};
 use iroh_live::{Node, NodeConfig};
 use shy_core::{
     ExtraProtocols,
-    huddle::media::{Cue, DeviceChoice, DeviceList, HuddleMedia, MediaCall},
+    huddle::media::{Cue, DeviceChoice, DeviceList, HuddleMedia, MediaCall, Ringing},
 };
 use tokio::runtime::Handle;
 use tracing::{debug, warn};
@@ -32,12 +34,9 @@ use tracing::{debug, warn};
 use crate::{
     access::Access,
     backend::{Backend, Sink, Speaker},
-    call::{Running, Shared},
+    call::{AbortOnDrop, Running, Shared},
     system::System,
 };
-
-/// The sample rate the join and leave sounds are made at.
-const CUE_RATE: u32 = 48_000;
 
 /// Huddle audio on this device's microphones and speakers. Make one per app
 /// and hand it to every workspace it opens: [`protocols`](Self::protocols)
@@ -153,48 +152,90 @@ impl<B: Backend> HuddleMedia for Media<B> {
     }
 
     fn play_cue(&self, cue: Cue) {
-        let Some((node, runtime)) = self.attached() else {
-            debug!(?cue, "no workspace is open, so the huddle sound is skipped");
+        let Some(sound) = self.sound_setup() else {
+            debug!(?cue, "the huddle sound is skipped: no workspace network is up");
             return;
         };
-        // The app closing plays the leave sound as it shuts the network down.
-        if node.endpoint().is_closed() {
-            debug!(?cue, "the network is closing, so the huddle sound is skipped");
-            return;
-        }
-        let speaker = lock(&self.running).as_ref().and_then(Running::speaker);
-        let device = lock(&self.choice).output.clone();
-        let backend = self.backend.clone();
-        runtime.spawn(async move {
-            if let Err(error) = play_cue_on(&*backend, speaker, device, cue).await {
+        sound.runtime.clone().spawn(async move {
+            if let Err(error) = sound.play_cue(cue).await {
                 warn!(?cue, error = %error, "a huddle sound can't play");
             }
         });
     }
+
+    fn ring(&self) -> Ringing {
+        let Some(sound) = self.sound_setup() else {
+            debug!("the ring is skipped: no workspace network is up");
+            return Ringing::new(());
+        };
+        let task = sound.runtime.clone().spawn(async move {
+            if let Err(error) = sound.ring().await {
+                warn!(error = %error, "the ring can't play");
+            }
+        });
+        Ringing::new(AbortOnDrop(task))
+    }
 }
 
-/// Plays on the call's speaker, or opens one for the sound alone.
-async fn play_cue_on<B: Backend>(
-    backend: &B,
+impl<B: Backend> Media<B> {
+    /// What a sound needs, unless no workspace is open or its network is
+    /// closing (the app closing plays the leave sound as it shuts down).
+    fn sound_setup(&self) -> Option<SoundSetup<B>> {
+        let (node, runtime) = self.attached()?;
+        if node.endpoint().is_closed() {
+            return None;
+        }
+        Some(SoundSetup {
+            backend: self.backend.clone(),
+            speaker: lock(&self.running).as_ref().and_then(Running::speaker),
+            device: lock(&self.choice).output.clone(),
+            runtime,
+        })
+    }
+}
+
+struct SoundSetup<B: Backend> {
+    backend: Arc<B>,
+    /// The call's speaker, when a call is running.
     speaker: Option<B::Speaker>,
+    /// The chosen output, for a sound outside a call.
     device: Option<String>,
-    cue: Cue,
-) -> Result<()> {
-    let speaker = match speaker {
-        Some(speaker) => speaker,
-        None => match backend.open_speaker(device.clone()).await {
-            Ok(speaker) => speaker,
-            Err(error) if device.is_some() => {
-                debug!(error = %error, "the chosen speaker can't open, so the sound plays on the default");
-                backend.open_speaker(None).await?
-            }
-            Err(error) => return Err(error),
-        },
-    };
-    let mut sink = speaker.sink(CUE_RATE, moq_audio::Layout::Mono)?;
-    sink.write(&cues::samples(cue, CUE_RATE))?;
-    sink.finish().await;
-    Ok(())
+    runtime: Handle,
+}
+
+impl<B: Backend> SoundSetup<B> {
+    async fn play_cue(self, cue: Cue) -> Result<()> {
+        let samples = cues::samples(cue)?;
+        let mut sink = self.sink().await?;
+        playout::play(&mut sink, &samples).await?;
+        sink.finish().await;
+        Ok(())
+    }
+
+    /// Loops the ring until the task is stopped.
+    async fn ring(self) -> Result<()> {
+        let cycle = cues::ring()?;
+        let mut sink = self.sink().await?;
+        loop {
+            playout::play(&mut sink, &cycle).await?;
+        }
+    }
+
+    /// A stream on the call's speaker, or on one opened for the sound alone.
+    async fn sink(&self) -> Result<<B::Speaker as Speaker>::Sink> {
+        let speaker = match &self.speaker {
+            Some(speaker) => speaker.clone(),
+            None => match self.backend.open_speaker(self.device.clone()).await {
+                Ok(speaker) => speaker,
+                Err(error) if self.device.is_some() => {
+                    debug!(error = %error, "the chosen speaker can't open, so the sound plays on the default");
+                    self.backend.open_speaker(None).await?
+                }
+                Err(error) => return Err(error),
+            },
+        };
+        speaker.sink(wav::RATE, moq_audio::Layout::Mono)
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

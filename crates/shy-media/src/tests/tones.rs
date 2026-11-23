@@ -166,10 +166,14 @@ pub(super) struct Recording {
 }
 
 impl Sink for Recording {
-    fn write(&mut self, samples: &[f32]) -> Result<()> {
+    fn write(&mut self, samples: &[f32]) -> Result<usize> {
         let first_channel = samples.iter().step_by(self.channels).copied();
         self.stream.lock().expect("stream lock").extend(first_channel);
-        Ok(())
+        Ok(samples.len() / self.channels)
+    }
+
+    fn buffered(&self) -> Duration {
+        Duration::ZERO
     }
 
     async fn finish(self) {}

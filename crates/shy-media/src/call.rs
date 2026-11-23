@@ -369,7 +369,8 @@ async fn list_devices<B: Backend>(backend: &Arc<B>) -> Option<DeviceList> {
         .ok()
 }
 
-struct AbortOnDrop(JoinHandle<()>);
+/// Stops a task when dropped.
+pub(crate) struct AbortOnDrop(pub(crate) JoinHandle<()>);
 
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {

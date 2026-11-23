@@ -180,7 +180,13 @@ impl<K: Sink> Playing<K> {
     fn play(&mut self, data: &[u8], voice: &mut PeerVoice) -> anyhow::Result<()> {
         let samples = moq_audio::Format::F32.as_interleaved_f32(data, self.channels)?;
         voice.heard(rms(&samples));
-        self.sink.write(&samples)
+        // Live audio that can't keep up is dropped rather than played late.
+        let taken = self.sink.write(&samples)?;
+        let given = samples.len() / self.channels.max(1) as usize;
+        if taken < given {
+            debug!(dropped = given - taken, "the speaker dropped late audio");
+        }
+        Ok(())
     }
 }
 

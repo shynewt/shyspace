@@ -6,4 +6,5 @@
 pub mod beacon;
 pub mod book;
 pub mod media;
+pub mod ring;
 pub mod rules;

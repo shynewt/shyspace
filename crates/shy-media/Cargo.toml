@@ -22,7 +22,7 @@ tracing = "0.1.44"
 [dev-dependencies]
 # The test tones are written as frames, which carry their samples as bytes.
 bytes = "1.12.2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 
 [lints]
 workspace = true

@@ -64,6 +64,8 @@ export class FakeHuddles {
   chosenDevices: AudioDeviceChoice = { input: null, output: null };
   /** Whether join and leave sounds are on, as `set_huddle_sounds` left it. */
   soundsOn = true;
+  /** The DM whose incoming huddle is ringing, as the core would ring it. */
+  ringing: string | null = null;
 
   constructor(context: HuddlesContext) {
     this.context = context;
@@ -85,7 +87,16 @@ export class FakeHuddles {
     if (isStart && this.isMyDm(channel)) {
       const memberName = this.context.members().find((candidate) => candidate.id === member)?.name ?? "";
       this.context.notify({ kind: "huddle_started", channel, member, member_name: memberName });
+      if (this.mine === null) this.ringing = channel;
     }
+  }
+
+  /** The ring stops, as answering, declining or the caller leaving would stop it. */
+  private stopRinging(): void {
+    if (this.ringing === null) return;
+    const channel = this.ringing;
+    this.ringing = null;
+    this.context.notify({ kind: "huddle_ring_stopped", channel });
   }
 
   leave(member: string, channel: string): void {
@@ -167,6 +178,9 @@ export class FakeHuddles {
       case "leave_huddle":
         this.leaveMine();
         return null;
+      case "decline_huddle":
+        this.stopRinging();
+        return null;
       case "set_huddle_muted":
         this.setMuted(argument(args, "muted") === true);
         return null;
@@ -207,6 +221,7 @@ export class FakeHuddles {
 
   private joinMine(channel: string, muted: boolean): Promise<null> | null {
     this.joinedMuted.push(muted);
+    this.stopRinging();
     if (this.failNextJoin !== null) {
       const message = this.failNextJoin;
       this.failNextJoin = null;

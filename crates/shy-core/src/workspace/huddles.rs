@@ -13,12 +13,13 @@ use iroh::PublicKey;
 use tokio::sync::{mpsc, watch};
 use tracing::warn;
 
-use super::Workspace;
+use super::{Workspace, huddle_ring::Ring};
 use crate::{
     huddle::{
         beacon::{Beacon, BeaconBody, BeaconState, MEDIA_WIRE, Reach, SessionId, media_path_name},
-        book::{EXPIRY_MS, HuddleBook, REFRESH_MS},
+        book::{EXPIRY_MS, HuddleBook, Participant, REFRESH_MS},
         media::{AudioDevice, Cue, DeviceChoice, Link, MediaCall, MediaEvent, MicState, OutputState},
+        ring::{CueLimit, IncomingHuddle},
         rules::{MAX_PARTICIPANTS, Visibility, hearing_set, huddle_members},
     },
     ops::now_ms,
@@ -58,6 +59,8 @@ pub(crate) struct HuddleState {
     /// Every beacon this device sent, for tests to carry between members.
     #[cfg(test)]
     sent: Vec<Beacon>,
+    pub(super) ringing: Option<Ring>,
+    cue_limit: CueLimit,
 }
 
 impl Default for HuddleState {
@@ -69,13 +72,23 @@ impl Default for HuddleState {
             sending: Vec::new(),
             #[cfg(test)]
             sent: Vec::new(),
+            ringing: None,
+            cue_limit: CueLimit::default(),
         }
     }
 }
 
 impl HuddleState {
-    fn now(&self) -> u64 {
+    pub(super) fn now(&self) -> u64 {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    pub(super) fn roster(&self, channel: &str) -> Vec<Participant> {
+        self.book.roster(channel, self.now())
+    }
+
+    pub(super) fn is_in_a_huddle(&self) -> bool {
+        self.mine.is_some()
     }
 }
 
@@ -102,7 +115,7 @@ struct MySession {
 }
 
 impl Workspace {
-    fn huddles(&self) -> std::sync::MutexGuard<'_, HuddleState> {
+    pub(super) fn huddles(&self) -> std::sync::MutexGuard<'_, HuddleState> {
         self.inner
             .huddles
             .lock()
@@ -195,6 +208,7 @@ impl Workspace {
             .clone()
             .context("this build of shyspace can't join huddles: it has no audio")?;
         let _transition = self.transition();
+        self.stop_ring();
         if let Some(ended) = self.end_current() {
             self.announce_left(ended)?;
         }
@@ -429,9 +443,20 @@ impl Workspace {
             return;
         };
         match self.huddle_sounds() {
-            Ok(true) => media.play_cue(cue),
-            Ok(false) => {}
-            Err(error) => warn!("couldn't tell whether huddle sounds are on: {error:#}"),
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                warn!("couldn't tell whether huddle sounds are on: {error:#}");
+                return;
+            }
+        }
+        let is_allowed = {
+            let mut huddles = self.huddles();
+            let now = huddles.now();
+            huddles.cue_limit.allows(cue, now)
+        };
+        if is_allowed {
+            media.play_cue(cue);
         }
     }
 
@@ -482,14 +507,15 @@ impl Workspace {
         self.after_roster_change(expired.channels)?;
         self.after_roster_change(received?.channels)?;
         if is_start {
-            self.ring_if_wanted(&body.channel, &body.member)?;
+            self.ring_if_wanted(&body.channel, &body.member, body.seq == 0)?;
         }
         Ok(())
     }
 
     /// Tells this member that `starter` began a huddle, if it's in a DM they
-    /// aren't already in, and the DM may alert them.
-    fn ring_if_wanted(&self, channel: &str, starter: &PublicKey) -> Result<()> {
+    /// aren't already in, and the DM may alert them; and rings, if it's new
+    /// and they aren't in a huddle.
+    fn ring_if_wanted(&self, channel: &str, starter: &PublicKey, is_first_beacon: bool) -> Result<()> {
         if private_kind(channel) != Some(PrivateKind::Dm) {
             return Ok(());
         }
@@ -522,6 +548,17 @@ impl Workspace {
             member: member_id(starter),
             member_name,
         });
+        let am_in_a_huddle = self.huddles().is_in_a_huddle();
+        self.ring_for(
+            channel,
+            starter,
+            IncomingHuddle {
+                is_dm: true,
+                is_first_beacon,
+                am_in_a_huddle,
+                may_alert: true,
+            },
+        );
         Ok(())
     }
 
@@ -540,6 +577,7 @@ impl Workspace {
             self.follow_membership()?;
             self.emit(Change::MyHuddle);
         }
+        self.stop_ring_if_over(&channels);
         for channel in channels {
             self.emit(Change::Huddle { channel });
         }
@@ -773,6 +811,7 @@ impl Workspace {
             let now = huddles.now();
             huddles.book.forget_expired(now)
         };
+        self.stop_ring_if_over(&[]);
         self.after_roster_change(expired.channels)
     }
 

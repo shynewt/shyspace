@@ -120,6 +120,21 @@ pub enum Cue {
     Left,
 }
 
+/// The incoming-huddle ring, playing until this is dropped. Dropping it
+/// stops the sound and never blocks.
+pub struct Ringing {
+    _playing: Box<dyn Send>,
+}
+
+impl Ringing {
+    /// `playing` stops the ring when it's dropped.
+    pub fn new(playing: impl Send + 'static) -> Self {
+        Self {
+            _playing: Box::new(playing),
+        }
+    }
+}
+
 /// Moves a huddle's sound. One call at a time.
 ///
 /// `start` and `stop` run while the core holds its join/leave lock, so they
@@ -135,6 +150,10 @@ pub trait HuddleMedia: Send + Sync + 'static {
     /// Returns at once; a sound that can't play is logged, never an error,
     /// so it can't hold up or break a join or a leave.
     fn play_cue(&self, cue: Cue);
+    /// Starts the incoming-huddle ring on the chosen speaker, looping until
+    /// the returned guard is dropped. Like a cue, a ring that can't play is
+    /// logged, never an error.
+    fn ring(&self) -> Ringing;
 }
 
 #[cfg(test)]
@@ -153,6 +172,8 @@ pub(crate) mod fake {
         cues: Vec<Cue>,
         /// How often the system's devices were listed: slow on a real machine.
         listings: usize,
+        rings_started: usize,
+        rings_playing: usize,
     }
 
     /// Records what the core asks of the media layer, and lets a test report
@@ -172,6 +193,15 @@ pub(crate) mod fake {
                 .as_ref()
                 .map(|peers| peers.borrow().clone())
                 .unwrap_or_default()
+        }
+
+        /// How many rings are sounding now.
+        pub(crate) fn rings_playing(&self) -> usize {
+            self.live().rings_playing
+        }
+
+        pub(crate) fn rings_started(&self) -> usize {
+            self.live().rings_started
         }
 
         pub(crate) fn listings(&self) -> usize {
@@ -257,6 +287,22 @@ pub(crate) mod fake {
 
         fn play_cue(&self, cue: Cue) {
             self.live().cues.push(cue);
+        }
+
+        fn ring(&self) -> Ringing {
+            let mut live = self.live();
+            live.rings_started += 1;
+            live.rings_playing += 1;
+            Ringing::new(FakeRing(self.clone()))
+        }
+    }
+
+    /// Counts the ring as stopped when dropped.
+    struct FakeRing(FakeMedia);
+
+    impl Drop for FakeRing {
+        fn drop(&mut self) {
+            self.0.live().rings_playing -= 1;
         }
     }
 }
