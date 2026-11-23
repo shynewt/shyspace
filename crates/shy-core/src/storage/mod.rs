@@ -129,11 +129,11 @@ impl Store {
         })
     }
 
-    /// Runs `work` atomically: either everything it wrote is kept, or nothing.
     pub(crate) fn is_in_transaction(&self) -> bool {
         !self.db.is_autocommit()
     }
 
+    /// Runs `work` atomically: either everything it wrote is kept, or nothing.
     /// Inside a transaction already, `work` runs in a savepoint of it.
     pub fn atomically<T>(&self, work: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
         if !self.db.is_autocommit() {
@@ -228,5 +228,26 @@ mod tests {
 
         assert!(store.meta("kept").unwrap().is_some() && store.meta("also kept").unwrap().is_some());
         assert_eq!(store.meta("undone").unwrap(), None);
+    }
+
+    /// SQLite can give up a whole transaction itself (a full disk, say);
+    /// the step's own error is what's reported, and nothing goes on as if
+    /// the transaction were still there.
+    #[test]
+    fn a_transaction_sqlite_gave_up_reports_the_real_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db"), TEST_DB_KEY).unwrap();
+
+        let outcome = store.atomically(|outer| {
+            let step = outer.atomically(|inner| -> Result<()> {
+                inner.execute_for_test("ROLLBACK");
+                anyhow::bail!("the disk is full")
+            });
+            assert!(!outer.is_in_transaction(), "the transaction is gone");
+            step
+        });
+
+        let error = format!("{:#}", outcome.unwrap_err());
+        assert!(error.contains("the disk is full"), "{error}");
     }
 }

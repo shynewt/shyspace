@@ -165,7 +165,23 @@ pub(crate) fn write_private_file(path: &Path, contents: &[u8]) -> Result<()> {
             file.sync_all()
         })
         .and_then(|()| std::fs::rename(&partial, path))
+        .and_then(|()| sync_folder_of(path))
         .with_context(|| format!("writing {}", path.display()))
+}
+
+/// Makes a rename into the folder survive a power cut.
+#[cfg(unix)]
+fn sync_folder_of(path: &Path) -> std::io::Result<()> {
+    match path.parent() {
+        Some(folder) => std::fs::File::open(folder)?.sync_all(),
+        None => Ok(()),
+    }
+}
+
+/// Windows keeps a rename without syncing the folder.
+#[cfg(not(unix))]
+fn sync_folder_of(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]

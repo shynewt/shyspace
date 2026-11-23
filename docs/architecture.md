@@ -65,7 +65,7 @@ Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even i
 6. push our unpushed ops as segments, each under the 32 MB that readers accept;
 7. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
 
-A pull fetches an author's segments a few at a time and applies each segment's ops in one transaction (each op still on its own). Our own writes also go up from a separate task 600 ms after each write, so a long catch-up doesn't hold them back; uploads never overlap.
+A pull fetches an author's segments a few at a time and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own); the author's cursor moves past the segment with the last one. Our own writes also go up from a separate task 600 ms after each write, so a long catch-up doesn't hold them back; uploads never overlap.
 
 An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried. If a second, different version of an op we already have arrives, signed by its author, neither version counts (see Forked logs in `security.md`).
 

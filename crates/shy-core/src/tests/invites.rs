@@ -335,3 +335,38 @@ async fn an_answer_goes_up_once_not_on_every_pass() {
             .any(|member| member.name == "Bob" && member.active)
     );
 }
+
+/// A create cut short after its folder is complete still gives the admin
+/// their name on the next open.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_create_cut_short_finishes_the_admins_name_on_the_next_open() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let ada_dir = root.path().join("ada");
+    let admin = create_admin(&ada_dir, &bucket).await;
+    // As if the app stopped before the chosen name was written.
+    let chosen = serde_json::json!({ "name": "Ada Lovelace", "is_bot": false }).to_string();
+    admin
+        .state()
+        .store
+        .set_meta("pending_profile", chosen.as_bytes())
+        .unwrap();
+    admin.shutdown().await.unwrap();
+    drop(admin);
+
+    let reopened = crate::Workspace::open_with(
+        &data_dir(&ada_dir),
+        connector(&bucket),
+        crate::Networking::Offline,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        reopened
+            .members()
+            .unwrap()
+            .iter()
+            .any(|member| member.name == "Ada Lovelace")
+    );
+}

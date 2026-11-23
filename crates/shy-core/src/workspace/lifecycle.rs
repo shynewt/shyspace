@@ -355,7 +355,8 @@ impl Workspace {
         Ok(workspace)
     }
 
-    /// Writes the Profile op a join chose, if it didn't get written then.
+    /// Writes the Profile op a join or create chose, if it didn't get
+    /// written then.
     fn finish_pending_profile(&self) -> Result<()> {
         let Some(bytes) = self.state().store.meta(PENDING_PROFILE_META)? else {
             return Ok(());

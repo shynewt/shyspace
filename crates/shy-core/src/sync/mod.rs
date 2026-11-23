@@ -115,7 +115,11 @@ impl Workspace {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = pusher.inner.push_now.notified() => tokio::time::sleep(PUSH_DEBOUNCE).await,
+                    _ = pusher.inner.push_now.notified() => {}
+                    _ = push_stopped.changed() => break,
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(PUSH_DEBOUNCE) => {}
                     _ = push_stopped.changed() => break,
                 }
                 match pusher.push().await {
