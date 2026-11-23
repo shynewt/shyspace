@@ -339,3 +339,44 @@ async fn a_workspace_already_on_this_device_isnt_added_again() {
     assert!(again.to_string().contains("already on this device"), "{again:#}");
     assert_eq!(names(&workspaces), ["Acme"]);
 }
+
+/// Pointed at one workspace folder (as `shy --dir` is, to run several
+/// members side by side on one machine), the app holds just that one.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_workspace_folder_holds_just_that_workspace() {
+    let device = Device::new();
+    let dir = device.root.path().join("maya");
+    let keys = device.root.path().join("keys");
+    std::fs::create_dir_all(&keys).unwrap();
+    let in_one_folder = || {
+        Workspaces::in_one_folder_with_connector(
+            &dir,
+            DeviceKeys::Files(keys.clone()),
+            connector(&device.bucket),
+        )
+    };
+    let workspace_id = in_one_folder()
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap()
+        .workspace_id()
+        .to_owned();
+    assert!(dir.join("workspace.json").exists());
+
+    let workspaces = in_one_folder();
+    assert!(
+        workspaces
+            .open_all(|| Networking::Offline.into())
+            .await
+            .unwrap()
+            .failed
+            .is_empty()
+    );
+
+    assert_eq!(names(&workspaces), ["Acme"]);
+    assert_eq!(workspaces.selected().unwrap().workspace_id(), workspace_id);
+    let another = workspaces
+        .create("Beta", profile(), test_bucket_config(), Networking::Offline)
+        .await;
+    assert!(another.is_err(), "the folder holds one workspace");
+}

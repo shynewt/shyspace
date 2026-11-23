@@ -33,9 +33,9 @@ pub(crate) type CommandResult<T> = Result<T, String>;
 const EXIT_UPLOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub(crate) struct AppState {
-    /// The app's data folder, holding every workspace on this device.
-    root: PathBuf,
     workspaces: Workspaces,
+    /// The one workspace folder of earlier versions, moved once on start.
+    single_folder: Option<DataDir>,
     /// Held while opening workspaces, so two opens don't race.
     opening: Mutex<()>,
     /// The join in progress, if one is waiting for the admin.
@@ -153,12 +153,13 @@ pub(crate) async fn open_workspaces(app: &AppHandle, state: &AppState) -> Comman
     // Held across opening, so two calls at once (React runs effects twice in
     // development) wait for each other instead of both opening the folders.
     let _opening = state.opening.lock().await;
-    let single_folder = DataDir::new(state.root.join("workspace"), KeyStorage::Keychain);
-    state
-        .workspaces
-        .adopt_single_folder(&single_folder)
-        .await
-        .map_err(failed)?;
+    if let Some(single_folder) = &state.single_folder {
+        state
+            .workspaces
+            .adopt_single_folder(single_folder)
+            .await
+            .map_err(failed)?;
+    }
     let opened = state
         .workspaces
         .open_all(|| state.online())
@@ -957,13 +958,19 @@ async fn set_profile_details(state: State<'_, AppState>, details: ProfileDetails
         .map_err(failed)
 }
 
-/// The app's data folder. `SHY_DIR` names another, so several members can
-/// run side by side on one machine.
-fn data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
-    match std::env::var_os("SHY_DIR") {
-        Some(dir) => Ok(PathBuf::from(dir)),
-        None => Ok(app.path().app_data_dir()?),
+/// The workspaces this app holds: every one in the app's data folder, or
+/// (with `SHY_DIR`, to run several members side by side on one machine)
+/// just the one in that folder, as `shy --dir` uses it.
+fn workspaces_on_this_device(app: &AppHandle) -> tauri::Result<(Workspaces, Option<DataDir>)> {
+    if let Some(dir) = std::env::var_os("SHY_DIR") {
+        return Ok((
+            Workspaces::in_one_folder(PathBuf::from(dir), DeviceKeys::Keychain),
+            None,
+        ));
     }
+    let root = app.path().app_data_dir()?;
+    let single_folder = DataDir::new(root.join("workspace"), KeyStorage::Keychain);
+    Ok((Workspaces::new(root, DeviceKeys::Keychain), Some(single_folder)))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -979,10 +986,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(files::StagedFiles::default())
         .setup(|app| {
-            let root = data_dir(app.handle())?;
+            let (workspaces, single_folder) = workspaces_on_this_device(app.handle())?;
             app.manage(AppState {
-                workspaces: Workspaces::new(&root, DeviceKeys::Keychain),
-                root,
+                workspaces,
+                single_folder,
                 opening: Mutex::new(()),
                 joining: std::sync::Mutex::new(None),
                 media: ShyMedia::new(),

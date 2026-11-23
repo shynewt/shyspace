@@ -44,6 +44,8 @@ Each member has an iroh ed25519 key. It is their network address, signs their op
 
 A member's data directory holds two SQLCipher-encrypted databases (`shy.db`, `mls.db`) and a `workspace.json` with only non-secret settings (workspace id, name, admin). The identity key and bucket credentials live inside `shy.db`. Both databases are encrypted with keys derived from a random *device key* (`keys.rs`), kept outside the directory: in the OS keychain, or in a key file (`shy --key-file`) on servers.
 
+The desktop app holds every workspace on the device (`workspaces.rs`): each in its own data directory, `workspaces/<workspace id>/`, with its own device key, identity and connections, so two workspaces share nothing and can't tell they share a person. `workspaces.json` beside them keeps only this device's choices: their order, which were used last, which are muted, and a pause on notifications. A workspace id names a folder and comes from invites and recovery kits, so only plain names are accepted. All workspaces stay open, gossip delivering live to each; the five used most recently also check the bucket at the normal pace, the rest every five minutes (`sync::Cadence`). Leaving a workspace closes it, then deletes its folder and its device key. A device with the single folder of earlier versions has it moved into this layout once on start: the device key is stored under the new folder's name first, then the folder renamed, then the old key forgotten, so a move cut short finishes the next time.
+
 ## Membership
 
 Only the admin (the workspace creator) changes membership. This keeps a single, linear chain of epochs without needing a server to order commits.
@@ -118,6 +120,7 @@ A file can also be shared into a page: then its place is the page and it has no 
 | `pages/` | Yjs page helpers, client ids bound to authors, and `update_check` (refusing updates from others unless they are their editor's next pieces of page text) |
 | `views.rs` | read models sent to the UI and agents |
 | `keys.rs` | the device key and where it's kept (keychain or file) |
+| `workspaces.rs` | the workspaces on a device: their folders, order, selection, live pace, mute and pause, and leaving |
 | `config.rs`, `identity.rs` | workspace settings (including the current bucket settings) and the identity key |
 | `tests/` | multi-member scenarios (`collaboration`, `private`), attacks (`hardening`, `private_attacks`) and slow capacity probes (`capacity`, see `development.md`) |
 

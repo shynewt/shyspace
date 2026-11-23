@@ -89,8 +89,44 @@ fn is_plain_id(workspace_id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
+/// Where the workspaces' folders are.
+enum Layout {
+    /// `workspaces/<workspace id>/` under the app's data folder.
+    Folders(PathBuf),
+    /// One workspace folder, as `shy --dir` uses, to run several members
+    /// side by side on one machine.
+    OneFolder(PathBuf),
+}
+
+impl Layout {
+    fn folder_of(&self, workspace_id: &str) -> PathBuf {
+        match self {
+            Self::Folders(root) => root.join(FOLDERS).join(workspace_id),
+            Self::OneFolder(dir) => dir.clone(),
+        }
+    }
+
+    /// The folder new workspace folders go into.
+    fn parent(&self) -> PathBuf {
+        match self {
+            Self::Folders(root) => root.join(FOLDERS),
+            Self::OneFolder(dir) => dir.parent().map(Path::to_path_buf).unwrap_or_default(),
+        }
+    }
+
+    fn settings_file(&self) -> PathBuf {
+        match self {
+            Self::Folders(root) => root.join(SETTINGS_FILE),
+            Self::OneFolder(dir) => {
+                let name = dir.file_name().unwrap_or_default().to_string_lossy();
+                self.parent().join(format!("{name}.{SETTINGS_FILE}"))
+            }
+        }
+    }
+}
+
 pub struct Workspaces {
-    root: PathBuf,
+    layout: Layout,
     keys: DeviceKeys,
     connect: Connector,
     /// The open workspaces, the selected one first, then by last use.
@@ -104,8 +140,25 @@ impl Workspaces {
     }
 
     pub(crate) fn with_connector(root: impl Into<PathBuf>, keys: DeviceKeys, connect: Connector) -> Self {
+        Self::laid_out(Layout::Folders(root.into()), keys, connect)
+    }
+
+    /// Just the workspace in `dir` (one it holds, or one made there).
+    pub fn in_one_folder(dir: impl Into<PathBuf>, keys: DeviceKeys) -> Self {
+        Self::in_one_folder_with_connector(dir, keys, s3_connector())
+    }
+
+    pub(crate) fn in_one_folder_with_connector(
+        dir: impl Into<PathBuf>,
+        keys: DeviceKeys,
+        connect: Connector,
+    ) -> Self {
+        Self::laid_out(Layout::OneFolder(dir.into()), keys, connect)
+    }
+
+    fn laid_out(layout: Layout, keys: DeviceKeys, connect: Connector) -> Self {
         Self {
-            root: root.into(),
+            layout,
             keys,
             connect,
             open: Mutex::default(),
@@ -119,13 +172,20 @@ impl Workspaces {
             DeviceKeys::Keychain => KeyStorage::Keychain,
             DeviceKeys::Files(folder) => KeyStorage::File(folder.join(format!("{workspace_id}.key"))),
         };
-        Ok(DataDir::new(self.root.join(FOLDERS).join(workspace_id), keys))
+        Ok(DataDir::new(self.layout.folder_of(workspace_id), keys))
     }
 
     /// Every complete workspace here, in the order the person arranged them;
     /// ones not placed yet come last, by name.
     pub fn list(&self) -> Result<Vec<WorkspaceEntry>> {
-        let folders = self.root.join(FOLDERS);
+        if let Layout::OneFolder(dir) = &self.layout {
+            let peeked = WorkspaceConfig::peek(dir)?;
+            return Ok(peeked
+                .map(|(workspace_id, name)| WorkspaceEntry { workspace_id, name })
+                .into_iter()
+                .collect());
+        }
+        let folders = self.layout.parent();
         let entries = match std::fs::read_dir(&folders) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -278,6 +338,9 @@ impl Workspaces {
         old: &DataDir,
         stop_after: MoveStep,
     ) -> Result<Option<String>> {
+        if matches!(self.layout, Layout::OneFolder(_)) {
+            return Ok(None);
+        }
         if !old.path.exists() {
             // Nothing to move, or a move that already renamed the folder.
             if old.path.parent().is_some_and(Path::exists) {
@@ -298,7 +361,7 @@ impl Workspaces {
             old.path.display(),
             new.path.display()
         );
-        std::fs::create_dir_all(self.root.join(FOLDERS))?;
+        std::fs::create_dir_all(self.layout.parent())?;
         let key = old.keys.load(&old.path).await?;
         match new.keys.load(&new.path).await {
             Ok(stored) if stored.to_bytes() == key.to_bytes() => {}
@@ -325,7 +388,7 @@ impl Workspaces {
             !Workspace::exists(&data.path),
             "this workspace is already on this device"
         );
-        std::fs::create_dir_all(self.root.join(FOLDERS))?;
+        std::fs::create_dir_all(self.layout.parent())?;
         Ok(data)
     }
 
@@ -338,7 +401,7 @@ impl Workspaces {
     }
 
     fn settings(&self) -> Result<DeviceSettings> {
-        let path = self.root.join(SETTINGS_FILE);
+        let path = self.layout.settings_file();
         match std::fs::read(&path) {
             Ok(bytes) => {
                 serde_json::from_slice(&bytes).with_context(|| format!("reading {}", path.display()))
@@ -351,9 +414,11 @@ impl Workspaces {
     /// Written whole to a new file and renamed over the old one, so a crash
     /// leaves either version, never half of one.
     fn save_settings(&self, settings: &DeviceSettings) -> Result<()> {
-        let path = self.root.join(SETTINGS_FILE);
-        let partial = self.root.join(format!("{SETTINGS_FILE}.partial"));
-        std::fs::create_dir_all(&self.root)?;
+        let path = self.layout.settings_file();
+        let partial = PathBuf::from(format!("{}.partial", path.display()));
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         std::fs::write(&partial, serde_json::to_vec_pretty(settings)?)
             .with_context(|| format!("writing {}", partial.display()))?;
         std::fs::rename(&partial, &path).with_context(|| format!("writing {}", path.display()))
