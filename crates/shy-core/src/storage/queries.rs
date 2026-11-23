@@ -73,6 +73,13 @@ pub(super) fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mess
 
 impl Store {
     pub fn page_state(&self, id: &str) -> Result<Option<Vec<u8>>> {
+        match self.pending_page_state(id) {
+            Some(state) => Ok(Some(state)),
+            None => self.stored_page_state(id),
+        }
+    }
+
+    pub(super) fn stored_page_state(&self, id: &str) -> Result<Option<Vec<u8>>> {
         Ok(self
             .db
             .query_row("SELECT doc FROM pages WHERE id = ?", [id], |row| row.get(0))

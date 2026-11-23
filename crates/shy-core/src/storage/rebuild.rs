@@ -97,6 +97,7 @@ impl Store {
     /// then settle in phases: the owner logs, then leaves, then content, each
     /// in its authors' order. Runs inside a transaction.
     pub(crate) fn rebuild_views(&self, context: ApplyContext<'_>) -> Result<()> {
+        self.replace_pending_pages();
         for table in SHARED_VIEW_TABLES {
             self.db.execute(&format!("DELETE FROM {table}"), [])?;
         }

@@ -64,16 +64,44 @@ pub fn merge(state: Option<&[u8]>, update: &[u8], client: u64) -> Result<Vec<u8>
     Ok(encode(&doc))
 }
 
+/// A merge couldn't rebuild a page from updates that applied before, so it
+/// no longer holds all of them. Replaying is deterministic, so this
+/// shouldn't happen; it isn't the fault of the update being added.
+#[derive(Debug)]
+pub struct MergeLost;
+
+impl std::fmt::Display for MergeLost {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a page merge lost updates that applied before")
+    }
+}
+
 /// Merges many updates to one page in memory, so replaying a page's history
 /// costs the size of each update rather than the whole page every time.
 #[derive(Default)]
 pub struct PageMerge {
+    base: Option<Vec<u8>>,
     doc: Doc,
     ends: ClientEnds,
-    accepted: Vec<Vec<u8>>,
+    /// The updates added on top of `base`, with their clients.
+    accepted: Vec<(Vec<u8>, u64)>,
 }
 
 impl PageMerge {
+    /// Starts from a page's stored state.
+    pub fn from_state(state: Option<&[u8]>) -> Result<Self> {
+        let ends = match state {
+            Some(state) => ClientEnds::of_state(state).context("reading the page state")?,
+            None => ClientEnds::default(),
+        };
+        Ok(Self {
+            base: state.map(<[u8]>::to_vec),
+            doc: load(state)?,
+            ends,
+            accepted: Vec::new(),
+        })
+    }
+
     /// Takes and refuses the same updates as [`merge`] would, one after
     /// another; a refused one leaves the page as it was.
     pub fn add(&mut self, update: &[u8], client: u64) -> Result<()> {
@@ -81,16 +109,29 @@ impl PageMerge {
         let decoded = Update::decode_v1(update)?;
         let applied = self.doc.transact_mut().apply_update(decoded);
         if let Err(error) = applied {
-            self.doc = Doc::new();
-            for accepted in &self.accepted {
-                self.doc
-                    .transact_mut()
-                    .apply_update(Update::decode_v1(accepted)?)?;
-            }
+            self.replay().context(MergeLost)?;
             return Err(error.into());
         }
         self.ends.extend(new_ends);
-        self.accepted.push(update.to_vec());
+        self.accepted.push((update.to_vec(), client));
+        Ok(())
+    }
+
+    /// Takes back the last update added, as if it never came.
+    pub fn undo_last(&mut self) -> Result<()> {
+        self.accepted.pop().context("no page update to take back")?;
+        self.replay().context(MergeLost)
+    }
+
+    /// Rebuilds the page from its base and the updates still accepted.
+    fn replay(&mut self) -> Result<()> {
+        let accepted = std::mem::take(&mut self.accepted);
+        let fresh = Self::from_state(self.base.as_deref())?;
+        *self = fresh;
+        for (update, client) in accepted {
+            self.add(&update, client)
+                .context("replaying a page update that applied before")?;
+        }
         Ok(())
     }
 

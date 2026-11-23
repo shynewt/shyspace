@@ -8,6 +8,7 @@ mod forks;
 mod invites;
 mod later;
 mod oplog;
+mod page_cache;
 mod private;
 mod private_members;
 mod profile_details;
@@ -45,6 +46,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use iroh::PublicKey;
 use rusqlite::{Connection, OptionalExtension, Params, params};
+use tracing::warn;
 
 /// A fixed key for databases that only live inside tests.
 #[cfg(test)]
@@ -52,6 +54,19 @@ impl Store {
     /// Runs raw SQL, to set up states a test needs.
     pub(crate) fn execute_for_test(&self, sql: &str) {
         self.db.execute_batch(sql).expect("test SQL");
+    }
+
+    /// Counts the page rows changed from now on, a measure of page writes
+    /// that doesn't depend on the machine.
+    pub(crate) fn count_page_writes(&self) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = count.clone();
+        self.db.update_hook(Some(move |action, _: &str, table: &str, _| {
+            if table == "pages" && action == rusqlite::hooks::Action::SQLITE_UPDATE {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }));
+        count
     }
 
     /// How many rows of `table` have `column` equal to `value`.
@@ -114,6 +129,7 @@ pub struct Store {
     /// then leaves, then content, so each is judged against settled state
     /// rather than the replay's order.
     pub(crate) settling: std::cell::Cell<Settling>,
+    pending_pages: std::cell::RefCell<page_cache::PendingPages>,
 }
 
 impl Store {
@@ -126,6 +142,7 @@ impl Store {
         Ok(Self {
             db,
             settling: std::cell::Cell::new(Settling::Everything),
+            pending_pages: std::cell::RefCell::default(),
         })
     }
 
@@ -140,7 +157,14 @@ impl Store {
             return self.with_savepoint(work);
         }
         let transaction = self.db.unchecked_transaction()?;
-        let value = work(self)?;
+        let outcome = work(self).and_then(|value| {
+            self.write_pending_pages()?;
+            Ok(value)
+        });
+        if outcome.is_err() {
+            self.forget_pending_pages();
+        }
+        let value = outcome?;
         transaction.commit()?;
         Ok(value)
     }
@@ -148,17 +172,36 @@ impl Store {
     /// Runs `work` inside the current transaction so that, if it fails,
     /// none of its writes remain.
     pub(crate) fn with_savepoint<T>(&self, work: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
+        if self.db.is_autocommit() {
+            return self.atomically(work);
+        }
         self.db.execute_batch("SAVEPOINT work")?;
+        self.pending_pages.borrow_mut().begin_savepoint();
         match work(self) {
             Ok(value) => {
-                self.db.execute_batch("RELEASE work")?;
+                if let Err(error) = self.db.execute_batch("RELEASE work") {
+                    self.pending_pages.borrow_mut().lose_track();
+                    return Err(error.into());
+                }
+                self.pending_pages.borrow_mut().release_savepoint();
                 Ok(value)
             }
             // SQLite may have given up the whole transaction itself (a full
             // disk, say); then there's no savepoint left to go back to.
-            Err(error) if self.db.is_autocommit() => Err(error),
+            Err(error) if self.db.is_autocommit() => {
+                self.forget_pending_pages();
+                Err(error)
+            }
             Err(error) => {
-                self.db.execute_batch("ROLLBACK TO work; RELEASE work")?;
+                let rolled_back = self
+                    .db
+                    .execute_batch("ROLLBACK TO work; RELEASE work")
+                    .map_err(anyhow::Error::from)
+                    .and_then(|()| self.pending_pages.borrow_mut().roll_back_savepoint());
+                if let Err(failure) = rolled_back {
+                    self.pending_pages.borrow_mut().lose_track();
+                    warn!("couldn't take back a failed step: {failure:#}");
+                }
                 Err(error)
             }
         }

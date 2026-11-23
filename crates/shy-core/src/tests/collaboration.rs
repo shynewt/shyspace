@@ -1178,3 +1178,34 @@ async fn a_newcomer_downloads_the_history_once_across_joining_and_the_first_pass
     let repeated: Vec<_> = downloads.iter().filter(|(_, count)| **count > 1).collect();
     assert!(repeated.is_empty(), "downloaded again: {repeated:?}");
 }
+
+#[tokio::test]
+async fn catching_up_on_typing_writes_each_page_once_per_batch_not_per_keystroke() {
+    use yrs::{GetString, Text, Transact};
+
+    const KEYSTROKES: usize = 100;
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let ada = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&ada, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let page = bob.create_page("Plan", None).unwrap();
+    let session = bob.page_editor_session(&page);
+    let editor = yrs::Doc::with_client_id(session.client_id);
+    let content = editor.get_or_insert_text("content");
+    for keystroke in 0..KEYSTROKES {
+        let mut txn = editor.transact_mut();
+        content.insert(&mut txn, keystroke as u32, "x");
+        bob.apply_doc_update(&page, &session.nonce, txn.encode_update_v1())
+            .unwrap();
+    }
+    let typed = content.get_string(&editor.transact());
+    sync_all(&[&ada, &bob]).await;
+
+    let carol = join(&ada, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let writes = carol.state().store.count_page_writes();
+    carol.sync().await;
+    assert_eq!(carol.page_text(&page).unwrap(), typed);
+    // The welcome page and Bob's page, each named and then written once.
+    let writes = writes.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(writes <= 4, "{writes} page writes for {KEYSTROKES} keystrokes");
+}

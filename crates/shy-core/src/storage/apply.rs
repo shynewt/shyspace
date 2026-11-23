@@ -213,15 +213,8 @@ impl Store {
             Op::DocUpdate { page, nonce, update } => {
                 self.db
                     .execute("INSERT OR IGNORE INTO pages (id) VALUES (?)", [page])?;
-                let state = self.page_state(page)?;
                 let client = pages::client_id(&verified.author, page, nonce);
-                let merged = pages::merge(state.as_deref(), update, client)
-                    .map_err(|error| rule_violation(format!("damaged page update: {error:#}")))?;
-                self.db.execute(
-                    "UPDATE pages SET doc = ?, updated_ms = MAX(updated_ms, ?) WHERE id = ?",
-                    params![merged, now, page],
-                )?;
-                self.reindex_page(page)?;
+                self.merge_page_update(page, update, client, now)?;
                 Change::Doc {
                     page: page.clone(),
                     update: update.clone(),
@@ -344,12 +337,10 @@ impl Store {
     }
 
     pub(super) fn reindex_page(&self, id: &str) -> Result<()> {
-        let (title, state): (String, Option<Vec<u8>>) =
-            self.db
-                .query_row("SELECT title, doc FROM pages WHERE id = ?", [id], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })?;
-        let text = pages::read(state.as_deref())?;
+        let title: String = self
+            .db
+            .query_row("SELECT title FROM pages WHERE id = ?", [id], |row| row.get(0))?;
+        let text = pages::read(self.page_state(id)?.as_deref())?;
         let visible = visible_text(cut_to(&text, MAX_INDEXED_PAGE_CHARS));
         self.index_for_search("page", id, &title, &visible)
     }
