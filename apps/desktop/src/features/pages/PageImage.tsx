@@ -140,7 +140,7 @@ function ResizableImage({
   );
 }
 
-function Caption({ view, element, caption, isEditingCaption, onCaptionEditEnd }: PageImageProps) {
+function Caption({ view, element, caption, isSelected, isEditingCaption, onCaptionEditEnd }: PageImageProps) {
   const [isEditing, setEditing] = useState(false);
   const [draft, setDraft] = useState(caption);
   const input = useRef<HTMLInputElement>(null);
@@ -186,14 +186,13 @@ function Caption({ view, element, caption, isEditingCaption, onCaptionEditEnd }:
       />
     );
   }
+  // Without a caption the image takes only its own height; selecting it offers one.
+  if (!caption && !isSelected) return null;
   return (
     <button
       type="button"
       onClick={() => setEditing(true)}
-      className={cx(
-        "mt-1.5 text-center text-sm",
-        caption ? "text-muted" : "text-faint opacity-0 group-hover/image:opacity-100 focus-visible:opacity-100",
-      )}
+      className={cx("mt-1.5 text-center text-sm", caption ? "text-muted" : "text-faint")}
     >
       {caption || "Add a caption"}
     </button>

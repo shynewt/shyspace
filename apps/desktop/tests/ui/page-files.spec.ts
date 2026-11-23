@@ -218,3 +218,17 @@ test("a link to a file from elsewhere is an unavailable chip that opens nothing"
   await expect(lines(page).first()).toHaveText("Numbers: File unavailable");
   await expect(page.locator(".cm-content").getByRole("link")).toHaveCount(0);
 });
+
+test("an image without a caption offers one only while selected", async ({ page }) => {
+  await pageWithImage(page, (id) => `Intro\n![](shy://file/${id})`);
+  const image = page.locator(".cm-content").getByRole("img");
+  await expect(image).toBeVisible();
+  const addCaption = page.locator(".cm-content").getByRole("button", { name: "Add a caption" });
+  await image.hover();
+  await expect(addCaption).toHaveCount(0);
+
+  await selectImageOnSecondLine(page);
+  await expect(addCaption).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(addCaption).toHaveCount(0);
+});
