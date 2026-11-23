@@ -27,6 +27,10 @@ type Preferences = {
   isSidebarHidden: boolean;
   /** Join huddles with the microphone closed. */
   joinsHuddlesMuted: boolean;
+  /** The sidebar's Pages section is folded. */
+  isPagesCollapsed: boolean;
+  /** Pages whose sub-pages are folded in the sidebar; any others show theirs. */
+  collapsedPages: string[];
 };
 
 const DEFAULTS: Preferences = {
@@ -38,6 +42,8 @@ const DEFAULTS: Preferences = {
   isProfileNudgeDismissed: false,
   isSidebarHidden: false,
   joinsHuddlesMuted: false,
+  isPagesCollapsed: false,
+  collapsedPages: [],
 };
 const RECENT_EMOJI_LIMIT = 16;
 const KEY = "shyspace.preferences";

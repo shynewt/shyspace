@@ -71,3 +71,31 @@ test("a page's actions hide after mouse use, and show for the keyboard", async (
   await expect(addSubpage).toBeFocused();
   await expect(addSubpage).toBeInViewport();
 });
+
+test("the Pages section and folded pages stay as they were after a restart", async ({ page }) => {
+  // The same seed gives the same ids, so the reloaded app has the same pages.
+  const open = async () => {
+    await page.goto("?seed=page-folds");
+    await page.evaluate(() => {
+      window.fake.seedPage("Parent", "");
+      window.fake.seedPage("Child", "", "Parent");
+    });
+  };
+  const header = sidebar(page).getByRole("button", { name: "Pages", exact: true });
+  await open();
+  await sidebar(page).getByRole("button", { name: "Collapse Parent" }).click();
+  await expect(pageItem(page, "Child")).toHaveCount(0);
+
+  await page.reload();
+  await open();
+  await expect(pageItem(page, "Parent")).toBeVisible();
+  await expect(sidebar(page).getByRole("button", { name: "Expand Parent" })).toBeVisible();
+  await expect(pageItem(page, "Child")).toHaveCount(0);
+
+  await header.click();
+  await expect(header).toHaveAttribute("aria-expanded", "false");
+  await page.reload();
+  await open();
+  await expect(header).toHaveAttribute("aria-expanded", "false");
+  await expect(pageItem(page, "Parent")).toHaveCount(0);
+});

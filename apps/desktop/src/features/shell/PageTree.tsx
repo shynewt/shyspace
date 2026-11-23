@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
 import { startPageDrag } from "../../lib/pageDrag";
+import { usePreferences } from "../../lib/preferences";
 import { reportError, showToast } from "../../lib/toast";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs, tweens } from "../../ui";
 import { NavItem } from "./NavItem";
@@ -39,7 +40,16 @@ function PageNode({
   depth: number;
   onCreateChild: (parent: string) => void;
 }) {
-  const [isOpen, setOpen] = useState(true);
+  const [{ collapsedPages }, setPreferences] = usePreferences();
+  const isOpen = !collapsedPages.includes(page.id);
+  // Pages deleted since leave the list as it's saved, so it never grows past the tree.
+  const setOpen = (open: boolean) =>
+    setPreferences({
+      collapsedPages: [
+        ...collapsedPages.filter((id) => id !== page.id && pages.some((candidate) => candidate.id === id)),
+        ...(open ? [] : [page.id]),
+      ],
+    });
   const [isMenuOpen, setMenuOpen] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const copyLink = () =>

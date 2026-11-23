@@ -1,7 +1,7 @@
 import { ChevronRight, Plus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
 import { api } from "../../lib/api";
+import { usePreferences } from "../../lib/preferences";
 import { reportError } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { IconButton, springs, tweens } from "../../ui";
@@ -10,7 +10,9 @@ import { PageTree } from "./PageTree";
 /** The sidebar's pages, as a tree under a header that folds like a channel section. */
 export function PagesSection() {
   const { pages, navigate } = useWorkspace();
-  const [isOpen, setOpen] = useState(true);
+  const [{ isPagesCollapsed }, setPreferences] = usePreferences();
+  const isOpen = !isPagesCollapsed;
+  const setOpen = (open: boolean) => setPreferences({ isPagesCollapsed: !open });
 
   const createPage = async (parent: string | null) => {
     try {
