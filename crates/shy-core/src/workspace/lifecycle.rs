@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use iroh::SecretKey;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, broadcast, mpsc, watch};
 
 use super::{Inner, Networking, Profile, State, Workspace};
@@ -35,6 +36,9 @@ use crate::{
 pub(crate) const STORE_FILE: &str = "shy.db";
 pub(crate) const MLS_FILE: &str = "mls.db";
 const SIGNER_META: &str = "mls_signer_public";
+/// The name a joiner chose, until their Profile op is written: a join the
+/// admin answered is finished on the next start rather than undone.
+const PENDING_PROFILE_META: &str = "pending_profile";
 const LOCK_FILE: &str = "shyspace.lock";
 const ANSWER_POLL: Duration = Duration::from_secs(2);
 
@@ -239,6 +243,7 @@ impl Workspace {
             bucket: bucket_config,
         };
         config.store_bucket(&local.store)?;
+        config.mark_complete(&data.path)?;
         let workspace = Self::start(data, local, mls, config, connect, networking).await?;
         workspace.write(Op::Profile {
             name,
@@ -250,7 +255,6 @@ impl Workspace {
         })?;
         let page = workspace.create_page("Getting started", None)?;
         workspace.edit_page(&page, Edit::Append(GETTING_STARTED))?;
-        workspace.inner.config.mark_complete(&data.path)?;
         Ok(workspace)
     }
 
@@ -267,6 +271,7 @@ impl Workspace {
         // Checked before the admin is asked: refused later, it would leave a
         // spent invite and a half-made workspace.
         let name = super::actions::checked_profile_name(profile.name)?;
+        ensure!(!name.is_empty(), "a name is needed to join");
         prepare_empty_dir(&data.path)?;
         let local = data.open_local().await?;
         let mut mls = local.open_mls(data, None)?;
@@ -307,12 +312,16 @@ impl Workspace {
         };
         config.store_bucket(&local.store)?;
         config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
-        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
-        workspace.write(Op::Profile {
+        let pending = PendingProfile {
             name,
             is_bot: profile.is_bot,
-        })?;
-        workspace.inner.config.mark_complete(&data.path)?;
+        };
+        local
+            .store
+            .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
+        config.mark_complete(&data.path)?;
+        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
+        workspace.finish_pending_profile()?;
         Ok(workspace)
     }
 
@@ -333,7 +342,25 @@ impl Workspace {
             "the MLS signing key reference is missing"
         );
         let mls = local.open_mls(data, Some(config.workspace_id.as_bytes()))?;
-        Self::start(data, local, mls, config, connect, networking).await
+        let workspace = Self::start(data, local, mls, config, connect, networking).await?;
+        workspace.finish_pending_profile()?;
+        Ok(workspace)
+    }
+
+    /// Writes the Profile op a join chose, if it didn't get written then.
+    fn finish_pending_profile(&self) -> Result<()> {
+        let Some(bytes) = self.state().store.meta(PENDING_PROFILE_META)? else {
+            return Ok(());
+        };
+        if self.state().mls.is_active() {
+            let pending: PendingProfile =
+                serde_json::from_slice(&bytes).context("reading the name chosen when joining")?;
+            self.write(Op::Profile {
+                name: pending.name,
+                is_bot: pending.is_bot,
+            })?;
+        }
+        self.state().store.delete_meta(PENDING_PROFILE_META)
     }
 
     async fn start(
@@ -445,6 +472,12 @@ async fn wait_for_answer(
             _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => bail!("you cancelled the join request"),
         }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct PendingProfile {
+    name: String,
+    is_bot: bool,
 }
 
 fn prepare_empty_dir(dir: &Path) -> Result<()> {

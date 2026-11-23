@@ -238,7 +238,11 @@ async fn a_name_the_app_refuses_fails_the_join_before_asking_the_admin() {
         .unwrap();
 
     assert!(refused.is_err());
-    assert!(!crate::Workspace::exists(&bob_dir), "no workspace was made");
+    assert!(!bob_dir.exists(), "nothing was made");
+    let unnamed = start_join(invite.clone(), &bob_dir, &bucket, "  ", false)
+        .await
+        .unwrap();
+    assert!(unnamed.is_err(), "an empty name the admin would drop");
     admin.sync().await;
     let state = admin
         .invites()
@@ -253,4 +257,41 @@ async fn a_name_the_app_refuses_fails_the_join_before_asking_the_admin() {
     wait_for_request(&admin, &token).await;
     admin.approve_invite(&token).await.unwrap();
     assert!(again.await.unwrap().is_ok());
+}
+
+/// Once the admin's answer is stored, a join is finished, not undone: a name
+/// that didn't get written then is written when the workspace next opens.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_join_cut_short_after_the_answer_finishes_on_the_next_open() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob_dir = root.path().join("bob");
+    let bob = join(&admin, &bob_dir, &bucket, "Bob", false).await;
+    // As if the app stopped before the chosen name was sent.
+    let chosen = serde_json::json!({ "name": "Bobby", "is_bot": false }).to_string();
+    bob.state()
+        .store
+        .set_meta("pending_profile", chosen.as_bytes())
+        .unwrap();
+    bob.shutdown().await.unwrap();
+    drop(bob);
+
+    let reopened = crate::Workspace::open_with(
+        &data_dir(&bob_dir),
+        connector(&bucket),
+        crate::Networking::Offline,
+    )
+    .await
+    .unwrap();
+    sync_all(&[&admin, &reopened]).await;
+
+    assert!(
+        admin
+            .members()
+            .unwrap()
+            .iter()
+            .any(|member| member.name == "Bobby")
+    );
+    assert_eq!(reopened.state().store.meta("pending_profile").unwrap(), None);
 }
