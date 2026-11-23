@@ -438,3 +438,71 @@ async fn one_failed_answer_upload_doesnt_skip_the_rest() {
     assert_eq!(answers_up, 1, "the answer after the failed one still went up");
     assert!(admin.status().error.is_some());
 }
+
+/// Starts a join and waits until its request is in the bucket, before the
+/// admin has looked.
+async fn request_posted(admin: &Workspace, root: &Path, bucket: &Bucket) -> String {
+    let invite = admin
+        .create_test_invite("for Bob", Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let _joining = start_join(invite, &root.join("bob"), bucket, "Bob", false);
+    for _ in 0..200 {
+        if bucket.invite_request(&token).await.unwrap().is_some() {
+            return token;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the request never reached the bucket");
+}
+
+/// Takes the wake our own writes left, as the sync loop's pass would have.
+async fn take_pending_wake(member: &Workspace) {
+    let _ = tokio::time::timeout(Duration::from_millis(10), member.inner.wake.notified()).await;
+}
+
+/// Joiners can't nudge the admin, so the admin's long idle wait still
+/// notices a join request within one short check.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_join_request_cuts_the_admins_idle_wait_short() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let token = request_posted(&admin, root.path(), &bucket).await;
+    let (_stop, mut stopped) = tokio::sync::watch::channel(false);
+    take_pending_wake(&admin).await;
+
+    let next = admin
+        .wait_for_next_check(Duration::from_secs(120), &mut stopped)
+        .await;
+
+    assert!(matches!(next, crate::sync::NextCheck::Woken));
+    assert_eq!(invite_state(&admin, &token), InviteState::Requested);
+}
+
+/// A revoked invite's slot isn't checked any more.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_invite_isnt_checked_while_waiting() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let token = request_posted(&admin, root.path(), &bucket).await;
+    admin.revoke_invite(&token).await.unwrap();
+    // As if the request came in after the revoke.
+    bucket
+        .put_invite_request(&token, b"a late request".to_vec())
+        .await
+        .unwrap();
+    let (_stop, mut stopped) = tokio::sync::watch::channel(false);
+    take_pending_wake(&admin).await;
+
+    let next = admin
+        .wait_for_next_check(Duration::from_secs(9), &mut stopped)
+        .await;
+
+    assert!(matches!(next, crate::sync::NextCheck::Due));
+    assert!(
+        bucket.invite_request(&token).await.unwrap().is_some(),
+        "not even read"
+    );
+}

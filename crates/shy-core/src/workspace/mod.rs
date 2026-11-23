@@ -127,6 +127,15 @@ pub(crate) struct Inner {
     /// version: not fetched again unless replaced, so junk can't cost a
     /// download on every pass.
     pub skipped_segments: Mutex<std::collections::HashSet<crate::transport::bucket::ListedObject>>,
+    /// When gap repair last listed each author whole, so a forged gap can't
+    /// make it list them whole on every pass.
+    pub gap_whole_listings: Mutex<std::collections::HashMap<PublicKey, tokio::time::Instant>>,
+    /// The head version we last acted on, per author; in memory only.
+    pub seen_heads: Mutex<std::collections::HashMap<PublicKey, String>>,
+    /// The seq our own head was last confirmed to hold.
+    pub confirmed_head_seq: std::sync::atomic::AtomicU64,
+    /// The latest signed hint per author: (seq, head version).
+    pub heard_hints: Mutex<std::collections::HashMap<PublicKey, (u64, String)>>,
     /// Fork proof objects in the bucket already looked at, by path, with the
     /// version we saw: our own found intact, and ones found overwritten.
     pub seen_fork_proofs: Mutex<std::collections::HashMap<String, String>>,

@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::{ops::Envelope, workspace::Heartbeat};
+use crate::{ops::Envelope, sync::Hint, workspace::Heartbeat};
 
 const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 
@@ -38,6 +38,8 @@ pub enum Wire {
     Nudge(u64),
     /// A signed "I'm here"; checked by the receiver, never stored.
     Presence(Heartbeat),
+    /// A signed "my head is at this seq and version", sent after an upload.
+    Hint(Hint),
 }
 
 /// What gossip hands the workspace: messages from peers, and local events a
@@ -248,6 +250,12 @@ impl Net {
 
     pub async fn broadcast_presence(&self, heartbeat: Heartbeat) -> Result<()> {
         let encoded = postcard::to_stdvec(&Wire::Presence(heartbeat))?;
+        self.sender.broadcast(Bytes::from(encoded)).await?;
+        Ok(())
+    }
+
+    pub async fn broadcast_hint(&self, hint: Hint) -> Result<()> {
+        let encoded = postcard::to_stdvec(&Wire::Hint(hint))?;
         self.sender.broadcast(Bytes::from(encoded)).await?;
         Ok(())
     }

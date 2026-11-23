@@ -686,3 +686,198 @@ async fn a_segment_whose_transaction_sqlite_gave_up_is_read_again_whole() {
     assert_eq!(applied(&admin), applied_before + 3);
     assert_eq!(admin.status().error, None);
 }
+
+async fn head_version(bucket: &Bucket, author: &iroh::PublicKey) -> String {
+    let heads = bucket.heads().await.unwrap();
+    heads
+        .into_iter()
+        .find(|head| head.author == *author)
+        .unwrap()
+        .version
+}
+
+fn texts(member: &Workspace, channel: &str) -> Vec<String> {
+    member
+        .messages(channel, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect()
+}
+
+/// Gossip can drop the tail of a burst and its hint. The author's head then
+/// moved without a hint explaining it, so the next check reads their log.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_brings_what_gossip_missed_when_a_head_moves() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    for text in ["one", "two", "three"] {
+        bob.send_message(&general, text, None).unwrap();
+    }
+    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
+    admin.receive(unpushed[0].clone()).unwrap();
+    bob.sync().await;
+
+    assert!(admin.check().await, "the check brought ops gossip had missed");
+    assert!(texts(&admin, &general).contains(&"three".to_string()));
+    assert!(!admin.check().await, "nothing new the second time");
+}
+
+/// A head that a signed hint already explained (we hold up to its seq) isn't
+/// read: that's what keeps checks cheap while gossip works.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_head_a_hint_already_explained_is_not_read() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let general = channel_id(&admin, "general");
+    let mut gets_per_check = Vec::new();
+    for is_hinted in [true, false] {
+        bob.send_message(&general, "live", None).unwrap();
+        for envelope in bob.state().store.unpushed(&bob.me()).unwrap() {
+            admin.receive(envelope).unwrap();
+        }
+        bob.sync().await;
+        if is_hinted {
+            let seq = bob.state().store.last_seq(&bob.me()).unwrap();
+            let hint = bob
+                .signed_hint(seq, head_version(&bucket, &bob.me()).await)
+                .unwrap();
+            assert!(!admin.receive_hint(&hint).unwrap(), "we already hold it");
+        }
+        let before = store.requests();
+        admin.check().await;
+        gets_per_check.push(store.requests().since(&before).gets);
+    }
+
+    assert_eq!(
+        gets_per_check[1],
+        gets_per_check[0] + 1,
+        "only the unexplained head is read"
+    );
+}
+
+/// A crash between uploading a segment and writing the head leaves the head
+/// behind. The author's next check rewrites it; until then the hourly sweep
+/// still finds the segment.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_segment_uploaded_without_its_head_still_arrives() {
+    for is_author_back in [true, false] {
+        let (_root, bucket, admin, bob) = admin_and_bob().await;
+        let general = channel_id(&admin, "general");
+        bob.send_message(&general, "before the crash", None).unwrap();
+        let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
+        bucket.put_segment(&unpushed).await.unwrap();
+        let last = unpushed.last().unwrap().seq;
+        bob.state().store.mark_pushed(&bob.me(), last).unwrap();
+        assert!(!admin.check().await, "the head didn't move");
+
+        if is_author_back {
+            bob.check().await;
+            admin.check().await;
+        } else {
+            admin.sync().await;
+        }
+
+        assert!(
+            texts(&admin, &general).contains(&"before the crash".to_string()),
+            "author back: {is_author_back}"
+        );
+    }
+}
+
+/// A write whose upload failed (or never started) goes up at the next check,
+/// even if its author writes nothing more.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_not_yet_uploaded_goes_up_at_the_next_check() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "late", None).unwrap();
+
+    bob.check().await;
+    admin.check().await;
+
+    assert!(texts(&admin, &general).contains(&"late".to_string()));
+}
+
+/// A check that failed to read a moved head (a failed save, a network blip)
+/// tries again at the next check, rather than waiting for the hourly sweep.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_that_failed_to_read_a_moved_head_tries_again() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "gossip lost this", None).unwrap();
+    bob.sync().await;
+    admin
+        .inner
+        .fail_segment_save
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.check().await;
+    assert!(admin.status().error.is_some(), "the first check failed");
+
+    admin.check().await;
+
+    assert!(texts(&admin, &general).contains(&"gossip lost this".to_string()));
+}
+
+/// A parked op pushed out by the cap is fetched again by the next check,
+/// not only by the hourly sweep.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_repairs_a_gap() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "second", None).unwrap();
+    bob.send_message(&general, "third", None).unwrap();
+    bob.sync().await;
+    admin
+        .inner
+        .fail_next_apply
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    admin.check().await;
+    // As if the parked ops were pushed out by the cap.
+    admin.state().store.execute_for_test("DELETE FROM pending_ops");
+    bob.send_message(&general, "fourth", None).unwrap();
+    let fourth = bob
+        .state()
+        .store
+        .unpushed(&bob.me())
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    admin.receive(fourth).unwrap();
+
+    admin.check().await;
+    admin.check().await;
+
+    let texts = texts(&admin, &general);
+    for text in ["second", "third", "fourth"] {
+        assert!(texts.contains(&text.to_string()), "{text}: {texts:?}");
+    }
+}
+
+/// A removed member's last segment without a head (an older version, or a
+/// crash before the head) still reaches others at a check, up to the frozen
+/// end of their log.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_members_headless_segment_arrives_at_a_check() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "last words", None).unwrap();
+    let unpushed = bob.state().store.unpushed(&bob.me()).unwrap();
+    bucket.put_segment(&unpushed).await.unwrap();
+    bob.state()
+        .store
+        .mark_pushed(&bob.me(), unpushed.last().unwrap().seq)
+        .unwrap();
+    admin.remove_member(&bob.my_id()).await.unwrap();
+
+    carol.check().await;
+    carol.check().await;
+
+    assert!(texts(&carol, &general).contains(&"last words".to_string()));
+}

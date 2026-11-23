@@ -2810,3 +2810,150 @@ async fn claimed_times_cant_date_a_message_ahead_or_reorder_lists() {
         "the page edit isn't dated ahead"
     );
 }
+
+/// Hints are signed by their author and name a head version. A replayed old
+/// hint, or one not signed by its author, can't make a reader skip a head
+/// that moved.
+#[tokio::test(flavor = "multi_thread")]
+async fn false_or_replayed_hints_cannot_stop_a_head_being_read() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let bob_head_version = || async {
+        let heads = bucket.heads().await.unwrap();
+        heads
+            .into_iter()
+            .find(|head| head.author == bob.me())
+            .unwrap()
+            .version
+    };
+    bob.send_message(&general, "one", None).unwrap();
+    for envelope in bob.state().store.unpushed(&bob.me()).unwrap() {
+        admin.receive(envelope).unwrap();
+    }
+    bob.sync().await;
+    let old_seq = bob.state().store.last_seq(&bob.me()).unwrap();
+    let old_hint = bob.signed_hint(old_seq, bob_head_version().await).unwrap();
+    admin.receive_hint(&old_hint).unwrap();
+    admin.check().await;
+
+    bob.send_message(&general, "two", None).unwrap();
+    bob.sync().await;
+    let new_seq = bob.state().store.last_seq(&bob.me()).unwrap();
+    let mut not_bobs = admin.signed_hint(new_seq, bob_head_version().await).unwrap();
+    not_bobs.author = bob.me();
+    assert!(admin.receive_hint(&not_bobs).is_err(), "not signed by Bob");
+    admin.receive_hint(&old_hint).unwrap();
+
+    admin.check().await;
+
+    let texts: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|message| message.text)
+        .collect();
+    assert!(texts.contains(&"two".to_string()), "{texts:?}");
+}
+
+/// Anyone with the bucket keys can write someone's head. One claiming more
+/// than its author wrote is corrected by them at their next check, so
+/// readers don't stop seeing their uploads move it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_falsely_high_head_is_corrected_by_its_author() {
+    let (_root, bucket, _admin, bob) = admin_and_bob().await;
+    let general = channel_id(&_admin, "general");
+    bob.send_message(&general, "one", None).unwrap();
+    bob.sync().await;
+    let high = crate::transport::heads::Head { last_seq: 1_000_000 };
+    bucket.put_head(&bob.me(), high).await.unwrap();
+
+    bob.check().await;
+
+    let pushed = bob.state().store.last_pushed_seq(&bob.me()).unwrap();
+    let head = bucket.head(&bob.me()).await.unwrap().unwrap();
+    assert_eq!(head.last_seq, pushed);
+}
+
+/// A forged op parked far ahead makes an author look like they have a gap
+/// each time their log moves. Gap repair still fetches again what it skipped,
+/// but lists that author whole at most once an hour, so the forgery can't
+/// make every pass list their whole history (and any junk under it).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forged_gap_cannot_make_every_pass_list_an_author_whole() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let general = channel_id(&admin, "general");
+    let junk_count = 50;
+    for number in 0..junk_count {
+        bucket
+            .put_raw(
+                &format!("ops/{}/{:020}-junk{number:04}", bob.my_id(), 0),
+                b"junk".to_vec(),
+            )
+            .await
+            .unwrap();
+    }
+    let (epoch, _) = current_key(&bob);
+    let held = admin.state().store.last_seq(&bob.me()).unwrap();
+    let forged = Envelope {
+        author: bob.me(),
+        seq: held + 1_000,
+        epoch: epoch + 1,
+        nonce: [0; 24],
+        ciphertext: vec![1, 2, 3],
+    };
+    admin.receive(forged).unwrap();
+    admin.set_last_whole_listing(now_ms().unwrap());
+
+    let mut listed_per_pass = Vec::new();
+    for _ in 0..3 {
+        bob.send_message(&general, "moves the log", None).unwrap();
+        for envelope in bob.state().store.unpushed(&bob.me()).unwrap() {
+            admin.receive(envelope).unwrap();
+        }
+        bob.sync().await;
+        let before = store.requests();
+        admin.sync().await;
+        listed_per_pass.push(store.requests().since(&before).listed_keys);
+    }
+
+    assert!(
+        listed_per_pass[0] >= junk_count,
+        "the first gap lists Bob whole: {listed_per_pass:?}"
+    );
+    assert!(
+        listed_per_pass[1..].iter().all(|listed| *listed < junk_count),
+        "later gaps don't: {listed_per_pass:?}"
+    );
+}
+
+/// Heads under keys that were never members are ignored: anyone with the
+/// bucket keys could otherwise make every reader fetch junk heads.
+#[tokio::test(flavor = "multi_thread")]
+async fn heads_of_strangers_are_not_read() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket) = super::capacity::counting_store::counting_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let strangers = 20;
+    for _ in 0..strangers {
+        let stranger = SecretKey::generate().public();
+        bucket
+            .put_head(&stranger, crate::transport::heads::Head { last_seq: 5 })
+            .await
+            .unwrap();
+    }
+
+    let before = store.requests();
+    bob.check().await;
+
+    assert!(
+        store.requests().since(&before).gets < strangers,
+        "{}",
+        store.requests().since(&before)
+    );
+}

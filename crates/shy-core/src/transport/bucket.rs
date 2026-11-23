@@ -350,7 +350,7 @@ pub fn listing_after(author: &PublicKey, held: u64) -> String {
 
 /// Changes whenever the object is replaced: an overwrite always changes the
 /// ETag, and stores without one still change the size or time.
-fn object_version(meta: &object_store::ObjectMeta) -> String {
+pub(super) fn object_version(meta: &object_store::ObjectMeta) -> String {
     meta.e_tag
         .clone()
         .unwrap_or_else(|| format!("{}@{}", meta.size, meta.last_modified))
@@ -374,6 +374,10 @@ impl Bucket {
 
     async fn get(&self, path: &Path) -> Result<Option<Bytes>> {
         self.get_at_most(path, MAX_OBJECT_SIZE).await
+    }
+
+    pub(super) fn store(&self) -> &Arc<dyn ObjectStore> {
+        &self.store
     }
 
     pub(super) async fn get_at_most(&self, path: &Path, limit: u64) -> Result<Option<Bytes>> {

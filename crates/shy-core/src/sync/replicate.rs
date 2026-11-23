@@ -1,5 +1,7 @@
 //! Moving envelopes between the local log, the bucket, and online peers.
 
+use std::time::Duration;
+
 use anyhow::Result;
 use iroh::PublicKey;
 use tracing::warn;
@@ -35,21 +37,26 @@ impl Workspace {
     /// stored bucket key, so objects others put in the bucket can't make us
     /// skip any of it. An op that fails locally is parked and doesn't hold
     /// reading back, unless it couldn't even be parked; the first such error
-    /// is returned at the end.
-    pub(crate) async fn pull(&self) -> Result<()> {
+    /// is returned at the end. Returns whether anything new came.
+    pub(crate) async fn pull(&self) -> Result<bool> {
         let refetching = self.refetch_gaps()?;
         let is_whole_listing_due = self.is_whole_listing_due()?;
         let mut local_failure = None;
+        let mut has_found_new = false;
         let authors = self.state().store.everyone_ever()?;
         for author in authors {
-            let listing = if is_whole_listing_due || refetching.contains(&author) {
-                Listing::Whole
-            } else {
-                Listing::PastHeld
+            let held = self.state().store.last_seq(&author)?;
+            let is_gap_listed_whole = refetching
+                .iter()
+                .any(|(gap_author, listing)| *gap_author == author && matches!(listing, Listing::Whole));
+            let listing = match is_whole_listing_due || is_gap_listed_whole {
+                true => Listing::Whole,
+                false => Listing::PastHeld,
             };
             if let Some(error) = self.pull_author(&author, listing).await? {
                 local_failure.get_or_insert(error);
             }
+            has_found_new |= self.state().store.last_seq(&author)? > held;
         }
         // A listing cut short by our own failure isn't done; try again next pass.
         if is_whole_listing_due && local_failure.is_none() {
@@ -58,7 +65,7 @@ impl Workspace {
                 .store
                 .set_meta(LAST_WHOLE_LISTING_META, &now.to_le_bytes())?;
         }
-        local_failure.map_or(Ok(()), Err)
+        local_failure.map_or(Ok(has_found_new), Err)
     }
 
     /// Reads `author`'s segments that may hold ops past what we hold; returns
@@ -131,9 +138,11 @@ impl Workspace {
     }
 
     /// Once per gap: if an author's next op went missing after we read past
-    /// it (a parked op pushed out by the cap), list their whole history and
-    /// fetch again what was skipped this run. Returns those authors.
-    fn refetch_gaps(&self) -> Result<Vec<PublicKey>> {
+    /// it (a parked op pushed out by the cap), fetch again what was skipped
+    /// this run, and list their whole history (at most once an hour each:
+    /// a forged parked op can fake a gap whenever their log moves). Returns
+    /// the authors to read again, and how.
+    pub(super) fn refetch_gaps(&self) -> Result<Vec<(PublicKey, Listing)>> {
         let state = self.state();
         let mut refetched = self
             .inner
@@ -147,7 +156,20 @@ impl Workspace {
                 let author_prefix = format!("ops/{}/", member_id(&author));
                 self.skipped_segments()
                     .retain(|listed| !listed.key.starts_with(&author_prefix));
-                refetching.push(author);
+                let mut listed_whole = self
+                    .inner
+                    .gap_whole_listings
+                    .lock()
+                    .expect("gap listing times lock poisoned by an earlier panic");
+                let is_due = listed_whole.get(&author).is_none_or(|last| {
+                    last.elapsed() >= Duration::from_millis(WHOLE_LISTING_EVERY_MS.unsigned_abs())
+                });
+                if is_due {
+                    listed_whole.insert(author, tokio::time::Instant::now());
+                    refetching.push((author, Listing::Whole));
+                } else {
+                    refetching.push((author, Listing::PastHeld));
+                }
             }
         }
         Ok(refetching)
@@ -166,6 +188,9 @@ impl Workspace {
         let _guard = self.inner.push_lock.lock().await;
         let me = self.me();
         let unpushed = self.state().store.unpushed(&me)?;
+        if unpushed.is_empty() {
+            return Ok(());
+        }
         for segment in split_into_segments(&unpushed)? {
             let last = segment
                 .last()
@@ -174,7 +199,7 @@ impl Workspace {
             self.bucket().put_segment(segment).await?;
             self.state().store.mark_pushed(&me, last)?;
         }
-        Ok(())
+        self.write_head().await
     }
 
     /// Refreshes who may gossip with us, then connects to members who seem

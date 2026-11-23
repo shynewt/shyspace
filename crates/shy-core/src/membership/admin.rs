@@ -205,14 +205,20 @@ impl Workspace {
     }
 
     /// Picks up requests posted through open invites, for the admin to decide.
-    async fn collect_join_requests(&self) -> Result<()> {
+    /// Reads the request slot of every open invite (none once it is used,
+    /// revoked or expired); returns whether a request was recorded.
+    pub(crate) async fn collect_join_requests(&self) -> Result<bool> {
         let tokens = self.state().store.open_invite_tokens(now_ms()?)?;
+        let mut has_recorded = false;
         for token in tokens {
             let Some(bytes) = self.bucket().invite_request(&token).await? else {
                 continue;
             };
             match self.record_request(&token, &bytes) {
-                Ok(()) => self.emit(Change::Invites),
+                Ok(()) => {
+                    has_recorded = true;
+                    self.emit(Change::Invites);
+                }
                 Err(error) => {
                     // Drop it so a genuine request can take the slot.
                     warn!("ignoring an invalid join request: {error:#}");
@@ -220,7 +226,7 @@ impl Workspace {
                 }
             }
         }
-        Ok(())
+        Ok(has_recorded)
     }
 
     fn record_request(&self, token: &str, bytes: &[u8]) -> Result<()> {

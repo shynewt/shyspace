@@ -56,17 +56,17 @@ Only the admin (the workspace creator) changes membership. This keeps a single, 
 
 ## Sync loop (`sync/`)
 
-Runs every 8 s, and 600 ms after any local write or nudge. Each step runs even if another fails:
+Bucket requests cost money on some providers, so the loop reads as little as it can (#137). After each upload an author rewrites their head (`heads/<id>`, the last seq they uploaded) and gossips a signed hint naming the head's version (`sync/heads.rs`). Most passes are *checks*: one listing of `heads/` (heads of keys that were never members are ignored), and only the logs whose head moved in a way no hint explained are read; members without a head (older versions), removed members whose frozen log we haven't finished, and authors with a gap are read past what we hold. A head counts as seen only once its log was read, so a failed read is retried at the next check. A *sweep* reads every author's log past what we hold: at start, after the computer slept, and when the hourly whole listing is due. Checks wait 8 s after one that found something gossip missed, then half as long again after each empty one, up to a minute (`sync/pacing.rs`); a hint naming ops we lack, an admin's commit nudge, or a neighbour joining wakes one at once, and the admin looks at open invites' request slots every 8 s, since joiners can't nudge. Our own writes don't wake a pass: a separate task uploads them 600 ms later, then writes our head and sends the hint. Each step of a pass runs even if another fails:
 
 1. apply new admin commits (advance epochs);
 2. retry parked ops;
 3. repair missing or altered commits in the bucket (everyone); admin only: refresh the recovery snapshot first, then collect join requests and deliver answers;
-4. pull new segments from everyone who was ever a member, ourselves included (newcomers need removed members' history; a restored device needs its own);
+4. read new segments: the logs whose heads moved (a check) or everyone who was ever a member, ourselves included (a sweep; newcomers need removed members' history, a restored device its own);
 5. learn the forks proved in the bucket, and put there the proofs we have that it lacks (`sync/forks.rs`);
 6. push our unpushed ops as segments, each under the 32 MB that readers accept;
 7. refresh the gossip allowlist to current members, then connect to members listed in the bucket.
 
-A pull fetches an author's segments a few at a time and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own); the author's cursor moves past the segment with the last one. Our own writes also go up from a separate task 600 ms after each write, so a long catch-up doesn't hold them back; uploads never overlap.
+A pull lists an author's segments past the highest seq we hold (all of them once an hour, on gap repair, and before a removal, for older names), fetches the ones that may hold more a few at a time, and applies a segment's ops in transactions of up to 500, letting go of the state between them (each op still on its own). Uploads never overlap; a failed one is retried by the next check.
 
 An incoming op is applied only if it decrypts, its signature is valid, its author was a member in that op's epoch, and it directly follows that author's previous op (logs have no gaps). Ops we can't apply yet (unknown epoch, clock far ahead) are parked in `pending_ops` and retried. If a second, different version of an op we already have arrives, signed by its author, neither version counts (see Forked logs in `security.md`).
 
@@ -82,6 +82,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 | `invites/<token>/request` | a joiner's request, written through a presigned link |
 | `invites/<token>/answer` | the admin's answer, read through a presigned link |
 | `recovery/snapshot` | the admin's recovery snapshot, encrypted with the recovery key |
+| `heads/<id>` | the last seq that member uploaded, rewritten after each upload; a hint only (`transport/heads.rs`) |
 | `peers/<id>` | gossip bootstrap hints, rewritten when a member starts and every 6 hours; members silent for a day aren't dialed, and nobody is redialed more often than every 10 minutes unless they announce again (`sync/peers.rs`) |
 | `files/<author>/<blob id>/<piece>` | a shared file's or profile picture's encrypted pieces (`transport/blobs.rs`) |
 | `health/versioning-probe`, `ops/lock-probe-<member>` | small probes that prove the bucket keeps deleted data (see `workspace/protection.rs`) |

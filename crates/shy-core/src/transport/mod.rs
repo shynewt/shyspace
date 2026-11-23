@@ -4,4 +4,5 @@
 pub mod blobs;
 pub mod bucket;
 pub mod gossip;
+pub mod heads;
 pub mod presigned;

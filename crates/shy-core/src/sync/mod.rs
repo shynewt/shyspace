@@ -4,10 +4,13 @@
 
 mod alerts;
 mod forks;
+mod heads;
+mod pacing;
 mod peers;
 mod receive;
 mod replicate;
 
+pub use heads::Hint;
 pub(crate) use replicate::Listing;
 
 use std::time::Duration;
@@ -15,6 +18,8 @@ use std::time::Duration;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tracing::warn;
+
+use pacing::{Pacing, SHORT_WAIT, has_slept};
 
 use crate::{
     ops::now_ms,
@@ -24,11 +29,25 @@ use crate::{
     workspace::{NextBeat, Workspace},
 };
 
-const SYNC_INTERVAL: Duration = Duration::from_secs(8);
 /// Well under the presence timeout, so one lost heartbeat doesn't count.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
 /// Batches bursts of writes (like typing) into one bucket upload.
 const PUSH_DEBOUNCE: Duration = Duration::from_millis(600);
+
+pub(crate) enum NextCheck {
+    Due,
+    /// Something happened: check now, and start from the short wait again.
+    Woken,
+    /// The computer slept: sweep now.
+    Slept,
+    Stopped,
+}
+
+#[derive(Clone, Copy)]
+enum PassKind {
+    Sweep,
+    Check,
+}
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct SyncStatus {
@@ -67,6 +86,11 @@ impl Workspace {
                         }
                     }
                     Incoming::Message(Wire::Nudge(_)) => receiver.inner.wake.notify_one(),
+                    Incoming::Message(Wire::Hint(hint)) => match receiver.receive_hint(&hint) {
+                        Ok(true) => receiver.inner.wake.notify_one(),
+                        Ok(false) => {}
+                        Err(error) => warn!("ignoring a hint: {error:#}"),
+                    },
                     Incoming::Message(Wire::Presence(heartbeat)) => {
                         match receiver.receive_heartbeat(&heartbeat) {
                             Ok(true) => receiver.emit(Change::Members),
@@ -124,11 +148,8 @@ impl Workspace {
                     _ = tokio::time::sleep(PUSH_DEBOUNCE) => {}
                     _ = push_stopped.changed() => break,
                 }
-                match pusher.push().await {
-                    Ok(()) => pusher.nudge_peers().await,
-                    Err(error) => {
-                        warn!("couldn't upload our changes yet; the next sync tries again: {error:#}")
-                    }
+                if let Err(error) = pusher.push().await {
+                    warn!("couldn't upload our changes yet; the next check tries again: {error:#}")
                 }
             }
         });
@@ -138,6 +159,9 @@ impl Workspace {
         tokio::spawn(async move {
             syncer.announce_self().await;
             let mut last_announced = tokio::time::Instant::now();
+            let mut pacing = Pacing::default();
+            // A sweep at start: things may have moved while we were away.
+            let mut is_sweep_due = true;
             loop {
                 // Staying announced keeps others dialing us while we're online.
                 if last_announced.elapsed() >= Duration::from_millis(peers::ANNOUNCE_EVERY_MS.unsigned_abs())
@@ -145,17 +169,84 @@ impl Workspace {
                     syncer.announce_self().await;
                     last_announced = tokio::time::Instant::now();
                 }
-                syncer.sync().await;
+                let is_whole_listing_due = syncer.is_whole_listing_due().unwrap_or_else(|error| {
+                    warn!("couldn't tell when everyone was last listed whole: {error:#}");
+                    true
+                });
+                let kind = match is_sweep_due || is_whole_listing_due {
+                    true => PassKind::Sweep,
+                    false => PassKind::Check,
+                };
+                let has_found_new = syncer.pass(kind).await;
                 if syncer.status().removed {
                     break;
                 }
-                tokio::select! {
-                    _ = syncer.inner.wake.notified() => tokio::time::sleep(PUSH_DEBOUNCE).await,
-                    _ = tokio::time::sleep(SYNC_INTERVAL) => {}
-                    _ = stopped.changed() => break,
+                let wait = pacing.after_check(has_found_new);
+                is_sweep_due = false;
+                match syncer.wait_for_next_check(wait, &mut stopped).await {
+                    NextCheck::Due => {}
+                    NextCheck::Woken => pacing.wake(),
+                    NextCheck::Slept => {
+                        pacing.wake();
+                        is_sweep_due = true;
+                    }
+                    NextCheck::Stopped => break,
                 }
             }
         });
+    }
+
+    /// Waits `wait`, looking every `SHORT_WAIT` for reasons to check sooner:
+    /// a wake (a nudge, a hint naming ops we lack), the computer having slept
+    /// (its neighbours may be gone and the bucket moved on), or a join request
+    /// (joiners aren't members, so they can't nudge us).
+    pub(crate) async fn wait_for_next_check(
+        &self,
+        wait: Duration,
+        stopped: &mut tokio::sync::watch::Receiver<bool>,
+    ) -> NextCheck {
+        let started = tokio::time::Instant::now();
+        let started_wall = std::time::SystemTime::now();
+        loop {
+            let remaining = wait.saturating_sub(started.elapsed());
+            tokio::select! {
+                _ = self.inner.wake.notified() => {
+                    tokio::time::sleep(PUSH_DEBOUNCE).await;
+                    // After a resume, a neighbour coming back often wakes us
+                    // first; it still counts as having slept.
+                    let wall_elapsed = started_wall.elapsed().unwrap_or_default();
+                    if has_slept(wall_elapsed, started.elapsed()) {
+                        return NextCheck::Slept;
+                    }
+                    return NextCheck::Woken;
+                }
+                _ = tokio::time::sleep(remaining.min(SHORT_WAIT)) => {}
+                _ = stopped.changed() => return NextCheck::Stopped,
+            }
+            if started.elapsed() >= wait {
+                return NextCheck::Due;
+            }
+            let wall_elapsed = started_wall.elapsed().unwrap_or_default();
+            if has_slept(wall_elapsed, started.elapsed()) {
+                return NextCheck::Slept;
+            }
+            if self.found_join_request().await {
+                return NextCheck::Woken;
+            }
+        }
+    }
+
+    /// Reads only the open invites' request slots, so a joiner isn't kept
+    /// waiting for the admin's next check.
+    async fn found_join_request(&self) -> bool {
+        if !self.is_admin() {
+            return false;
+        }
+        let _guard = self.inner.sync_lock.lock().await;
+        self.collect_join_requests().await.unwrap_or_else(|error| {
+            warn!("couldn't look for join requests: {error:#}");
+            false
+        })
     }
 
     pub fn status(&self) -> SyncStatus {
@@ -175,11 +266,25 @@ impl Workspace {
         self.status_lock().removed = true;
     }
 
-    /// One full pass. Each step runs even if an earlier one failed, so one
-    /// bad object can't stop the others; the first error is shown in the UI.
+    /// One full pass: every author's segments past what we hold (whole
+    /// listings when due). Each step runs even if an earlier one failed, so
+    /// one bad object can't stop the others; the first error is shown in the
+    /// UI.
     pub async fn sync(&self) {
+        self.pass(PassKind::Sweep).await;
+    }
+
+    /// A light pass: reads only the logs whose head moved in a way gossip
+    /// didn't already explain. Returns whether it brought ops gossip missed.
+    #[cfg(test)]
+    pub(crate) async fn check(&self) -> bool {
+        self.pass(PassKind::Check).await
+    }
+
+    async fn pass(&self, kind: PassKind) -> bool {
         let _guard = self.inner.sync_lock.lock().await;
         let mut errors = Vec::new();
+        let mut has_found_new = false;
         if let Err(error) = self.follow_admin_commits().await {
             errors.push(error);
         }
@@ -206,7 +311,11 @@ impl Workspace {
             }
             // Forks first, so ops proved forked never apply or alert here.
             let shared_forks = self.share_forks().await;
-            let pulled = self.pull().await;
+            let pulled = match kind {
+                PassKind::Sweep => self.pull().await,
+                PassKind::Check => self.check_heads().await,
+            }
+            .map(|found| has_found_new = found);
             let tended = self.tend_private_channels();
             for result in [
                 shared_forks,
@@ -239,6 +348,7 @@ impl Workspace {
             }
         }
         self.emit(Change::Sync);
+        has_found_new
     }
 
     /// Returns how soon to try again when the beat was held back.

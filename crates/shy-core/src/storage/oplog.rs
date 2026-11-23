@@ -188,6 +188,16 @@ impl Store {
         )
     }
 
+    /// The highest seq of `author`'s that is in the bucket, 0 if none.
+    pub fn last_pushed_seq(&self, author: &PublicKey) -> Result<u64> {
+        let last: Option<u64> = self.db.query_row(
+            "SELECT MAX(seq) FROM ops WHERE author = ? AND pushed = 1",
+            [author.as_bytes()],
+            |row| row.get(0),
+        )?;
+        Ok(last.unwrap_or(0))
+    }
+
     pub fn mark_pushed(&self, author: &PublicKey, up_to_seq: u64) -> Result<()> {
         self.db.execute(
             "UPDATE ops SET pushed = 1 WHERE author = ? AND seq <= ?",
