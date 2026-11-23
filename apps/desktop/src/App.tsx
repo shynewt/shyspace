@@ -5,6 +5,7 @@ import { Shell } from "./features/shell/Shell";
 import { api, type Session } from "./lib/api";
 import { useAccent, useTheme } from "./lib/preferences";
 import { reportError } from "./lib/toast";
+import { useUpdateChecks } from "./lib/updates";
 import { useNoBrowserMenu } from "./lib/useContextMenu";
 import { useInputModality } from "./lib/useInputModality";
 import { Logo, Toasts, tweens } from "./ui";
@@ -20,6 +21,7 @@ export function App() {
   useInputModality();
   useTheme();
   useAccent();
+  useUpdateChecks();
 
   useEffect(() => {
     api.session().then(

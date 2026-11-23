@@ -18,7 +18,7 @@ shyspace is a team workspace (chat, pages, AI agents) where every device keeps a
 - **`crates/shy-media`**: huddle audio, the only crate that knows about microphones, speakers and iroh-live. It implements the core's `HuddleMedia`: `access` (the media node's policy: only the call's listed peers, each reading only this call's path and publishing only at its own), `call` (one running call: the publication, the speaker, a listener per peer, device checks), `listen` (hearing one peer: subscribe, decode, play, link and speaking reports), `mic` (mute closes the device; microphone state and your own speaking), `system` (the real devices through moq-audio and cpal), `devices` (which device opens, the Bluetooth rule, the device list), `cues` and `wav` (the join, leave and ring sounds bundled from `sounds/`, rendered by its `render.py`), `playout` (playing a whole sound through a stream that holds only a moment), and calls between endpoints with test tones in `tests/`.
 - **`crates/shy-demo`**: a development tool that fills a fresh workspace with demo people and content, through the same `Workspace` API.
 - **`vendor/yrs`**: a patched copy of the Yjs library the core merges pages with (see `vendor/README.md`).
-- **`apps/desktop`**: the desktop app. `src-tauri/src/lib.rs` maps each UI command to one `Workspace` call and forwards core changes to the UI as `change` events. The UI is React in `src/`.
+- **`apps/desktop`**: the desktop app. `src-tauri/src/lib.rs` maps each UI command to one `Workspace` call and forwards core changes to the UI as `change` events; `src-tauri/src/updates.rs` finds, downloads and installs app updates. The UI is React in `src/`.
 
 ## Core ideas
 

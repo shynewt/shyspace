@@ -64,6 +64,12 @@ export class FakeBackend {
   /** What the window title, taskbar and tray last showed as needing you. */
   attentionCount = 0;
   private pendingJoin: { approve: () => void; cancel: () => void } | null = null;
+  /** The update the app has downloaded and could restart into, as `check_for_update` reports it. */
+  readyUpdate: string | null = null;
+  /** How many times the app asked for an update. */
+  updateChecks = 0;
+  /** The version the app restarted into, once `restart_to_update` went through. */
+  restartedInto: string | null = null;
   private members: Member[] = [];
   private pages: StoredPage[] = [];
   /** Each page editor session's page and Yjs client id, by its nonce. */
@@ -373,6 +379,14 @@ export class FakeBackend {
     }
     if (chatAnswer !== NOT_CHAT) return chatAnswer;
     switch (command) {
+      case "check_for_update":
+        this.updateChecks += 1;
+        return this.readyUpdate;
+      case "restart_to_update":
+        if (this.huddles.answer("my_huddle", undefined) !== null) return "in_huddle";
+        if (this.readyUpdate === null) return "nothing_ready";
+        this.restartedInto = this.readyUpdate;
+        return "restarting";
       case "sidebar_sections":
         return this.sections.list(
           this.chat.channels.map((channel) => ({

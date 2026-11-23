@@ -5,6 +5,7 @@ mod alerts;
 mod files;
 mod huddles;
 mod tray;
+mod updates;
 mod window;
 
 use std::path::PathBuf;
@@ -109,6 +110,11 @@ pub(crate) async fn current(state: &State<'_, AppState>) -> CommandResult<Worksp
 
 #[tauri::command]
 async fn session(app: AppHandle, state: State<'_, AppState>) -> CommandResult<Option<Session>> {
+    open_workspace(&app, &state).await
+}
+
+/// Opens the workspace on this device, if there is one and it isn't open yet.
+pub(crate) async fn open_workspace(app: &AppHandle, state: &AppState) -> CommandResult<Option<Session>> {
     // Held across the open, so two calls at once (React runs effects twice in
     // development) wait for each other instead of both opening the folder.
     let mut slot = state.workspace.lock().await;
@@ -121,7 +127,7 @@ async fn session(app: AppHandle, state: State<'_, AppState>) -> CommandResult<Op
     let workspace = Workspace::open(&state.data, state.online())
         .await
         .map_err(failed)?;
-    Ok(Some(activate(&app, &mut slot, workspace)))
+    Ok(Some(activate(app, &mut slot, workspace)))
 }
 
 #[tauri::command]
@@ -819,6 +825,9 @@ pub fn run() {
             alerts::follow_clicks(app.handle())?;
             let has_tray = tray::try_install(app.handle());
             app.manage(tray::HasTray(has_tray));
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            app.manage(updates::PendingUpdate::default());
             Ok(())
         })
         // With a tray icon, closing the window keeps shyspace running there,
@@ -837,6 +846,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            updates::check_for_update,
+            updates::restart_to_update,
             huddles::huddle,
             huddles::my_huddle,
             huddles::join_huddle,
@@ -965,15 +976,22 @@ fn on_run_event(app: &AppHandle, event: tauri::RunEvent) {
 /// isn't held back until the next start. Quitting never waits longer than
 /// `EXIT_UPLOAD_LIMIT`.
 fn upload_before_exit(app: &AppHandle) {
-    let state = app.state::<AppState>();
     tauri::async_runtime::block_on(async {
-        let Some(workspace) = state.workspace.lock().await.clone() else {
-            return;
-        };
-        match tokio::time::timeout(EXIT_UPLOAD_LIMIT, workspace.shutdown()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => tracing::warn!("could not upload unsent changes before quitting: {error:#}"),
-            Err(_) => tracing::warn!("gave up uploading unsent changes: quitting took too long"),
-        }
+        let workspace = app.state::<AppState>().workspace.lock().await.take();
+        shut_down(workspace).await;
     });
+}
+
+/// Shuts a workspace down, uploading what wasn't sent yet, within
+/// `EXIT_UPLOAD_LIMIT`. What doesn't make it stays on disk and goes at the
+/// next start.
+pub(crate) async fn shut_down(workspace: Option<Workspace>) {
+    let Some(workspace) = workspace else {
+        return;
+    };
+    match tokio::time::timeout(EXIT_UPLOAD_LIMIT, workspace.shutdown()).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::warn!("could not upload unsent changes before closing: {error:#}"),
+        Err(_) => tracing::warn!("gave up uploading unsent changes: closing took too long"),
+    }
 }

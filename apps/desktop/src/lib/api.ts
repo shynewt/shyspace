@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { reportError } from "./toast";
+import type { RestartOutcome } from "./updateFlow";
 
 export type Session = { workspace_name: string; me: string; is_admin: boolean };
 export type NotifyLevel = "all" | "mentions" | "nothing";
@@ -454,6 +455,10 @@ export const api = {
   leaveHuddle: () => invoke<void>("leave_huddle"),
   /** Stops the ring for an incoming huddle without joining it. */
   declineHuddle: () => invoke<void>("decline_huddle"),
+  /** The version downloaded and ready to install, or null while there's nothing newer. */
+  checkForUpdate: () => invoke<string | null>("check_for_update"),
+  /** Installs the ready update and restarts into it, after uploading unsent changes; refused during a huddle. */
+  restartToUpdate: () => invoke<RestartOutcome>("restart_to_update"),
   /** The incoming huddle ringing now, if any. */
   huddleRinging: () => invoke<IncomingHuddle | null>("huddle_ringing"),
   setHuddleMuted: (muted: boolean) => invoke<void>("set_huddle_muted", { muted }),

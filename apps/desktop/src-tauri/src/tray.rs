@@ -15,6 +15,8 @@ pub const MAIN_WINDOW: &str = "main";
 /// app would be hidden with no way back.
 pub struct HasTray(pub bool);
 
+const TRAY_ID: &str = "shyspace";
+
 /// Creates the tray icon, or reports why there is none. On Linux the
 /// appindicator binding panics (rather than failing) when the system library
 /// is missing, so the panic is caught here; this relies on the default
@@ -39,7 +41,7 @@ fn install(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open shyspace", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit shyspace", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
-    let mut tray = TrayIconBuilder::with_id("shyspace")
+    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("shyspace")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -63,6 +65,16 @@ fn install(app: &AppHandle) -> tauri::Result<()> {
     }
     tray.build(app)?;
     Ok(())
+}
+
+/// Brings the app back after the updater's exit cleanup ran but its
+/// installer didn't start: that cleanup removes the tray icon and, on
+/// Windows, hides the windows.
+pub fn restore_after_cancelled_exit(app: &AppHandle) {
+    if app.state::<HasTray>().0 && app.tray_by_id(TRAY_ID).is_none() {
+        try_install(app);
+    }
+    show_main_window(app);
 }
 
 pub fn show_main_window(app: &AppHandle) {
