@@ -595,3 +595,53 @@ async fn renaming_a_deleted_file_brings_nothing_back() {
     admin.sync().await;
     assert!(admin.files().unwrap().is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_opens_only_its_own_files() {
+    let (root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let plan = admin.create_page("Plan", None).unwrap();
+    let other = admin.create_page("Other", None).unwrap();
+    let message = admin
+        .send_files(&general, "", None, vec![bytes_file(b"from chat")])
+        .await
+        .unwrap();
+    let in_chat = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == message)
+        .unwrap()
+        .files[0]
+        .id
+        .clone();
+    let in_other_page = admin
+        .share_page_file(&other, bytes_file(b"from another page"))
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let saved = root.path().join("saved");
+    for file in [&in_chat, &in_other_page] {
+        assert!(bob.page_file_bytes(&plan, file).await.is_err(), "{file}");
+        assert!(bob.save_page_file(&plan, file, &saved).await.is_err(), "{file}");
+        assert!(!saved.exists());
+        assert!(bob.page_files(&plan).unwrap().is_empty());
+    }
+    assert!(bob.page_file_bytes(&other, &in_other_page).await.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_file_arriving_after_its_page_was_deleted_is_dropped() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let page = admin.create_page("Plan", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    admin.delete_page(&page).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let late = forged_file(&bob, &bucket, new_owned_id(&bob.me()), &page).await;
+    let mut forger = Forger::new(&bob);
+    admin.receive(forger.seal(late)).unwrap();
+    assert!(admin.page_files(&page).unwrap().is_empty());
+    assert!(admin.files().unwrap().is_empty());
+}

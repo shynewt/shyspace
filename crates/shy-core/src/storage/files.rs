@@ -67,31 +67,39 @@ impl Store {
     }
 
     /// Removes the files `id` names: the file itself, a message's files or a
-    /// channel's. Each is marked deleted, so it can't come back, and its blob
-    /// waits to leave the bucket. Returns the places that lost files.
-    pub(super) fn purge_files_of(&self, id: &str, deleter: &[u8]) -> Result<Vec<String>> {
-        let doomed: Vec<(String, String, Vec<u8>, Vec<u8>)> = self
+    /// channel's or page's. Each is marked deleted, so it can't come back, and
+    /// its blob waits to leave the bucket. Returns what changed for them.
+    pub(super) fn purge_files_of(&self, id: &str, deleter: &[u8]) -> Result<Vec<Change>> {
+        let doomed: Vec<DoomedFile> = self
             .db
-            .prepare("SELECT id, place, author, blob FROM files WHERE id = ?1 OR message = ?1 OR place = ?1")?
+            .prepare(
+                "SELECT id, place, message, author, blob FROM files WHERE id = ?1 OR message = ?1 OR place = ?1",
+            )?
             .query_map([id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok(DoomedFile {
+                    id: row.get(0)?,
+                    place: row.get(1)?,
+                    message: row.get(2)?,
+                    author: row.get(3)?,
+                    blob: row.get(4)?,
+                })
             })?
             .collect::<Result<_, _>>()?;
-        let mut places = Vec::new();
-        for (file, place, author, blob) in doomed {
-            let blob: BlobRef = postcard::from_bytes(&blob).context("reading a stored file")?;
-            self.mark_deleted(&file)?;
-            self.db.execute("DELETE FROM files WHERE id = ?", [&file])?;
+        let mut changes = Vec::new();
+        for doomed in doomed {
+            let blob: BlobRef = postcard::from_bytes(&doomed.blob).context("reading a stored file")?;
+            self.mark_deleted(&doomed.id)?;
+            self.db.execute("DELETE FROM files WHERE id = ?", [&doomed.id])?;
             self.db
-                .execute("DELETE FROM file_names WHERE file = ?", [&file])?;
-            self.request_blob_removal(&author, &blob.id, deleter)?;
-            if !places.contains(&place) {
-                places.push(place);
+                .execute("DELETE FROM file_names WHERE file = ?", [&doomed.id])?;
+            self.request_blob_removal(&doomed.author, &blob.id, deleter)?;
+            let change = file_change(doomed.place, doomed.message.as_deref());
+            if !changes.contains(&change) {
+                changes.push(change);
             }
         }
-        Ok(places)
+        Ok(changes)
     }
-
     /// Keeps a rename from the file's sharer, cleaned, unless a later one
     /// is kept. The file may not have arrived yet; it shows the name when it does.
     pub(super) fn apply_file_rename(&self, id: &str, name: &str, lamport: u64) -> Result<Option<Change>> {
@@ -103,11 +111,24 @@ impl Store {
         if changed == 0 {
             return Ok(None);
         }
-        let place: Option<String> = self
+        let file: Option<(String, Option<String>)> = self
             .db
-            .query_row("SELECT place FROM files WHERE id = ?", [id], |row| row.get(0))
+            .query_row("SELECT place, message FROM files WHERE id = ?", [id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
             .optional()?;
-        Ok(place.map(|channel| Change::Messages { channel }))
+        Ok(file.map(|(place, message)| file_change(place, message.as_deref())))
+    }
+
+    /// The files shared into `page`, oldest first.
+    pub fn files_of_page(&self, page: &str) -> Result<Vec<StoredFile>> {
+        self.db
+            .prepare(&format!(
+                "SELECT {FILE_COLUMNS} FROM {FILES} WHERE f.place = ? AND f.message IS NULL ORDER BY f.seq, f.id"
+            ))?
+            .query_map([page], stored_file)?
+            .collect::<Result<_, _>>()
+            .map_err(Into::into)
     }
 
     pub fn file(&self, id: &str) -> Result<Option<StoredFile>> {
@@ -270,6 +291,23 @@ impl Store {
             params![removal.author, removal.blob_id, removal.requested_by],
         )?;
         Ok(())
+    }
+}
+
+struct DoomedFile {
+    id: String,
+    place: String,
+    message: Option<String>,
+    author: Vec<u8>,
+    blob: Vec<u8>,
+}
+
+/// What changed for a file in `place`: a file without a message belongs to
+/// a page, so its page's files changed; any other changes its channel.
+pub(super) fn file_change(place: String, message: Option<&str>) -> Change {
+    match message {
+        None => Change::PageFiles { page: place },
+        Some(_) => Change::Messages { channel: place },
     }
 }
 

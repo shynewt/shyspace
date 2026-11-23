@@ -173,7 +173,7 @@ impl Store {
         )?;
         let kind = self.item_kind(id)?;
         let message_channel = self.message_channel(id)?;
-        let places_with_files = self.purge_files_of(id, deleter)?;
+        let file_changes = self.purge_files_of(id, deleter)?;
         self.purge_message(id)?;
         self.purge_channel(id)?;
         self.db.execute("DELETE FROM pages WHERE id = ?", [id])?;
@@ -182,10 +182,7 @@ impl Store {
             Some(ItemKind::Channel) => Some(Change::Channels),
             Some(ItemKind::Page) => Some(Change::Pages),
             Some(ItemKind::Message) => message_channel.map(|channel| Change::Messages { channel }),
-            Some(ItemKind::File) => places_with_files
-                .into_iter()
-                .next()
-                .map(|channel| Change::Messages { channel }),
+            Some(ItemKind::File) => file_changes.into_iter().next(),
             None => None,
         })
     }

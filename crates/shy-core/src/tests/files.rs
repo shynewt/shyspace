@@ -389,3 +389,83 @@ async fn a_file_opens_even_when_the_cache_cannot_be_tidied() {
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(opened.unwrap(), b"bob's notes");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_shared_into_a_page_opens_for_another_member_from_that_page() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = admin.create_page("Plan", None).unwrap();
+    let content = five_megabytes();
+    let file = admin
+        .share_page_file(&page, bytes_file("diagram.png", &content))
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let listed = bob.page_files(&page).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        (
+            listed[0].id.as_str(),
+            listed[0].name.as_str(),
+            listed[0].place.as_str()
+        ),
+        (file.as_str(), "diagram.png", page.as_str())
+    );
+    assert_eq!(listed[0].message, None);
+    assert!(!listed[0].can_delete, "only its sharer or the admin may");
+    assert_eq!(bob.page_file_bytes(&page, &file).await.unwrap(), content);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_page_deletes_its_files_and_their_pieces() {
+    let (_root, bucket, admin, bob) = admin_and_bob().await;
+    let page = bob.create_page("Plan", None).unwrap();
+    let file = bob
+        .share_page_file(&page, bytes_file("notes.txt", b"draft"))
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    assert_eq!(admin.page_files(&page).unwrap().len(), 1);
+    let blob = bob.state().store.file(&file).unwrap().unwrap().blob;
+
+    bob.delete_page(&page).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    assert!(admin.page_files(&page).unwrap().is_empty());
+    assert!(!file_ids(&admin).contains(&file));
+    assert!(
+        bucket
+            .file_chunk(&bob.me(), &blob.id, 0, blob.size + 1024)
+            .await
+            .unwrap()
+            .is_none(),
+        "the page's file left the bucket"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_file_tells_others_the_page_changed_not_a_channel() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = admin.create_page("Plan", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let mut changes = bob.subscribe();
+    let file = admin
+        .share_page_file(&page, bytes_file("photo.png", b"pixels"))
+        .await
+        .unwrap();
+    admin.rename_file(&file, "team photo.png").unwrap();
+    admin.delete_file(&file).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let mut page_changes = 0;
+    while let Ok(change) = changes.try_recv() {
+        match change {
+            crate::views::Change::PageFiles { page: changed } => {
+                assert_eq!(changed, page);
+                page_changes += 1;
+            }
+            crate::views::Change::Messages { channel } => assert_ne!(channel, page),
+            _ => {}
+        }
+    }
+    assert_eq!(page_changes, 3, "shared, renamed, deleted");
+}

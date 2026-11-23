@@ -270,9 +270,7 @@ impl Store {
                     return Err(rule_violation("a file attached to someone else's message"));
                 }
                 self.put_file(file, verified)?;
-                Change::Messages {
-                    channel: file.place.clone(),
-                }
+                super::files::file_change(file.place.clone(), file.message.as_deref())
             }
             Op::ProfilePicture { picture } => {
                 if let Some(picture) = picture {

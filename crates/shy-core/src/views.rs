@@ -188,12 +188,14 @@ pub struct Message {
 }
 
 /// A shared file as this member sees it. Its bytes come through
-/// `Workspace::file_bytes` or `Workspace::save_file`.
+/// `Workspace::file_bytes` or `Workspace::save_file`, or for a page's file
+/// through `page_file_bytes` or `save_page_file`.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FileInfo {
     pub id: EntityId,
-    /// The channel or DM it was shared in.
+    /// The channel, DM or page it was shared in.
     pub place: EntityId,
+    /// None for a page's file.
     pub message: Option<EntityId>,
     /// The author's member id (hex).
     pub author: String,
@@ -414,14 +416,18 @@ pub enum Change {
     PageReset {
         page: EntityId,
     },
+    /// A file shared into the page arrived, was renamed or was deleted.
+    PageFiles {
+        page: EntityId,
+    },
     Members,
     Invites,
     /// The bucket settings changed; the workspace reconnects.
     Storage,
     /// A new result from checking whether the bucket keeps deleted data.
     StorageProtection,
-    /// How far this device's upload of files into `channel` has got, in
-    /// bytes of the files themselves.
+    /// How far this device's upload of files into `channel` (or a page) has
+    /// got, in bytes of the files themselves.
     Upload {
         channel: EntityId,
         sent: u64,

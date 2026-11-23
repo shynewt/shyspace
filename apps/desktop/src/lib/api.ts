@@ -215,6 +215,7 @@ export type Change =
   | { kind: "pages" }
   | { kind: "doc"; page: string; update: number[] }
   | { kind: "page_reset"; page: string }
+  | { kind: "page_files"; page: string }
   | { kind: "members" }
   | { kind: "invites" }
   | { kind: "storage" }

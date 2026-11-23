@@ -21,7 +21,7 @@ use crate::{
         cache::{BlobCache, BlobKey},
         clean_file_name, clean_media_type,
     },
-    ops::{EntityId, MAX_MESSAGE_CHARS, Op},
+    ops::{EntityId, MAX_MESSAGE_CHARS, Op, new_owned_id},
     storage::{BlobRemoval, ItemKind, StoredFile},
     views::{Change, FileInfo, member_id},
 };
@@ -38,6 +38,19 @@ pub struct NewFile {
     pub name: String,
     pub media_type: String,
     pub source: FileSource,
+}
+
+impl NewFile {
+    fn checked_size(&self) -> Result<u64> {
+        let size = self.source.size()?;
+        ensure!(
+            size <= MAX_FILE_BYTES,
+            "{} is larger than {} MB",
+            self.name,
+            MAX_FILE_BYTES / 1024 / 1024
+        );
+        Ok(size)
+    }
 }
 
 #[derive(Clone)]
@@ -94,17 +107,10 @@ impl Workspace {
         if let Some(target) = &reply_to {
             self.ensure_can_reply_to(channel, target)?;
         }
-        let mut sizes = Vec::new();
-        for file in &files {
-            let size = file.source.size()?;
-            ensure!(
-                size <= MAX_FILE_BYTES,
-                "{} is larger than {} MB",
-                file.name,
-                MAX_FILE_BYTES / 1024 / 1024
-            );
-            sizes.push(size);
-        }
+        let sizes = files
+            .iter()
+            .map(NewFile::checked_size)
+            .collect::<Result<Vec<_>>>()?;
         let total: u64 = sizes.iter().sum();
         let message = self.new_item_id(channel);
         let mut shared = Vec::new();
@@ -286,6 +292,72 @@ impl Workspace {
         output.sync_all().context("saving the file")?;
         std::fs::rename(&partial, destination)
             .with_context(|| format!("saving {}", destination.display()))?;
+        Ok(())
+    }
+
+    /// Uploads `file` into `page`, for everyone who can read the page.
+    /// Returns its id, for the page's text to link.
+    pub async fn share_page_file(&self, page: &str, file: NewFile) -> Result<EntityId> {
+        self.require_item(page, ItemKind::Page)?;
+        let size = file.checked_size()?;
+        let blob = self
+            .upload(self.file_cache(), file.source, size, |done| {
+                self.emit(Change::Upload {
+                    channel: page.to_owned(),
+                    sent: done,
+                    total: size,
+                });
+            })
+            .await?;
+        let blob_id = blob.id.clone();
+        let shared = SharedFile {
+            id: new_owned_id(&self.me()),
+            place: page.to_owned(),
+            message: None,
+            name: clean_file_name(&file.name),
+            media_type: clean_media_type(&file.media_type),
+            blob,
+        };
+        let id = shared.id.clone();
+        if let Err(error) = self.write(Op::File { file: shared }) {
+            self.abandon_blob(&self.file_cache(), &blob_id).await;
+            return Err(error);
+        }
+        self.inner.wake.notify_one();
+        Ok(id)
+    }
+
+    /// The files shared into `page`, oldest first.
+    pub fn page_files(&self, page: &str) -> Result<Vec<FileInfo>> {
+        let state = self.state();
+        state
+            .store
+            .files_of_page(page)?
+            .into_iter()
+            .map(|file| self.file_info(&state.store, file))
+            .collect()
+    }
+
+    /// A file of `page`'s, whole, for showing in the page.
+    pub async fn page_file_bytes(&self, page: &str, file: &str) -> Result<Vec<u8>> {
+        self.require_page_file(page, file)?;
+        self.file_bytes(file).await
+    }
+
+    /// Saves a file of `page`'s to `destination`, like [`Workspace::save_file`].
+    pub async fn save_page_file(&self, page: &str, file: &str, destination: &Path) -> Result<()> {
+        self.require_page_file(page, file)?;
+        self.save_file(file, destination).await
+    }
+
+    /// A file shared anywhere but `page` is refused, so a page's text can't
+    /// pull one in by naming its id.
+    fn require_page_file(&self, page: &str, file: &str) -> Result<()> {
+        let stored = self.stored_file(file)?;
+        ensure!(
+            stored.place == page && stored.message.is_none(),
+            "that file isn't part of this page"
+        );
         Ok(())
     }
 
