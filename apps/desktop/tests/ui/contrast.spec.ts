@@ -41,9 +41,13 @@ const GRAPHIC_PAIRS: [string, string][] = [
 
 const ACCENTS = ["violet", "blue", "indigo", "teal", "pink", "graphite"];
 
+/** Reads #rrggbb, or the short #rgb a built stylesheet may use for it. */
 function channels(hex: string): number[] {
-  const match = hex.trim().match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (!match) throw new Error(`not a #rrggbb color: "${hex}"`);
+  const short = hex.trim().match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+  const doubled = short?.slice(1).map((digit) => digit + digit);
+  const long = doubled ? `#${doubled.join("")}` : hex.trim();
+  const match = long.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!match) throw new Error(`not a #rrggbb or #rgb color: "${hex}"`);
   return match.slice(1).map((part) => Number.parseInt(part, 16) / 255);
 }
 

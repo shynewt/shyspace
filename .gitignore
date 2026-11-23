@@ -1,6 +1,7 @@
 target/
 node_modules/
 dist/
+apps/desktop/dist-ui-tests/
 apps/desktop/src-tauri/gen/
 .local/
 .envrc

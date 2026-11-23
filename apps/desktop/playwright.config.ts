@@ -22,12 +22,16 @@ if (unknown.length > 0) throw new Error(`UI_TEST_BROWSERS names unknown browsers
 
 export default defineConfig({
   testDir: "tests/ui",
-  globalSetup: "./tests/ui/warm-up.ts",
   fullyParallel: true,
   // Each worker is a browser. GitHub's 2-core machines would get one by
   // default; tests mostly wait, so three fit. Four locally keeps a laptop cool.
   workers: process.env.CI ? 3 : 4,
   use: { baseURL: APP_URL, trace: "retain-on-failure" },
   projects: browsers.filter((browser) => chosen.includes(browser.name ?? "")),
-  webServer: { command: `pnpm exec vite --host ${HOST} --port ${PORT} --strictPort`, url: APP_URL },
+  webServer: {
+    command: `pnpm exec vite build --config vite.ui-tests.config.ts --logLevel error && pnpm exec vite preview --config vite.ui-tests.config.ts --host ${HOST} --port ${PORT} --strictPort`,
+    url: APP_URL,
+    // Building comes first.
+    timeout: 180_000,
+  },
 });

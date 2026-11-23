@@ -2,14 +2,14 @@
 # Runs the UI tests in WebKit inside the official Playwright container, because
 # Playwright's WebKit build needs Ubuntu libraries that other distributions lack.
 # The image tag follows the installed Playwright, whose browsers it ships.
-# The container has its own network, so its dev server on port 1430 doesn't
+# The container has its own network, so its test server on port 1430 doesn't
 # clash with one on the host.
 set -euo pipefail
 
 desktop_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 playwright_version="$(cd "$desktop_dir" && node -p 'require("./node_modules/@playwright/test/package.json").version')"
 
-# The image has no pnpm, which the config's dev server command uses. Every
+# The image has no pnpm, which the config's test server command uses. Every
 # command it runs is already installed in node_modules, so a stand-in that
 # runs `pnpm exec <tool>` as `npx <tool>` is enough, and needs no network.
 container_command='mkdir -p /tmp/bin \

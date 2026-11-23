@@ -222,6 +222,8 @@ test("a card opened with the mouse shows no focus ring; from the keyboard it doe
   await page.keyboard.press("Escape");
   await expect(card(page, "Ada")).toHaveCount(0);
   await nameButton(page, "Ada").click();
+  // The card ignores clicks outside until it's open, so the click that opened it can't close it.
+  await expect(card(page, "Ada")).toBeVisible();
   await page.mouse.click(5, 5);
   await expect(card(page, "Ada")).toHaveCount(0);
 
