@@ -713,6 +713,9 @@ impl Bucket {
 }
 
 #[cfg(test)]
+mod probe;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
