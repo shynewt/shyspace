@@ -1,18 +1,15 @@
 import { UserX } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type LaterItem, type Session } from "../../lib/api";
+import { api, type Session } from "../../lib/api";
 import { useMembersWithCurrentStatus } from "../../lib/members";
 import type { SettingsTarget } from "../../lib/settings";
 import { SHORTCUTS } from "../../lib/shortcuts";
 import { showView } from "../../lib/shownView";
-import { showToast } from "../../lib/toast";
-import { openAlertTarget } from "../../lib/useAlerts";
 import { useLive } from "../../lib/useLive";
 import { useMouseBackAndForward } from "../../lib/useMouseBackAndForward";
 import { ScrollMemoryContext, useNavigation } from "../../lib/useNavigation";
-import { useReminders } from "../../lib/useReminders";
-import { sameView, savedItemView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
+import { sameView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
 import { Dialog, tweens } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { DraftsAndSentView } from "../drafts/DraftsAndSentView";
@@ -28,11 +25,10 @@ import { ShellLayout } from "./ShellLayout";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
 import { StatusDialog } from "./StatusDialog";
-import { useAttentionBadge } from "./useAttentionBadge";
 import { useSidebar } from "./useSidebar";
 import { ViewHeader } from "./ViewHeader";
 import { WorkspaceRail } from "./WorkspaceRail";
-import { takePendingTarget, useWorkspaces } from "./Workspaces";
+import { takePendingOpen, useWorkspaces } from "./Workspaces";
 
 export function Shell({ session }: { session: Session }) {
   // Unread counts change as messages arrive.
@@ -131,15 +127,6 @@ export function Shell({ session }: { session: Session }) {
 
   useMouseBackAndForward(back, forward);
 
-  const openSaved = useCallback(
-    (item: LaterItem) => {
-      const target = savedItemView(item);
-      if (target) navigate(target);
-      else showToast("What you saved no longer exists.", "info");
-    },
-    [navigate],
-  );
-
   // What notifications above the shell need: where you are, and how to open something here.
   const currentView = useRef(view);
   currentView.current = view;
@@ -147,15 +134,14 @@ export function Shell({ session }: { session: Session }) {
     () => showView({ workspaceId: session.workspace_id, view: () => currentView.current, navigate }),
     [session.workspace_id, navigate],
   );
-  // A notification from this workspace clicked while another was shown: open it now.
-  const [openFirst] = useState(takePendingTarget);
+  // What a notification or reminder from this workspace asked to open while another was shown.
+  const [openFirst] = useState(takePendingOpen);
   const hasOpenedFirst = useRef(false);
   useEffect(() => {
     if (!openFirst || hasOpenedFirst.current) return;
     hasOpenedFirst.current = true;
-    openAlertTarget(openFirst, navigate);
+    openFirst(navigate);
   }, [openFirst, navigate]);
-  useReminders(session.workspace_id, openSaved);
 
   const openSettings = useCallback((target: SettingsTarget = { section: "profile" }) => setSettingsTarget(target), []);
   const openSearch = useCallback((query = "") => setPaletteQuery(query), []);
@@ -193,7 +179,6 @@ export function Shell({ session }: { session: Session }) {
   return (
     <WorkspaceContext.Provider value={context}>
       <HuddleProvider>
-        <AttentionBadge />
         <ShellLayout
           sidebar={sidebar}
           sidebarContent={<Sidebar status={status} onOpenSearch={() => openSearch()} />}
@@ -261,10 +246,4 @@ function RemovedNotice({ isRemoved }: { isRemoved: boolean }) {
       </div>
     </Dialog>
   );
-}
-
-/** Keeps the count of what needs you showing outside the window. */
-function AttentionBadge() {
-  useAttentionBadge();
-  return null;
 }

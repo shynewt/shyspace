@@ -28,6 +28,10 @@ export const MAX_HUDDLE_PARTICIPANTS = 8;
 
 export type HuddlesContext = {
   me: () => string;
+  /** The workspace shown now, which a join lands in. */
+  workspaceId: () => string;
+  /** "#general", or a DM's people joined by ", ". */
+  channelName: (channel: string) => string;
   members: () => Member[];
   notify: (change: Change) => void;
   privateView: (channel: string) => PrivateView | null;
@@ -91,7 +95,7 @@ export class FakeHuddles {
       const memberName = this.context.members().find((candidate) => candidate.id === member)?.name ?? "";
       this.context.notify({ kind: "huddle_started", channel, member, member_name: memberName });
       if (this.mine === null) {
-        this.ringing = { channel, member, member_name: memberName };
+        this.ringing = { workspace_id: this.context.workspaceId(), channel, member, member_name: memberName };
         this.context.notify({ kind: "huddle_ringing", channel, member, member_name: memberName });
       }
     }
@@ -169,6 +173,13 @@ export class FakeHuddles {
     this.context.notify({ kind: "huddle_devices" });
   }
 
+  /** `memberName` starts a huddle in a DM of another workspace on this device, which rings here. */
+  ringFrom(workspaceId: string, member: string, memberName: string): void {
+    const channel = `${workspaceId}-dm`;
+    this.ringing = { workspace_id: workspaceId, channel, member, member_name: memberName };
+    this.context.notify({ kind: "huddle_ringing", channel, member, member_name: memberName });
+  }
+
   /** Finishes a join held by `holdJoining`. */
   connect(): void {
     if (!this.releaseJoin) throw new Error("fake backend: no join is waiting");
@@ -195,6 +206,9 @@ export class FakeHuddles {
         this.leaveMine();
         return null;
       case "decline_huddle":
+        if (this.ringing && this.ringing.workspace_id !== requireString(args, "workspaceId")) {
+          throw new Error("fake backend: nothing rings in that workspace");
+        }
         this.stopRinging();
         return null;
       case "huddle_ringing":
@@ -249,7 +263,9 @@ export class FakeHuddles {
     this.leaveMine();
     if (this.rosterOf(channel).size >= MAX_HUDDLE_PARTICIPANTS) throw new Error("this huddle is full");
     this.mine = {
+      workspace_id: this.context.workspaceId(),
       channel,
+      channel_name: this.context.channelName(channel),
       phase: "joining",
       muted,
       mic: muted ? "off" : "opening",

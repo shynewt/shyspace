@@ -13,8 +13,8 @@ import { linkedMessageView, type View } from "./workspace";
 export type AlertWorkspaces = {
   /** Names by workspace id; a notification names its workspace once there are two or more. */
   names: ReadonlyMap<string, string>;
-  /** Shows a workspace (even the selected one, while adding another), then opens `target` there. */
-  select: (workspaceId: string, target: AlertTarget) => void;
+  /** Opens something in a workspace, showing it first if it isn't (even the selected one, while adding another). */
+  openIn: (workspaceId: string, open: (navigate: (view: View) => void) => void) => void;
 };
 
 type AlertChange = Extract<Change, { kind: "alert" } | { kind: "huddle_started" }>;
@@ -68,11 +68,8 @@ export function useAlerts(workspaces: AlertWorkspaces) {
   useEffect(() => {
     const opening = listen<{ workspace_id: string | null } & AlertTarget>("alert-opened", (event) => {
       const { workspace_id: workspaceId, ...target } = event.payload;
-      const shown = shownView();
-      if (shown && (workspaceId === null || workspaceId === shown.workspaceId)) {
-        return openAlertTarget(target, shown.navigate);
-      }
-      if (workspaceId !== null) currentWorkspaces.current.select(workspaceId, target);
+      const into = workspaceId ?? shownView()?.workspaceId;
+      if (into) currentWorkspaces.current.openIn(into, (navigate) => openAlertTarget(target, navigate));
     });
     return () => {
       opening.then((stop) => stop()).catch(reportError);

@@ -12,6 +12,8 @@ import type {
   AlertTarget,
   BucketConfig,
   Change,
+  Channel,
+  Inbox,
   LaterItem,
   Member,
   MemberStatus,
@@ -27,6 +29,7 @@ import type {
   StorageProvider,
   StorageRotation,
   StorageSettings,
+  WorkspaceBadge,
 } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
 import { FakeDrafts } from "./drafts";
@@ -119,6 +122,8 @@ export class FakeBackend {
   });
   readonly huddles = new FakeHuddles({
     me: () => this.me(),
+    workspaceId: () => this.session?.workspace_id ?? "",
+    channelName: (channel) => this.channelName(channel),
     members: () => this.members,
     notify: (change) => this.notify(change),
     privateView: (channel) => this.private.view(channel),
@@ -129,6 +134,7 @@ export class FakeBackend {
       this.session = session;
     },
     emitFrom: (workspaceId, change) => void emit("change", { workspace_id: workspaceId, change }),
+    shownBadge: () => this.shownBadge(),
   });
   private later = new FakeLater();
   private sections = new FakeSections();
@@ -521,7 +527,18 @@ export class FakeBackend {
       case "take_due_reminders": {
         const due = this.later.takeDue(Date.now());
         if (due.length > 0) this.notify({ kind: "later" });
-        return this.laterItems().filter((item) => due.includes(item.id));
+        // Every workspace shares the fake's one list, so each is the shown workspace's.
+        const workspaceId = this.session?.workspace_id ?? "";
+        return this.laterItems()
+          .filter((item) => due.includes(item.id))
+          .map((item) => ({ workspace_id: workspaceId, item }));
+      }
+      case "next_reminder_ms": {
+        const now = Date.now();
+        const upcoming = this.laterItems().flatMap((item) =>
+          !item.is_done && item.remind_ms !== null && item.remind_ms > now ? [item.remind_ms] : [],
+        );
+        return upcoming.length > 0 ? Math.min(...upcoming) : null;
       }
       case "set_draft":
         this.drafts.set(requireString(args, "target"), requireString(args, "text"));
@@ -900,6 +917,37 @@ export class FakeBackend {
     this.notify({ kind: "later" });
     for (const channel of this.chat.channels) this.notify({ kind: "messages", channel: channel.id });
     this.notify({ kind: "pages" });
+  }
+
+  /** As the core counts a workspace's badge: the Inbox outside DMs, unread unmuted DMs, and due reminders. */
+  private shownBadge(): Omit<WorkspaceBadge, "workspace_id"> {
+    const channels = this.answer("channels", undefined) as Channel[];
+    const inbox = this.answer("inbox", undefined) as Inbox;
+    const dms = new Set(channels.filter((channel) => channel.kind === "dm").map((channel) => channel.id));
+    const outsideDms = inbox.attention.filter((item) => !dms.has(item.message.channel)).length;
+    const inDms = channels
+      .filter((channel) => channel.kind === "dm" && channel.notify !== "nothing")
+      .reduce((total, channel) => total + channel.unread, 0);
+    const now = Date.now();
+    const due = this.laterItems().filter(
+      (item) => !item.is_done && item.remind_ms !== null && item.remind_ms <= now,
+    ).length;
+    return {
+      unread: channels.some((channel) => channel.unread > 0 && channel.notify !== "nothing"),
+      mentions: inDms + channels.reduce((total, channel) => total + channel.unread_mentions, 0),
+      attention: outsideDms + inDms + due,
+    };
+  }
+
+  /** "#general", or a DM's people joined by ", ", as the core names a huddle's place. */
+  private channelName(id: string): string {
+    const channels = this.answer("channels", undefined) as { id: string; name: string; dm_members: string[] }[];
+    const channel = channels.find((candidate) => candidate.id === id);
+    if (!channel) return "";
+    if (channel.dm_members.length === 0) return `#${channel.name}`;
+    return channel.dm_members
+      .map((member) => this.members.find((found) => found.id === member)?.name ?? member)
+      .join(", ");
   }
 
   private notify(change: Change): void {

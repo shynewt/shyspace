@@ -1,12 +1,20 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { api, type Change, type HuddlePeer, type IncomingHuddle, type MyHuddle, onChange } from "../../lib/api";
+import {
+  api,
+  type Change,
+  type HuddlePeer,
+  type IncomingHuddle,
+  type MyHuddle,
+  onAnyWorkspaceChange,
+} from "../../lib/api";
 import { channelReference } from "../../lib/channels";
 import { displayName } from "../../lib/people";
 import { usePreferences } from "../../lib/preferences";
 import { SHORTCUTS } from "../../lib/shortcuts";
-import { reportError, showUndoToast } from "../../lib/toast";
-import { useLive } from "../../lib/useLive";
+import { reportError, showToast, showUndoToast } from "../../lib/toast";
+import { useLiveEverywhere } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
+import { useWorkspaces } from "../shell/Workspaces";
 import { huddleNews } from "./huddleText";
 
 /** A link that comes back within this long shows nothing, so a blip never alarms anyone. */
@@ -15,8 +23,10 @@ export const RECONNECT_GRACE_MS = 3000;
 const DEVICE_GRACE_MS = 2000;
 
 type HuddleValue = {
-  /** Your huddle; null when you're in none, undefined until loaded. */
+  /** Your huddle, in whichever workspace holds it; null when you're in none, undefined until loaded. */
   mine: MyHuddle | null | undefined;
+  /** Your huddle is in another workspace than the one shown, so its people and place aren't in this one's lists. */
+  isElsewhere: boolean;
   /** The huddle ringing for you right now, if any. */
   incoming: IncomingHuddle | null;
   /** Who's talking right now, you included. */
@@ -28,6 +38,8 @@ type HuddleValue = {
   isSpeakerDown: boolean;
   join: (channel: string) => void;
   leave: () => void;
+  /** Joins the ringing huddle, showing its workspace first if it's another. */
+  answer: () => void;
   /** Stops the ring without joining. */
   decline: () => void;
   toggleMute: () => void;
@@ -45,21 +57,30 @@ export function useMyHuddle(): HuddleValue {
  * Your huddle for the whole app: what it is, who's talking, the actions on
  * it, and what a screen reader hears as it changes.
  */
+/** A huddle to join once its workspace is shown, after answering a ring from another. */
+let pendingJoin: string | null = null;
+
 export function HuddleProvider({ children }: { children: ReactNode }) {
-  const mine = useLive(api.myHuddle, (change) => change.kind === "my_huddle");
+  // Only one workspace on the device holds a call, and it goes on whichever is shown.
+  const mine = useLiveEverywhere(api.myHuddle, (change) => change.kind === "my_huddle");
+  const spaces = useWorkspaces();
   const { session, channels, members } = useWorkspace();
   const [{ joinsHuddlesMuted }] = usePreferences();
   const speaking = useSpeaking(mine ?? null, session.me);
   const reconnecting = useLongReconnects(mine?.peers ?? NO_PEERS);
 
+  const callPlace = mine?.channel_name;
   const placeOf = useCallback(
     (channel: string) =>
       channelReference(
         channels.find((candidate) => candidate.id === channel),
         members,
-      ) || "a channel",
-    [channels, members],
+      ) ||
+      callPlace ||
+      "a channel",
+    [channels, members, callPlace],
   );
+  const isElsewhere = Boolean(mine && mine.workspace_id !== session.workspace_id);
   const nameOf = useCallback(
     (member: string) => displayName(members?.find((candidate) => candidate.id === member)?.name ?? "", member),
     [members],
@@ -67,7 +88,7 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   const [news, setNews] = useState<{ id: number; text: string } | null>(null);
   const say = useCallback((text: string) => setNews((last) => ({ id: (last?.id ?? 0) + 1, text })), []);
   useNews(mine, nameOf, placeOf, say);
-  const incoming = useLive(api.huddleRinging, isRingChange) ?? null;
+  const incoming = useLiveEverywhere(api.huddleRinging, isRingChange) ?? null;
   const caller = incoming && displayName(incoming.member_name, incoming.member);
   useEffect(() => {
     if (caller) say(`${caller} started a huddle`);
@@ -96,19 +117,43 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   current.current = mine;
   const join = useCallback(
     (channel: string) => {
-      const previous = current.current?.channel;
+      const previous = current.current;
       api.joinHuddle(channel, joinsHuddlesMuted).then(() => {
-        if (!previous || previous === channel) return;
-        showUndoToast(`Left the huddle in ${placeOf(previous)}`, () => api.joinHuddle(previous, joinsHuddlesMuted));
+        if (!previous || previous.channel === channel) return;
+        // Undo rejoins in the shown workspace, so only a huddle that was in it can come back that way.
+        if (previous.workspace_id !== session.workspace_id) {
+          return showToast(`Left the huddle in ${previous.channel_name}`, "info");
+        }
+        showUndoToast(`Left the huddle in ${placeOf(previous.channel)}`, () =>
+          api.joinHuddle(previous.channel, joinsHuddlesMuted),
+        );
       }, reportError);
     },
-    [joinsHuddlesMuted, placeOf],
+    [joinsHuddlesMuted, placeOf, session.workspace_id],
   );
+  // Answering a ring from another workspace showed this one; join now.
+  useEffect(() => {
+    if (pendingJoin === null) return;
+    const channel = pendingJoin;
+    pendingJoin = null;
+    join(channel);
+  }, [join]);
+  const ringing = useRef(incoming);
+  ringing.current = incoming;
+  const { select } = spaces;
+  const answer = useCallback(() => {
+    const ring = ringing.current;
+    if (!ring) return;
+    if (ring.workspace_id === session.workspace_id) return join(ring.channel);
+    pendingJoin = ring.channel;
+    select(ring.workspace_id, (navigate) => navigate({ kind: "channel", id: ring.channel }));
+  }, [join, select, session.workspace_id]);
   const leave = useCallback(() => {
     api.leaveHuddle().catch(reportError);
   }, []);
   const decline = useCallback(() => {
-    api.declineHuddle().catch(reportError);
+    const ring = ringing.current;
+    if (ring) api.declineHuddle(ring.workspace_id).catch(reportError);
   }, []);
   const toggleMute = useCallback(() => {
     const huddle = current.current;
@@ -119,8 +164,34 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   useHuddleKeys(mine, join, leave, toggleMute);
 
   const value = useMemo(
-    () => ({ mine, incoming, speaking, reconnecting, isMicDown, isSpeakerDown, join, leave, decline, toggleMute }),
-    [mine, incoming, speaking, reconnecting, isMicDown, isSpeakerDown, join, leave, decline, toggleMute],
+    () => ({
+      mine,
+      isElsewhere,
+      incoming,
+      speaking,
+      reconnecting,
+      isMicDown,
+      isSpeakerDown,
+      join,
+      leave,
+      answer,
+      decline,
+      toggleMute,
+    }),
+    [
+      mine,
+      isElsewhere,
+      incoming,
+      speaking,
+      reconnecting,
+      isMicDown,
+      isSpeakerDown,
+      join,
+      leave,
+      answer,
+      decline,
+      toggleMute,
+    ],
   );
   return (
     <HuddleContext.Provider value={value}>
@@ -178,7 +249,7 @@ function useSpeaking(mine: MyHuddle | null, me: string): ReadonlySet<string> {
   currentChannel.current = channel;
   useEffect(
     () =>
-      onChange((change) => {
+      onAnyWorkspaceChange((_, change) => {
         if (change.kind !== "huddle_speaking") return;
         setHeard((previous) => {
           const here = currentChannel.current;

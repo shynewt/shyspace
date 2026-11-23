@@ -1,25 +1,30 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
-  type AlertTarget,
   api,
   type Change,
+  type LaterItem,
   onAnyWorkspaceChange,
   type Session,
   type WorkspaceBadge,
   type WorkspaceItem,
 } from "../../lib/api";
 import { saveEverythingBeforeSwitch } from "../../lib/beforeSwitch";
-import { reportError } from "../../lib/toast";
+import { shownView } from "../../lib/shownView";
+import { reportError, showToast } from "../../lib/toast";
 import { useAlerts } from "../../lib/useAlerts";
 import { usePresence } from "../../lib/usePresence";
+import { useReminders } from "../../lib/useReminders";
+import { savedItemView, type View } from "../../lib/workspace";
 
 type WorkspacesValue = {
   /** Every workspace on this device, in rail order. */
   workspaces: WorkspaceItem[];
   badges: ReadonlyMap<string, WorkspaceBadge>;
   shownId: string;
-  /** Shows another workspace, then opens `target` in it if given (a notification's message). */
-  select: (workspaceId: string, target?: AlertTarget) => void;
+  /** Shows another workspace, then runs `open` there if given (a notification's message). */
+  select: (workspaceId: string, open?: Opener) => void;
+  /** Opens something in `workspaceId`: right away if it's shown, else after showing it. */
+  openIn: (workspaceId: string, open: Opener) => void;
   /** Deletes a workspace from this device (the caller asks first). */
   leave: (workspaceId: string) => Promise<void>;
   /** Opens joining, creating or restoring another workspace. */
@@ -34,18 +39,21 @@ export function useWorkspaces(): WorkspacesValue {
   return value;
 }
 
-/** What a notification opens once its workspace has been shown, read once by the next shell. */
-let pendingTarget: AlertTarget | null = null;
+/** Opens something in the shown workspace's screen, given how to navigate there. */
+export type Opener = (navigate: (view: View) => void) => void;
 
-export function takePendingTarget(): AlertTarget | null {
-  const target = pendingTarget;
-  pendingTarget = null;
-  return target;
+/** What to open once a workspace has been shown (a notification's message), read once by the next shell. */
+let pendingOpen: Opener | null = null;
+
+export function takePendingOpen(): Opener | null {
+  const open = pendingOpen;
+  pendingOpen = null;
+  return open;
 }
 
 /** Changes that move a workspace's unread or mention counts. */
 function changesBadges(change: Change): boolean {
-  return ["channels", "messages", "alert", "workspaces"].includes(change.kind);
+  return ["channels", "messages", "alert", "later", "workspaces"].includes(change.kind);
 }
 
 /**
@@ -92,21 +100,29 @@ export function WorkspacesProvider({
   }, []);
 
   const select = useCallback(
-    (workspaceId: string, target?: AlertTarget) => {
+    (workspaceId: string, open?: Opener) => {
       if (workspaceId === session.workspace_id) {
-        // Already selected, as while adding another: show it again, opening `target` there.
-        pendingTarget = target ?? null;
+        // Already selected, as while adding another: show it again, opening there.
+        pendingOpen = open ?? null;
         onSession(session);
         return;
       }
       saveEverythingBeforeSwitch()
         .then(() => api.selectWorkspace(workspaceId))
         .then((next) => {
-          pendingTarget = target ?? null;
+          pendingOpen = open ?? null;
           onSession(next);
         }, reportError);
     },
     [session, onSession],
+  );
+  const openIn = useCallback(
+    (workspaceId: string, open: Opener) => {
+      const shown = shownView();
+      if (shown?.workspaceId === workspaceId) return open(shown.navigate);
+      select(workspaceId, open);
+    },
+    [select],
   );
   const leave = useCallback(
     async (workspaceId: string) => {
@@ -124,15 +140,31 @@ export function WorkspacesProvider({
   );
 
   const alertWorkspaces = useMemo(
-    () => ({ names: new Map(workspaces.map((workspace) => [workspace.workspace_id, workspace.name])), select }),
-    [workspaces, select],
+    () => ({ names: new Map(workspaces.map((workspace) => [workspace.workspace_id, workspace.name])), openIn }),
+    [workspaces, openIn],
   );
   useAlerts(alertWorkspaces);
   usePresence();
+  useReminders(
+    useCallback(
+      (workspaceId: string, item: LaterItem) =>
+        openIn(workspaceId, (navigate) => {
+          const saved = savedItemView(item);
+          if (saved) navigate(saved);
+          else showToast("What you saved no longer exists.", "info");
+        }),
+      [openIn],
+    ),
+  );
+  // The window's badge counts what needs you in every workspace on this device.
+  const attention = [...badges.values()].reduce((total, badge) => total + badge.attention, 0);
+  useEffect(() => {
+    api.setAttentionCount(attention).catch(reportError);
+  }, [attention]);
 
   const value = useMemo(
-    () => ({ workspaces, badges, shownId: session.workspace_id, select, leave, add: onAdd }),
-    [workspaces, badges, session.workspace_id, select, leave, onAdd],
+    () => ({ workspaces, badges, shownId: session.workspace_id, select, openIn, leave, add: onAdd }),
+    [workspaces, badges, session.workspace_id, select, openIn, leave, onAdd],
   );
   return <WorkspacesContext.Provider value={value}>{children}</WorkspacesContext.Provider>;
 }

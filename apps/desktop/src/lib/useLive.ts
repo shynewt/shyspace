@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { type Change, onChange } from "./api";
+import { type Change, onAnyWorkspaceChange, onChange } from "./api";
 import { reportError } from "./toast";
 
 /**
@@ -8,6 +8,23 @@ import { reportError } from "./toast";
  * function or a useCallback): a new `load` starts over, like a new query.
  */
 export function useLive<T>(load: () => Promise<T>, isRelevant: (change: Change) => boolean) {
+  return useLiveFrom(onChange, load, isRelevant);
+}
+
+/** The same, for data that spans workspaces (your call, a ring): reloaded on changes from any of them. */
+export function useLiveEverywhere<T>(load: () => Promise<T>, isRelevant: (change: Change) => boolean) {
+  return useLiveFrom(subscribeEverywhere, load, isRelevant);
+}
+
+function subscribeEverywhere(listener: (change: Change) => void): () => void {
+  return onAnyWorkspaceChange((_, change) => listener(change));
+}
+
+function useLiveFrom<T>(
+  subscribe: (listener: (change: Change) => void) => () => void,
+  load: () => Promise<T>,
+  isRelevant: (change: Change) => boolean,
+) {
   const [value, setValue] = useState<T>();
   // Only consulted when a change arrives, so the latest one is always right.
   const relevantRef = useRef(isRelevant);
@@ -28,14 +45,14 @@ export function useLive<T>(load: () => Promise<T>, isRelevant: (change: Change) 
       );
     };
     refresh();
-    const unsubscribe = onChange((change) => {
+    const unsubscribe = subscribe((change) => {
       if (relevantRef.current(change)) refresh();
     });
     return () => {
       isCancelled = true;
       unsubscribe();
     };
-  }, [load]);
+  }, [subscribe, load]);
 
   return value;
 }

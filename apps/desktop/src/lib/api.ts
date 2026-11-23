@@ -16,7 +16,13 @@ export type WorkspaceItem = {
   is_muted: boolean;
 };
 /** What a workspace's rail icon shows: the same counts as its sidebar. */
-export type WorkspaceBadge = { workspace_id: string; unread: boolean; mentions: number };
+export type WorkspaceBadge = {
+  workspace_id: string;
+  unread: boolean;
+  mentions: number;
+  /** What needs you, as the window's badge counts it: Inbox outside DMs, unread unmuted DMs, due reminders. */
+  attention: number;
+};
 
 /** The workspace the app shows; changes from the others aren't passed on. */
 let selectedWorkspaceId: string | null = null;
@@ -307,8 +313,12 @@ export type HuddleLink = "connecting" | "direct" | "relayed" | "reconnecting";
 export type MicState = "off" | "opening" | "live" | "permission_denied" | "silent" | "lost";
 export type OutputState = "playing" | "bluetooth_call_mode" | "lost";
 export type HuddlePeer = { member: string; link: HuddleLink; speaking: boolean };
+/** Your huddle, in whichever workspace on this device holds it (one at a time). */
 export type MyHuddle = {
+  workspace_id: string;
   channel: string;
+  /** "#general", or a DM's people joined by ", ": enough to name it while another workspace is shown. */
+  channel_name: string;
   phase: HuddlePhase;
   muted: boolean;
   mic: MicState;
@@ -316,7 +326,7 @@ export type MyHuddle = {
   peers: HuddlePeer[];
 };
 /** The incoming huddle ringing on this device. */
-export type IncomingHuddle = { channel: string; member: string; member_name: string };
+export type IncomingHuddle = { workspace_id: string; channel: string; member: string; member_name: string };
 export type AudioDevice = {
   id: string;
   name: string;
@@ -408,7 +418,10 @@ export const api = {
   saveForLater: (item: string, remindMs: number | null) => invoke<void>("save_for_later", { item, remindMs }),
   removeFromLater: (item: string) => invoke<void>("remove_from_later", { item }),
   markLaterDone: (item: string, done: boolean) => invoke<void>("mark_later_done", { item, done }),
-  takeDueReminders: () => invoke<LaterItem[]>("take_due_reminders"),
+  /** Due reminders from every workspace on this device, each marked fired. */
+  takeDueReminders: () => invoke<{ workspace_id: string; item: LaterItem }[]>("take_due_reminders"),
+  /** When the next reminder comes due, in any workspace. */
+  nextReminderMs: () => invoke<number | null>("next_reminder_ms"),
   setDraft: (target: string, text: string) => invoke<void>("set_draft", { target, text }),
   linkedMessage: (id: string) => invoke<LinkedMessage | null>("linked_message", { id }),
   markAllRead: () => invoke<void>("mark_all_read"),
@@ -495,7 +508,7 @@ export const api = {
   joinHuddle: (channel: string, muted: boolean) => invoke<void>("join_huddle", { channel, muted }),
   leaveHuddle: () => invoke<void>("leave_huddle"),
   /** Stops the ring for an incoming huddle without joining it. */
-  declineHuddle: () => invoke<void>("decline_huddle"),
+  declineHuddle: (workspaceId: string) => invoke<void>("decline_huddle", { workspaceId }),
   /** The version downloaded and ready to install, or null while there's nothing newer. */
   checkForUpdate: () => invoke<string | null>("check_for_update"),
   /** Installs the ready update and restarts into it, after uploading unsent changes; refused during a huddle. */

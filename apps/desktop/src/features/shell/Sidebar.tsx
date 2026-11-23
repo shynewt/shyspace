@@ -8,6 +8,7 @@ import { useLive } from "../../lib/useLive";
 import { Kbd, Logo } from "../../ui";
 import { HuddleBar } from "../huddles/HuddleBar";
 import { useMyHuddle } from "../huddles/HuddleContext";
+import { HuddleElsewhereBar } from "../huddles/HuddleElsewhere";
 import { IncomingHuddleCard } from "../huddles/IncomingHuddle";
 import { ChannelSections } from "./ChannelSections";
 import { DirectMessages } from "./DirectMessages";
@@ -21,7 +22,7 @@ import { WorkspaceMenu } from "./WorkspaceMenu";
 
 /** The sidebar's content; `ShellLayout` places it, docked or as a drawer. */
 export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefined; onOpenSearch: () => void }) {
-  const { mine, incoming } = useMyHuddle();
+  const { mine, isElsewhere, incoming } = useMyHuddle();
   const readyUpdate = useReadyUpdate();
   return (
     <div className="flex h-full flex-col">
@@ -59,7 +60,11 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
 
       <AnimatePresence initial={false}>
         {mine ? (
-          <HuddleBar key="huddle" huddle={mine} />
+          isElsewhere ? (
+            <HuddleElsewhereBar key="huddle-elsewhere" huddle={mine} />
+          ) : (
+            <HuddleBar key="huddle" huddle={mine} />
+          )
         ) : (
           incoming && <IncomingHuddleCard key="incoming" incoming={incoming} />
         )}

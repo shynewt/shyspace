@@ -17,6 +17,8 @@ export type WorkspacesContext = {
   setSession: (session: Session | null) => void;
   /** Sends `change` as coming from `workspaceId` (null for the app itself). */
   emitFrom: (workspaceId: string | null, change: Change) => void;
+  /** The shown workspace's own badge, counted from the fake's messages as the core counts it. */
+  shownBadge: () => Omit<WorkspaceBadge, "workspace_id">;
 };
 
 export class FakeWorkspaces {
@@ -46,8 +48,8 @@ export class FakeWorkspaces {
   }
 
   /** What `workspaceId`'s rail icon shows, as its own unread messages would make it. */
-  setBadge(workspaceId: string, unread: boolean, mentions: number): void {
-    this.badges.set(workspaceId, { unread, mentions });
+  setBadge(workspaceId: string, unread: boolean, mentions: number, attention = mentions): void {
+    this.badges.set(workspaceId, { unread, mentions, attention });
     this.context.emitFrom(workspaceId, { kind: "channels" });
   }
 
@@ -66,7 +68,9 @@ export class FakeWorkspaces {
       case "workspace_badges":
         return this.items().map((item) => ({
           workspace_id: item.workspace_id,
-          ...(this.badges.get(item.workspace_id) ?? { unread: false, mentions: 0 }),
+          ...(item.workspace_id === this.context.session()?.workspace_id
+            ? this.context.shownBadge()
+            : (this.badges.get(item.workspace_id) ?? { unread: false, mentions: 0, attention: 0 })),
         }));
       case "select_workspace":
         return this.select(requireString(args, "workspaceId"));
@@ -81,7 +85,7 @@ export class FakeWorkspaces {
       case "mark_workspace_read": {
         const id = requireString(args, "workspaceId");
         this.markedRead.push(id);
-        this.badges.set(id, { unread: false, mentions: 0 });
+        this.badges.set(id, { unread: false, mentions: 0, attention: 0 });
         this.context.emitFrom(id, { kind: "channels" });
         return null;
       }

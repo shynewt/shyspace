@@ -232,7 +232,7 @@ function Notice({ children }: { children: ReactNode }) {
 }
 
 /** Mute says its state in words, not only an icon: icons alone are why people talk on mute. */
-function MuteButton({
+export function MuteButton({
   mic,
   isMuted,
   isJoining,

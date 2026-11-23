@@ -6,7 +6,15 @@ import { useWorkspace } from "../../lib/workspace";
 import { Button, IconButton, rise, tweens } from "../../ui";
 import { MemberAvatar } from "../members/MemberAvatar";
 import { ChannelName } from "../private/ChannelName";
+import { useWorkspaces } from "../shell/Workspaces";
 import { useMyHuddle } from "./HuddleContext";
+
+/** The name of `workspaceId` when it isn't the one shown; null when it is. */
+export function useOtherWorkspaceName(workspaceId: string): string | null {
+  const { workspaces, shownId } = useWorkspaces();
+  if (workspaceId === shownId) return null;
+  return workspaces.find((workspace) => workspace.workspace_id === workspaceId)?.name ?? "another workspace";
+}
 
 /**
  * A DM huddle ringing for you, docked where your huddle's bar goes: who,
@@ -14,8 +22,9 @@ import { useMyHuddle } from "./HuddleContext";
  * it moves after it arrives: the ring is the alarm, the card just answers it.
  */
 export function IncomingHuddleCard({ incoming }: { incoming: IncomingHuddle }) {
-  const { join, decline } = useMyHuddle();
+  const { answer, decline } = useMyHuddle();
   const { channels } = useWorkspace();
+  const otherWorkspace = useOtherWorkspaceName(incoming.workspace_id);
   const name = displayName(incoming.member_name, incoming.member);
   const isGroup = (channels.find((channel) => channel.id === incoming.channel)?.dm_members.length ?? 0) > 1;
   return (
@@ -30,10 +39,14 @@ export function IncomingHuddleCard({ incoming }: { incoming: IncomingHuddle }) {
           <p className="truncate text-sm">
             <span className="font-medium">{name}</span> started a huddle
           </p>
-          {isGroup && (
-            <p className="truncate text-xs text-muted">
-              <ChannelName channelId={incoming.channel} />
-            </p>
+          {otherWorkspace ? (
+            <p className="truncate text-xs text-muted">in {otherWorkspace}</p>
+          ) : (
+            isGroup && (
+              <p className="truncate text-xs text-muted">
+                <ChannelName channelId={incoming.channel} />
+              </p>
+            )
           )}
         </div>
       </div>
@@ -42,7 +55,7 @@ export function IncomingHuddleCard({ incoming }: { incoming: IncomingHuddle }) {
           variant="primary"
           size="sm"
           icon={<Headphones size={14} />}
-          onClick={() => join(incoming.channel)}
+          onClick={answer}
           className="flex-1 justify-center"
         >
           Join
@@ -57,7 +70,7 @@ export function IncomingHuddleCard({ incoming }: { incoming: IncomingHuddle }) {
 
 /** The same, in the header while the sidebar is hidden. */
 export function IncomingHuddlePill({ incoming }: { incoming: IncomingHuddle }) {
-  const { join, decline } = useMyHuddle();
+  const { answer, decline } = useMyHuddle();
   const name = displayName(incoming.member_name, incoming.member);
   return (
     <motion.div
@@ -73,7 +86,7 @@ export function IncomingHuddlePill({ incoming }: { incoming: IncomingHuddle }) {
       <button
         type="button"
         aria-label={`Join ${name}'s huddle`}
-        onClick={() => join(incoming.channel)}
+        onClick={answer}
         className="flex h-6 items-center gap-1 rounded-full bg-accent-soft px-2 text-sm text-accent-text transition-colors hover:bg-accent-soft/70"
       >
         <Headphones size={13} />

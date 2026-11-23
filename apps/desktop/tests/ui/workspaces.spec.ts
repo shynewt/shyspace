@@ -231,3 +231,46 @@ test("notifications keep coming while adding a workspace, and one opens its work
   await page.evaluate(() => window.fake.clickAlert(0));
   await expect(rail(page).getByRole("button", { name: /^Team/ })).toHaveAttribute("aria-current", "page");
 });
+
+test("a call stays reachable while another workspace is shown", async ({ page }) => {
+  await openApp(page);
+  await addTeam(page);
+  await page.getByRole("button", { name: "Start a huddle" }).click();
+  await expect(page.getByRole("region", { name: "Your huddle" })).toContainText("general");
+
+  await page.keyboard.press("Control+2");
+  await expect(workspaceMenu(page, "Team")).toBeVisible();
+  const bar = page.getByRole("region", { name: "Your huddle" });
+  await expect(bar).toContainText("Acme · #general");
+  await bar.getByRole("button", { name: "Mute", exact: true }).click();
+  await expect(bar.getByRole("button", { name: "Mute", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  await bar.getByRole("button", { name: "Acme · #general" }).click();
+  await expect(workspaceMenu(page, "Acme")).toBeVisible();
+  await page.getByRole("region", { name: "Your huddle" }).getByRole("button", { name: "Leave" }).click();
+  await expect(page.getByRole("region", { name: "Your huddle" })).toHaveCount(0);
+});
+
+test("a ring from another workspace shows, and Join goes there to answer", async ({ page }) => {
+  await openApp(page);
+  const team = await addTeam(page);
+  await page.evaluate((id) => window.fake.huddles.ringFrom(id, `${id}-grace`, "Grace"), team);
+  const card = page.getByRole("region", { name: "Incoming huddle" });
+  await expect(card).toContainText("Grace started a huddle");
+  await expect(card).toContainText("in Team");
+
+  await card.getByRole("button", { name: "Join" }).click();
+  await expect(workspaceMenu(page, "Team")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.fake.handle("my_huddle", undefined)))
+    .toMatchObject({ workspace_id: team });
+});
+
+test("declining a ring from another workspace declines it there", async ({ page }) => {
+  await openApp(page);
+  const team = await addTeam(page);
+  await page.evaluate((id) => window.fake.huddles.ringFrom(id, `${id}-grace`, "Grace"), team);
+  await page.getByRole("region", { name: "Incoming huddle" }).getByRole("button", { name: "Decline" }).click();
+  await expect(page.getByRole("region", { name: "Incoming huddle" })).toHaveCount(0);
+  await expect(workspaceMenu(page, "Acme")).toBeVisible();
+});
