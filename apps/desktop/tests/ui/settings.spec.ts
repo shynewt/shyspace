@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { failWith } from "./support";
+import { answerWith, failWith } from "./support";
 
 declare global {
   interface Window {
@@ -230,6 +230,43 @@ test("a failed storage save keeps what you typed and says why", async ({ page })
   await expect(settings.getByRole("alert")).toHaveText("the bucket refused these keys");
   await expect(settings.getByLabel("Access key")).toHaveValue("AKIDNEW");
   await expect(settings.getByLabel("Secret key")).toHaveValue("wrong-secret");
+});
+
+/** Settings › Recovery, with the core reporting a recovery snapshot of `bytes`. */
+async function recoveryWithSnapshot(page: Page, bytes: number) {
+  const settings = await openSettings(page);
+  const storage = await page.evaluate(() => window.fake.handle("storage_settings", undefined));
+  await answerWith(
+    page,
+    "storage_settings",
+    { ...(storage as object), recovery_snapshot_bytes: bytes },
+    { kind: "storage" },
+  );
+  await settings.getByRole("tab", { name: "Recovery" }).click();
+  return settings;
+}
+
+test("a recovery kit far from its size limit says nothing about it", async ({ page }) => {
+  const settings = await recoveryWithSnapshot(page, 620_000);
+  await expect(settings.getByRole("button", { name: "Show recovery kit" })).toBeVisible();
+  await expect(settings.getByRole("tabpanel")).not.toContainText("32 MB");
+});
+
+test("a recovery kit nearing its size limit says so calmly, and still shows", async ({ page }) => {
+  const settings = await recoveryWithSnapshot(page, 26 * 1024 * 1024);
+  await expect(settings.getByRole("tabpanel")).toContainText("Your recovery kit is nearly too big");
+  // No advice to remove people: that would only make the snapshot bigger.
+  await expect(settings.getByText(/^It grows as your team grows/)).toHaveText(
+    "It grows as your team grows, and is now 26 MB of the 32 MB it can hold. Past that, it can no longer restore your admin role. An update to lift this limit is planned.",
+  );
+  await expect(settings.getByRole("button", { name: "Show recovery kit" })).toBeVisible();
+});
+
+test("a recovery kit past its size limit says it can't restore, and offers no kit", async ({ page }) => {
+  const settings = await recoveryWithSnapshot(page, 33 * 1024 * 1024);
+  await expect(settings.getByRole("tabpanel")).toContainText("Your recovery kit can't restore this workspace");
+  await expect(settings.getByRole("tabpanel")).toContainText("keep this device safe");
+  await expect(settings.getByRole("button", { name: "Show recovery kit" })).toHaveCount(0);
 });
 
 test("the admin can show the recovery kit", async ({ page }) => {
