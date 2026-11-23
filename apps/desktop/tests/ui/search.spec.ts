@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
 
+declare global {
+  interface Window {
+    /** Lets a held search answer go; resolves once it has. */
+    releaseHeldSearch?: () => Promise<void>;
+  }
+}
+
 test("search finds a message and jumps to its channel", async ({ page }) => {
   await page.goto("");
   await page.evaluate(() => {
@@ -30,6 +37,40 @@ test("search results say who wrote a message and when a page changed", async ({ 
   await page.getByLabel("Search messages and pages").fill("quarterly");
   await expect(page.getByRole("option", { name: /quarterly budget/ })).toContainText(/Grace, 3:30\sPM/);
   await expect(page.getByRole("option").filter({ hasText: "Budget first" })).toContainText(/Edited 3:30\sPM/);
+});
+
+test("a slow answer for an older query doesn't replace newer results", async ({ page }) => {
+  await page.goto("");
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    window.fake.receiveMessage(grace, "general", "We ship on Friday");
+    window.fake.receiveMessage(grace, "general", "The shipping crates arrived");
+    const fake = window.fake;
+    const handle = fake.handle.bind(fake);
+    fake.handle = (command, args) => {
+      const answer = handle(command, args);
+      const isHeld = command === "search" && typeof args === "object" && "query" in args && args.query === "ship";
+      if (!isHeld) return answer;
+      return new Promise((resolve) => {
+        window.releaseHeldSearch = async () => {
+          resolve(answer);
+          await new Promise((settled) => setTimeout(settled, 100));
+        };
+      });
+    };
+  });
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+
+  await page.keyboard.press("Control+k");
+  const box = page.getByLabel("Search messages and pages");
+  await box.fill("ship");
+  await expect.poll(() => page.evaluate(() => window.releaseHeldSearch !== undefined)).toBe(true);
+  await box.fill("shipping");
+  await expect(page.getByRole("option", { name: /shipping crates/ })).toBeVisible();
+
+  await page.evaluate(() => window.releaseHeldSearch?.());
+  await expect(page.getByRole("option", { name: /ship on Friday/ })).toHaveCount(0);
+  await expect(page.getByRole("option", { name: /shipping crates/ })).toBeVisible();
 });
 
 test("the palette runs actions", async ({ page }) => {

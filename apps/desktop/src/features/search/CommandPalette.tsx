@@ -96,8 +96,18 @@ function PaletteBody({
       setHits([]);
       return;
     }
-    const timer = setTimeout(() => api.search(query).then(setHits, reportError), SEARCH_DELAY_MS);
-    return () => clearTimeout(timer);
+    let isCurrent = true;
+    const timer = setTimeout(
+      () =>
+        api.search(query).then((found) => {
+          if (isCurrent) setHits(found);
+        }, reportError),
+      SEARCH_DELAY_MS,
+    );
+    return () => {
+      isCurrent = false;
+      clearTimeout(timer);
+    };
   }, [query]);
 
   const items = useMemo<Item[]>(() => {
