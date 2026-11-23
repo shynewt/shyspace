@@ -3142,3 +3142,68 @@ async fn junk_put_first_at_a_commit_slot_neither_is_overwritten_nor_blocks_it() 
         .any(|member| member.id == carol.my_id() && member.active);
     assert!(!carol_is_active, "the removal reached Bob");
 }
+
+/// Junk that waited for its epoch key (kept with the parked ops) is skipped
+/// the same way once the key is there, so its author's later ops apply.
+/// So is a body that decodes but has no clock, which only junk can have.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_kept_waiting_or_without_a_clock_is_skipped_too() {
+    for is_kept_waiting in [true, false] {
+        let (_root, _bucket, admin, bob) = admin_and_bob().await;
+        let general = channel_id(&admin, "general");
+        let (epoch, key) = current_key(&bob);
+        let next = bob.state().store.next_seq(&bob.me()).unwrap();
+        let without_a_clock = OpBody {
+            lamport: 0,
+            timestamp_ms: 0,
+            op: Op::Message {
+                id: crate::ops::new_owned_id(&bob.me()),
+                channel: general.clone(),
+                text: "no clock".into(),
+                reply_to: None,
+            },
+        };
+        let junk = match is_kept_waiting {
+            true => crypto::seal_bytes(
+                &bob.inner.identity,
+                &key,
+                epoch,
+                next,
+                postcard::to_stdvec(&(crypto::OP_FORMAT, "not an op")).unwrap(),
+            )
+            .unwrap(),
+            false => crypto::seal(&bob.inner.identity, &key, epoch, next, &without_a_clock).unwrap(),
+        };
+        let after = OpBody {
+            lamport: 9_001,
+            timestamp_ms: 0,
+            op: Op::Message {
+                id: crate::ops::new_owned_id(&bob.me()),
+                channel: general.clone(),
+                text: "after the junk".into(),
+                reply_to: None,
+            },
+        };
+        if is_kept_waiting {
+            admin.state().store.insert_pending(&junk).unwrap();
+        } else {
+            admin.receive(junk).unwrap();
+        }
+        admin
+            .receive(crypto::seal(&bob.inner.identity, &key, epoch, next + 1, &after).unwrap())
+            .unwrap();
+        admin.sync().await;
+        admin.sync().await;
+
+        let texts: Vec<_> = admin
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|message| message.text)
+            .collect();
+        assert!(
+            texts.contains(&"after the junk".to_string()),
+            "kept waiting: {is_kept_waiting}, {texts:?}"
+        );
+    }
+}

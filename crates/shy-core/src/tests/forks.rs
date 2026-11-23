@@ -304,3 +304,22 @@ async fn junk_over_a_held_range_cannot_hide_a_later_upload() {
             .unwrap()
     );
 }
+
+/// Junk its author signed is kept whole (it is small) though it never
+/// applies, so if they also send a real op for that seq, the two are proved
+/// a fork rather than the real one being quietly ignored.
+#[tokio::test(flavor = "multi_thread")]
+async fn junk_then_a_real_op_for_the_same_seq_is_proved_a_fork() {
+    let fork = fork().await;
+    let (admin, bob) = (&fork.admin, &fork.bob);
+    let (epoch, key) = current_key(bob);
+    let seq = fork.for_admin.seq;
+    let junk = postcard::to_stdvec(&(crate::crypto::OP_FORMAT, "not an op")).unwrap();
+    admin
+        .receive(crate::crypto::seal_bytes(&bob.inner.identity, &key, epoch, seq, junk).unwrap())
+        .unwrap();
+
+    admin.receive(fork.for_admin.clone()).unwrap();
+
+    assert!(admin.state().store.is_forked(&bob.me(), seq).unwrap());
+}

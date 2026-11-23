@@ -131,7 +131,10 @@ fn parse_body(envelope: &Envelope, body_bytes: Vec<u8>) -> Result<VerifiedOp> {
         Ok((body, [])) if format == OP_FORMAT => body,
         _ => return Err(anyhow::Error::new(Unreadable)),
     };
-    ensure!(body.lamport > 0, "lamport clock must start at 1");
+    // A clock starts at 1; only junk has none.
+    if body.lamport == 0 {
+        return Err(anyhow::Error::new(Unreadable));
+    }
     Ok(VerifiedOp {
         author: envelope.author,
         seq: envelope.seq,

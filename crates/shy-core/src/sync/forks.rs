@@ -58,8 +58,8 @@ impl Workspace {
         let Some(stored) = state.store.applied_envelope(&author, seq)? else {
             return Ok(SecondLook::Settled(Vec::new()));
         };
-        // The usual case is the same op again. One refused for its size kept
-        // only its header, so there's nothing to compare it with.
+        // The usual case is the same op again. One refused for its size (or
+        // junk too big to keep) has only its header: nothing to compare.
         if stored == *envelope || stored.ciphertext.is_empty() {
             return Ok(SecondLook::Settled(Vec::new()));
         }

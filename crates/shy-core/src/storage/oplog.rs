@@ -85,12 +85,13 @@ impl Store {
             |row| row.get(0),
         )?;
         self.open_stored(&bytes)?
-            .context("that op never counts: it was refused for its size, or forked")
+            .context("that op never counts: refused for its size, unreadable, or forked")
     }
 
     /// An op from the log, or `None` for one that never counts: refused for
-    /// its size (kept without content),
-    /// or one its author also signed another version of.
+    /// its size (kept without content), junk its author signed (kept whole,
+    /// so a second version can still be proved a fork), or one its author
+    /// also signed another version of.
     pub(crate) fn open_stored(&self, bytes: &[u8]) -> Result<Option<VerifiedOp>> {
         let envelope: Envelope = postcard::from_bytes(bytes).context("reading a stored op")?;
         if envelope.ciphertext.is_empty() || self.is_forked(&envelope.author, envelope.seq)? {
@@ -99,9 +100,11 @@ impl Store {
         let key = self
             .epoch_key(envelope.epoch)?
             .with_context(|| format!("no key for epoch {} of a stored op", envelope.epoch))?;
-        Ok(Some(
-            crypto::open(&envelope, &key).context("opening a stored op")?,
-        ))
+        match crypto::open(&envelope, &key) {
+            Ok(verified) => Ok(Some(verified)),
+            Err(error) if error.downcast_ref::<crypto::Unreadable>().is_some() => Ok(None),
+            Err(error) => Err(error.context("opening a stored op")),
+        }
     }
 
     /// Records an op refused for its size as handled, keeping only its

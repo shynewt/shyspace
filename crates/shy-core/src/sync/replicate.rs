@@ -185,8 +185,8 @@ impl Workspace {
             return Ok(false);
         }
         for (theirs, stored) in envelopes.iter().zip(&ours) {
-            // One refused for its size kept only its header: nothing to
-            // compare, as when checking for forks.
+            // One refused for its size (or junk too big to keep) has only its
+            // header: nothing to compare, as when checking for forks.
             let is_ours = stored.seq == theirs.seq
                 && (stored == theirs
                     || stored.ciphertext.is_empty()

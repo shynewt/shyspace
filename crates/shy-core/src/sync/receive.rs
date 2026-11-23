@@ -8,7 +8,7 @@ use tracing::warn;
 use super::forks::SecondLook;
 use crate::{
     crypto::{self, EpochKey, NewerFormat, Unreadable},
-    ops::{Envelope, MAX_PAGE_UPDATE_BYTES, MAX_STORED_NUMBER, RuleViolation, VerifiedOp},
+    ops::{Envelope, MAX_OP_BYTES, MAX_PAGE_UPDATE_BYTES, MAX_STORED_NUMBER, RuleViolation, VerifiedOp},
     storage::{Applied, ApplyContext},
     transport::bucket::parse_segment_name,
     views::Change,
@@ -78,8 +78,8 @@ pub(super) struct SegmentRead {
 
 /// What retrying parked ops found.
 pub(super) struct Pending {
-    /// Authors held up by an op this version can't read: from a newer
-    /// version, or junk they signed.
+    /// Authors held up by an op in a newer format than this version's (or
+    /// junk claiming one).
     pub waiting_for_update: Vec<PublicKey>,
     /// The first parked op that failed locally again.
     pub local_failure: Option<anyhow::Error>,
@@ -310,6 +310,10 @@ impl Workspace {
                         }
                     }
                     Ok(_) => {}
+                    Err(error) if error.downcast_ref::<Unreadable>().is_some() => {
+                        skip_unreadable(&state, &envelope)?;
+                        state.store.delete_pending(&envelope)?;
+                    }
                     Err(error) if error.downcast_ref::<NewerFormat>().is_some() => {
                         // Only the op its author needs next blocks anything;
                         // a far-ahead one can't raise a false alarm.
@@ -337,14 +341,20 @@ impl Workspace {
     }
 }
 
-/// Signed junk its author can't take back: recorded as handled with only its
-/// header in its turn, so their later ops aren't held up; before its turn
-/// it isn't kept, and gap repair reads it again once they're waiting.
+/// Signed junk its author can't take back: recorded as handled in its turn,
+/// so their later ops aren't held up. It's kept whole when it fits the op
+/// size limit (it never applies), so a real op for the same seq is still
+/// proved a fork. Before its turn it isn't kept, and gap repair reads it
+/// again once later ops wait behind it.
 fn skip_unreadable(state: &State, envelope: &Envelope) -> Result<Vec<Change>> {
     let is_next = envelope.seq == 1 || state.store.is_applied(&envelope.author, envelope.seq - 1)?;
     if is_next {
         warn!("skipping a signed op that no version can read");
-        state.store.insert_refused(envelope)?;
+        if envelope.ciphertext.len() <= MAX_OP_BYTES {
+            state.store.insert_applied(envelope, true)?;
+        } else {
+            state.store.insert_refused(envelope)?;
+        }
     }
     Ok(Vec::new())
 }
