@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use shy_core::{
-    BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace,
+    BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace, WorkspaceOptions,
     profile::ProfileDetails,
     sync::SyncStatus,
     views::{
@@ -21,6 +21,7 @@ use shy_core::{
     },
     workspace::StorageUpdate,
 };
+use shy_media::ShyMedia;
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, ipc::Response};
 use tokio::sync::Mutex;
 
@@ -34,6 +35,17 @@ pub(crate) struct AppState {
     workspace: Mutex<Option<Workspace>>,
     /// Stops the join in progress, if one is waiting for the admin.
     joining: std::sync::Mutex<Option<JoinCancel>>,
+    /// Huddle audio, shared by whichever workspace is open.
+    media: ShyMedia,
+}
+
+impl AppState {
+    /// Online, with huddle audio served on the workspace's endpoint.
+    fn online(&self) -> WorkspaceOptions {
+        WorkspaceOptions::from(Networking::Online)
+            .with_protocols(self.media.protocols())
+            .with_media(self.media.huddle_media())
+    }
 }
 
 #[derive(Serialize)]
@@ -106,7 +118,7 @@ async fn session(app: AppHandle, state: State<'_, AppState>) -> CommandResult<Op
     if !Workspace::exists(&state.data.path) {
         return Ok(None);
     }
-    let workspace = Workspace::open(&state.data, Networking::Online)
+    let workspace = Workspace::open(&state.data, state.online())
         .await
         .map_err(failed)?;
     Ok(Some(activate(&app, &mut slot, workspace)))
@@ -129,7 +141,7 @@ async fn create_workspace(
         workspace_name.trim(),
         profile,
         bucket,
-        Networking::Online,
+        state.online(),
     )
     .await
     .map_err(failed)?;
@@ -158,8 +170,7 @@ async fn join_workspace(
         }
         *joining = Some(cancel.clone());
     }
-    let joined =
-        Workspace::join_cancellable(&state.data, &invite, profile, Networking::Online, &cancel).await;
+    let joined = Workspace::join_cancellable(&state.data, &invite, profile, state.online(), &cancel).await;
     *state
         .joining
         .lock()
@@ -198,7 +209,7 @@ async fn restore_workspace(
     state: State<'_, AppState>,
     kit: String,
 ) -> CommandResult<Session> {
-    let workspace = Workspace::restore(&state.data, &kit, Networking::Online)
+    let workspace = Workspace::restore(&state.data, &kit, state.online())
         .await
         .map_err(failed)?;
     Ok(install(&app, &state, workspace).await)
@@ -773,6 +784,7 @@ pub fn run() {
                 data: DataDir::new(dir, KeyStorage::Keychain),
                 workspace: Mutex::new(None),
                 joining: std::sync::Mutex::new(None),
+                media: ShyMedia::new(),
             });
             window::create_main_window(app.handle())?;
             alerts::follow_clicks(app.handle())?;

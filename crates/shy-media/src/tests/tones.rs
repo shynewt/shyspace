@@ -1,0 +1,185 @@
+//! A backend with no audio devices: each "microphone" plays a steady tone,
+//! and the "speaker" keeps everything it's given, one recording per stream.
+
+use std::{
+    f32::consts::TAU,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use anyhow::Result;
+use bytes::Bytes;
+use moq_audio::{Frame, Layout, encode};
+use shy_core::huddle::media::{AudioDevice, DeviceList};
+use tokio::{sync::mpsc, task::JoinHandle};
+
+use crate::{
+    backend::{Backend, Outgoing, Sink, Speaker, VoiceReport},
+    listen::rms,
+};
+
+const RATE: u32 = 48_000;
+const FRAME: Duration = Duration::from_millis(20);
+const LOUDNESS: f32 = 0.3;
+
+pub(super) struct Tones {
+    frequency: f32,
+    speaker: Recorder,
+}
+
+impl Tones {
+    pub(super) fn new(frequency: f32) -> Self {
+        Self {
+            frequency,
+            speaker: Recorder::default(),
+        }
+    }
+
+    pub(super) fn speaker(&self) -> Recorder {
+        self.speaker.clone()
+    }
+}
+
+impl Backend for Tones {
+    type Speaker = Recorder;
+    type Voice = Playing;
+
+    fn list_devices(&self) -> Result<DeviceList> {
+        let device = |id: &str| AudioDevice {
+            id: id.into(),
+            name: id.into(),
+            is_default: true,
+            is_bluetooth: false,
+        };
+        Ok(DeviceList {
+            inputs: vec![device("tone")],
+            outputs: vec![device("recorder")],
+        })
+    }
+
+    async fn open_speaker(&self, _device: Option<String>) -> Result<Recorder> {
+        Ok(self.speaker.clone())
+    }
+
+    fn open_voice(
+        &self,
+        _speaker: &Recorder,
+        _device: Option<String>,
+        outgoing: Outgoing,
+        reports: mpsc::Sender<VoiceReport>,
+    ) -> Result<Playing> {
+        let frequency = self.frequency;
+        Ok(Playing(tokio::spawn(async move {
+            if let Err(error) = play_tone(outgoing, frequency, &reports).await {
+                panic!("the test tone stopped: {error:#}");
+            }
+        })))
+    }
+}
+
+/// Stops the tone when dropped, as closing a microphone would.
+pub(super) struct Playing(JoinHandle<()>);
+
+impl Drop for Playing {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn play_tone(outgoing: Outgoing, frequency: f32, reports: &mpsc::Sender<VoiceReport>) -> Result<()> {
+    let mut broadcast = outgoing.broadcast;
+    let clock = outgoing.catalog.clock();
+    let mut options = encode::Options::default();
+    options.track = Some(outgoing.track);
+    let input = encode::Input::new(RATE, Layout::Mono);
+    let mut producer = encode::Producer::new(&mut broadcast, outgoing.catalog, input, &options)?;
+    let _ = reports.try_send(VoiceReport::Opened);
+    let per_frame = (RATE as f32 * FRAME.as_secs_f32()) as usize;
+    let mut every = tokio::time::interval(FRAME);
+    for frame in 0.. {
+        every.tick().await;
+        let samples: Vec<f32> = (0..per_frame)
+            .map(|index| {
+                let time = (frame * per_frame + index) as f32 / RATE as f32;
+                LOUDNESS * (TAU * frequency * time).sin()
+            })
+            .collect();
+        let bytes: Vec<u8> = samples.iter().flat_map(|sample| sample.to_ne_bytes()).collect();
+        producer.write(&Frame::new(Bytes::from(bytes), clock.now()))?;
+        let _ = reports.try_send(VoiceReport::Level {
+            rms: rms(&samples),
+            peak: LOUDNESS,
+        });
+    }
+    Ok(())
+}
+
+/// One stream's samples, as played.
+type Stream = Arc<Mutex<Vec<f32>>>;
+
+/// Every stream the speaker was given.
+#[derive(Debug, Clone, Default)]
+pub(super) struct Recorder(Arc<Mutex<Vec<Stream>>>);
+
+impl Recorder {
+    /// The samples of each stream so far.
+    pub(super) fn streams(&self) -> Vec<Vec<f32>> {
+        self.0
+            .lock()
+            .expect("recorder lock")
+            .iter()
+            .map(|stream| stream.lock().expect("stream lock").clone())
+            .collect()
+    }
+
+    /// How many samples it was given in all.
+    pub(super) fn total(&self) -> usize {
+        self.streams().iter().map(Vec::len).sum()
+    }
+}
+
+impl Speaker for Recorder {
+    type Sink = Recording;
+
+    fn sink(&self, sample_rate: u32, layout: Layout) -> Result<Recording> {
+        assert_eq!(
+            sample_rate, RATE,
+            "Opus decodes at the rate the tones are made at"
+        );
+        let stream = Arc::new(Mutex::new(Vec::new()));
+        self.0.lock().expect("recorder lock").push(stream.clone());
+        Ok(Recording {
+            stream,
+            channels: layout.channels() as usize,
+        })
+    }
+
+    async fn switch(&self, _device: Option<String>) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Keeps the first channel: every channel of a tone carries the same wave.
+pub(super) struct Recording {
+    stream: Stream,
+    channels: usize,
+}
+
+impl Sink for Recording {
+    fn write(&mut self, samples: &[f32]) -> Result<()> {
+        let first_channel = samples.iter().step_by(self.channels).copied();
+        self.stream.lock().expect("stream lock").extend(first_channel);
+        Ok(())
+    }
+
+    async fn finish(self) {}
+}
+
+/// Roughly the pitch of `samples`, from how often the wave crosses zero.
+pub(super) fn pitch(samples: &[f32]) -> f32 {
+    let crossings = samples
+        .windows(2)
+        .filter(|pair| (pair[0] < 0.0) != (pair[1] < 0.0))
+        .count();
+    crossings as f32 / 2.0 / (samples.len() as f32 / RATE as f32)
+}

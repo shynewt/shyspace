@@ -3,7 +3,7 @@
 ## Setup
 
 - Rust (stable), Node with pnpm, Podman or Docker.
-- Linux desktop builds need: `webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel` (Fedora names).
+- Linux desktop builds need: `webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel` (Fedora names), and for huddle audio `alsa-lib-devel pipewire-devel clang` (Ubuntu: `libasound2-dev libpipewire-0.3-dev clang libclang-dev`). `clang-libs` alone isn't enough: generating the PipeWire bindings needs clang's own headers.
 - `cd apps/desktop && pnpm install`
 
 ## A local bucket

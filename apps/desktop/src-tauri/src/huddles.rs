@@ -38,7 +38,12 @@ pub async fn set_huddle_muted(state: State<'_, AppState>, muted: bool) -> Comman
 
 #[tauri::command]
 pub async fn huddle_devices(state: State<'_, AppState>) -> CommandResult<Devices> {
-    current(&state).await?.huddle_devices().map_err(failed)
+    let workspace = current(&state).await?;
+    // Asking the system for its devices can take a moment.
+    tauri::async_runtime::spawn_blocking(move || workspace.huddle_devices())
+        .await
+        .map_err(|error| format!("listing the audio devices crashed: {error}"))?
+        .map_err(failed)
 }
 
 #[tauri::command]
