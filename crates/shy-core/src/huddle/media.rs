@@ -151,6 +151,8 @@ pub(crate) mod fake {
         muted: bool,
         devices: DeviceChoice,
         cues: Vec<Cue>,
+        /// How often the system's devices were listed: slow on a real machine.
+        listings: usize,
     }
 
     /// Records what the core asks of the media layer, and lets a test report
@@ -170,6 +172,10 @@ pub(crate) mod fake {
                 .as_ref()
                 .map(|peers| peers.borrow().clone())
                 .unwrap_or_default()
+        }
+
+        pub(crate) fn listings(&self) -> usize {
+            self.live().listings
         }
 
         pub(crate) fn my_path(&self) -> Option<String> {
@@ -229,6 +235,7 @@ pub(crate) mod fake {
         }
 
         fn list_devices(&self) -> Result<DeviceList> {
+            self.live().listings += 1;
             let device = |id: &str, is_default: bool, is_bluetooth: bool| AudioDevice {
                 id: id.into(),
                 name: id.into(),

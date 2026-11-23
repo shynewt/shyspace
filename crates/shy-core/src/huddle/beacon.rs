@@ -96,15 +96,25 @@ impl Beacon {
             .context("bad beacon signature")
     }
 
-    /// Where the participant publishes their media in this session. Random
-    /// per join, so it names no channel and can't be reused.
+    /// Where the participant publishes their media in this session.
     pub fn media_path_name(&self) -> String {
-        media_path_name(&self.body.session)
+        media_path_name(&self.body.endpoint, &self.body.session)
     }
 }
 
-pub fn media_path_name(session: &SessionId) -> String {
-    format!("h-{}", hex::encode(session))
+const PATH_CONTEXT: &str = "shyspace huddle path v1";
+
+/// Where `endpoint` publishes its media in `session`. Random per join, so it
+/// names no channel or person and can't be reused; and bound to the device,
+/// so a session id copied into another device's beacon leads to that
+/// device's own path, never to the one it was copied from.
+pub fn media_path_name(endpoint: &PublicKey, session: &SessionId) -> String {
+    // Both inputs have fixed lengths, so the concatenation is unambiguous.
+    let mut input = [0; 32 + 16];
+    input[..32].copy_from_slice(endpoint.as_bytes());
+    input[32..].copy_from_slice(session);
+    let derived = blake3::derive_key(PATH_CONTEXT, &input);
+    format!("h-{}", hex::encode(&derived[..16]))
 }
 
 fn signed_bytes(workspace_id: &str, body: &BeaconBody) -> Result<Vec<u8>> {
@@ -175,6 +185,14 @@ pub(crate) mod tests {
         let second = Beacon::sign(&ada, "w1", body(&ada, "general", [2; 16], 0, 6)).unwrap();
         assert_ne!(first.media_path_name(), second.media_path_name());
         assert!(!first.media_path_name().contains("general"));
+    }
+
+    #[test]
+    fn a_copied_session_leads_to_the_copiers_own_path() {
+        let (ada, carol) = (SecretKey::generate(), SecretKey::generate());
+        let adas = Beacon::sign(&ada, "w1", body(&ada, "general", [1; 16], 0, 5)).unwrap();
+        let copied = Beacon::sign(&carol, "w1", body(&carol, "general", [1; 16], 0, 5)).unwrap();
+        assert_ne!(adas.media_path_name(), copied.media_path_name());
     }
 
     #[test]

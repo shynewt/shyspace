@@ -241,6 +241,46 @@ async fn an_outsiders_beacon_doesnt_get_them_heard() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn copying_someones_session_doesnt_get_their_audio_path() {
+    let (_root, [ada, bob, carol]) = three_members().await;
+    let general = channel_id(&ada.workspace, "general");
+    bob.workspace.join_huddle(&general, false).unwrap();
+    ada.workspace.join_huddle(&general, false).unwrap();
+    let adas = ada.workspace.take_sent_beacons();
+    for beacon in &adas {
+        bob.workspace.receive_beacon(beacon, Via::Gossip).unwrap();
+    }
+
+    // Carol's own app copies Ada's session id from her beacon into Carol's.
+    let carol_inner = &carol.workspace.inner;
+    let copied = Beacon::sign(
+        &carol_inner.identity,
+        &carol_inner.config.workspace_id,
+        BeaconBody {
+            member: carol.workspace.me(),
+            endpoint: carol.workspace.me(),
+            channel: general.clone(),
+            session: adas[0].body.session,
+            seq: 0,
+            sent_ms: now_ms().unwrap(),
+            state: joined_state(),
+            media_wire: MEDIA_WIRE,
+        },
+    )
+    .unwrap();
+    bob.workspace.receive_beacon(&copied, Via::Gossip).unwrap();
+
+    let heard = bob.media.peers();
+    let adas_path = &heard[&ada.workspace.me()];
+    assert_eq!(Some(adas_path.clone()), ada.media.my_path());
+    assert_ne!(
+        &heard[&carol.workspace.me()],
+        adas_path,
+        "Carol got Ada's audio path by copying her session"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_dm_huddle_is_for_its_two_members() {
     let (_root, [ada, bob, carol]) = three_members().await;
     let dm = ada.workspace.open_dm(&[bob.workspace.my_id()]).unwrap();
@@ -568,6 +608,24 @@ async fn the_chosen_devices_are_kept_and_used_for_the_next_call() {
         ada.media.devices(),
         choice,
         "the call starts on the chosen devices"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn joining_never_waits_for_the_device_list() {
+    let (_root, [ada, _bob, _carol]) = three_members().await;
+    let gone = DeviceChoice {
+        input: Some("a-mic-unplugged-since".into()),
+        output: None,
+    };
+    ada.workspace.set_huddle_devices(gone.clone()).unwrap();
+    let general = channel_id(&ada.workspace, "general");
+    ada.workspace.join_huddle(&general, false).unwrap();
+    assert_eq!(ada.media.listings(), 0, "the join listed the devices");
+    assert_eq!(
+        ada.media.devices(),
+        gone,
+        "a device that's gone is passed on, for the media layer to report"
     );
 }
 

@@ -66,7 +66,12 @@ pub fn hearing_set(
         .iter()
         .filter(|participant| participant.endpoint != *my_device && allowed.contains(&participant.member))
         .take(MAX_LINKS)
-        .map(|participant| (participant.endpoint, media_path_name(&participant.session)))
+        .map(|participant| {
+            (
+                participant.endpoint,
+                media_path_name(&participant.endpoint, &participant.session),
+            )
+        })
         .collect()
 }
 
@@ -96,7 +101,7 @@ mod tests {
         let roster = [participant(&me, 1), participant(&bob, 2), participant(&carol, 3)];
         let heard = hearing_set(&roster, &me, &[me, bob]);
         assert_eq!(heard.keys().copied().collect::<Vec<_>>(), [bob]);
-        assert_eq!(heard[&bob], media_path_name(&[2; 16]));
+        assert_eq!(heard[&bob], media_path_name(&bob, &[2; 16]));
     }
 
     #[test]

@@ -212,7 +212,9 @@ impl Workspace {
             "this huddle is full"
         );
 
-        let chosen_devices = self.huddle_devices()?.chosen;
+        // As saved, unchecked: listing devices can take seconds, and a
+        // device that's gone is the media layer's to report and replace.
+        let chosen_devices = self.saved_devices()?;
         let session: SessionId = rand::random();
         let beacon = self.sign_beacon(channel, session, 0, joined())?;
         let (events, event_receiver) = mpsc::channel(64);
@@ -239,7 +241,7 @@ impl Workspace {
         let started = match self.refresh_audience() {
             Ok(Audience::Updated) => media
                 .start(MediaCall {
-                    my_path: media_path_name(&session),
+                    my_path: media_path_name(&self.me(), &session),
                     peers: peer_receiver,
                     events,
                     muted,
