@@ -21,6 +21,9 @@ use crate::{
     views::InviteState,
 };
 
+/// The id tests' workspaces get, shaped like a real one (see `links`).
+pub const TEST_WORKSPACE_ID: &str = "0123456789abcdef";
+
 pub fn test_bucket_config() -> BucketConfig {
     BucketConfig {
         endpoint: "http://unused".into(),
@@ -52,7 +55,7 @@ pub async fn create_admin_connected(dir: &Path, connect: Connector) -> Workspace
 async fn create_admin_using(dir: &Path, connect: Connector, options: WorkspaceOptions) -> Workspace {
     Workspace::create_with(
         &data_dir(dir),
-        "workspace-id".into(),
+        TEST_WORKSPACE_ID.into(),
         "Acme",
         Profile {
             name: "Ada",

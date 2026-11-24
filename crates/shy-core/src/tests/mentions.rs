@@ -110,9 +110,35 @@ async fn unread_mentions_are_listed_across_channels_once() {
 fn member_links_keep_names_from_breaking_the_markdown() {
     let link = mentions::member_link("Ada [the] Admin", "ab12");
     assert_eq!(link, "[@Ada the Admin](shy://member/ab12)");
-    assert!(mentions::mentions(&link, "ab12"));
+    assert!(mentions::mentions(&link, "0123456789abcdef", "ab12"));
     assert!(
-        !mentions::mentions(&link, "ab1"),
+        !mentions::mentions(&link, "0123456789abcdef", "ab1"),
         "a prefix of an id isn't the id"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mention_naming_this_workspace_counts_like_an_older_one() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob]).await;
+    if let Some(latest) = admin.messages(&general, None, 1).unwrap().pop() {
+        admin.mark_read(&general, &latest.id).unwrap();
+    }
+    let link = crate::links::app_link(admin.workspace_id(), "member", &admin.my_id());
+    bob.send_message(&general, &format!("[@Ada]({link}) can you look?"), None)
+        .unwrap();
+    let everyone = crate::links::app_link(admin.workspace_id(), "mention", "channel");
+    bob.send_message(&general, &format!("[@channel]({everyone}) standup"), None)
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    assert_eq!(channel_view(&admin, &general).unread_mentions, 2);
+    assert!(
+        admin
+            .messages(&general, None, 2)
+            .unwrap()
+            .iter()
+            .all(|message| message.mentions_me)
     );
 }

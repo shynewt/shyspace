@@ -328,8 +328,13 @@ impl Store {
     }
 
     /// Everyone's name and every page's title, for naming app links.
-    pub(crate) fn link_names(&self, admin: &PublicKey) -> Result<crate::markdown::LinkNames> {
+    pub(crate) fn link_names(
+        &self,
+        admin: &PublicKey,
+        workspace_id: &str,
+    ) -> Result<crate::markdown::LinkNames> {
         Ok(crate::markdown::LinkNames {
+            workspace_id: workspace_id.to_owned(),
             members: self
                 .members(admin)?
                 .into_iter()

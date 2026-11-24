@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
-const APP_LINK: &str = "shy://";
+use crate::links::{APP_LINK, AppLink, parse};
 /// Shown before a page link's title and a message link's words in previews,
 /// as their chips show an icon.
 const PAGE_ICON: &str = "📄";
@@ -44,6 +44,8 @@ pub(crate) fn visible_text(markdown: &str) -> String {
 
 /// Who and what app links point to, for naming them in previews.
 pub(crate) struct LinkNames {
+    /// The workspace these names are of; links into another aren't named.
+    pub(crate) workspace_id: String,
     /// Member id (hex) to name.
     pub(crate) members: HashMap<String, String>,
     /// Page id to title.
@@ -54,7 +56,9 @@ impl LinkNames {
     /// What a chip for `link` says, and the text after the link's id (a
     /// bare link can run into punctuation); `None` for a link no chip names.
     fn name(&self, link: &str) -> Option<(String, String)> {
-        let (kind, rest) = link.strip_prefix(APP_LINK)?.split_once('/')?;
+        let app_link = parse(link)?;
+        let link_is_here = app_link.is_in(&self.workspace_id);
+        let AppLink { kind, rest, .. } = app_link;
         let id_end = match kind {
             "message" => message_id_end(rest),
             _ => rest
@@ -62,6 +66,9 @@ impl LinkNames {
                 .unwrap_or(rest.len()),
         };
         let (id, after) = rest.split_at(id_end);
+        if !link_is_here {
+            return Some(("a link to another workspace".to_owned(), after.to_owned()));
+        }
         let name = match kind {
             "member" => {
                 let name = self.members.get(id).map(|name| name.trim()).unwrap_or_default();
@@ -188,6 +195,7 @@ mod tests {
 
     fn names() -> LinkNames {
         LinkNames {
+            workspace_id: "0123456789abcdef".to_owned(),
             members: [("ab12".to_owned(), "Eve".to_owned())].into(),
             pages: [("p1".to_owned(), "Plan".to_owned())].into(),
         }
@@ -220,6 +228,56 @@ mod tests {
     fn a_private_message_link_is_named_whole() {
         let text = "see shy://message/p:abc123/def456. and [it](shy://message/dm:ab/cd)";
         assert_eq!(preview_text(text, &names()), "see 💬 a message. and 💬 a message");
+    }
+
+    #[test]
+    fn links_naming_this_workspace_are_named_like_older_ones() {
+        let here = "0123456789abcdef";
+        let text = format!(
+            "hi [@Ada](shy://{here}/member/ab12), [doc](shy://{here}/page/p1) and shy://{here}/page/p1; \
+             see shy://{here}/message/p:abc123/def456. and [it](shy://{here}/message/dm:ab/cd)"
+        );
+        assert_eq!(
+            preview_text(&text, &names()),
+            "hi @Eve, 📄 Plan and 📄 Plan; see 💬 a message. and 💬 a message"
+        );
+    }
+
+    #[test]
+    fn links_into_another_workspace_never_show_their_label() {
+        let text = "[@Eve](shy://fedcba9876543210/member/ab12) or shy://fedcba9876543210/page/p1.";
+        assert_eq!(
+            preview_text(text, &names()),
+            "a link to another workspace or a link to another workspace."
+        );
+    }
+
+    #[test]
+    fn odd_workspace_parts_read_as_older_links_without_panicking() {
+        for text in [
+            "[x](shy://0123456789ABCDEF/page/p1)",
+            "[x](shy://0123456789abcde/page/p1)",
+            "[x](shy://0123456789abcdef0/page/p1)",
+            "[x](shy://0123456789abcdef)",
+            "[x](shy://0123456789abcdef/)",
+            "[x](shy://0123456789abcdef/page)",
+            "shy://0123456789abcdef/message/ shy:// shy:///",
+        ] {
+            let preview = preview_text(text, &names());
+            assert!(
+                !preview.contains("Plan") || text.contains("abcdef/page/p1"),
+                "{text}: {preview}"
+            );
+            words(text);
+        }
+    }
+
+    #[test]
+    fn new_and_older_bare_links_stay_out_of_the_index() {
+        assert_eq!(
+            words("see shy://0123456789abcdef/page/p1 and shy://page/p2 now"),
+            ["see", "and", "now"]
+        );
     }
 
     #[test]

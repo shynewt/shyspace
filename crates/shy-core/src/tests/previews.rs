@@ -174,3 +174,27 @@ async fn a_match_next_to_a_named_link_is_marked_exactly() {
         "…before see 📄 Handbook \u{1}budget\u{2} 📄 Handbook after after after after after…"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_thread_summary_names_links_of_this_workspace_and_never_labels_others() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let question = admin.send_message(&general, "who?", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let here = crate::links::app_link(admin.workspace_id(), "member", &carol.my_id());
+    let elsewhere = crate::links::app_link("fedcba9876543210", "member", &carol.my_id());
+    bob.send_message(
+        &general,
+        &format!("[@Ada]({here}) or [@Ada]({elsewhere})"),
+        Some(question.clone()),
+    )
+    .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    assert_eq!(
+        last_reply_preview(&admin, &general, &question),
+        "@Carol or a link to another workspace"
+    );
+}

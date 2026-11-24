@@ -237,7 +237,7 @@ async fn a_shut_down_workspace_lets_go_of_everything_and_reopens() {
     let dir = root.path().join("ada");
     let admin = crate::Workspace::create_with(
         &data_dir(&dir),
-        "workspace-id".into(),
+        TEST_WORKSPACE_ID.into(),
         "Acme",
         crate::Profile {
             name: "Ada",
@@ -537,7 +537,7 @@ async fn writes_go_up_while_a_catch_up_is_still_reading() {
     let root = tempfile::tempdir().unwrap();
     let admin = Workspace::create_with(
         &data_dir(&root.path().join("ada")),
-        "workspace-id".into(),
+        TEST_WORKSPACE_ID.into(),
         "Acme",
         crate::Profile {
             name: "Ada",

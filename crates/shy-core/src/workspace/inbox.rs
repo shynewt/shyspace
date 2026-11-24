@@ -79,7 +79,11 @@ impl Workspace {
     fn attention_in(&self, state: &State, channel: &Channel) -> Result<Vec<Wanted>> {
         let my_id = self.my_id();
         let mut wanted = Vec::new();
-        for mention in state.store.unread_mentions(&channel.id, &self.me())? {
+        for mention in
+            state
+                .store
+                .unread_mentions(&self.inner.config.workspace_id, &channel.id, &self.me())?
+        {
             let thread_root = state
                 .store
                 .thread_root(&mention.id)?
@@ -145,6 +149,7 @@ impl Workspace {
             .message(root, &self.me())?
             .context("thread without its first message")?;
         Ok(follows_by_default(
+            &self.inner.config.workspace_id,
             &self.my_id(),
             (&first.author, &first.text),
             replies

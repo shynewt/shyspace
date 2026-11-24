@@ -94,7 +94,12 @@ impl Workspace {
             // Thread replies count in their thread, but a mention counts anywhere.
             let unread = state.store.unread_count(&channel.id, &self.me())?;
             channel.unread = u32::try_from(unread).unwrap_or(u32::MAX);
-            channel.unread_mentions = count(state.store.unread_mentions(&channel.id, &self.me())?.len());
+            channel.unread_mentions = count(
+                state
+                    .store
+                    .unread_mentions(&self.inner.config.workspace_id, &channel.id, &self.me())?
+                    .len(),
+            );
             channel.last_read = state.store.read_marker(&channel.id)?;
             channel.notify = state.store.notify_level(&channel.id)?;
             channel.can_delete = self.may(&Op::Delete {
@@ -176,10 +181,15 @@ impl Workspace {
         // Names only when some thread has a reply to preview.
         let names = match replies.is_empty() {
             true => None,
-            false => Some(state.store.link_names(&self.inner.config.admin)?),
+            false => Some(
+                state
+                    .store
+                    .link_names(&self.inner.config.admin, &self.inner.config.workspace_id)?,
+            ),
         };
         for message in &mut messages {
-            message.mentions_me = message.author != my_id && mentions(&message.text, &my_id);
+            message.mentions_me =
+                message.author != my_id && mentions(&message.text, &self.inner.config.workspace_id, &my_id);
             message.saved = state.store.saved_mark(&message.id)?;
             message.can_edit = self.may(&Op::MessageEdit {
                 id: message.id.clone(),
@@ -204,6 +214,7 @@ impl Workspace {
             message.is_following = match state.store.following_choice(&message.id)? {
                 Some(choice) => choice,
                 None => follows_by_default(
+                    &self.inner.config.workspace_id,
                     &my_id,
                     (&message.author, &message.text),
                     thread
@@ -302,7 +313,9 @@ impl Workspace {
             filters.channel = Some(found.id);
         }
         let mut hits = state.store.search(&query.text, &filters, limit)?;
-        let names = state.store.link_names(&self.inner.config.admin)?;
+        let names = state
+            .store
+            .link_names(&self.inner.config.admin, &self.inner.config.workspace_id)?;
         for hit in &mut hits {
             let markdown = if hit.kind == "message" {
                 hit.thread_root = state.store.thread_root(&hit.id)?.filter(|root| *root != hit.id);
@@ -319,13 +332,14 @@ impl Workspace {
 /// Without an explicit choice, you follow a thread you started, replied in,
 /// or were mentioned in.
 pub(crate) fn follows_by_default<'a>(
+    workspace_id: &str,
     my_id: &str,
     (root_author, root_text): (&str, &str),
     mut replies: impl Iterator<Item = (&'a str, &'a str)>,
 ) -> bool {
     root_author == my_id
-        || mentions(root_text, my_id)
-        || replies.any(|(author, text)| author == my_id || mentions(text, my_id))
+        || mentions(root_text, workspace_id, my_id)
+        || replies.any(|(author, text)| author == my_id || mentions(text, workspace_id, my_id))
 }
 
 fn count(length: usize) -> u32 {

@@ -8,6 +8,7 @@ pub mod files;
 pub mod huddle;
 pub mod identity;
 pub mod keys;
+pub mod links;
 mod markdown;
 pub mod membership;
 pub mod mentions;

@@ -1,13 +1,17 @@
 //! Mentions are markdown links inside a message's text, so they need no op
 //! of their own and read naturally anywhere markdown is shown:
 //! `[@Ada](shy://member/<id>)`, `[@channel](shy://mention/channel)` and
-//! `[@here](shy://mention/here)`.
+//! `[@here](shy://mention/here)`, with links written now also naming their
+//! workspace (see `links`).
 
-pub(crate) const MEMBER_LINK_PREFIX: &str = "shy://member/";
-/// What every mention of a group (@channel, @here) starts with.
-pub(crate) const GROUP_MENTION_PREFIX: &str = "shy://mention/";
-const CHANNEL_LINK: &str = "shy://mention/channel";
-const HERE_LINK: &str = "shy://mention/here";
+use crate::links::{APP_LINK, AppLink, parse};
+
+const MEMBER_LINK_PREFIX: &str = "shy://member/";
+/// What a link to a member holds, in either form: for finding candidates
+/// before parsing them.
+pub(crate) const MEMBER_LINK_PART: &str = "member/";
+/// What a group mention (@channel, @here) holds, in either form.
+pub(crate) const GROUP_MENTION_PART: &str = "mention/";
 pub const CHANNEL_LINK_MARKDOWN: &str = "[@channel](shy://mention/channel)";
 pub const HERE_LINK_MARKDOWN: &str = "[@here](shy://mention/here)";
 
@@ -17,16 +21,32 @@ pub fn member_link(name: &str, member: &str) -> String {
     format!("[@{name}]({MEMBER_LINK_PREFIX}{member})")
 }
 
-/// Whether `text` mentions `member`: by a link to them, or by @channel or
-/// @here. Until presence exists (#42), @here reaches everyone like @channel.
-pub fn mentions(text: &str, member: &str) -> bool {
-    text.contains(CHANNEL_LINK) || text.contains(HERE_LINK) || mentioned_members(text).any(|id| id == member)
+/// Whether `text` mentions `member` of `workspace_id`: by a link to them,
+/// or by @channel or @here, in links of this workspace (or older ones, which
+/// name none). Until presence exists (#42), @here reaches everyone like
+/// @channel.
+pub fn mentions(text: &str, workspace_id: &str, member: &str) -> bool {
+    app_links_in(text)
+        .filter(|link| link.is_in(workspace_id))
+        .any(|link| match link.kind {
+            "member" => leading_hex(link.rest) == member,
+            "mention" => ["channel", "here"]
+                .iter()
+                .any(|group| link.rest.strip_prefix(group).is_some_and(ends_word)),
+            _ => false,
+        })
 }
 
-fn mentioned_members(text: &str) -> impl Iterator<Item = &str> {
-    text.match_indices(MEMBER_LINK_PREFIX).map(|(start, prefix)| {
-        let rest = &text[start + prefix.len()..];
-        let end = rest.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(rest.len());
-        &rest[..end]
-    })
+fn app_links_in(text: &str) -> impl Iterator<Item = AppLink<'_>> {
+    text.match_indices(APP_LINK)
+        .filter_map(|(start, _)| parse(&text[start..]))
+}
+
+fn leading_hex(text: &str) -> &str {
+    let end = text.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(text.len());
+    &text[..end]
+}
+
+fn ends_word(rest: &str) -> bool {
+    !rest.starts_with(|c: char| c.is_ascii_alphanumeric())
 }

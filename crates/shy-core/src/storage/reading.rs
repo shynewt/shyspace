@@ -9,7 +9,7 @@ use rusqlite::{OptionalExtension, params};
 
 use super::{Store, queries::IS_SHOWN_IN_CHANNEL};
 use crate::{
-    mentions::{GROUP_MENTION_PREFIX, MEMBER_LINK_PREFIX, mentions},
+    mentions::{GROUP_MENTION_PART, MEMBER_LINK_PART, mentions},
     views::{MessageCursor, NotifyLevel, member_id},
 };
 
@@ -78,7 +78,12 @@ impl Store {
 
     /// Unread messages by others that mention you, oldest first. A thread
     /// reply counts until its thread is read past it.
-    pub fn unread_mentions(&self, channel: &str, me: &PublicKey) -> Result<Vec<UnreadMention>> {
+    pub fn unread_mentions(
+        &self,
+        workspace_id: &str,
+        channel: &str,
+        me: &PublicKey,
+    ) -> Result<Vec<UnreadMention>> {
         let my_id = member_id(me);
         let (lamport, author) = self.read_position(channel)?;
         // Only messages holding a mention link can mention anyone.
@@ -96,8 +101,8 @@ impl Store {
                 me.as_bytes(),
                 lamport,
                 author,
-                format!("{MEMBER_LINK_PREFIX}{my_id}"),
-                GROUP_MENTION_PREFIX
+                format!("{MEMBER_LINK_PART}{my_id}"),
+                GROUP_MENTION_PART
             ],
             |row| {
                 let text: String = row.get(1)?;
@@ -114,7 +119,7 @@ impl Store {
         let mut thread_roots: Option<HashMap<String, String>> = None;
         for row in rows {
             let (mention, text, is_in_channel) = row?;
-            if !mentions(&text, &my_id) {
+            if !mentions(&text, workspace_id, &my_id) {
                 continue;
             }
             if !is_in_channel {
@@ -242,6 +247,8 @@ mod tests {
 
     use crate::{mentions::member_link, storage::test_channel::TestChannel};
 
+    const TEST_WORKSPACE: &str = "0123456789abcdef";
+
     #[test]
     fn unread_counts_leave_out_thread_replies_and_what_is_read() {
         let mut channel = TestChannel::new();
@@ -274,7 +281,7 @@ mod tests {
         let found = |channel: &TestChannel| -> Vec<String> {
             channel
                 .store
-                .unread_mentions(&channel.id, &me)
+                .unread_mentions(TEST_WORKSPACE, &channel.id, &me)
                 .unwrap()
                 .into_iter()
                 .map(|mention| mention.id)
@@ -302,7 +309,10 @@ mod tests {
         let cost = |channel: &TestChannel| {
             channel.store.steps_of(|| {
                 channel.store.unread_count(&channel.id, &me).unwrap();
-                channel.store.unread_mentions(&channel.id, &me).unwrap();
+                channel
+                    .store
+                    .unread_mentions(TEST_WORKSPACE, &channel.id, &me)
+                    .unwrap();
             })
         };
         read_up_to(&mut channel, 20);
@@ -331,7 +341,10 @@ mod tests {
         let cost = |channel: &TestChannel| {
             channel.store.steps_of(|| {
                 channel.store.unread_count(&channel.id, &me).unwrap();
-                channel.store.unread_mentions(&channel.id, &me).unwrap();
+                channel
+                    .store
+                    .unread_mentions(TEST_WORKSPACE, &channel.id, &me)
+                    .unwrap();
             })
         };
         extend_thread(&mut channel, 100);

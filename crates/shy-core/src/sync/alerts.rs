@@ -39,7 +39,10 @@ impl Workspace {
         let my_id = self.my_id();
         let is_wanted = match state.store.notify_level(channel)?.stricter(status_level) {
             NotifyLevel::All => true,
-            NotifyLevel::Mentions => mentions(text, &my_id) || self.follows_thread_of(state, id)?,
+            NotifyLevel::Mentions => {
+                mentions(text, &self.inner.config.workspace_id, &my_id)
+                    || self.follows_thread_of(state, id)?
+            }
             NotifyLevel::Nothing => false,
         };
         if !is_wanted {
@@ -60,7 +63,9 @@ impl Workspace {
             .find(|member| member.id == author)
             .map(|member| member.name)
             .unwrap_or_default();
-        let names = state.store.link_names(&self.inner.config.admin)?;
+        let names = state
+            .store
+            .link_names(&self.inner.config.admin, &self.inner.config.workspace_id)?;
         let mut preview: String = preview_text(text, &names).chars().take(PREVIEW_CHARS).collect();
         if preview.is_empty() {
             // Files go out before their message, so they are here already.
@@ -98,6 +103,7 @@ impl Workspace {
         // The new reply itself doesn't make you follow.
         let others = replies.iter().filter(|reply| reply.id != message);
         Ok(follows_by_default(
+            &self.inner.config.workspace_id,
             &self.my_id(),
             (&first.author, &first.text),
             others.map(|reply| (reply.author.as_str(), reply.text.as_str())),

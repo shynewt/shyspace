@@ -2137,7 +2137,7 @@ async fn a_workspace_created_without_a_region_can_still_be_joined() {
     let bucket = memory_bucket();
     let admin = Workspace::create_with(
         &data_dir(&root.path().join("ada")),
-        "workspace-id".into(),
+        TEST_WORKSPACE_ID.into(),
         "Acme",
         crate::Profile {
             name: "Ada",
@@ -4800,4 +4800,43 @@ async fn page_messages_signed_for_another_workspace_are_refused() {
 
     assert!(admin.receive_page(&elsewhere).is_err());
     assert!(admin.page_presence(&page).unwrap().viewers.is_empty());
+}
+
+/// A mention naming another workspace isn't one here, even of an id that
+/// is a member here: it can't notify, alert or count.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mention_naming_another_workspace_doesnt_mention_anyone_here() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob]).await;
+    if let Some(latest) = admin.messages(&general, None, 1).unwrap().pop() {
+        admin.mark_read(&general, &latest.id).unwrap();
+    }
+    let elsewhere = "fedcba9876543210";
+    assert_ne!(admin.workspace_id(), elsewhere);
+    let member = crate::links::app_link(elsewhere, "member", &admin.my_id());
+    let everyone = crate::links::app_link(elsewhere, "mention", "channel");
+    bob.send_message(
+        &general,
+        &format!("[@Ada]({member}) and [@channel]({everyone})"),
+        None,
+    )
+    .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let channel = admin
+        .channels()
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == general)
+        .unwrap();
+    assert_eq!(channel.unread_mentions, 0);
+    assert!(
+        !admin
+            .messages(&general, None, 1)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .mentions_me
+    );
 }

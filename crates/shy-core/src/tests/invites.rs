@@ -356,7 +356,7 @@ async fn a_create_cut_short_finishes_the_admins_name_on_the_next_open() {
     cut_short().push(ada_dir.clone());
     let created = crate::Workspace::create_with(
         &data_dir(&ada_dir),
-        "workspace-id".into(),
+        TEST_WORKSPACE_ID.into(),
         "Acme",
         crate::Profile {
             name: "Ada",

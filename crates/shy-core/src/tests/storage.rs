@@ -108,7 +108,7 @@ async fn settings_that_fail_the_check_change_nothing() {
     });
     let admin = crate::Workspace::create_with(
         &data_dir(&root.path().join("ada")),
-        "workspace-id".into(),
+        TEST_WORKSPACE_ID.into(),
         "Acme",
         crate::Profile {
             name: "Ada",

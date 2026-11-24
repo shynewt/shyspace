@@ -144,6 +144,7 @@ mod tests {
     #[test]
     fn a_snippet_reads_only_the_indexed_start_of_a_page() {
         let names = crate::markdown::LinkNames {
+            workspace_id: "0123456789abcdef".to_owned(),
             members: std::collections::HashMap::new(),
             pages: std::collections::HashMap::new(),
         };
