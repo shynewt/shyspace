@@ -17,6 +17,22 @@ test("unsent text waits as a draft when you switch away", async ({ page }) => {
   await expect(page.getByLabel("Message #random")).toHaveValue("half a thought");
 });
 
+test("text typed before the saved drafts load is still kept as a draft", async ({ page }) => {
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await page.evaluate(() => {
+    window.fake.holdDrafts = true;
+  });
+  await page.getByRole("button", { name: "random", exact: true }).click();
+  await page.getByLabel("Message #random").fill("typed quickly");
+  await page.evaluate(() => {
+    window.fake.holdDrafts = false;
+    window.fake.finishDrafts();
+  });
+
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await expect(page.getByRole("button", { name: "random, draft" })).toBeVisible();
+});
+
 test("drafts wait in Drafts & sent, not in the inbox, and sending clears them", async ({ page }) => {
   await page.getByLabel("Message #random").fill("finish this later");
   await page.keyboard.press("Control+Shift+A");

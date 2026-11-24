@@ -82,6 +82,9 @@ export class FakeBackend {
   /** Keeps `restart_to_update` waiting, as the system's password prompt does, until `finishRestart()`. */
   holdRestart = false;
   private finishHeldRestart: (() => void) | null = null;
+  /** Keeps `drafts` loads waiting, as a busy disk would, until `finishDrafts()`. */
+  holdDrafts = false;
+  private heldDraftLoads: (() => void)[] = [];
   private members: Member[] = [];
   private pages: StoredPage[] = [];
   /** Each page editor session's page and Yjs client id, by its nonce. */
@@ -209,6 +212,12 @@ export class FakeBackend {
 
   approveJoin(): void {
     this.pendingJoin?.approve();
+  }
+
+  /** Answers the `drafts` loads held by `holdDrafts`, with the drafts as they are now. */
+  finishDrafts(): void {
+    if (this.heldDraftLoads.length === 0) throw new Error("fake backend: no drafts load is waiting");
+    for (const answer of this.heldDraftLoads.splice(0)) answer();
   }
 
   /** Lets a restart held by `holdRestart` go on. */
@@ -543,8 +552,11 @@ export class FakeBackend {
       case "set_draft":
         this.drafts.set(requireString(args, "target"), requireString(args, "text"));
         return this.notify({ kind: "drafts" });
-      case "drafts":
-        return this.drafts.list((target) => this.chat.channelOf(target));
+      case "drafts": {
+        const list = () => this.drafts.list((target) => this.chat.channelOf(target));
+        if (!this.holdDrafts) return list();
+        return new Promise((resolve) => this.heldDraftLoads.push(() => resolve(list())));
+      }
       case "sent_messages":
         return sentMessages(this.chat, {
           me: this.me(),

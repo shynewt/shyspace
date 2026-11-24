@@ -14,6 +14,8 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
   const latest = useRef({ text, onRestore });
   const isDirty = useRef(false);
   const [isRestored, setRestored] = useState(false);
+  // The text as last saved or restored; only a change from it is an edit.
+  const saved = useRef("");
 
   useEffect(() => {
     latest.current = { text, onRestore };
@@ -26,6 +28,8 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
       const draft = drafts.find((candidate) => candidate.target === target);
       // Never replace what the user already started typing.
       if (draft && !latest.current.text) latest.current.onRestore(draft.text);
+      // What's stored, not what's shown: text typed before this answer is an edit.
+      saved.current = draft?.text ?? "";
       setRestored(true);
     }, reportError);
     return () => {
@@ -33,11 +37,8 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
     };
   }, [target]);
 
-  // The text as last saved or restored; only a change from it is an edit.
-  const saved = useRef<string | null>(null);
   useEffect(() => {
     if (!isRestored) return;
-    if (saved.current === null) saved.current = text;
     if (text === saved.current) return;
     isDirty.current = true;
     const timer = setTimeout(() => {
