@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, onChange, onFileDrag, onFilesDropped, type StagedFile } from "../../lib/api";
-import { activeDropTarget, addDropTarget, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
+import { addDropTarget, dropTargetAt, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { formatSize } from "../../lib/files";
 import { MAX_FILE_BYTES, MAX_FILES_PER_MESSAGE, MAX_PASTED_BYTES } from "../../lib/limits";
 import { reportError } from "../../lib/toast";
@@ -8,7 +8,8 @@ import { reportError } from "../../lib/toast";
 export type Upload = { sent: number; total: number };
 
 /** Files waiting in a message box: picked, dropped or pasted, until sent or removed. */
-export function useAttachments(channelId: string) {
+/** `box` is the message box's element: a drop on the panel holding it comes here. */
+export function useAttachments(channelId: string, box: RefObject<Element | null>) {
   const boxId = useId();
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [upload, setUpload] = useState<Upload | null>(null);
@@ -22,19 +23,25 @@ export function useAttachments(channelId: string) {
   useEffect(() => {
     isMounted.current = true;
     // A box focused while mounting has already put itself last.
-    addDropTarget(boxId);
+    addDropTarget(boxId, () => box.current);
     return () => {
       isMounted.current = false;
       removeDropTarget(boxId);
       // Leaving the box lets its files go; a send already under way has its own copy.
       for (const file of stagedNow.current) api.unstageFile(file.token).catch(reportError);
     };
-  }, [boxId]);
+  }, [boxId, box]);
   const markActive = useCallback(() => markDropTargetUsed(boxId), [boxId]);
 
   const add = useCallback((files: StagedFile[]) => setStaged((current) => [...current, ...files]), []);
-  useEffect(() => onFilesDropped((files) => activeDropTarget() === boxId && add(files)), [boxId, add]);
-  useEffect(() => onFileDrag((isDragging) => setDragTarget(isDragging && activeDropTarget() === boxId)), [boxId]);
+  useEffect(
+    () => onFilesDropped(({ files, position }) => dropTargetAt(position) === boxId && add(files)),
+    [boxId, add],
+  );
+  useEffect(
+    () => onFileDrag((position) => setDragTarget(position !== null && dropTargetAt(position) === boxId)),
+    [boxId],
+  );
   useEffect(
     () =>
       onChange((change) => {

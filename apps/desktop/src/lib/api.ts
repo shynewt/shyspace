@@ -628,11 +628,17 @@ export function shownWorkspaceId(): string | null {
 }
 
 /** Files dropped on the window, already staged; and whether files are being dragged over it. */
-export function onFilesDropped(listener: (files: StagedFile[]) => void): () => void {
-  return subscribe<StagedFile[]>("files-dropped", listener);
+/** A point in the window, in page pixels. */
+export type DropPoint = { x: number; y: number };
+/** Files dropped on the window, staged, and where: null when the window couldn't say. */
+export type FilesDropped = { files: StagedFile[]; position: DropPoint | null };
+
+export function onFilesDropped(listener: (drop: FilesDropped) => void): () => void {
+  return subscribe<FilesDropped>("files-dropped", listener);
 }
-export function onFileDrag(listener: (isDragging: boolean) => void): () => void {
-  return subscribe<boolean>("file-drag", listener);
+/** Where files are being dragged over the window; null once the drag leaves or drops. */
+export function onFileDrag(listener: (position: DropPoint | null) => void): () => void {
+  return subscribe<DropPoint | null>("file-drag", listener);
 }
 
 function subscribe<T>(event: string, listener: (payload: T) => void): () => void {

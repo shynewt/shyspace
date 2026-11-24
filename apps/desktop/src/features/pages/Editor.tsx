@@ -10,7 +10,7 @@ import * as Y from "yjs";
 import { api, onChange, onFilesDropped, type PageEditorSession, type PagePresence } from "../../lib/api";
 import { saveBeforeSwitch } from "../../lib/beforeSwitch";
 import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
-import { activeDropTarget, addDropTarget, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
+import { addDropTarget, dropTargetAt, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { usePreferences } from "../../lib/preferences";
@@ -371,9 +371,9 @@ function PageEditor({
 
   useEffect(() => {
     if (!view) return;
-    addDropTarget(dropTarget);
-    const stopListening = onFilesDropped((files) => {
-      if (activeDropTarget() === dropTarget) uploadIntoPage(view, pageId, files).catch(reportError);
+    addDropTarget(dropTarget, () => view.dom);
+    const stopListening = onFilesDropped(({ files, position }) => {
+      if (dropTargetAt(position) === dropTarget) uploadIntoPage(view, pageId, files).catch(reportError);
     });
     return () => {
       stopListening();

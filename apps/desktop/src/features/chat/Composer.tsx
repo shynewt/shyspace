@@ -53,7 +53,7 @@ export function Composer({
       if (mentionTarget.current === insertMention) mentionTarget.current = null;
     };
   }, [mentionTarget, insertMention]);
-  const attachments = useAttachments(channelId);
+  const attachments = useAttachments(channelId, input);
   const hasFiles = !editing && attachments.staged.length > 0;
   const sentLength = characterCount(picker.toSend(text).trim());
   const isTooLong = sentLength > MAX_MESSAGE_CHARS;

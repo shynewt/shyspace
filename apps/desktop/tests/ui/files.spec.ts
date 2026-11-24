@@ -65,7 +65,7 @@ test("an image shows in the message, and only real images do", async ({ page }) 
 
 test("dropped files land in the message box", async ({ page }) => {
   await page.getByLabel("Message #general").focus();
-  await page.evaluate(() => window.fake.files.dragOver(true));
+  await page.evaluate(() => window.fake.files.dragOver({ x: 10, y: 10 }));
   await expect(page.getByText(/Drop to attach/)).toBeVisible();
   await page.evaluate(() => window.fake.files.drop([{ name: "plan.pdf", type: "application/pdf", bytes: [37, 80] }]));
   await expect(page.getByText(/Drop to attach/)).toHaveCount(0);
@@ -799,4 +799,81 @@ test("a picture that hadn't arrived when first shown appears the next time", asy
   await page.getByRole("button", { name: "Inbox" }).click();
   await page.getByRole("button", { name: "general", exact: true }).click();
   await expect(page.getByRole("article").filter({ hasText: "Morning" }).locator("img")).toHaveCount(1);
+});
+
+/** The middle of `region`, in page pixels: where a drop on it lands. */
+async function middleOf(region: import("@playwright/test").Locator) {
+  const box = await region.boundingBox();
+  if (!box) throw new Error("not laid out");
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+test.describe("a drop goes to the panel it lands on", () => {
+  // Wide enough for the thread to sit beside the channel, not over it.
+  test.use({ viewport: { width: 1400, height: 900 } });
+  test.beforeEach(async ({ page }) => {
+    await page.evaluate(() => {
+      const grace = window.fake.addMember("Grace");
+      window.fake.receiveMessage(grace, "general", "Who has the agenda?");
+    });
+    const root = page.getByRole("article").filter({ hasText: "Who has the agenda?" });
+    await root.hover();
+    await root.getByRole("button", { name: "Reply in thread" }).click();
+    await expect(page.getByRole("complementary", { name: "Thread" })).toBeVisible();
+    // The thread's box was used last, so without a place a drop would go there.
+    await page.getByRole("textbox", { name: "Reply in thread" }).focus();
+  });
+
+  const thread = (page: import("@playwright/test").Page) => page.getByRole("complementary", { name: "Thread" });
+  const channelLog = (page: import("@playwright/test").Page) => page.getByRole("log", { name: "Messages in #general" });
+
+  test("dropped on the channel, it attaches there, not to the open thread", async ({ page }) => {
+    const at = await middleOf(channelLog(page));
+    await page.evaluate((at) => window.fake.files.dragOver(at), at);
+    await expect(page.getByText("Drop to attach to “Message #general”")).toBeVisible();
+    await expect(thread(page).getByText(/Drop to attach/)).toHaveCount(0);
+    await page.evaluate(
+      (at) => window.fake.files.drop([{ name: "agenda.pdf", type: "application/pdf", bytes: [37] }], at),
+      at,
+    );
+
+    await expect(thread(page).getByRole("list", { name: "Files to send" })).toHaveCount(0);
+    await expect(page.getByRole("list", { name: "Files to send" }).getByText("agenda.pdf")).toBeVisible();
+  });
+
+  test("dropped on the thread, it attaches to the thread's reply", async ({ page }) => {
+    await page.getByLabel("Message #general").focus();
+    const at = await middleOf(thread(page));
+    await page.evaluate((at) => window.fake.files.dragOver(at), at);
+    await expect(thread(page).getByText(/Drop to attach/)).toBeVisible();
+    await expect(page.getByText(/Drop to attach/)).toHaveCount(1);
+    await page.evaluate(
+      (at) => window.fake.files.drop([{ name: "notes.pdf", type: "application/pdf", bytes: [37] }], at),
+      at,
+    );
+
+    await expect(thread(page).getByRole("list", { name: "Files to send" }).getByText("notes.pdf")).toBeVisible();
+    await expect(page.getByRole("list", { name: "Files to send" })).toHaveCount(1);
+  });
+});
+
+test("dropped on a DM, it attaches to that DM's box", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const dm = window.fake.handle("open_dm", { members: [grace] });
+    if (typeof dm !== "string") throw new Error("no DM");
+    window.fake.receiveMessageIn(grace, dm, "Send it over");
+  });
+  await page
+    .getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: /^Grace/ })
+    .click();
+  const log = page.getByRole("log", { name: "Messages in Grace" });
+  await expect(log.getByText("Send it over")).toBeVisible();
+  const at = await middleOf(log);
+  await page.evaluate(
+    (at) => window.fake.files.drop([{ name: "draft.pdf", type: "application/pdf", bytes: [37] }], at),
+    at,
+  );
+  await expect(page.getByRole("list", { name: "Files to send" }).getByText("draft.pdf")).toBeVisible();
 });

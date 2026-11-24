@@ -1,6 +1,7 @@
 import { Bookmark, BookmarkCheck, ChevronRight, Ellipsis, FilePlus2, Link2, Trash2 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { api, type Page, pageLink } from "../../lib/api";
+import { DROP_ZONE } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
@@ -59,7 +60,7 @@ export function PageView({ pageId }: { pageId: string }) {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" {...{ [DROP_ZONE]: "" }}>
       <ViewHeader className="text-sm text-muted">
         <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
           <ol className="flex min-w-0 items-center gap-0.5">

@@ -6,7 +6,7 @@
 
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import type { Change, FileInfo, Member, StagedFile } from "../../../src/lib/api";
+import type { Change, DropPoint, FileInfo, Member, StagedFile } from "../../../src/lib/api";
 import { argument, ownedId, randomHex, requireString } from "./helpers";
 
 /** Returned by `answer` for commands that aren't about files. */
@@ -130,15 +130,19 @@ export class FakeFiles {
 
   // ---- Acting for tests ---------------------------------------------------
 
-  /** Files dropped on the window: staged, then announced like the native side does. */
-  drop(files: FileForTest[]): void {
+  /**
+   * Files dropped on the window, at `at` in page pixels (null for a drop the
+   * native side couldn't place): staged, then announced like the native side does.
+   */
+  drop(files: FileForTest[], at: DropPoint | null = null): void {
     const staged = files.map((file) => this.stage(file));
-    void emit("file-drag", false);
-    void emit("files-dropped", staged);
+    void emit("file-drag", null);
+    void emit("files-dropped", { files: staged, position: at });
   }
 
-  dragOver(isDragging: boolean): void {
-    void emit("file-drag", isDragging);
+  /** Files dragged over the window at `at`; null once the drag leaves. */
+  dragOver(at: DropPoint | null): void {
+    void emit("file-drag", at);
   }
 
   /** A file someone else shared into a page. */

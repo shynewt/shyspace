@@ -1110,7 +1110,19 @@ pub fn run() {
         // so alerts still arrive; Quit in the tray menu ends it.
         .on_window_event(|window, event| {
             if let WindowEvent::DragDrop(drop) = event {
-                files::on_drag_drop(window.app_handle(), &window.state::<files::StagedFiles>(), drop);
+                let scale_factor = match window.scale_factor() {
+                    Ok(scale) => Some(scale),
+                    Err(error) => {
+                        tracing::warn!(%error, "couldn't read the window's scale; a drop goes to the box used last");
+                        None
+                    }
+                };
+                files::on_drag_drop(
+                    window.app_handle(),
+                    &window.state::<files::StagedFiles>(),
+                    drop,
+                    scale_factor,
+                );
             }
             if let WindowEvent::ThemeChanged(_) = event {
                 tray::redraw(window.app_handle());

@@ -19,7 +19,7 @@ use shy_core::{
     workspace::{FileSource, NewFile},
 };
 use tauri::{
-    AppHandle, DragDropEvent, Emitter, State,
+    AppHandle, DragDropEvent, Emitter, PhysicalPosition, State,
     ipc::{InvokeBody, Request, Response},
 };
 use tauri_plugin_dialog::DialogExt;
@@ -157,26 +157,58 @@ fn media_type_of(path: &Path) -> &'static str {
     }
 }
 
-/// Stages files dropped on the window and tells the UI about them.
-pub fn on_drag_drop(app: &AppHandle, staged: &StagedFiles, event: &DragDropEvent) {
-    let message = match event {
-        DragDropEvent::Enter { .. } | DragDropEvent::Over { .. } => {
-            let _ = app.emit("file-drag", true);
+/// Where files are over the window, in page pixels, so the UI can give them
+/// to the panel under the pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct DropPoint {
+    x: f64,
+    y: f64,
+}
+
+impl DropPoint {
+    fn from_physical(position: PhysicalPosition<f64>, scale_factor: f64) -> Self {
+        let logical = position.to_logical::<f64>(scale_factor);
+        Self {
+            x: logical.x,
+            y: logical.y,
+        }
+    }
+}
+
+#[derive(Serialize, Clone)]
+struct FilesDropped {
+    files: Vec<StagedFile>,
+    /// None when the window's scale couldn't be read: the UI then uses the box used last.
+    position: Option<DropPoint>,
+}
+
+/// Stages files dropped on the window and tells the UI about them, and where.
+/// `scale_factor` turns the window's pixels into the page's.
+pub fn on_drag_drop(app: &AppHandle, staged: &StagedFiles, event: &DragDropEvent, scale_factor: Option<f64>) {
+    let at = |position: &PhysicalPosition<f64>| {
+        scale_factor.map(|scale| DropPoint::from_physical(*position, scale))
+    };
+    let (files, position) = match event {
+        DragDropEvent::Enter { position, .. } | DragDropEvent::Over { position } => {
+            let _ = app.emit("file-drag", at(position));
             return;
         }
         DragDropEvent::Leave => {
-            let _ = app.emit("file-drag", false);
+            let _ = app.emit("file-drag", None::<DropPoint>);
             return;
         }
-        DragDropEvent::Drop { paths, .. } => paths
-            .iter()
-            .filter_map(|path| staged.add_path(path.clone()))
-            .collect::<Vec<_>>(),
+        DragDropEvent::Drop { paths, position } => (
+            paths
+                .iter()
+                .filter_map(|path| staged.add_path(path.clone()))
+                .collect::<Vec<_>>(),
+            at(position),
+        ),
         _ => return,
     };
-    let _ = app.emit("file-drag", false);
-    if !message.is_empty() {
-        let _ = app.emit("files-dropped", message);
+    let _ = app.emit("file-drag", None::<DropPoint>);
+    if !files.is_empty() {
+        let _ = app.emit("files-dropped", FilesDropped { files, position });
     }
 }
 
@@ -443,6 +475,12 @@ pub async fn set_workspace_icon(state: State<'_, AppState>, image: Vec<u8>) -> C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_drop_point_is_in_page_pixels() {
+        let point = DropPoint::from_physical(PhysicalPosition::new(300.0, 150.0), 2.0);
+        assert_eq!(point, DropPoint { x: 150.0, y: 75.0 });
+    }
 
     #[test]
     fn a_pasted_file_unframes_to_its_name_type_and_bytes() {

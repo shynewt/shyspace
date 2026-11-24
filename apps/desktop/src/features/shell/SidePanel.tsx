@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { motion, useIsPresent } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { DROP_ZONE } from "../../lib/dropTargets";
 import { cx, IconButton, instantAfterAKey, springs, tweens } from "../../ui";
 import { useShellLayout } from "./ShellLayout";
 import { HEADER_BAR } from "./ViewHeader";
@@ -90,6 +91,7 @@ export function SidePanel({
     <motion.aside
       ref={panel}
       aria-label={title}
+      {...{ [DROP_ZONE]: "" }}
       onPointerDownCapture={() => {
         isPointerDownInside.current = true;
       }}

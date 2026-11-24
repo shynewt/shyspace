@@ -2,6 +2,7 @@ import { AnimatePresence } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type Message } from "../../lib/api";
 import { channelReference, composerLabel } from "../../lib/channels";
+import { DROP_ZONE } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
 import { distanceFromBottom, isAboveView, isInView } from "../../lib/messageList";
 import { captureScrollAnchor, restoreScrollAnchor, type ScrollRestore } from "../../lib/scrollAnchor";
@@ -324,7 +325,7 @@ export function ChannelView({
 
   return (
     <div className="relative flex h-full">
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col" {...{ [DROP_ZONE]: "" }}>
         <ViewHeader>
           {channel ? <ChannelTitle channel={channel} members={members} /> : <h1 className="text-lg">…</h1>}
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
