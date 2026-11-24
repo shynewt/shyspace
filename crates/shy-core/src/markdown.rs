@@ -9,6 +9,10 @@ use std::collections::HashMap;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 const APP_LINK: &str = "shy://";
+/// Shown before a page link's title and a message link's words in previews,
+/// as their chips show an icon.
+const PAGE_ICON: &str = "📄";
+const MESSAGE_ICON: &str = "💬";
 
 /// The same flavour the desktop renders: GitHub's tables, strikethrough,
 /// task lists, footnotes and callouts.
@@ -70,11 +74,11 @@ impl LinkNames {
             "page" => {
                 let title = self.pages.get(id).map(|title| title.trim()).unwrap_or_default();
                 match title.is_empty() {
-                    true => "Untitled page".to_owned(),
-                    false => title.to_owned(),
+                    true => format!("{PAGE_ICON} Untitled page"),
+                    false => format!("{PAGE_ICON} {title}"),
                 }
             }
-            "message" => "a linked message".to_owned(),
+            "message" => format!("{MESSAGE_ICON} a message"),
             _ => return None,
         };
         Some((name, after.to_owned()))
@@ -195,7 +199,7 @@ mod tests {
                     [site](https://a.b), [doc](shy://page/p1) and <shy://page/p1>; [file](shy://file/f1)";
         assert_eq!(
             preview_text(text, &names()),
-            "hi @Eve and @channel site, Plan and Plan; file"
+            "hi @Eve and @channel site, 📄 Plan and 📄 Plan; file"
         );
     }
 
@@ -215,10 +219,7 @@ mod tests {
     #[test]
     fn a_private_message_link_is_named_whole() {
         let text = "see shy://message/p:abc123/def456. and [it](shy://message/dm:ab/cd)";
-        assert_eq!(
-            preview_text(text, &names()),
-            "see a linked message. and a linked message"
-        );
+        assert_eq!(preview_text(text, &names()), "see 💬 a message. and 💬 a message");
     }
 
     #[test]

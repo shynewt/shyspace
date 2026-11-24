@@ -1,6 +1,6 @@
 //! Previews that reach the app as plain text (thread summaries, search
 //! snippets and notifications) name every app link by its real target, as
-//! a chip does: the member's current name, the page's title, "a linked
+//! a chip does: the member's current name, the page's title after 📄, "💬 a
 //! message". An author's label never shows, even for a reference link whose
 //! definition a cut left out.
 
@@ -73,7 +73,7 @@ async fn page_message_and_unknown_member_links_are_named_like_chips() {
 
     assert_eq!(
         last_reply_preview(&admin, &general, &question),
-        "see Handbook, a linked message and @member 1a2b3c; also Handbook"
+        "see 📄 Handbook, 💬 a message and @member 1a2b3c; also 📄 Handbook"
     );
 }
 
@@ -112,7 +112,7 @@ async fn a_search_snippet_names_links_and_marks_the_match() {
 
     let hits = admin.search("budg", 10).unwrap();
     let snippet = &hits.iter().find(|hit| hit.kind == "message").unwrap().snippet;
-    assert_eq!(snippet, "\u{1}budget\u{2} by @Carol in Handbook");
+    assert_eq!(snippet, "\u{1}budget\u{2} by @Carol in 📄 Handbook");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -150,4 +150,27 @@ async fn a_message_cant_fake_a_highlight_in_its_snippet() {
 
     let snippet = &admin.search("budget", 10).unwrap()[0].snippet;
     assert_eq!(snippet, "fake \u{1}budget\u{2}");
+}
+
+/// A link's icon is a word of its own, so a match right after it is marked
+/// whole and the cut still counts words, whatever their bytes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_match_next_to_a_named_link_is_marked_exactly() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let page = admin.create_page("Handbook", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let text = format!(
+        "{} see shy://page/{page} budget shy://page/{page} {}",
+        "before ".repeat(10),
+        "after ".repeat(10)
+    );
+    bob.send_message(&general, &text, None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let snippet = &admin.search("budget", 10).unwrap()[0].snippet;
+    assert_eq!(
+        snippet,
+        "…before see 📄 Handbook \u{1}budget\u{2} 📄 Handbook after after after after after…"
+    );
 }
