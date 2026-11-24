@@ -200,6 +200,24 @@ async fn leaving_closes_the_workspace_and_deletes_its_folder_and_key() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_with_a_page_open_can_still_be_left() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap();
+    let workspace_id = acme.workspace_id().to_owned();
+    let page = acme.create_page("Plans", None).unwrap();
+    acme.join_page(&page, true).await.unwrap();
+    drop(acme);
+
+    workspaces.leave(&workspace_id).await.unwrap();
+
+    assert!(!workspaces.folder(&workspace_id).unwrap().path.exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn leaving_the_selected_workspace_selects_the_one_used_before() {
     let device = Device::new();
     let workspaces = device.workspaces();

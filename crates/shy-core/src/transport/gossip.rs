@@ -162,6 +162,8 @@ pub struct Net {
     sender: GossipSender,
     neighbors: Arc<AtomicUsize>,
     members_only: MembersOnly,
+    pub(super) gossip: Gossip,
+    pub(super) page: Mutex<Option<super::page_gossip::OpenPage>>,
 }
 
 impl Net {
@@ -244,6 +246,8 @@ impl Net {
             sender,
             neighbors,
             members_only,
+            gossip,
+            page: Mutex::new(None),
         })
     }
 
@@ -258,11 +262,7 @@ impl Net {
 
     /// Connects to the given peers, skipping ourselves and non-members.
     pub async fn join(&self, peers: Vec<PublicKey>) -> Result<()> {
-        let own_id = self.router.endpoint().id();
-        let peers: Vec<_> = peers
-            .into_iter()
-            .filter(|peer| *peer != own_id && self.members_only.is_member(peer))
-            .collect();
+        let peers = self.dialable(peers);
         if !peers.is_empty() {
             self.sender.join_peers(peers).await?;
         }
@@ -270,6 +270,20 @@ impl Net {
     }
 
     /// Sends an envelope live, or a nudge when it is too large for gossip.
+    /// `peers` without ourselves and non-members.
+    pub(super) fn dialable(&self, peers: Vec<PublicKey>) -> Vec<PublicKey> {
+        let own_id = self.router.endpoint().id();
+        peers
+            .into_iter()
+            .filter(|peer| *peer != own_id && self.members_only.is_member(peer))
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(super) fn endpoint(&self) -> &Endpoint {
+        self.router.endpoint()
+    }
+
     pub async fn broadcast(&self, envelope: Envelope) -> Result<()> {
         let encoded = postcard::to_stdvec(&Wire::Envelope(envelope))?;
         if encoded.len() <= self.sender.max_content_size() {

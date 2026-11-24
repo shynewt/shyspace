@@ -4757,3 +4757,47 @@ async fn a_look_kept_as_unreadable_applies_after_updating() {
 
     assert_eq!(updated.workspace_look().unwrap().theme.as_deref(), Some("dusk"));
 }
+
+/// A member removed while on a page goes from it at once, and nothing they
+/// send to it afterwards shows.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_member_goes_from_a_page_and_cant_come_back_to_it() {
+    use super::page_cursors::{beacon, cursor};
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = admin.create_page("Plans", None).unwrap();
+    admin.join_page(&page, true).await.unwrap();
+    admin.receive_page(&beacon(&bob, &page, true)).unwrap();
+    admin.receive_page(&cursor(&bob, &page, 1)).unwrap();
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+
+    let presence = admin.page_presence(&page).unwrap();
+    assert!(presence.viewers.is_empty() && presence.cursors.is_empty());
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    assert!(admin.receive_page(&beacon(&bob, &page, true)).is_err());
+    assert!(admin.receive_page(&cursor(&bob, &page, 2)).is_err());
+    assert!(admin.page_presence(&page).unwrap().viewers.is_empty());
+}
+
+/// A beacon or cursor signed for another workspace doesn't show here, even
+/// from a member: signatures name the workspace, so one can't be replayed.
+#[tokio::test(flavor = "multi_thread")]
+async fn page_messages_signed_for_another_workspace_are_refused() {
+    use crate::{ops::now_ms, pages::cursors::PageBeacon, transport::page_gossip::PageWire};
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = admin.create_page("Plans", None).unwrap();
+    admin.join_page(&page, true).await.unwrap();
+    let elsewhere = PageWire::Beacon(
+        PageBeacon::signed(
+            &bob.inner.identity,
+            "another workspace",
+            &page,
+            true,
+            now_ms().unwrap(),
+        )
+        .unwrap(),
+    );
+
+    assert!(admin.receive_page(&elsewhere).is_err());
+    assert!(admin.page_presence(&page).unwrap().viewers.is_empty());
+}

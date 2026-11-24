@@ -9,6 +9,7 @@ mod key_rotation;
 mod later;
 mod lifecycle;
 mod look;
+mod pages_live;
 mod presence;
 mod protection;
 mod reads;
@@ -200,6 +201,9 @@ pub(crate) struct Inner {
     /// The runtime the workspace was opened on, so its sync calls can start
     /// tasks from any thread.
     pub runtime: tokio::runtime::Handle,
+    pub page_live: Mutex<pages_live::PageLive>,
+    #[cfg(test)]
+    pub page_sent: Mutex<Vec<crate::transport::page_gossip::PageWire>>,
     pub own_presence: Mutex<presence::OwnPresence>,
     /// Sends a heartbeat now instead of at the next tick.
     pub heartbeat_now: Notify,
@@ -316,6 +320,7 @@ impl Workspace {
         let left = self.leave_huddle();
         self.finish_huddle_sends().await;
         self.inner.stopped.send_replace(true);
+        self.close_page();
         let uploaded = self.push().await;
         if let Some(net) = &self.inner.net {
             net.shutdown().await;

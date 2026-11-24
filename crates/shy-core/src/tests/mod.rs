@@ -16,6 +16,7 @@ mod later;
 mod mentions;
 mod notes;
 mod notifications;
+mod page_cursors;
 mod presence;
 mod previews;
 mod private;

@@ -504,6 +504,21 @@ pub struct ProtectionCheck {
     pub checked_ms: Option<i64>,
 }
 
+/// Another member's cursor on a page; no selection while they aren't in its text.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PageCursor {
+    pub member: String,
+    pub selection: Option<crate::pages::cursors::CursorSelection>,
+    pub idle_ms: i64,
+}
+
+/// Who else is on a page (member ids), and their cursors.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct PagePresence {
+    pub viewers: Vec<String>,
+    pub cursors: Vec<PageCursor>,
+}
+
 /// What changed, so listeners refresh only the affected view.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -541,6 +556,10 @@ pub enum Change {
     },
     /// A file shared into the page arrived, was renamed or was deleted.
     PageFiles {
+        page: EntityId,
+    },
+    /// Who else is on the page, or where their cursors are, changed.
+    PagePresence {
         page: EntityId,
     },
     Members,

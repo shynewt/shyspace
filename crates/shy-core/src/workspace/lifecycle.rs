@@ -504,6 +504,9 @@ impl Workspace {
                 refetched_gaps: Mutex::new(std::collections::HashSet::new()),
                 skipped_segments: Mutex::new(std::collections::HashSet::new()),
                 fetch_failures: Mutex::new(std::collections::HashMap::new()),
+                page_live: Mutex::default(),
+                #[cfg(test)]
+                page_sent: Mutex::default(),
                 last_slow_duties: Mutex::new(None),
                 verified_commits: Mutex::new(std::collections::HashMap::new()),
                 removal_reads: Mutex::new(std::collections::HashMap::new()),

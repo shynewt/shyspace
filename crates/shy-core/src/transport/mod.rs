@@ -6,4 +6,5 @@ pub mod bucket;
 pub mod direct;
 pub mod gossip;
 pub mod heads;
+pub mod page_gossip;
 pub mod presigned;

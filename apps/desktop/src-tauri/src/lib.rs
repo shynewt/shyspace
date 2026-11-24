@@ -4,6 +4,7 @@
 mod alerts;
 mod files;
 mod huddles;
+mod pages_live;
 mod tray;
 mod updates;
 mod window;
@@ -1098,6 +1099,10 @@ pub fn run() {
             files::file_bytes,
             files::share_page_file,
             files::page_files,
+            pages_live::join_page,
+            pages_live::leave_page,
+            pages_live::move_cursor,
+            pages_live::page_presence,
             files::page_file_bytes,
             files::save_page_file,
             files::save_file,
