@@ -45,9 +45,10 @@ def check_out(tag: str, old: Path) -> None:
     if old.exists():
         run("git", "worktree", "remove", "--force", str(old))
     run("git", "worktree", "add", "--detach", str(old), tag)
+    shutil.rmtree(old / FIXTURE, ignore_errors=True)
     shutil.copytree(ROOT / FIXTURE, old / FIXTURE)
     manifest = old / "Cargo.toml"
-    text = manifest.read_text()
+    text = manifest.read_text().replace(f', "{FIXTURE}"', "")
     if "members = [" not in text:
         raise RuntimeError(f"{tag}'s Cargo.toml has no members list to add the fixture to")
     manifest.write_text(text.replace("members = [", f'members = ["{FIXTURE}", ', 1))
