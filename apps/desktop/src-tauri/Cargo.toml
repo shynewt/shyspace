@@ -29,6 +29,7 @@ anyhow = "1.0.104"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-clipboard-manager = "2"
 
 [lints]
 workspace = true

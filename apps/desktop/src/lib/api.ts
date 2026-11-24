@@ -518,6 +518,8 @@ export const api = {
       "stage_pasted_file",
       framePastedFile(file.name, file.type, new Uint8Array(await file.arrayBuffer())),
     ),
+  /** The system clipboard's image: width and height (little-endian u32 each), then RGBA pixels. */
+  clipboardImage: async () => new Uint8Array(await invoke<ArrayBuffer>("clipboard_image")),
   unstageFile: (token: string) => invoke<void>("unstage_file", { token }),
   /** A staged image's bytes, for its thumbnail; refused for anything over the inline image limit. */
   stagedFileBytes: async (token: string) => new Uint8Array(await invoke<ArrayBuffer>("staged_file_bytes", { token })),

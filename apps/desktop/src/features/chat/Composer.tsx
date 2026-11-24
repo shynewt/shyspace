@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { api, type Message } from "../../lib/api";
+import { clipboardImageFile, isEmptyPaste } from "../../lib/clipboardImage";
 import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../lib/limits";
 import { droppedPageId, isPageDrag } from "../../lib/pageDrag";
 import { reportError } from "../../lib/toast";
@@ -181,6 +182,8 @@ export function Composer({
               onPaste={(event) => {
                 if (editing) return;
                 if (attachments.paste(Array.from(event.clipboardData.files))) event.preventDefault();
+                else if (isEmptyPaste(event.clipboardData))
+                  clipboardImageFile().then((file) => attachments.paste([file]), reportError);
               }}
               onBlur={() => setFocused(false)}
               onDragOver={(event) => {

@@ -2,6 +2,7 @@
 //! call, and every core change is forwarded to the UI as a "change" event.
 
 mod alerts;
+mod clipboard;
 mod files;
 mod huddles;
 mod pages_live;
@@ -1086,6 +1087,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(files::StagedFiles::default())
         .setup(|app| {
             let (workspaces, single_folder) = workspaces_on_this_device(app.handle())?;
@@ -1154,6 +1156,7 @@ pub fn run() {
             huddles::set_huddle_sounds,
             files::pick_files,
             files::stage_pasted_file,
+            clipboard::clipboard_image,
             files::staged_file_bytes,
             files::unstage_file,
             files::send_files,

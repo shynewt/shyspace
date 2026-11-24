@@ -48,6 +48,20 @@ test("a pasted image uploads into the page and is linked where it was pasted", a
   await expect.poll(() => page.evaluate(() => window.fake.pageText("Plan"))).toBe(`Intro\n![](shy://file/${file.id})`);
 });
 
+test("an image the web view left out of a paste is read from the clipboard into the page", async ({ page }) => {
+  const pageId = await openPage(page, "Plan", "");
+  await lines(page).first().click();
+  await page.evaluate(() => {
+    window.fake.files.clipboardImage = { width: 1, height: 1, rgba: [255, 0, 0, 255] };
+  });
+  await paste(page, []);
+
+  await expect.poll(async () => (await pageFiles(page, pageId)).length).toBe(1);
+  const [file] = await pageFiles(page, pageId);
+  expect(file.name).toBe("Plan image 1.png");
+  await expect.poll(() => page.evaluate(() => window.fake.pageText("Plan"))).toBe(`![](shy://file/${file.id})`);
+});
+
 test("a pasted file that isn't an image is linked by its name", async ({ page }) => {
   const pageId = await openPage(page, "Plan", "");
   await lines(page).first().click();

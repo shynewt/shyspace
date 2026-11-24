@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { allowClipboard } from "./support";
 
 const PNG = [
@@ -83,6 +83,47 @@ test("a pasted image is attached instead of pasted as text", async ({ page }) =>
   }, PNG);
   await expect(page.getByRole("list", { name: "Files to send" }).getByText("screenshot.png")).toBeVisible();
   await expect(composer).toHaveValue("");
+});
+
+/** Pastes into the focused element; `text` is what the clipboard offers as text. */
+async function pasteNothingBut(page: Page, text: string) {
+  await page.evaluate((text) => {
+    const transfer = new DataTransfer();
+    if (text) transfer.setData("text/plain", text);
+    document.activeElement?.dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true }),
+    );
+  }, text);
+}
+
+test("an image the web view left out of a paste is read from the clipboard", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.files.clipboardImage = { width: 1, height: 1, rgba: [255, 0, 0, 255] };
+  });
+  const composer = page.getByLabel("Message #general");
+  await composer.focus();
+  await pasteNothingBut(page, "");
+
+  await expect(page.getByRole("list", { name: "Files to send" }).getByText("image.png")).toBeVisible();
+  await expect(composer).toHaveValue("");
+});
+
+test("a paste of text never reads the clipboard's image", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.files.clipboardImage = { width: 1, height: 1, rgba: [255, 0, 0, 255] };
+  });
+  await page.getByLabel("Message #general").focus();
+  await pasteNothingBut(page, "hello");
+
+  expect(await page.evaluate(() => window.fake.files.clipboardReads)).toBe(0);
+  await expect(page.getByRole("list", { name: "Files to send" })).toHaveCount(0);
+});
+
+test("an empty paste with no image on the clipboard says so", async ({ page }) => {
+  await page.getByLabel("Message #general").focus();
+  await pasteNothingBut(page, "");
+
+  await expect(page.getByText("there's no image on the clipboard to paste")).toBeVisible();
 });
 
 test("a file that fails to send stays in the box with its text", async ({ page }) => {

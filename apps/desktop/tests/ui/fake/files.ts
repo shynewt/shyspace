@@ -46,6 +46,10 @@ export class FakeFiles {
   readonly saved: string[] = [];
   /** Makes the next send (or share into a page) fail, like a bucket that can't be reached. */
   failNextSend = false;
+  /** The image on the system clipboard, as width, height and RGBA pixels; none when null. */
+  clipboardImage: { width: number; height: number; rgba: number[] } | null = null;
+  /** How often the app read the system clipboard's image. */
+  clipboardReads = 0;
   /** Makes the next share into a page wait until `releaseShare` is called. */
   holdNextShare = false;
   releaseShare: (() => void) | null = null;
@@ -60,6 +64,17 @@ export class FakeFiles {
         const picked = this.pickNext.map((file) => this.stage(file));
         this.pickNext = [];
         return picked;
+      }
+      case "clipboard_image": {
+        this.clipboardReads += 1;
+        const image = this.clipboardImage;
+        if (!image) throw new Error("there's no image on the clipboard to paste (the clipboard is empty)");
+        const framed = new Uint8Array(8 + image.rgba.length);
+        const header = new DataView(framed.buffer);
+        header.setUint32(0, image.width, true);
+        header.setUint32(4, image.height, true);
+        framed.set(image.rgba, 8);
+        return framed.buffer;
       }
       case "stage_pasted_file":
         return this.stage(unframePastedFile(args));

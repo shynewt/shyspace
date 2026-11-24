@@ -9,6 +9,7 @@ import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import { api, onChange, onFilesDropped, type PageEditorSession, type PagePresence } from "../../lib/api";
 import { saveBeforeSwitch } from "../../lib/beforeSwitch";
+import { clipboardImageFile, isEmptyPaste } from "../../lib/clipboardImage";
 import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
 import { addDropTarget, dropTargetAt, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
@@ -342,10 +343,14 @@ function PageEditor({
             EditorView.domEventHandlers({
               focus: () => markDropTargetUsed(dropTarget),
               paste: (event, editor) => {
-                const files = [...(event.clipboardData?.files ?? [])];
-                if (files.length === 0) return false;
+                const clipboard = event.clipboardData;
+                if (!clipboard) return false;
+                const isEmpty = isEmptyPaste(clipboard);
+                const files = [...clipboard.files];
+                if (files.length === 0 && !isEmpty) return false;
                 event.preventDefault();
-                stagePastedForPage(files, pageId, titleRef.current)
+                (isEmpty ? clipboardImageFile().then((file) => [file]) : Promise.resolve(files))
+                  .then((pasted) => stagePastedForPage(pasted, pageId, titleRef.current))
                   .then((staged) => uploadIntoPage(editor, pageId, staged))
                   .catch(reportError);
                 return true;
