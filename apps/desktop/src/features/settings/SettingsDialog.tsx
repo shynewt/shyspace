@@ -2,7 +2,9 @@ import { Bell, Bot, HardDrive, Headphones, LifeBuoy, Palette, ShieldCheck, UserR
 import { motion } from "motion/react";
 import { Tabs } from "radix-ui";
 import { Fragment, type ReactNode } from "react";
+import { api } from "../../lib/api";
 import { type SettingsGroup, type SettingsSection, type SettingsTarget, sectionsShownTo } from "../../lib/settings";
+import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { cx, Dialog, instantAfterAKey, springs } from "../../ui";
 import { WaitingRequestsBadge } from "../members/JoinRequests";
@@ -123,35 +125,35 @@ function SettingsWindow({
       orientation="vertical"
       className="@container/settings mt-4 flex h-settings max-h-[calc(100dvh-6rem)] border-t border-line"
     >
-      <Tabs.List
-        aria-label="Settings sections"
-        className="flex w-45 shrink-0 flex-col @2xl/settings:w-49 gap-px overflow-y-auto border-r border-line bg-bg p-2"
-      >
-        {groups.map((group) => (
-          <Fragment key={group.id}>
-            <div
-              aria-hidden
-              className="truncate px-2.5 pt-3 pb-1 text-2xs font-semibold tracking-wide text-faint uppercase first:pt-1"
-            >
-              {group.title}
-            </div>
-            {sections
-              .filter((section) => section.group === group.id)
-              .map((section) => (
-                <SectionTab
-                  key={section.id}
-                  section={section.id}
-                  label={section.label}
-                  isActive={section.id === shownSection}
-                  badge={
-                    (section.id === "members" && session.is_admin && <WaitingRequestsBadge />) ||
-                    (section.id === "storage" && <StorageAttentionSign />)
-                  }
-                />
-              ))}
-          </Fragment>
-        ))}
-      </Tabs.List>
+      <div className="flex w-45 shrink-0 flex-col @2xl/settings:w-49 border-r border-line bg-bg">
+        <Tabs.List aria-label="Settings sections" className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto p-2">
+          {groups.map((group) => (
+            <Fragment key={group.id}>
+              <div
+                aria-hidden
+                className="truncate px-2.5 pt-3 pb-1 text-2xs font-semibold tracking-wide text-faint uppercase first:pt-1"
+              >
+                {group.title}
+              </div>
+              {sections
+                .filter((section) => section.group === group.id)
+                .map((section) => (
+                  <SectionTab
+                    key={section.id}
+                    section={section.id}
+                    label={section.label}
+                    isActive={section.id === shownSection}
+                    badge={
+                      (section.id === "members" && session.is_admin && <WaitingRequestsBadge />) ||
+                      (section.id === "storage" && <StorageAttentionSign />)
+                    }
+                  />
+                ))}
+            </Fragment>
+          ))}
+        </Tabs.List>
+        <AppVersion />
+      </div>
       {sections.map((section) => (
         // Every section stays mounted while Settings is open, so typed text and
         // a save still running survive looking at another section.
@@ -178,6 +180,11 @@ function SettingsWindow({
       ))}
     </Tabs.Root>
   );
+}
+
+function AppVersion() {
+  const version = useLive(api.appVersion, () => false);
+  return <p className="truncate px-4.5 py-3 text-xs text-faint">{version && `shyspace ${version}`}</p>;
 }
 
 function SectionTab({

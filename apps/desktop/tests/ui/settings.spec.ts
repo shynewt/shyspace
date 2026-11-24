@@ -475,3 +475,8 @@ test("cursors in pages: others' can be hidden and yours kept to yourself, and bo
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("shyspace.preferences") ?? "{}"));
   expect(stored).toMatchObject({ showCursorsInPages: false, shareCursorInPages: false });
 });
+
+test("settings show which version of the app this is", async ({ page }) => {
+  const settings = await openSettings(page);
+  await expect(settings.getByText("shyspace 1.2.3")).toBeVisible();
+});

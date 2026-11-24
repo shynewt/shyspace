@@ -1,3 +1,4 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { appLink } from "./appLinks";
@@ -560,6 +561,7 @@ export const api = {
   /** Stops the ring for an incoming huddle without joining it. */
   declineHuddle: (workspaceId: string) => invoke<void>("decline_huddle", { workspaceId }),
   /** The version downloaded and ready to install, or null while there's nothing newer. */
+  appVersion: getVersion,
   checkForUpdate: () => invoke<string | null>("check_for_update"),
   /** Installs the ready update and restarts into it, after uploading unsent changes; refused during a huddle. */
   restartToUpdate: () => invoke<RestartOutcome>("restart_to_update"),

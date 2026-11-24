@@ -475,6 +475,8 @@ export class FakeBackend {
     }
     if (chatAnswer !== NOT_CHAT) return chatAnswer;
     switch (command) {
+      case "plugin:app|version":
+        return "1.2.3";
       case "check_for_update":
         this.updateChecks += 1;
         return this.readyUpdate;
