@@ -86,8 +86,7 @@ function DmItem({ dm, title }: { dm: Channel; title: string }) {
       label={title}
       kind="direct message"
       unread={dm.unread}
-      // Every message in a DM is for you, unless you muted it.
-      mentions={dm.notify === "nothing" ? 0 : dm.unread}
+      isForYou
       isMuted={dm.notify === "nothing"}
       huddle={huddle}
       status={

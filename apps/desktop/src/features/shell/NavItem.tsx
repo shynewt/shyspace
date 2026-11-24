@@ -14,6 +14,7 @@ export function NavItem({
   unread = 0,
   countNoun = "unread",
   mentions = 0,
+  isForYou = false,
   waiting,
   isMuted = false,
   status,
@@ -36,6 +37,8 @@ export function NavItem({
   countNoun?: string;
   /** How many of those mention you; shown as a red badge instead. */
   mentions?: number;
+  /** A DM: every message is for you, so unread ones count red, as a plain number rather than "@N". */
+  isForYou?: boolean;
   /** Things only waiting, like drafts: a quiet count that never makes the label bold. `label` says it ("2 drafts"). */
   waiting?: { count: number; label: string };
   /** Muted: dimmed, and only mentions get a badge. */
@@ -57,7 +60,8 @@ export function NavItem({
 }) {
   const { view: current, navigate } = useWorkspace();
   const isActive = sameView(current, view);
-  const hasUnread = !isActive && (isMuted ? mentions > 0 : unread > 0);
+  const forYou = isForYou ? (isMuted ? 0 : unread) : mentions;
+  const hasUnread = !isActive && (isMuted ? forYou > 0 : unread > 0);
   const waitingLabel = waiting && waiting.count > 0 ? waiting.label : undefined;
   return (
     <div className="group relative flex items-center" style={{ paddingLeft: depth * INDENT_PX }}>
@@ -78,7 +82,7 @@ export function NavItem({
             ? accessibleName(
                 [label, kind, status?.label, huddle?.label, waitingLabel],
                 hasUnread ? unread : 0,
-                mentions,
+                isForYou ? 0 : mentions,
                 countNoun,
               )
             : undefined
@@ -119,10 +123,10 @@ export function NavItem({
             initial={{ scale: 0.6, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={springs.pop}
-            tone={mentions > 0 ? "danger" : "accent"}
+            tone={forYou > 0 ? "danger" : "accent"}
             className={cx(huddle ? "ml-1" : "ml-auto", "group-hover:opacity-0")}
           >
-            {mentions > 0 ? `@${mentions}` : unread}
+            {mentions > 0 && !isForYou ? `@${mentions}` : unread}
           </CountBadge>
         )}
         {!hasUnread && waiting && waiting.count > 0 && (
