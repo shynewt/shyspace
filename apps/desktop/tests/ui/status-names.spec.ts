@@ -16,7 +16,8 @@ async function graceSays(page: Page, text: string, status: MemberStatus | null) 
     },
     { text, status },
   );
-  await expect(channelLog(page).getByText(text)).toBeVisible();
+  // Exact: a short text like "Hi" is also part of the empty channel's "Say hi", there until the message shows.
+  await expect(channelLog(page).getByText(text, { exact: true })).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
