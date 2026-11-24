@@ -48,6 +48,7 @@ import {
 import { FakeHuddles, NOT_HUDDLES } from "./huddles";
 import { FakeInvites } from "./invites";
 import { FakeLater } from "./later";
+import { FakePageCursors, NOT_PAGE_CURSORS } from "./pageCursors";
 import { FakePrivate, NOT_PRIVATE } from "./private";
 import { search } from "./search";
 import { FakeSections } from "./sections";
@@ -125,6 +126,14 @@ export class FakeBackend {
     sendMessage: (channel, text, replyTo) => this.answer("send_message", { channel, text, replyTo }) as string,
     channelOf: (message) => this.chat.channelOf(message),
     isPage: (id) => this.pages.some((page) => page.id === id),
+  });
+  readonly pageCursors = new FakePageCursors({
+    notify: (change) => this.notify(change),
+    docOf: (page) => {
+      const found = this.pages.find((candidate) => candidate.id === page);
+      if (!found) throw new Error(`fake backend: no page ${page}`);
+      return found.doc;
+    },
   });
   readonly huddles = new FakeHuddles({
     me: () => this.me(),
@@ -444,6 +453,8 @@ export class FakeBackend {
   private answer(command: string, args: InvokeArgs | undefined): unknown {
     const filesAnswer = this.files.answer(command, args);
     if (filesAnswer !== NOT_FILES) return filesAnswer;
+    const cursorsAnswer = this.pageCursors.answer(command, args);
+    if (cursorsAnswer !== NOT_PAGE_CURSORS) return cursorsAnswer;
     const huddlesAnswer = this.huddles.answer(command, args);
     if (huddlesAnswer !== NOT_HUDDLES) return huddlesAnswer;
     const workspacesAnswer = this.workspaces.answer(command, args);

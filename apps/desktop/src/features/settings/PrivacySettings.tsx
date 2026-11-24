@@ -1,6 +1,10 @@
 import { ChevronRight, Lock } from "lucide-react";
+import { usePreferences } from "../../lib/preferences";
+import { SegmentedControl } from "../../ui";
+import { Setting } from "./layout";
 
 export function PrivacySettings() {
+  const [preferences, update] = usePreferences();
   return (
     <div className="flex flex-col gap-4">
       <div className="flex gap-3 rounded-xl border border-line bg-bg p-4">
@@ -27,6 +31,20 @@ export function PrivacySettings() {
           <li>Desktop notifications show outside the encryption. You can hide their text under Notifications.</li>
         </ul>
       </details>
+      <Setting
+        title="Your cursor in pages"
+        description="Whether others on the same page see that you're there and where you're typing. Appear offline also stops it. You still see theirs."
+      >
+        <SegmentedControl<"share" | "keep">
+          label="Your cursor in pages"
+          options={[
+            { value: "share", label: "Share" },
+            { value: "keep", label: "Don't share" },
+          ]}
+          value={preferences.shareCursorInPages ? "share" : "keep"}
+          onChange={(choice) => update({ shareCursorInPages: choice === "share" })}
+        />
+      </Setting>
     </div>
   );
 }

@@ -39,6 +39,10 @@ type Preferences = {
   isPagesCollapsed: boolean;
   /** Pages whose sub-pages are folded in the sidebar; any others show theirs. */
   collapsedPages: string[];
+  /** Draw other members' cursors and selections in pages. */
+  showCursorsInPages: boolean;
+  /** Let others on a page see you there and where your cursor is. */
+  shareCursorInPages: boolean;
 };
 
 const DEFAULTS: Preferences = {
@@ -53,6 +57,8 @@ const DEFAULTS: Preferences = {
   joinsHuddlesMuted: false,
   isPagesCollapsed: false,
   collapsedPages: [],
+  showCursorsInPages: true,
+  shareCursorInPages: true,
 };
 const RECENT_EMOJI_LIMIT = 16;
 const KEY = "shyspace.preferences";

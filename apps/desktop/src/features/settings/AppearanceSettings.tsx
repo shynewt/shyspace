@@ -70,6 +70,20 @@ export function AppearanceSettings() {
           onChange={(reduceMotion) => update({ reduceMotion })}
         />
       </Setting>
+      <Setting
+        title="Others' cursors in pages"
+        description="Where others on the same page are typing and what they've selected, in the colour of their avatar."
+      >
+        <SegmentedControl<"show" | "hide">
+          label="Others' cursors in pages"
+          options={[
+            { value: "show", label: "Show" },
+            { value: "hide", label: "Hide" },
+          ]}
+          value={preferences.showCursorsInPages ? "show" : "hide"}
+          onChange={(choice) => update({ showCursorsInPages: choice === "show" })}
+        />
+      </Setting>
     </>
   );
 }

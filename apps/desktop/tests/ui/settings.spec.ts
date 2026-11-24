@@ -408,3 +408,21 @@ test("no section makes the whole settings window scroll past its end", async ({ 
     expect(overflow, `${await section.textContent()} scrolls the window`).toBeLessThanOrEqual(0);
   }
 });
+
+test("cursors in pages: others' can be hidden and yours kept to yourself, and both are kept", async ({ page }) => {
+  const settings = await openSettings(page);
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+  await settings
+    .getByRole("radiogroup", { name: "Others' cursors in pages" })
+    .getByRole("radio", { name: "Hide" })
+    .click();
+  await settings.getByRole("tab", { name: "Privacy" }).click();
+  await settings
+    .getByRole("radiogroup", { name: "Your cursor in pages" })
+    .getByRole("radio", { name: "Don't share" })
+    .click();
+
+  await page.reload();
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("shyspace.preferences") ?? "{}"));
+  expect(stored).toMatchObject({ showCursorsInPages: false, shareCursorInPages: false });
+});

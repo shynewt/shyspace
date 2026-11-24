@@ -87,6 +87,13 @@ export type Message = {
   /** Files shared with it, in the order they were sent. */
   files: FileInfo[];
 };
+/** A selection in a page as Yjs relative positions (`Y.encodeRelativePosition`), so it stays put as text moves. */
+export type CursorSelection = { anchor: number[]; head: number[] };
+/** Another member's cursor on a page: none while they aren't in its text. */
+export type PageCursor = { member: string; selection: CursorSelection | null; idle_ms: number };
+/** Who else is on a page, and their cursors. */
+export type PagePresence = { viewers: string[]; cursors: PageCursor[] };
+
 /** A shared file. Its bytes come through `api.fileBytes`; show it by what they are, never by its name or type. */
 export type FileInfo = {
   id: string;
@@ -268,6 +275,8 @@ export type Change =
   | { kind: "doc"; page: string; update: number[] }
   | { kind: "page_reset"; page: string }
   | { kind: "page_files"; page: string }
+  /** Who is on the page, or where their cursors are, changed. */
+  | { kind: "page_presence"; page: string }
   | { kind: "members" }
   | { kind: "invites" }
   | { kind: "storage" }
@@ -508,6 +517,12 @@ export const api = {
   /** Uploads a staged file into a page; resolves to its id, for the page's text to link. */
   sharePageFile: (page: string, token: string) => invoke<string>("share_page_file", { page, token }),
   pageFiles: (page: string) => invoke<FileInfo[]>("page_files", { page }),
+  /** Starts hearing who is on the page and where their cursors are; with `share`, they hear you too. */
+  joinPage: (page: string, share: boolean) => invoke<void>("join_page", { page, share }),
+  leavePage: (page: string) => invoke<void>("leave_page", { page }),
+  /** Your selection on a page you joined sharing, or null when you're not in its text. */
+  moveCursor: (page: string, selection: CursorSelection | null) => invoke<void>("move_cursor", { page, selection }),
+  pagePresence: (page: string) => invoke<PagePresence>("page_presence", { page }),
   /** A page's own file only; any other is refused, so page text can't pull one in by id. */
   pageFileBytes: async (page: string, file: string) =>
     new Uint8Array(await invoke<ArrayBuffer>("page_file_bytes", { page, file })),

@@ -7,15 +7,17 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
-import { api, onChange, onFilesDropped, type PageEditorSession } from "../../lib/api";
+import { api, onChange, onFilesDropped, type PageEditorSession, type PagePresence } from "../../lib/api";
 import { saveBeforeSwitch } from "../../lib/beforeSwitch";
 import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
 import { activeDropTarget, addDropTarget, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
+import { displayName } from "../../lib/people";
+import { usePreferences } from "../../lib/preferences";
 import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
-import { ConfirmDialog } from "../../ui";
+import { ConfirmDialog, memberColor, memberTint } from "../../ui";
 import { ProfileCardAt } from "../members/ProfileCardAt";
 import { formattingKeymap } from "./editor/commands";
 import {
@@ -30,6 +32,14 @@ import {
 } from "./editor/images";
 import { livePreview, setKnownMembers, setPageFileNames, setPageTitles } from "./editor/livePreview";
 import type { CardAnchor } from "./editor/openLinks";
+import {
+  type RemoteCursor,
+  relativeSelection,
+  remoteCursors,
+  remoteCursorTheme,
+  resolveCursor,
+  setRemoteCursors,
+} from "./editor/remoteCursors";
 import { type MenuKey, type Suggestion, suggestions } from "./editor/suggestions";
 import { pageTheme } from "./editor/theme";
 import { pageUploads } from "./editor/uploads";
@@ -69,7 +79,22 @@ const REMOTE = "remote";
  * local edits go out as Yjs updates, remote ones come back through change
  * events. Applying an update twice is harmless, so no echo tracking is needed.
  */
-export function Editor({ pageId }: { pageId: string }) {
+/** A request to go to a member's cursor; `at` makes asking twice go twice. */
+export type CursorJump = { member: string; at: number };
+
+/** Your selection goes to the others on the page at most this often. */
+const CURSOR_SEND_GAP_MS = 100;
+
+export function Editor({
+  pageId,
+  presence,
+  jumpTo,
+}: {
+  pageId: string;
+  /** Who else is on the page, and their cursors. */
+  presence: PagePresence | undefined;
+  jumpTo: CursorJump | null;
+}) {
   // A Yjs doc can't forget what it merged, so a rebuilt page gets a fresh one.
   const [resets, setResets] = useState(0);
   useEffect(
@@ -79,11 +104,33 @@ export function Editor({ pageId }: { pageId: string }) {
       }),
     [pageId],
   );
-  return <PageEditor key={resets} pageId={pageId} restart={() => setResets((count) => count + 1)} />;
+  return (
+    <PageEditor
+      key={resets}
+      pageId={pageId}
+      presence={presence}
+      jumpTo={jumpTo}
+      restart={() => setResets((count) => count + 1)}
+    />
+  );
 }
 
 /** `restart` must start a fresh editor, with a new session, from the saved page. */
-function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }) {
+function PageEditor({
+  pageId,
+  presence,
+  jumpTo,
+  restart,
+}: {
+  pageId: string;
+  presence: PagePresence | undefined;
+  jumpTo: CursorJump | null;
+  restart: () => void;
+}) {
+  const [{ showCursorsInPages, shareCursorInPages }] = usePreferences();
+  const shareRef = useRef(shareCursorInPages);
+  shareRef.current = shareCursorInPages;
+  const textRef = useRef<Y.Text | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const { pages, navigate } = useWorkspace();
@@ -122,6 +169,22 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
   useEffect(() => {
     const doc = new Y.Doc();
     const text = doc.getText(PAGE_TEXT);
+    textRef.current = text;
+    let lastCursorSent = 0;
+    let cursorTimer: ReturnType<typeof setTimeout> | undefined;
+    const sendCursor = (editor: EditorView) => {
+      if (!shareRef.current) return;
+      clearTimeout(cursorTimer);
+      const wait = lastCursorSent + CURSOR_SEND_GAP_MS - Date.now();
+      if (wait > 0) {
+        cursorTimer = setTimeout(() => sendCursor(editor), wait);
+        return;
+      }
+      lastCursorSent = Date.now();
+      const selection = editor.state.selection.main;
+      const shared = editor.hasFocus ? relativeSelection(text, selection.anchor, selection.head) : null;
+      api.moveCursor(pageId, shared).catch(reportError);
+    };
     let session: PageEditorSession | undefined;
     let pending: Uint8Array[] = [];
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -266,6 +329,11 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
             yCollab(text, null, { undoManager }),
             pageTheme,
             pageUploads,
+            remoteCursors(text),
+            remoteCursorTheme,
+            EditorView.updateListener.of((update) => {
+              if (update.selectionSet || update.focusChanged) sendCursor(update.view);
+            }),
             EditorView.domEventHandlers({
               focus: () => markDropTargetUsed(dropTarget),
               paste: (event, editor) => {
@@ -311,6 +379,56 @@ function PageEditor({ pageId, restart }: { pageId: string; restart: () => void }
   useEffect(() => {
     view?.dispatch({ effects: setPageTitles.of(new Map(pages.map((page) => [page.id, page.title]))) });
   }, [view, pages]);
+
+  // Joining the open page again only switches sharing, so a change of the
+  // setting never leaves the page in between.
+  useEffect(() => {
+    api.joinPage(pageId, shareCursorInPages).catch(reportError);
+  }, [pageId, shareCursorInPages]);
+  useEffect(
+    () => () => {
+      api.leavePage(pageId).catch(reportError);
+    },
+    [pageId],
+  );
+
+  useEffect(() => {
+    if (!view) return;
+    const now = Date.now();
+    const cursors: RemoteCursor[] =
+      showCursorsInPages && presence
+        ? presence.cursors.flatMap(({ member, selection, idle_ms }) =>
+            selection
+              ? [
+                  {
+                    member,
+                    name: displayName(members?.find((candidate) => candidate.id === member)?.name ?? "", member),
+                    color: memberColor(member),
+                    tint: memberTint(member),
+                    anchor: Uint8Array.from(selection.anchor),
+                    head: Uint8Array.from(selection.head),
+                    movedAt: now - idle_ms,
+                  },
+                ]
+              : [],
+          )
+        : [];
+    view.dispatch({ effects: setRemoteCursors.of(cursors) });
+  }, [view, presence, showCursorsInPages, members]);
+
+  const handledJump = useRef<CursorJump | null>(null);
+  useEffect(() => {
+    if (!jumpTo || handledJump.current === jumpTo) return;
+    const cursor = presence?.cursors.find((candidate) => candidate.member === jumpTo.member);
+    const text = textRef.current;
+    if (!view || !text || !cursor?.selection) return;
+    handledJump.current = jumpTo;
+    const resolved = resolveCursor(text, {
+      anchor: Uint8Array.from(cursor.selection.anchor),
+      head: Uint8Array.from(cursor.selection.head),
+    });
+    if (resolved) view.dispatch({ effects: EditorView.scrollIntoView(resolved.head, { y: "center" }) });
+  }, [view, jumpTo, presence]);
 
   useEffect(() => {
     view?.dispatch({ effects: setPageFileNames.of(new Map([...filesById].map(([id, file]) => [id, file.name]))) });

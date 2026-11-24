@@ -12,6 +12,16 @@ export function avatarHue(id: string) {
   return HUES[Math.abs(hash) % HUES.length];
 }
 
+/** A member's colour, as their avatar has it: for their caret and other marks. */
+export function memberColor(id: string): string {
+  return `hsl(${avatarHue(id)} 70% 52%)`;
+}
+
+/** The same colour, faint: for highlights behind text. */
+export function memberTint(id: string): string {
+  return `hsl(${avatarHue(id)} 70% 62% / 0.2)`;
+}
+
 export function initials(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "?";
