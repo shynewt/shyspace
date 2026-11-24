@@ -71,7 +71,8 @@ export function HuddleBar({ huddle }: { huddle: MyHuddle }) {
         type="button"
         aria-label={`In the huddle: ${namesList(everyone.map(nameOf), everyone.length)}. Show details`}
         onClick={() => setDetailsOpen(true)}
-        className="mt-2 flex w-full flex-wrap gap-1.5 rounded-md py-0.5"
+        // Each speaking ring reaches 4px past its face; 10px apart, two never touch.
+        className="mt-2 flex w-full flex-wrap gap-2.5 rounded-md py-1"
       >
         <AnimatePresence initial={false}>
           {everyone.map((member) => {

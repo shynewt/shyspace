@@ -73,7 +73,7 @@ export function Avatar({
         // Speaking flips many times a minute, so the ring only fades, briefly, and never pulses.
         <span
           className={cx(
-            "pointer-events-none absolute -inset-[3px] rounded-[34%] ring-2 ring-success transition-opacity",
+            "pointer-events-none absolute -inset-[2px] rounded-[34%] ring-2 ring-success transition-opacity",
             isSpeaking ? "opacity-100" : "opacity-0",
           )}
         />

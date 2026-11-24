@@ -502,3 +502,43 @@ test("without voice in this build, Settings › Huddles says why and offers noth
   await expect(settings.getByRole("switch")).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
+
+for (const count of [2, 5, 8]) {
+  test(`speaking rings never touch, with ${count} in the huddle`, async ({ page }) => {
+    await openApp(page);
+    const names = ["Grace", "Linus", "Mia", "Omar", "Priya", "Sven", "Tara"].slice(0, count - 1);
+    const others = await othersJoin(page, names);
+    await page.getByRole("button", { name: /^Join / }).click();
+    await expect(bar(page)).toBeVisible();
+    await page.evaluate(
+      ([ids, me]) => {
+        for (const id of [...ids, me]) window.fake.huddles.speaking(id, true);
+      },
+      [others, (await page.evaluate(() => window.fake.session?.me)) ?? ""] as const,
+    );
+    // Each ring's painted box: its own box plus the ring drawn around it.
+    const rings = bar(page).locator(".ring-success");
+    await expect(rings).toHaveCount(count);
+    await expect
+      .poll(() => rings.evaluateAll((all) => all.filter((ring) => getComputedStyle(ring).opacity === "1").length))
+      .toBe(count);
+    const boxes = await rings.evaluateAll((all) =>
+      all.map((ring) => {
+        const box = ring.getBoundingClientRect();
+        const width = Number.parseFloat(
+          getComputedStyle(ring)
+            .getPropertyValue("--tw-ring-shadow")
+            .match(/0 0 0 calc\((\d+)px/)?.[1] ?? "2",
+        );
+        return { left: box.left - width, right: box.right + width, top: box.top - width, bottom: box.bottom + width };
+      }),
+    );
+    for (const [index, one] of boxes.entries()) {
+      for (const other of boxes.slice(index + 1)) {
+        const overlaps =
+          one.left < other.right && other.left < one.right && one.top < other.bottom && other.top < one.bottom;
+        expect(overlaps, `rings overlap: ${JSON.stringify([one, other])}`).toBe(false);
+      }
+    }
+  });
+}
