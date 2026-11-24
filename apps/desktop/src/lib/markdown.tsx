@@ -18,7 +18,8 @@ import { CALLOUTS, type CalloutKind, isCalloutKind, rehypeCallouts } from "./cal
 import { type CodeSegment, highlight } from "./codeHighlight";
 import { isMisleadingLink, misleadingLinkWarning, openExternalUrl } from "./contact";
 import { isCheapToFormat, remarkSizeLimits, withPlainLineEnds } from "./markdownBudget";
-import { isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
+import { everyoneMentioned, isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
+import { displayName } from "./people";
 import { reportError } from "./toast";
 
 /** The id part of `shy://page/<id>` and `shy://message/<id>` links. */
@@ -54,6 +55,7 @@ export function ChatMarkdown({
   text,
   myId,
   pageTitle,
+  memberName,
   onOpenPage,
   onOpenMessage,
   renderMemberMention,
@@ -63,6 +65,8 @@ export function ChatMarkdown({
   /** Mentions of this member stand out. */
   myId: string;
   pageTitle: (id: string) => string | undefined;
+  /** A member's name as the app shows it (with a safety code when names collide); a mention chip draws this. */
+  memberName: (id: string) => string | undefined;
   onOpenPage: (id: string) => void;
   onOpenMessage: (id: string) => void;
   /** Draws a mention of a member, like a button opening their card; plain text without it. */
@@ -82,7 +86,7 @@ export function ChatMarkdown({
   if (!isCheapToFormat(source)) return <PlainText text={text} />;
   return (
     <ErrorBoundary key={text} fallback={<PlainText text={text} />}>
-      <LinkContext.Provider value={{ myId, pageTitle, onOpenPage, onOpenMessage, renderMemberMention }}>
+      <LinkContext.Provider value={{ myId, pageTitle, memberName, onOpenPage, onOpenMessage, renderMemberMention }}>
         <Markdown
           remarkPlugins={[remarkGfm, remarkBreaks, remarkSizeLimits]}
           rehypePlugins={[rehypeCallouts]}
@@ -107,6 +111,7 @@ function PlainText({ text }: { text: string }) {
 type LinkHandlers = {
   myId: string;
   pageTitle: (id: string) => string | undefined;
+  memberName: (id: string) => string | undefined;
   onOpenPage: (id: string) => void;
   onOpenMessage: (id: string) => void;
   renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
@@ -114,41 +119,39 @@ type LinkHandlers = {
 
 const LinkContext = createContext<LinkHandlers | null>(null);
 
-/** Labels that show nothing: spaces, no-break spaces and zero-width marks. */
-const BLANK = /^[\s\u200b-\u200d\u2060\ufeff]*$/;
-
 function MarkdownLink({ href = "", children, node }: ComponentProps<"a"> & ExtraProps) {
   const handlers = useContext(LinkContext);
   if (!handlers) throw new Error("a markdown link outside ChatMarkdown");
-  const { myId, pageTitle, onOpenPage, onOpenMessage, renderMemberMention } = handlers;
+  const { myId, pageTitle, memberName, onOpenPage, onOpenMessage, renderMemberMention } = handlers;
   // An address the renderer blocked (javascript: and the like) arrives empty: show what it said, not a link to nowhere.
   if (href === "") return <>{children}</>;
-  // Chips show their label as plain text: markup inside one, like an
-  // autolink, could otherwise put a link out inside a trusted-looking chip.
-  const label = node ? textOf(node) : "";
+  // Chips name what they open, as plain text the app knows, never the author's
+  // label: "@Ada" leading to Eve, or "Payroll" opening another page, would lie.
   const message = href.match(MESSAGE_LINK)?.[1];
   if (message) {
     return (
       <button type="button" className="page-chip" onClick={() => onOpenMessage(message)}>
-        {label}
+        a message
       </button>
     );
   }
   if (isMentionLink(href)) {
     const className = linkMentions(href, myId) ? "mention mention-me" : "mention";
     const memberId = mentionedMemberId(href);
-    if (memberId && renderMemberMention) return renderMemberMention(memberId, label, className);
-    return <span className={className}>{label}</span>;
+    if (!memberId) return <span className={className}>@{everyoneMentioned(href)}</span>;
+    const name = `@${memberName(memberId) ?? displayName("", memberId)}`;
+    if (renderMemberMention) return renderMemberMention(memberId, name, className);
+    return <span className={className}>{name}</span>;
   }
   const page = href.match(PAGE_LINK)?.[1];
   if (page) {
-    // A bare link (or a blank label) shows the page's title, as text.
     return (
       <button type="button" className="page-chip" onClick={() => onOpenPage(page)}>
-        {BLANK.test(label) ? (pageTitle(page) ?? "Untitled page") : label}
+        {pageTitle(page) ?? "Untitled page"}
       </button>
     );
   }
+  const label = node ? textOf(node) : "";
   return (
     <ExternalLink href={href} text={label}>
       {children}

@@ -130,7 +130,10 @@ test("a mention of someone unknown opens no card", async ({ page }) => {
       `Ask [@Bob](shy://member/${"b".repeat(64)})`,
     ),
   );
-  await channelLog(page).getByText("@Bob").click();
+  // Not the author's "@Bob": a chip names who it points to, here nobody this device knows.
+  await channelLog(page)
+    .getByText(`@member ${"b".repeat(6)}`)
+    .click();
   await page.waitForTimeout(300);
 
   await expect(page.getByRole("dialog")).toHaveCount(0);

@@ -48,12 +48,12 @@ async function sendWithPage(page: import("@playwright/test").Page, text: string)
   return page.getByRole("article").filter({ hasText: "today" });
 }
 
-test("a page link keeps its author's label; an empty or blank one shows the page's title", async ({ page }) => {
+test("a page link shows the page's title, whatever its label", async ({ page }) => {
   const message = await sendWithPage(
     page,
     "[Read this](shy://page/{page}), [](shy://page/{page}) and [ ](shy://page/{page}) today",
   );
-  await expect(message.locator(".page-chip")).toHaveText(["Read this", "Handbook", "Handbook"]);
+  await expect(message.locator(".page-chip")).toHaveText(["Handbook", "Handbook", "Handbook"]);
 });
 
 test("a chip's label is only text, so it can't hide a link out", async ({ page }) => {
@@ -61,6 +61,29 @@ test("a chip's label is only text, so it can't hide a link out", async ({ page }
     page,
     "[<https://evil.example/handbook>](shy://page/{page}) and [@Ada <https://evil.example>](shy://member/ff00) today",
   );
-  await expect(message.getByRole("button", { name: "https://evil.example/handbook", exact: true })).toBeVisible();
+  await expect(message.getByRole("button", { name: "Handbook", exact: true })).toBeVisible();
+  await expect(message).not.toContainText("evil.example");
   await expect(message.getByRole("link")).toHaveCount(0);
+});
+
+test("chips name their target, whatever label the author wrote", async ({ page }) => {
+  await page.evaluate(() => {
+    const mallory = window.fake.addMember("Mallory");
+    const eve = window.fake.addMember("Eve");
+    const other = window.fake.seedPage("Party planning", "");
+    window.fake.receiveMessage(
+      mallory,
+      "general",
+      `Ping [@Ada](shy://member/${eve}), read [Payroll](shy://page/${other}), see [Approved by Ada](shy://message/abc) and [@here](shy://mention/channel) today`,
+    );
+  });
+  const message = page.getByRole("article").filter({ hasText: "today" });
+  await expect(message).toContainText("@Eve");
+  await expect(message).not.toContainText("@Ada");
+  await expect(message.getByRole("button", { name: "Party planning", exact: true })).toBeVisible();
+  await expect(message).not.toContainText("Payroll");
+  await expect(message).not.toContainText("Approved by Ada");
+  await expect(message).toContainText("a message");
+  await expect(message).toContainText("@channel");
+  await expect(message).not.toContainText("@here");
 });

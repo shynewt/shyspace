@@ -23,6 +23,12 @@ export function mentionedMemberId(href: string): string | null {
   return href.match(MEMBER_LINK)?.[1] ?? null;
 }
 
+/** "channel" or "here" for an @channel or @here link; null for any other. */
+export function everyoneMentioned(href: string): "channel" | "here" | null {
+  const kind = href.match(EVERYONE_LINK)?.[1];
+  return kind === "channel" || kind === "here" ? kind : null;
+}
+
 /** Whether a mention link reaches `memberId`: theirs, or @channel / @here. */
 export function linkMentions(href: string, memberId: string): boolean {
   return EVERYONE_LINK.test(href) || href.match(MEMBER_LINK)?.[1] === memberId;

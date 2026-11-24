@@ -16,7 +16,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { api, type Message, messageLink, pageLink } from "../../lib/api";
 import { MAX_SHOWN_REACTIONS } from "../../lib/limits";
 import { ChatMarkdown, messageIdsIn, pageIdsIn, plainPreview } from "../../lib/markdown";
-import { useMember } from "../../lib/members";
+import { useMember, useMemberNames } from "../../lib/members";
 import { displayName, formatFullDate, formatTime } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
@@ -78,6 +78,7 @@ export const MessageItem = memo(function MessageItem({
   const openMenu = useCallback(() => setMenuOpen(true), []);
   useContextMenu(article, openMenu);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const memberName = useMemberNames();
   const linkedMessages = useMemo(
     () =>
       messageIdsIn(message.text)
@@ -172,6 +173,7 @@ export const MessageItem = memo(function MessageItem({
               <ChatMarkdown
                 text={message.text}
                 myId={session.me}
+                memberName={memberName}
                 pageTitle={(id) => titles.get(id)}
                 onOpenPage={(id) => navigate({ kind: "page", id })}
                 onOpenMessage={openLinkedMessage}

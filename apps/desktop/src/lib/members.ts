@@ -3,8 +3,9 @@
  * Statuses past their end time are dropped here, live: nothing announces
  * that a status ended, so a timer wakes up when the next one does.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Member, MemberStatus } from "./api";
+import { distinctName } from "./people";
 import { useWorkspace } from "./workspace";
 
 /** setTimeout can't wait longer than about 24 days. */
@@ -48,4 +49,16 @@ export function useMembers(): Member[] | undefined {
 
 export function useMember(id: string): Member | undefined {
   return useMembers()?.find((member) => member.id === id);
+}
+
+/** Names members as the app shows them, with a safety code where two share a name; undefined for someone unknown. */
+export function useMemberNames(): (id: string) => string | undefined {
+  const members = useMembers();
+  return useCallback(
+    (id: string) => {
+      const member = members?.find((candidate) => candidate.id === id);
+      return member && members ? distinctName(member, members) : undefined;
+    },
+    [members],
+  );
 }

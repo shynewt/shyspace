@@ -4,7 +4,7 @@ import { api, type FileInfo } from "../../lib/api";
 import { copyImage } from "../../lib/copyImage";
 import { formatSize, type LoadedImage } from "../../lib/files";
 import { ChatMarkdown } from "../../lib/markdown";
-import { useMember } from "../../lib/members";
+import { useMember, useMemberNames } from "../../lib/members";
 import { looksLikePdf, mayPreviewAsPdf } from "../../lib/pdfPreview";
 import { displayName } from "../../lib/people";
 import { decodeText, isMarkdownFile, mayPreviewAsText } from "../../lib/textPreview";
@@ -120,6 +120,7 @@ function TextViewer(props: ViewerProps) {
   const { file, open, onOpenChange } = props;
   const [loaded, setLoaded] = useState<LoadedText>({ status: "loading" });
   const { session, pages, navigate } = useWorkspace();
+  const memberName = useMemberNames();
   const openElsewhere = (view: View | null) => {
     if (!view) return;
     onOpenChange(false);
@@ -156,6 +157,7 @@ function TextViewer(props: ViewerProps) {
               <ChatMarkdown
                 text={loaded.text}
                 myId={session.me}
+                memberName={memberName}
                 pageTitle={(id) => pages.find((page) => page.id === id)?.title || undefined}
                 onOpenPage={(id) => openElsewhere({ kind: "page", id })}
                 onOpenMessage={(id) => {
