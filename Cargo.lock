@@ -9126,7 +9126,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "shy-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -9141,7 +9141,7 @@ dependencies = [
 
 [[package]]
 name = "shy-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aead-stream",
  "anyhow",
@@ -9177,7 +9177,7 @@ dependencies = [
 
 [[package]]
 name = "shy-demo"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "shy-core",
@@ -9186,7 +9186,7 @@ dependencies = [
 
 [[package]]
 name = "shy-media"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "bytes",
@@ -9201,7 +9201,7 @@ dependencies = [
 
 [[package]]
 name = "shyspace-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "serde",
