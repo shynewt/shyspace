@@ -47,7 +47,7 @@ export function useAlerts(workspaces: AlertWorkspaces) {
       const author = authorOf(change);
       const prepared = Promise.all([
         isShown ? titleInShown(change) : Promise.resolve(titleElsewhere(change)),
-        avatarPng(author.id, displayName(author.name, author.id)),
+        avatarPng(author.id, displayName(author.name, author.id), { canLoadPicture: isShown }),
       ]);
       const workspaceName = names.size > 1 ? names.get(workspaceId) : undefined;
       lastShown = lastShown

@@ -169,3 +169,41 @@ test("a notification shows the sender's picture", async ({ page }) => {
 
   await expect.poll(() => alertPictures(page)).toEqual([grace]);
 });
+
+/** The colour at the middle of the last notification's picture, as [red, green, blue]. */
+async function lastPictureCentre(page: Page): Promise<number[]> {
+  return page.evaluate(async () => {
+    const png = window.fake.alertPngs.at(-1);
+    if (!png || png.length === 0) throw new Error("the notification had no picture");
+    const bitmap = await createImageBitmap(new Blob([new Uint8Array(png)], { type: "image/png" }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("no canvas");
+    context.drawImage(bitmap, 0, 0);
+    const [red, green, blue] = context.getImageData(bitmap.width / 2, bitmap.height / 2, 1, 1).data;
+    return [red, green, blue];
+  });
+}
+
+test("a notification shows the sender's own picture when they have one", async ({ page }) => {
+  // A single red pixel, scaled to fill the notification's square.
+  const redPixel = [
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196,
+    137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240, 31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0,
+    0, 73, 69, 78, 68, 174, 66, 96, 130,
+  ];
+  await page.evaluate((png) => window.fake.files.setPicture(window.fake.memberNamed("Grace"), png), redPixel);
+  await graceSays(page, "random", "with a picture");
+  await expect.poll(() => page.evaluate(() => window.fake.alertPngs.length)).toBe(1);
+  const [red, green, blue] = await lastPictureCentre(page);
+  expect(red).toBeGreaterThan(200);
+  expect(green + blue).toBeLessThan(60);
+});
+
+test("a notification from someone without a picture shows their letter tile", async ({ page }) => {
+  await graceSays(page, "random", "no picture");
+  await expect.poll(() => page.evaluate(() => window.fake.alertPngs.length)).toBe(1);
+  const [red, green, blue] = await lastPictureCentre(page);
+  expect([red, green, blue]).not.toEqual([255, 0, 0]);
+  expect(await page.evaluate(() => window.fake.alertPngs[0]?.length ?? 0)).toBeLessThanOrEqual(256 * 1024);
+});

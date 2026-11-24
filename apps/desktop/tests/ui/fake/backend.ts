@@ -281,6 +281,8 @@ export class FakeBackend {
   readonly alertsHeld: string[] = [];
   /** Whose picture each alert in `alertsShown` came with, if it was a PNG; null for none. */
   readonly alertPictures: (string | null)[] = [];
+  /** The PNG bytes each alert in `alertsShown` came with; empty for none. */
+  readonly alertPngs: number[][] = [];
   /** What each alert in `alertsShown` opens when clicked, if anything. */
   readonly alertTargets: (AlertTarget | null)[] = [];
   /** Which workspace each alert in `alertsShown` came from. */
@@ -627,6 +629,7 @@ export class FakeBackend {
         this.alertWorkspaces.push(requireString(args, "workspaceId"));
         this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
         this.alertPictures.push(alertPicture(argument(args, "picture")));
+        this.alertPngs.push(alertPng(argument(args, "picture")));
         this.alertTargets.push(alertTarget(argument(args, "target")));
         return null;
       case "pages":
@@ -994,6 +997,11 @@ function alertTarget(value: unknown): AlertTarget | null {
 }
 
 /** The member a `show_alert` picture is for, if it's PNG bytes. */
+function alertPng(picture: unknown): number[] {
+  if (typeof picture !== "object" || picture === null || !("png" in picture) || !Array.isArray(picture.png)) return [];
+  return picture.png.filter((byte): byte is number => typeof byte === "number");
+}
+
 function alertPicture(picture: unknown): string | null {
   if (picture === null || picture === undefined) return null;
   if (typeof picture !== "object" || !("member" in picture) || !("png" in picture)) {
