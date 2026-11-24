@@ -2,9 +2,9 @@ import { AtSign, CheckCheck, Inbox as InboxIcon, MessageSquareReply } from "luci
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo, useState } from "react";
 import { api, type Channel, type InboxItem } from "../../lib/api";
-import { plainPreview } from "../../lib/markdown";
 import { useMemberNames } from "../../lib/members";
 import { displayName } from "../../lib/people";
+import { plainPreview } from "../../lib/plainPreview";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";

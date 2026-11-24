@@ -14,9 +14,9 @@ import { motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SearchHit } from "../../lib/api";
 import { useChannelNames } from "../../lib/channels";
-import { plainPreview } from "../../lib/markdown";
 import { useMemberNames, useMembers } from "../../lib/members";
 import { displayName, formatWhen } from "../../lib/people";
+import { cutPreview } from "../../lib/plainPreview";
 import { SETTINGS_SECTIONS } from "../../lib/settings";
 import { hasCommandModifier, shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
@@ -346,7 +346,7 @@ function readableSnippet(
   memberName: (id: string) => string | undefined,
 ): string {
   const withPlainLinks = text.replace(MARKED_APP_LINK, (link) => link.replace(MATCH_MARKS, ""));
-  return plainPreview(withPlainLinks, pageTitle, memberName);
+  return cutPreview(withPlainLinks, pageTitle, memberName);
 }
 
 /** The core wraps matches in \u0001…\u0002; render them as highlights. */

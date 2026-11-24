@@ -2,9 +2,9 @@ import { AlarmClock, Bookmark, Check, ChevronRight, Ellipsis, FileText, Trash2, 
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type LaterItem } from "../../lib/api";
-import { plainPreview } from "../../lib/markdown";
 import { useMemberNames } from "../../lib/members";
 import { displayName } from "../../lib/people";
+import { plainPreview } from "../../lib/plainPreview";
 import { describeReminder } from "../../lib/reminders";
 import { reportError, showUndoToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";

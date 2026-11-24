@@ -1,8 +1,8 @@
 import { ChevronRight } from "lucide-react";
 import type { Message } from "../../lib/api";
-import { plainPreview } from "../../lib/markdown";
 import { useMemberNames, useMembers } from "../../lib/members";
 import { displayName, formatWhen } from "../../lib/people";
+import { cutPreview } from "../../lib/plainPreview";
 import { CountBadge, cx, RelativeTime } from "../../ui";
 import { ReplierAvatars } from "./ReplierAvatars";
 
@@ -30,7 +30,7 @@ export function ThreadSummary({
   const unread = message.unread_replies;
   const lastAuthor = message.last_reply_author === null ? null : nameOf(message.last_reply_author);
   const preview =
-    message.last_reply_preview === null ? "" : plainPreview(message.last_reply_preview, pageTitle, memberName);
+    message.last_reply_preview === null ? "" : cutPreview(message.last_reply_preview, pageTitle, memberName);
   const label = [
     countText,
     lastAuthor !== null && message.last_reply_ms !== null

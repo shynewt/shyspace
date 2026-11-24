@@ -27,14 +27,10 @@ const PAGE_ID = "[0-9a-f]+";
 /** A message id; in a private channel or DM it starts with the channel, like `p:…/…`. */
 const MESSAGE_ID = "(?:(?:p|dm):[0-9a-f]+/)?[0-9a-f]+";
 
-const PAGE_LINK = new RegExp(`^shy://page/(${PAGE_ID})$`);
-const MESSAGE_LINK = new RegExp(`^shy://message/(${MESSAGE_ID})$`);
-const ANY_PAGE_LINK = new RegExp(`shy://page/(${PAGE_ID})`, "g");
-const ANY_MESSAGE_LINK = new RegExp(`shy://message/(${MESSAGE_ID})`, "g");
-const LABELLED_MEMBER_LINK = /\[([^\]]*)\]\(shy:\/\/member\/([0-9a-f]+)\)/g;
-const LABELLED_EVERYONE_LINK = /\[([^\]]*)\]\(shy:\/\/mention\/(channel|here)\)/g;
-/** A labelled page or message link, reduced to the bare link the steps below name. */
-const LABELLED_APP_LINK = new RegExp(`\\[[^\\]]*\\]\\((shy://(?:page/${PAGE_ID}|message/${MESSAGE_ID}))\\)`, "g");
+export const PAGE_LINK = new RegExp(`^shy://page/(${PAGE_ID})$`);
+export const MESSAGE_LINK = new RegExp(`^shy://message/(${MESSAGE_ID})$`);
+export const ANY_PAGE_LINK = new RegExp(`shy://page/(${PAGE_ID})`, "g");
+export const ANY_MESSAGE_LINK = new RegExp(`shy://message/(${MESSAGE_ID})`, "g");
 const BARE_PAGE_LINK = new RegExp(`(?<!\\]\\()shy://page/(${PAGE_ID})`, "g");
 const BARE_MESSAGE_LINK = new RegExp(`(?<!\\]\\()shy://message/(${MESSAGE_ID})`, "g");
 /** A link alone on its line, which a card under the message can stand in for. */
@@ -42,8 +38,6 @@ const APP_LINK_LINE = new RegExp(`^[ \\t]*(shy://(?:page/${PAGE_ID}|message/${ME
 const SAFE_EXTERNAL = /^(https?:|mailto:)/i;
 const NO_CARDS: ReadonlySet<string> = new Set();
 
-/** Previews show a line or two; reading further into a long (or hostile) message only costs time. */
-const PREVIEW_SOURCE_CHARS = 1000;
 const CODE_MAX_HEIGHT_PX = 240;
 const COPIED_FEEDBACK_MS = 1400;
 
@@ -356,56 +350,4 @@ export function pageIdsIn(text: string): string[] {
 
 export function messageIdsIn(text: string): string[] {
   return [...new Set([...text.matchAll(ANY_MESSAGE_LINK)].map((match) => match[1]))];
-}
-
-/**
- * One line of plain words for quotes, previews and search results: markdown
- * marks dropped, links as their text, page links by title, lines joined with
- * " · ". Copes with text cut off inside a link, as search snippets can be.
- */
-export function plainPreview(
-  text: string,
-  pageTitle: (id: string) => string | undefined,
-  memberName: (id: string) => string | undefined,
-): string {
-  return (
-    text
-      .slice(0, PREVIEW_SOURCE_CHARS)
-      .replace(/[\uD800-\uDBFF]$/, "")
-      // An app link names its real target, like its chip: never the author's label.
-      .replace(LABELLED_MEMBER_LINK, (_, label: string, id: string) =>
-        truthfulLabel(label, `@${memberName(id) ?? displayName("", id)}`),
-      )
-      .replace(LABELLED_EVERYONE_LINK, (_, label: string, kind: string) => truthfulLabel(label, `@${kind}`))
-      .replace(LABELLED_APP_LINK, "$1")
-      .replace(/!?\[([^\]]*)\]\([^)\s]*\)/g, "$1")
-      .replace(/\]\([^)\s]*\)/g, "")
-      .replace(/\[([^\]]*)\]\([^)\s]*?(…?)$/, "$1$2")
-      .replace(/\[([^\][]*)$/, "$1")
-      .replace(ANY_PAGE_LINK, (_, id: string) => pageTitle(id) ?? "Untitled page")
-      .replace(ANY_MESSAGE_LINK, "a linked message")
-      .split("\n")
-      .map(plainLine)
-      .filter(Boolean)
-      .join(" · ")
-      .replace(/\s+/g, " ")
-  );
-}
-
-/**
- * `label` when it already says `truth`, ignoring control characters (a search
- * snippet's match marks, kept so the match stays highlighted); else `truth`.
- */
-function truthfulLabel(label: string, truth: string): string {
-  return label.replace(/\p{Cc}/gu, "") === truth ? label : truth;
-}
-
-function plainLine(line: string): string {
-  return line
-    .replace(/^\s*(?:#{1,6}\s+|>\s?|```.*$)/, "")
-    .replace(/^\[!(?:note|info|tip|important|warning|caution)\]\s*/i, "")
-    .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "")
-    .replace(/\*\*|__|~~|`/g, "")
-    .replace(/(^|\W)[*_](\S(?:.*?\S)?)[*_](?=\W|$)/g, "$1$2")
-    .trim();
 }

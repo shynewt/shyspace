@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { api, type LaterItem, onAnyWorkspaceChange } from "./api";
-import { plainPreview } from "./markdown";
+import { plainPreview } from "./plainPreview";
 import { reportError, showReminderToast } from "./toast";
 
 /** Checks at least this often, in case the clock jumps (sleep, time zones). */

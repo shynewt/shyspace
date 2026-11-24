@@ -11,9 +11,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LinkedMessage, type Message, messageLink } from "../../lib/api";
 import { MAX_SHOWN_REACTIONS } from "../../lib/limits";
-import { plainPreview } from "../../lib/markdown";
 import { useMemberNames } from "../../lib/members";
 import { formatTime, groupByDay } from "../../lib/people";
+import { plainPreview } from "../../lib/plainPreview";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
 import { useLive } from "../../lib/useLive";
