@@ -121,6 +121,8 @@ function MarkdownLink({ href = "", children, node }: ComponentProps<"a"> & Extra
   const handlers = useContext(LinkContext);
   if (!handlers) throw new Error("a markdown link outside ChatMarkdown");
   const { myId, pageTitle, onOpenPage, onOpenMessage, renderMemberMention } = handlers;
+  // An address the renderer blocked (javascript: and the like) arrives empty: show what it said, not a link to nowhere.
+  if (href === "") return <>{children}</>;
   // Chips show their label as plain text: markup inside one, like an
   // autolink, could otherwise put a link out inside a trusted-looking chip.
   const label = node ? textOf(node) : "";

@@ -242,3 +242,16 @@ test("a long link's tooltip wraps inside the tooltip width", async ({ page }) =>
   expect(box.height).toBeGreaterThan(40);
   expect(await tooltip.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
+
+test("a link to a blocked address shows as its text, not a link that fails", async ({ page }) => {
+  await page.evaluate(() =>
+    window.fake.receiveMessage(
+      window.fake.addMember("Mallory"),
+      "general",
+      "Try [this trick](javascript:alert(1)) now",
+    ),
+  );
+  const message = page.getByRole("article").filter({ hasText: "this trick" });
+  await expect(message).toContainText("Try this trick now");
+  await expect(message.getByRole("link")).toHaveCount(0);
+});
