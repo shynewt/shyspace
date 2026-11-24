@@ -3,6 +3,7 @@ import { AnimatePresence, motion, type Transition } from "motion/react";
 import { type KeyboardEvent, useMemo } from "react";
 import { api, type Draft } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
+import { useMemberNames } from "../../lib/members";
 import { reportError, showUndoToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
@@ -47,6 +48,7 @@ const rowMotion = {
 function DraftRow({ draft }: { draft: Draft }) {
   const { navigate, pages } = useWorkspace();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const memberName = useMemberNames();
   const isThread = draft.target !== draft.channel;
   const isOld = Date.now() - draft.updated_ms > OLD_AFTER_MS;
   const open = () => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined });
@@ -83,7 +85,7 @@ function DraftRow({ draft }: { draft: Draft }) {
           </span>
         }
       >
-        {plainPreview(draft.text, (id) => titles.get(id))}
+        {plainPreview(draft.text, (id) => titles.get(id), memberName)}
       </ListRow>
     </motion.li>
   );

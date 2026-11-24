@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LinkedMessage, type Message, messageLink } from "../../lib/api";
 import { MAX_SHOWN_REACTIONS } from "../../lib/limits";
 import { plainPreview } from "../../lib/markdown";
+import { useMemberNames } from "../../lib/members";
 import { formatTime, groupByDay } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
 import { useContextMenu } from "../../lib/useContextMenu";
@@ -88,6 +89,7 @@ export function SentList() {
 function SentRow({ item }: { item: LinkedMessage }) {
   const { navigate, pages, session } = useWorkspace();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const memberName = useMemberNames();
   const { message, thread_root: threadRoot } = item;
   const row = useRef<HTMLLIElement>(null);
   const [isMenuOpen, setMenuOpen] = useState(false);
@@ -162,7 +164,7 @@ function SentRow({ item }: { item: LinkedMessage }) {
           </span>
         }
       >
-        {plainPreview(message.text, (id) => titles.get(id))}
+        {plainPreview(message.text, (id) => titles.get(id), memberName)}
       </ListRow>
     </li>
   );

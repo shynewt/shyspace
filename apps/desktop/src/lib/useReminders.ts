@@ -25,7 +25,13 @@ export function useReminders(onOpen: (workspaceId: string, item: LaterItem) => v
     const fireDue = async () => {
       for (const { workspace_id: workspaceId, item } of await api.takeDueReminders()) {
         const text = item.message?.message.text;
-        const what = text ? plainPreview(text, () => undefined) : item.page?.title || "something you saved";
+        const what = text
+          ? plainPreview(
+              text,
+              () => undefined,
+              () => undefined,
+            )
+          : item.page?.title || "something you saved";
         const body = what.length > PREVIEW_CHARS ? `${what.slice(0, PREVIEW_CHARS - 1)}…` : what;
         showReminderToast(`Reminder: ${body}`, () => open.current(workspaceId, item));
         api

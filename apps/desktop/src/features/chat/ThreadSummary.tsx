@@ -1,7 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import type { Message } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
-import { useMembers } from "../../lib/members";
+import { useMemberNames, useMembers } from "../../lib/members";
 import { displayName, formatWhen } from "../../lib/people";
 import { CountBadge, cx, RelativeTime } from "../../ui";
 import { ReplierAvatars } from "./ReplierAvatars";
@@ -21,6 +21,7 @@ export function ThreadSummary({
   onOpen: () => void;
 }) {
   const members = useMembers();
+  const memberName = useMemberNames();
   const memberFor = (id: string) => members?.find((member) => member.id === id);
   const nameOf = (id: string) => displayName(memberFor(id)?.name ?? "", id);
 
@@ -28,7 +29,8 @@ export function ThreadSummary({
   const countText = `${count} ${count === 1 ? "reply" : "replies"}`;
   const unread = message.unread_replies;
   const lastAuthor = message.last_reply_author === null ? null : nameOf(message.last_reply_author);
-  const preview = message.last_reply_preview === null ? "" : plainPreview(message.last_reply_preview, pageTitle);
+  const preview =
+    message.last_reply_preview === null ? "" : plainPreview(message.last_reply_preview, pageTitle, memberName);
   const label = [
     countText,
     lastAuthor !== null && message.last_reply_ms !== null

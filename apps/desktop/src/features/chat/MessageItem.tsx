@@ -314,7 +314,7 @@ export const MessageItem = memo(function MessageItem({
         >
           {isConfirmingDelete && (
             <blockquote className="selectable line-clamp-3 border-l-3 border-surface-3 pl-2.5 text-sm text-ink">
-              {plainPreview(message.text, (id) => titles.get(id))}
+              {plainPreview(message.text, (id) => titles.get(id), memberName)}
             </blockquote>
           )}
         </ConfirmDialog>

@@ -4,7 +4,7 @@ import { useCallback, useMemo } from "react";
 import { api, type LinkedMessage } from "../../lib/api";
 import { channelReference } from "../../lib/channels";
 import { plainPreview } from "../../lib/markdown";
-import { useMembers } from "../../lib/members";
+import { useMemberNames, useMembers } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { useLive } from "../../lib/useLive";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
@@ -16,6 +16,7 @@ export function MessageCard({ messageId }: { messageId: string }) {
   const { channels, pages, navigate } = useWorkspace();
   const members = useMembers();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const memberName = useMemberNames();
   const loadLinked = useCallback(() => api.linkedMessage(messageId), [messageId]);
   // One that's missing could arrive in any channel; one that's shown changes only with its own.
   const linked: LinkedMessage | null | undefined = useLive(
@@ -59,7 +60,9 @@ export function MessageCard({ messageId }: { messageId: string }) {
         <span className="block text-xs text-muted">
           <b className="font-semibold text-ink">{author}</b> in <ChannelName channelId={message.channel} />
         </span>
-        <span className="mt-0.5 line-clamp-2 block text-sm">{plainPreview(message.text, (id) => titles.get(id))}</span>
+        <span className="mt-0.5 line-clamp-2 block text-sm">
+          {plainPreview(message.text, (id) => titles.get(id), memberName)}
+        </span>
       </span>
     </motion.button>
   );

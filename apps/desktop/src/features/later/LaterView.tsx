@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type LaterItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
+import { useMemberNames } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { describeReminder } from "../../lib/reminders";
 import { reportError, showUndoToast } from "../../lib/toast";
@@ -89,6 +90,7 @@ function LaterRow({ item }: { item: LaterItem }) {
   const openMenu = useCallback(() => setMenuOpen(true), []);
   useContextMenu(row, openMenu);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const memberName = useMemberNames();
   const linked = item.message;
   const openItem = () => {
     const view = savedItemView(item);
@@ -96,7 +98,9 @@ function LaterRow({ item }: { item: LaterItem }) {
   };
   const author = linked ? displayName(linked.message.author_name, linked.message.author) : null;
 
-  const preview = linked ? plainPreview(linked.message.text, (id) => titles.get(id)) : item.page?.title || "Untitled";
+  const preview = linked
+    ? plainPreview(linked.message.text, (id) => titles.get(id), memberName)
+    : item.page?.title || "Untitled";
   const isOverdue = item.remind_ms !== null && item.remind_ms <= Date.now() && !item.is_done;
 
   const setDone = (isDone: boolean) =>

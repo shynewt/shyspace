@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo, useState } from "react";
 import { api, type Channel, type InboxItem } from "../../lib/api";
 import { plainPreview } from "../../lib/markdown";
+import { useMemberNames } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
@@ -76,6 +77,7 @@ export function InboxView() {
 function AttentionRow({ item }: { item: InboxItem }) {
   const { navigate, pages } = useWorkspace();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
+  const memberName = useMemberNames();
   const { message } = item;
   const name = displayName(message.author_name, message.author);
   const where = item.reason === "mention" ? "mentioned you in" : "replied in a thread in";
@@ -99,7 +101,7 @@ function AttentionRow({ item }: { item: InboxItem }) {
           </>
         }
       >
-        {plainPreview(message.text, (id) => titles.get(id))}
+        {plainPreview(message.text, (id) => titles.get(id), memberName)}
       </ListRow>
     </motion.li>
   );

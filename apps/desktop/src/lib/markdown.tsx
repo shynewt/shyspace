@@ -31,6 +31,10 @@ const PAGE_LINK = new RegExp(`^shy://page/(${PAGE_ID})$`);
 const MESSAGE_LINK = new RegExp(`^shy://message/(${MESSAGE_ID})$`);
 const ANY_PAGE_LINK = new RegExp(`shy://page/(${PAGE_ID})`, "g");
 const ANY_MESSAGE_LINK = new RegExp(`shy://message/(${MESSAGE_ID})`, "g");
+const LABELLED_MEMBER_LINK = /\[([^\]]*)\]\(shy:\/\/member\/([0-9a-f]+)\)/g;
+const LABELLED_EVERYONE_LINK = /\[([^\]]*)\]\(shy:\/\/mention\/(channel|here)\)/g;
+/** A labelled page or message link, reduced to the bare link the steps below name. */
+const LABELLED_APP_LINK = new RegExp(`\\[[^\\]]*\\]\\((shy://(?:page/${PAGE_ID}|message/${MESSAGE_ID}))\\)`, "g");
 const BARE_PAGE_LINK = new RegExp(`(?<!\\]\\()shy://page/(${PAGE_ID})`, "g");
 const BARE_MESSAGE_LINK = new RegExp(`(?<!\\]\\()shy://message/(${MESSAGE_ID})`, "g");
 /** A link alone on its line, which a card under the message can stand in for. */
@@ -359,21 +363,41 @@ export function messageIdsIn(text: string): string[] {
  * marks dropped, links as their text, page links by title, lines joined with
  * " · ". Copes with text cut off inside a link, as search snippets can be.
  */
-export function plainPreview(text: string, pageTitle: (id: string) => string | undefined): string {
-  return text
-    .slice(0, PREVIEW_SOURCE_CHARS)
-    .replace(/[\uD800-\uDBFF]$/, "")
-    .replace(/!?\[([^\]]*)\]\([^)\s]*\)/g, "$1")
-    .replace(/\]\([^)\s]*\)/g, "")
-    .replace(/\[([^\]]*)\]\([^)\s]*?(…?)$/, "$1$2")
-    .replace(/\[([^\][]*)$/, "$1")
-    .replace(ANY_PAGE_LINK, (_, id: string) => pageTitle(id) ?? "Untitled page")
-    .replace(ANY_MESSAGE_LINK, "a linked message")
-    .split("\n")
-    .map(plainLine)
-    .filter(Boolean)
-    .join(" · ")
-    .replace(/\s+/g, " ");
+export function plainPreview(
+  text: string,
+  pageTitle: (id: string) => string | undefined,
+  memberName: (id: string) => string | undefined,
+): string {
+  return (
+    text
+      .slice(0, PREVIEW_SOURCE_CHARS)
+      .replace(/[\uD800-\uDBFF]$/, "")
+      // An app link names its real target, like its chip: never the author's label.
+      .replace(LABELLED_MEMBER_LINK, (_, label: string, id: string) =>
+        truthfulLabel(label, `@${memberName(id) ?? displayName("", id)}`),
+      )
+      .replace(LABELLED_EVERYONE_LINK, (_, label: string, kind: string) => truthfulLabel(label, `@${kind}`))
+      .replace(LABELLED_APP_LINK, "$1")
+      .replace(/!?\[([^\]]*)\]\([^)\s]*\)/g, "$1")
+      .replace(/\]\([^)\s]*\)/g, "")
+      .replace(/\[([^\]]*)\]\([^)\s]*?(…?)$/, "$1$2")
+      .replace(/\[([^\][]*)$/, "$1")
+      .replace(ANY_PAGE_LINK, (_, id: string) => pageTitle(id) ?? "Untitled page")
+      .replace(ANY_MESSAGE_LINK, "a linked message")
+      .split("\n")
+      .map(plainLine)
+      .filter(Boolean)
+      .join(" · ")
+      .replace(/\s+/g, " ")
+  );
+}
+
+/**
+ * `label` when it already says `truth`, ignoring control characters (a search
+ * snippet's match marks, kept so the match stays highlighted); else `truth`.
+ */
+function truthfulLabel(label: string, truth: string): string {
+  return label.replace(/\p{Cc}/gu, "") === truth ? label : truth;
 }
 
 function plainLine(line: string): string {
