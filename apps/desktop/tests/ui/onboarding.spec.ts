@@ -81,3 +81,28 @@ test("in the smallest window the whole form can be scrolled to, from the welcome
   await expect(create).toBeInViewport({ ratio: 1 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(640);
 });
+
+test("pasting a bucket's address fills the endpoint, bucket and region, and names the provider", async ({ page }) => {
+  await page.getByLabel("Endpoint").fill("https://shyspace-shynewt.s3.fr-par.scw.cloud");
+  await expect(page.getByLabel("Endpoint")).toHaveValue("https://s3.fr-par.scw.cloud");
+  await expect(page.getByLabel("Bucket")).toHaveValue("shyspace-shynewt");
+  await expect(page.getByLabel("Region")).toHaveValue("fr-par");
+  await expect(page.getByText("Scaleway, Paris")).toBeVisible();
+});
+
+test("a recognised address never overwrites a bucket or region you typed", async ({ page }) => {
+  await page.getByLabel("Bucket").fill("my-bucket");
+  await page.getByLabel("Region").fill("custom-1");
+  await page.getByLabel("Endpoint").fill("https://other.s3.eu-central-1.amazonaws.com");
+  await expect(page.getByLabel("Endpoint")).toHaveValue("https://s3.eu-central-1.amazonaws.com");
+  await expect(page.getByLabel("Bucket")).toHaveValue("my-bucket");
+  await expect(page.getByLabel("Region")).toHaveValue("custom-1");
+  await expect(page.getByText("AWS, Frankfurt")).toBeVisible();
+});
+
+test("an address it doesn't know is left as typed", async ({ page }) => {
+  await page.getByLabel("Endpoint").fill("https://minio.example.com");
+  await expect(page.getByLabel("Endpoint")).toHaveValue("https://minio.example.com");
+  await expect(page.getByLabel("Region")).toHaveValue("us-east-1");
+  await expect(page.getByText("Or paste your bucket's address")).toBeVisible();
+});

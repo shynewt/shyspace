@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { type FormEvent, useRef, useState } from "react";
 import { api, type BucketConfig, type Session } from "../../lib/api";
 import { MAX_PROFILE_NAME_CHARS } from "../../lib/limits";
+import { describeProvider, parseStorageEndpoint } from "../../lib/storageEndpoint";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { Button, Field, Input, rise } from "../../ui";
@@ -34,7 +35,24 @@ export function CreateForm({ onReady }: { onReady: (session: Session) => void })
   const [isBusy, setBusy] = useState(false);
   const firstInput = useRef<HTMLInputElement>(null);
   useFocusOnMount(firstInput);
-  const setField = (field: keyof BucketConfig) => (value: string) => setBucket({ ...bucket, [field]: value });
+  // What the person typed themselves; a recognised address never overwrites it.
+  const typed = useRef(new Set<keyof BucketConfig>());
+  const setField = (field: keyof BucketConfig) => (value: string) => {
+    typed.current.add(field);
+    setBucket((previous) => ({ ...previous, [field]: value }));
+  };
+  const recognised = parseStorageEndpoint(bucket.endpoint);
+  const setEndpoint = (value: string) => {
+    const parsed = parseStorageEndpoint(value);
+    const isFree = (field: keyof BucketConfig, current: string) => !typed.current.has(field) || current.trim() === "";
+    setBucket((previous) => ({
+      ...previous,
+      // A bucket's own address is the provider's endpoint plus the bucket.
+      endpoint: parsed?.bucket ? parsed.endpoint : value,
+      bucket: parsed?.bucket && isFree("bucket", previous.bucket) ? parsed.bucket : previous.bucket,
+      region: parsed && isFree("region", previous.region) ? parsed.region : previous.region,
+    }));
+  };
   const isComplete = workspaceName.trim() && name.trim() && Object.values(bucket).every((value) => value.trim());
   const [check, setCheck] = useState<BucketCheck>({ kind: "untested" });
   // A passed check only counts for the exact settings that were tested.
@@ -98,8 +116,9 @@ export function CreateForm({ onReady }: { onReady: (session: Session) => void })
       <BucketField
         label="Endpoint"
         value={bucket.endpoint}
-        onChange={setField("endpoint")}
+        onChange={setEndpoint}
         placeholder="https://s3.eu-west-1.amazonaws.com"
+        hint={recognised ? describeProvider(recognised) : "Or paste your bucket's address"}
       />
       <div className="grid grid-cols-2 gap-3">
         <BucketField label="Bucket" value={bucket.bucket} onChange={setField("bucket")} placeholder="team-space" />
@@ -184,19 +203,22 @@ function BucketField({
   value,
   onChange,
   placeholder,
+  hint,
   type = "text",
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  hint?: string;
   type?: "text" | "password";
 }) {
   return (
-    <Field label={label}>
-      {(id) => (
+    <Field label={label} hint={hint}>
+      {(id, description) => (
         <Input
           id={id}
+          {...description}
           type={type}
           value={value}
           onChange={(event) => onChange(event.target.value)}

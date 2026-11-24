@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { api, type StorageSettings as Settings } from "../../lib/api";
+import { describeProvider, parseStorageEndpoint } from "../../lib/storageEndpoint";
 import { showToast } from "../../lib/toast";
 import { useFormAction } from "../../lib/useFormAction";
 import { useLive } from "../../lib/useLive";
@@ -39,6 +40,7 @@ function BucketForm({ settings }: { settings: Settings }) {
   const [accessKeyId, setAccessKeyId] = useState(settings.access_key_id);
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [newKit, setNewKit] = useState<string | null>(null);
+  const provider = parseStorageEndpoint(settings.endpoint);
   const isComplete = Boolean(region.trim() && accessKeyId.trim() && secretAccessKey.trim());
   const save = useFormAction(async () => {
     const kit = await api.updateStorage(region, accessKeyId, secretAccessKey);
@@ -52,7 +54,10 @@ function BucketForm({ settings }: { settings: Settings }) {
       <form onSubmit={save.run} className="flex flex-col gap-3">
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-xl border border-line bg-bg px-3.5 py-2.5 text-sm">
           <dt className="text-muted">Endpoint</dt>
-          <dd className="selectable truncate">{settings.endpoint}</dd>
+          <dd className="selectable truncate">
+            {settings.endpoint}
+            {provider && <span className="text-muted"> · {describeProvider(provider)}</span>}
+          </dd>
           <dt className="text-muted">Bucket</dt>
           <dd className="selectable truncate">{settings.bucket}</dd>
         </dl>
