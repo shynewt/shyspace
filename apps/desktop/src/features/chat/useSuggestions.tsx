@@ -2,7 +2,7 @@ import { AtSign, Bot, FileText } from "lucide-react";
 import { motion } from "motion/react";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { type Member, PAGE_LINK_PREFIX, type Page } from "../../lib/api";
+import { type Member, type Page, pageLink } from "../../lib/api";
 import { emojiQueryAt } from "../../lib/emojiQuery";
 import { useMembers } from "../../lib/members";
 import { exactlyNamed, mentionQueryAt, withMentionLinks, withTypedMentions } from "../../lib/mentions";
@@ -158,7 +158,7 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
     const title = pages.find((page) => page.id === pageId)?.title;
     if (title === undefined) return;
     if (!title) {
-      insertAtCursor(`${PAGE_LINK_PREFIX}${pageId}`);
+      insertAtCursor(pageLink(session.workspace_id, pageId));
       return;
     }
     pickedPages.current.set(title, pageId);
@@ -194,19 +194,26 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
       text,
       people.map(({ name, member }) => ({ name, id: member.id })),
     );
-    return withMentionLinks(typed.text, new Map([...typed.named, ...picked.current]), pickedPages.current);
+    return withMentionLinks(
+      typed.text,
+      session.workspace_id,
+      new Map([...typed.named, ...picked.current]),
+      pickedPages.current,
+    );
   };
   /** Shows a sent message's mention links as plain `@Name` again, remembering who they are. */
   const adopt = useCallback(
     (text: string) =>
       text.replace(
-        /\[@([^\]]*)\]\(shy:\/\/(member|mention)\/([0-9a-z]+)\)/g,
-        (_, name: string, kind: string, id: string) => {
+        /\[@([^\]]*)\]\(shy:\/\/(?:([0-9a-f]{16})\/)?(member|mention)\/([0-9a-z]+)\)/g,
+        (whole: string, name: string, workspace: string | undefined, kind: string, id: string) => {
+          // Another workspace's mention stays as written: it names nobody here.
+          if (workspace !== undefined && workspace !== session.workspace_id) return whole;
           if (kind === "member") picked.current.set(name, id);
           return `@${name}`;
         },
       ),
-    [],
+    [session.workspace_id],
   );
   const forgetPicked = () => {
     picked.current.clear();

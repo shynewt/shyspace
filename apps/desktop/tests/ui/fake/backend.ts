@@ -44,6 +44,7 @@ import {
   requireDetails,
   requireNotifyLevel,
   requireString,
+  workspaceIdFor,
 } from "./helpers";
 import { FakeHuddles, NOT_HUDDLES } from "./huddles";
 import { FakeInvites } from "./invites";
@@ -95,6 +96,7 @@ export class FakeBackend {
   latestEditorClient: number | null = null;
   private chat = new FakeChat({
     me: () => this.me(),
+    workspaceId: () => this.session?.workspace_id ?? "",
     isAdmin: () => Boolean(this.session?.is_admin),
     members: () => this.members,
     tick: () => this.tick(),
@@ -107,6 +109,7 @@ export class FakeBackend {
   });
   private private = new FakePrivate({
     me: () => this.me(),
+    workspaceId: () => this.session?.workspace_id ?? "",
     isAdmin: () => Boolean(this.session?.is_admin),
     members: () => this.members,
     tick: () => this.tick(),
@@ -728,7 +731,7 @@ export class FakeBackend {
       recovery_snapshot_bytes: null,
       recovery_snapshot_limit: RECOVERY_SNAPSHOT_LIMIT,
     };
-    this.session = { workspace_id: "w-acme", workspace_name: workspaceName, me, is_admin: true };
+    this.session = { workspace_id: workspaceIdFor("Acme"), workspace_name: workspaceName, me, is_admin: true };
     this.chat.createChannel("general");
     return this.session;
   }
@@ -783,7 +786,7 @@ export class FakeBackend {
       recovery_snapshot_bytes: null,
       recovery_snapshot_limit: RECOVERY_SNAPSHOT_LIMIT,
     };
-    this.session = { workspace_id: "w-team", workspace_name: "Team", me, is_admin: false };
+    this.session = { workspace_id: workspaceIdFor("Team"), workspace_name: "Team", me, is_admin: false };
     return this.session;
   }
 

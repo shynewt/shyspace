@@ -1,5 +1,8 @@
 import { expect, type Page, test } from "@playwright/test";
 
+/** The workspace the fake opens, whose links the editor writes. */
+const ACME = "61636d6500000000";
+
 const pageText = (page: Page) => page.evaluate(() => window.fake.pageText("Typing"));
 const editor = (page: Page) => page.locator(".cm-content");
 
@@ -102,7 +105,7 @@ test("at suggests people and inserts a mention", async ({ page }) => {
   await page.keyboard.press("Enter");
   await page.keyboard.type("today");
 
-  await expect.poll(() => pageText(page)).toBe(`Ask [@Grace Hopper](shy://member/${grace}) today`);
+  await expect.poll(() => pageText(page)).toBe(`Ask [@Grace Hopper](shy://${ACME}/member/${grace}) today`);
   await expect(editor(page).getByText("@Grace Hopper")).toBeVisible();
 });
 
@@ -115,7 +118,7 @@ test("double brackets suggest pages and insert a link", async ({ page }) => {
   await expect(menu.getByRole("option")).toHaveText([/Roadmap/]);
   await menu.getByRole("option", { name: /Roadmap/ }).click();
 
-  await expect.poll(() => pageText(page)).toBe(`See [](shy://page/${roadmap}) `);
+  await expect.poll(() => pageText(page)).toBe(`See [](shy://${ACME}/page/${roadmap}) `);
   await expect(editor(page).getByRole("link", { name: "Roadmap" })).toBeVisible();
 });
 
@@ -127,7 +130,7 @@ for (const title of ["Plan \\", "Plan `v2", "Plan <https://evil.example>"]) {
     await page.getByRole("listbox", { name: "Pages to link" }).getByRole("option").first().click();
 
     // Titles come from other members, so the link carries only the page's id.
-    await expect.poll(() => pageText(page)).toBe(`See [](shy://page/${target}) `);
+    await expect.poll(() => pageText(page)).toBe(`See [](shy://${ACME}/page/${target}) `);
     await expect(editor(page).getByRole("link", { name: title })).toBeVisible();
     await expect(editor(page).getByRole("link")).toHaveCount(1);
   });
@@ -140,7 +143,7 @@ test("link to page in the block menu moves on to picking the page", async ({ pag
   await page.keyboard.press("Enter");
   await expect(page.getByRole("listbox", { name: "Pages to link" })).toBeVisible();
   await page.keyboard.press("Enter");
-  await expect.poll(() => pageText(page)).toBe(`[](shy://page/${roadmap}) `);
+  await expect.poll(() => pageText(page)).toBe(`[](shy://${ACME}/page/${roadmap}) `);
 });
 
 test("another member typing a slash doesn't open your menu", async ({ page }) => {

@@ -30,6 +30,7 @@ export function useReminders(onOpen: (workspaceId: string, item: LaterItem) => v
               text,
               () => undefined,
               () => undefined,
+              workspaceId,
             )
           : item.page?.title || "something you saved";
         const body = what.length > PREVIEW_CHARS ? `${what.slice(0, PREVIEW_CHARS - 1)}…` : what;

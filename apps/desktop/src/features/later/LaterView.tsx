@@ -84,7 +84,7 @@ export function LaterView() {
 }
 
 function LaterRow({ item }: { item: LaterItem }) {
-  const { pages, navigate } = useWorkspace();
+  const { pages, navigate, session } = useWorkspace();
   const row = useRef<HTMLLIElement>(null);
   const [isMenuOpen, setMenuOpen] = useState(false);
   const openMenu = useCallback(() => setMenuOpen(true), []);
@@ -99,7 +99,7 @@ function LaterRow({ item }: { item: LaterItem }) {
   const author = linked ? displayName(linked.message.author_name, linked.message.author) : null;
 
   const preview = linked
-    ? plainPreview(linked.message.text, (id) => titles.get(id), memberName)
+    ? plainPreview(linked.message.text, (id) => titles.get(id), memberName, session.workspace_id)
     : item.page?.title || "Untitled";
   const isOverdue = item.remind_ms !== null && item.remind_ms <= Date.now() && !item.is_done;
 

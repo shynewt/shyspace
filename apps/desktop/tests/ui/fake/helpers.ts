@@ -41,6 +41,14 @@ export function randomHex(bytes: number): string {
 }
 
 /** Like the core: an id starts with 16 bytes of its owner's key. */
+/** A workspace's id, shaped like the core's (16 hex characters) and readable from its name. */
+export function workspaceIdFor(name: string): string {
+  const hex = Array.from(new TextEncoder().encode(name.toLowerCase()), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return hex.padEnd(16, "0").slice(0, 16);
+}
+
 export function ownedId(owner: string): string {
   return `${owner.slice(0, 32)}${randomHex(8)}`;
 }

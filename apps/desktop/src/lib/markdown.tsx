@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, FileText, MessageSquare } from "lucide-react";
 import {
   type ComponentProps,
   createContext,
@@ -12,29 +12,26 @@ import {
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { ConfirmDialog, cx, ErrorBoundary, IconButton, Tooltip } from "../ui";
-import { PAGE_LINK_PREFIX } from "./api";
+import { Avatar, ConfirmDialog, cx, ErrorBoundary, IconButton, Tooltip } from "../ui";
+import { type AppLink, appLinkPattern, isInWorkspace, parseAppLink, type WorkspaceLinks } from "./appLinks";
 import { CALLOUTS, type CalloutKind, isCalloutKind, rehypeCallouts } from "./callouts";
 import { type CodeSegment, highlight } from "./codeHighlight";
 import { isMisleadingLink, misleadingLinkWarning, openExternalUrl } from "./contact";
+import { useWorkspaceIcon } from "./files";
 import { isCheapToFormat, remarkSizeLimits, withPlainLineEnds } from "./markdownBudget";
 import { everyoneMentioned, isMentionLink, linkMentions, mentionedMemberId } from "./mentions";
 import { displayName } from "./people";
 import { reportError } from "./toast";
 
-/** The id part of `shy://page/<id>` and `shy://message/<id>` links. */
-const PAGE_ID = "[0-9a-f]+";
-/** A message id; in a private channel or DM it starts with the channel, like `p:…/…`. */
-const MESSAGE_ID = "(?:(?:p|dm):[0-9a-f]+/)?[0-9a-f]+";
-
-export const PAGE_LINK = new RegExp(`^shy://page/(${PAGE_ID})$`);
-export const MESSAGE_LINK = new RegExp(`^shy://message/(${MESSAGE_ID})$`);
-export const ANY_PAGE_LINK = new RegExp(`shy://page/(${PAGE_ID})`, "g");
-export const ANY_MESSAGE_LINK = new RegExp(`shy://message/(${MESSAGE_ID})`, "g");
-const BARE_PAGE_LINK = new RegExp(`(?<!\\]\\()shy://page/(${PAGE_ID})`, "g");
-const BARE_MESSAGE_LINK = new RegExp(`(?<!\\]\\()shy://message/(${MESSAGE_ID})`, "g");
+const ANY_PAGE_LINK = appLinkPattern("page");
+const ANY_MESSAGE_LINK = appLinkPattern("message");
+const BARE_PAGE_LINK = new RegExp(`(?<!\\]\\()${ANY_PAGE_LINK.source}`, "g");
+const BARE_MESSAGE_LINK = new RegExp(`(?<!\\]\\()${ANY_MESSAGE_LINK.source}`, "g");
 /** A link alone on its line, which a card under the message can stand in for. */
-const APP_LINK_LINE = new RegExp(`^[ \\t]*(shy://(?:page/${PAGE_ID}|message/${MESSAGE_ID}))[ \\t]*(?:\\n|$)`, "gm");
+const APP_LINK_LINE = new RegExp(
+  `^[ \\t]*((?:${ANY_PAGE_LINK.source})|(?:${ANY_MESSAGE_LINK.source}))[ \\t]*(?:\\n|$)`,
+  "gm",
+);
 const SAFE_EXTERNAL = /^(https?:|mailto:)/i;
 const NO_CARDS: ReadonlySet<string> = new Set();
 
@@ -57,6 +54,7 @@ export function ChatMarkdown({
   onOpenPage,
   onOpenMessage,
   renderMemberMention,
+  workspaceLinks,
   cardLinks = NO_CARDS,
 }: {
   text: string;
@@ -69,7 +67,9 @@ export function ChatMarkdown({
   onOpenMessage: (id: string) => void;
   /** Draws a mention of a member, like a button opening their card; plain text without it. */
   renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
-  /** Links drawn as cards under the text; one alone on its line leaves the text. */
+  /** The workspace this text is in, and the others on this device, for links that name one. */
+  workspaceLinks: WorkspaceLinks;
+  /** Links drawn as cards under the text (see `cardLinkKey`); one alone on its line leaves the text. */
   cardLinks?: ReadonlySet<string>;
 }) {
   // A bare page link gets an empty label, which the link fills with the page's
@@ -77,21 +77,23 @@ export function ChatMarkdown({
   // the markdown source, where `<https://…>`, a backtick or a final `\` would
   // be read as markup.
   const source = withPlainLineEnds(text)
-    .replace(APP_LINK_LINE, (line: string, link: string) => (cardLinks.has(link) ? "" : line))
-    .replace(BARE_PAGE_LINK, (_, id: string) => `[](${PAGE_LINK_PREFIX}${id})`)
+    .replace(APP_LINK_LINE, (line: string, link: string) =>
+      cardLinks.has(cardKey(link, workspaceLinks.workspaceId) ?? "") ? "" : line,
+    )
+    .replace(BARE_PAGE_LINK, (link: string) => `[](${link})`)
     .replace(BARE_MESSAGE_LINK, (link: string) => `[a message](${link})`);
   // Checked as the parser will see it.
   if (!isCheapToFormat(source)) return <PlainText text={text} />;
   return (
     <ErrorBoundary key={text} fallback={<PlainText text={text} />}>
-      <LinkContext.Provider value={{ myId, pageTitle, memberName, onOpenPage, onOpenMessage, renderMemberMention }}>
+      <LinkContext.Provider
+        value={{ myId, pageTitle, memberName, onOpenPage, onOpenMessage, renderMemberMention, workspaceLinks }}
+      >
         <Markdown
           remarkPlugins={[remarkGfm, remarkBreaks, remarkSizeLimits]}
           rehypePlugins={[rehypeCallouts]}
           skipHtml
-          urlTransform={(url) =>
-            SAFE_EXTERNAL.test(url) || PAGE_LINK.test(url) || MESSAGE_LINK.test(url) || isMentionLink(url) ? url : ""
-          }
+          urlTransform={(url) => (SAFE_EXTERNAL.test(url) || parseAppLink(url) ? url : "")}
           disallowedElements={["img"]}
           components={COMPONENTS}
         >
@@ -113,6 +115,7 @@ type LinkHandlers = {
   onOpenPage: (id: string) => void;
   onOpenMessage: (id: string) => void;
   renderMemberMention?: (memberId: string, label: ReactNode, className: string) => ReactNode;
+  workspaceLinks: WorkspaceLinks;
 };
 
 const LinkContext = createContext<LinkHandlers | null>(null);
@@ -120,12 +123,21 @@ const LinkContext = createContext<LinkHandlers | null>(null);
 function MarkdownLink({ href = "", children, node }: ComponentProps<"a"> & ExtraProps) {
   const handlers = useContext(LinkContext);
   if (!handlers) throw new Error("a markdown link outside ChatMarkdown");
-  const { myId, pageTitle, memberName, onOpenPage, onOpenMessage, renderMemberMention } = handlers;
+  const { myId, pageTitle, memberName, onOpenPage, onOpenMessage, renderMemberMention, workspaceLinks } = handlers;
+  const { workspaceId } = workspaceLinks;
   // An address the renderer blocked (javascript: and the like) arrives empty: show what it said, not a link to nowhere.
   if (href === "") return <>{children}</>;
   // Chips name what they open, as plain text the app knows, never the author's
   // label: "@Ada" leading to Eve, or "Payroll" opening another page, would lie.
-  const message = href.match(MESSAGE_LINK)?.[1];
+  const link = parseAppLink(href);
+  if (link && !isInWorkspace(link, workspaceId)) {
+    return (
+      <LinkElsewhere link={link} workspaceLinks={workspaceLinks}>
+        {children}
+      </LinkElsewhere>
+    );
+  }
+  const message = link?.kind === "message" ? link.id : null;
   if (message) {
     return (
       <button type="button" className="page-chip" onClick={() => onOpenMessage(message)}>
@@ -133,15 +145,15 @@ function MarkdownLink({ href = "", children, node }: ComponentProps<"a"> & Extra
       </button>
     );
   }
-  if (isMentionLink(href)) {
-    const className = linkMentions(href, myId) ? "mention mention-me" : "mention";
-    const memberId = mentionedMemberId(href);
-    if (!memberId) return <span className={className}>@{everyoneMentioned(href)}</span>;
+  if (isMentionLink(href, workspaceId)) {
+    const className = linkMentions(href, myId, workspaceId) ? "mention mention-me" : "mention";
+    const memberId = mentionedMemberId(href, workspaceId);
+    if (!memberId) return <span className={className}>@{everyoneMentioned(href, workspaceId)}</span>;
     const name = `@${memberName(memberId) ?? displayName("", memberId)}`;
     if (renderMemberMention) return renderMemberMention(memberId, name, className);
     return <span className={className}>{name}</span>;
   }
-  const page = href.match(PAGE_LINK)?.[1];
+  const page = link?.kind === "page" ? link.id : null;
   if (page) {
     return (
       <button type="button" className="page-chip" onClick={() => onOpenPage(page)}>
@@ -344,10 +356,74 @@ function useHighlighted(code: string, language: string): CodeSegment[] | null {
   return highlighted?.code === code ? highlighted.segments : null;
 }
 
-export function pageIdsIn(text: string): string[] {
-  return [...new Set([...text.matchAll(ANY_PAGE_LINK)].map((match) => match[1]))];
+/** The pages `text` links to in `workspaceId`. */
+export function pageIdsIn(text: string, workspaceId: string): string[] {
+  return idsHere(text.matchAll(ANY_PAGE_LINK), workspaceId);
 }
 
-export function messageIdsIn(text: string): string[] {
-  return [...new Set([...text.matchAll(ANY_MESSAGE_LINK)].map((match) => match[1]))];
+/** The messages `text` links to in `workspaceId`. */
+export function messageIdsIn(text: string, workspaceId: string): string[] {
+  return idsHere(text.matchAll(ANY_MESSAGE_LINK), workspaceId);
+}
+
+function idsHere(matches: Iterable<RegExpMatchArray>, workspaceId: string): string[] {
+  const here = [...matches].filter((match) => isInWorkspace({ workspace: match[1] ?? null }, workspaceId));
+  return [...new Set(here.map((match) => match[2]))];
+}
+
+/** How a page or message of this workspace is named in `cardLinks`. */
+export function cardLinkKey(kind: "page" | "message", id: string): string {
+  return `${kind}:${id}`;
+}
+
+/** A link's key in `cardLinks`, whichever form it's written in; null for one into another workspace. */
+function cardKey(link: string, workspaceId: string): string | null {
+  const parsed = parseAppLink(link);
+  if (!parsed || !isInWorkspace(parsed, workspaceId)) return null;
+  return parsed.kind === "page" || parsed.kind === "message" ? cardLinkKey(parsed.kind, parsed.id) : null;
+}
+
+/**
+ * A link into another workspace. On this device: a chip naming the kind and
+ * the workspace, opening it there. Elsewhere: quiet words, nothing to click.
+ * A mention of someone there is its text, never a chip: its label is the
+ * author's, and a chip would vouch for it.
+ */
+function LinkElsewhere({
+  link,
+  workspaceLinks,
+  children,
+}: {
+  link: AppLink;
+  workspaceLinks: WorkspaceLinks;
+  children: ReactNode;
+}) {
+  if (link.kind !== "page" && link.kind !== "message") return <>{children}</>;
+  const workspace = link.workspace ? workspaceLinks.workspaceOf(link.workspace) : undefined;
+  if (!link.workspace || !workspace) return <span className="text-muted">link to a workspace you're not in</span>;
+  const { name } = workspace;
+  const Icon = link.kind === "page" ? FileText : MessageSquare;
+  const kind = link.kind === "page" ? "Page" : "Message";
+  const description = `Open the ${link.kind} in ${name}`;
+  return (
+    <Tooltip label={description}>
+      <button
+        type="button"
+        className="page-chip inline-flex items-center gap-1 align-bottom"
+        aria-label={description}
+        onClick={() => workspaceLinks.openElsewhere(link)}
+      >
+        <Icon size={12} aria-hidden className="shrink-0" />
+        <span className="shrink-0">{kind} in</span>
+        <WorkspaceTile workspaceId={link.workspace} name={name} icon={workspace.icon} />
+        <span className="max-w-40 truncate">{name}</span>
+      </button>
+    </Tooltip>
+  );
+}
+
+/** A workspace's rail icon, small, so a chip shows its click leaves this workspace. */
+function WorkspaceTile({ workspaceId, name, icon }: { workspaceId: string; name: string; icon: string | null }) {
+  const pictureUrl = useWorkspaceIcon(workspaceId, icon);
+  return <Avatar id={workspaceId} name={name} size={14} pictureUrl={pictureUrl} />;
 }

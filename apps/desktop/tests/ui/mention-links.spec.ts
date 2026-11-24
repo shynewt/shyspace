@@ -2,6 +2,8 @@
 import { expect, test } from "@playwright/test";
 import { withMentionLinks, withTypedMentions } from "../../src/lib/mentions";
 
+const HERE = "0123456789abcdef";
+
 test("picked people and pages become links, longest names first", () => {
   const people = new Map([
     ["Ada", "a1"],
@@ -11,15 +13,15 @@ test("picked people and pages become links, longest names first", () => {
     ["Launch plan", "b1"],
     ["Ada", "b2"],
   ]);
-  expect(withMentionLinks("@Ada Lovelace, @Ada and @Launch plan. @channel", people, pages)).toBe(
-    "[@Ada Lovelace](shy://member/a2), [@Ada](shy://member/a1) and shy://page/b1. [@channel](shy://mention/channel)",
+  expect(withMentionLinks("@Ada Lovelace, @Ada and @Launch plan. @channel", HERE, people, pages)).toBe(
+    `[@Ada Lovelace](shy://${HERE}/member/a2), [@Ada](shy://${HERE}/member/a1) and shy://${HERE}/page/b1. [@channel](shy://${HERE}/mention/channel)`,
   );
 });
 
 test("a page's title only links when it was picked, and as a whole word", () => {
   const pages = new Map([["Plan", "c1"]]);
-  expect(withMentionLinks("@Planning and @Plan, not email@Plan", new Map(), pages)).toBe(
-    "@Planning and shy://page/c1, not email@Plan",
+  expect(withMentionLinks("@Planning and @Plan, not email@Plan", HERE, new Map(), pages)).toBe(
+    `@Planning and shy://${HERE}/page/c1, not email@Plan`,
   );
 });
 

@@ -107,7 +107,7 @@ test("@ finds pages by any word of their title, and sends a page link", async ({
 
   const message = page.getByRole("article").filter({ hasText: "before Friday" });
   await expect(message.locator(".page-chip", { hasText: "Launch plan" })).toBeVisible();
-  const sent = `See shy://page/${planId} before Friday`;
+  const sent = `See shy://61636d6500000000/page/${planId} before Friday`;
   expect(await page.evaluate((text) => window.fake.messageWithText(text), sent)).toBeTruthy();
 });
 
@@ -155,7 +155,7 @@ test("picking one of two people who share a name mentions that one", async ({ pa
   await composer.pressSequentially("again");
   await composer.press("Enter");
 
-  const sent = `Thanks [@Grace·${code}](shy://member/${second}) again`;
+  const sent = `Thanks [@Grace·${code}](shy://61636d6500000000/member/${second}) again`;
   await expect
     .poll(() =>
       page.evaluate((text) => {

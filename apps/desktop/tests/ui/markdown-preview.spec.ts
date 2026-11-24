@@ -5,12 +5,14 @@ import { EditorState } from "@codemirror/state";
 import { expect, test } from "@playwright/test";
 import { type PreviewItem, previewItems } from "../../src/features/pages/editor/markdownPreview";
 
+const HERE = "0123456789abcdef";
+
 function itemsIn(text: string, ranges: { from: number; to: number }[], revealedLines: number[]): PreviewItem[] {
   const state = EditorState.create({ doc: text, extensions: markdown({ base: markdownLanguage }) });
   // Parsing on creation stops after a time budget; finish it so results don't depend on load.
   const tree = ensureSyntaxTree(state, text.length, 10_000);
   if (!tree) throw new Error("the markdown parser didn't finish");
-  return previewItems(state.doc, tree, ranges, new Set(revealedLines));
+  return previewItems(state.doc, tree, ranges, new Set(revealedLines), HERE);
 }
 
 function itemsOf(text: string, revealedLines: number[] = []): PreviewItem[] {
@@ -50,6 +52,8 @@ function shownAs(item: PreviewItem): string | null {
       return `<file ${item.fileId}: ${item.label}>`;
     case "mention":
       return item.label;
+    case "elsewhere":
+      return `<${item.link.kind} in ${item.link.workspace}>`;
     case "callout":
       return `<${item.callout}>`;
     case "line":
@@ -204,4 +208,21 @@ test("a callout's marker shows as written on the line being edited, and unknown 
   expect(
     itemsOf("> [!FOO] just a quote").some((item) => item.kind === "line" && item.className === "cm-md-quote"),
   ).toBe(true);
+});
+
+test("links naming this workspace are chips like older ones, and another's are marked as elsewhere", () => {
+  const elsewhere = "fedcba9876543210";
+  expect(rendered(`See shy://${HERE}/page/ab12 and [it](shy://${HERE}/message/cd34)`)).toBe(
+    "See <page ab12> and <message cd34: it>",
+  );
+  expect(rendered(`See shy://${elsewhere}/page/ab12 and [it](shy://${elsewhere}/message/cd34)`)).toBe(
+    `See <page in ${elsewhere}> and <message in ${elsewhere}>`,
+  );
+});
+
+test("a mention of someone in another workspace is its plain text, never a mention chip", () => {
+  const items = itemsOf("Thanks [@Ada](shy://fedcba9876543210/member/e1) again");
+  expect(items.some((item) => item.kind === "mention")).toBe(false);
+  expect(items.some((item) => item.kind === "style" && item.className === "cm-md-plain")).toBe(true);
+  expect(rendered("Thanks [@Ada](shy://fedcba9876543210/member/e1) again")).toBe("Thanks @Ada again");
 });

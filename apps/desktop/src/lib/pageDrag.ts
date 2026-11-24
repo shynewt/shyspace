@@ -4,13 +4,13 @@
  * being edited) take it too.
  */
 import type { DragEvent } from "react";
-import { PAGE_LINK_PREFIX } from "./api";
+import { pageLink } from "./api";
 
 const PAGE_DRAG_TYPE = "application/x-shy-page";
 
-export function startPageDrag(event: DragEvent, pageId: string) {
+export function startPageDrag(event: DragEvent, workspaceId: string, pageId: string) {
   event.dataTransfer.setData(PAGE_DRAG_TYPE, pageId);
-  event.dataTransfer.setData("text/plain", `${PAGE_LINK_PREFIX}${pageId}`);
+  event.dataTransfer.setData("text/plain", pageLink(workspaceId, pageId));
   event.dataTransfer.effectAllowed = "copyLink";
 }
 

@@ -1,43 +1,54 @@
 /**
- * Mentions are markdown links in a message: `[@Ada](shy://member/<id>)`,
- * `[@channel](shy://mention/channel)`, `[@here](shy://mention/here)`. These
- * helpers mirror `crates/shy-core/src/mentions.rs`.
+ * Mentions are markdown links in a message: `[@Ada](shy://<workspace>/member/<id>)`,
+ * `[@channel](shy://<workspace>/mention/channel)`, `[@here](…/mention/here)`;
+ * older ones name no workspace (see `appLinks.ts`). Only mentions in the
+ * workspace they're read in count. These helpers mirror
+ * `crates/shy-core/src/mentions.rs`.
  */
 
-import { PAGE_LINK_PREFIX } from "./api";
+import { appLink, appLinkPattern, isInWorkspace, parseAppLink } from "./appLinks";
 
-const MEMBER_LINK = /^shy:\/\/member\/([0-9a-f]+)$/;
-const EVERYONE_LINK = /^shy:\/\/mention\/(channel|here)$/;
 const EVERYONE = ["channel", "here"] as const;
+const ANY_MEMBER_LINK = appLinkPattern("member");
+const ANY_EVERYONE_LINK = appLinkPattern("mention");
 
-export function memberLink(name: string, id: string): string {
-  return `[@${name.replace(/[[\]]/g, "")}](shy://member/${id})`;
+export function memberLink(workspaceId: string, name: string, id: string): string {
+  return `[@${name.replace(/[[\]]/g, "")}](${appLink(workspaceId, "member", id)})`;
 }
 
-export function isMentionLink(href: string): boolean {
-  return MEMBER_LINK.test(href) || EVERYONE_LINK.test(href);
+function mentionHere(href: string, workspaceId: string) {
+  const link = parseAppLink(href);
+  if (!link || !isInWorkspace(link, workspaceId)) return null;
+  return link.kind === "member" || link.kind === "mention" ? link : null;
 }
 
-/** The member a `shy://member/<id>` link mentions; null for @channel, @here and other links. */
-export function mentionedMemberId(href: string): string | null {
-  return href.match(MEMBER_LINK)?.[1] ?? null;
+/** Whether `href` mentions someone in `workspaceId`; a mention naming another workspace isn't one here. */
+export function isMentionLink(href: string, workspaceId: string): boolean {
+  return mentionHere(href, workspaceId) !== null;
 }
 
-/** "channel" or "here" for an @channel or @here link; null for any other. */
-export function everyoneMentioned(href: string): "channel" | "here" | null {
-  const kind = href.match(EVERYONE_LINK)?.[1];
-  return kind === "channel" || kind === "here" ? kind : null;
+/** The member a mention link in `workspaceId` names; null for @channel, @here and other links. */
+export function mentionedMemberId(href: string, workspaceId: string): string | null {
+  const link = mentionHere(href, workspaceId);
+  return link?.kind === "member" ? link.id : null;
 }
 
-/** Whether a mention link reaches `memberId`: theirs, or @channel / @here. */
-export function linkMentions(href: string, memberId: string): boolean {
-  return EVERYONE_LINK.test(href) || href.match(MEMBER_LINK)?.[1] === memberId;
+/** "channel" or "here" for an @channel or @here link in `workspaceId`; null for any other. */
+export function everyoneMentioned(href: string, workspaceId: string): "channel" | "here" | null {
+  const link = mentionHere(href, workspaceId);
+  return link?.kind === "mention" && (link.id === "channel" || link.id === "here") ? link.id : null;
 }
 
-/** Whether `text` mentions `memberId`, like the core decides. */
-export function mentions(text: string, memberId: string): boolean {
-  if (/shy:\/\/mention\/(channel|here)/.test(text)) return true;
-  return [...text.matchAll(/shy:\/\/member\/([0-9a-f]+)/g)].some((match) => match[1] === memberId);
+/** Whether a mention link reaches `memberId` of `workspaceId`: theirs, or @channel / @here. */
+export function linkMentions(href: string, memberId: string, workspaceId: string): boolean {
+  return everyoneMentioned(href, workspaceId) !== null || mentionedMemberId(href, workspaceId) === memberId;
+}
+
+/** Whether `text` mentions `memberId` of `workspaceId`, like the core decides. */
+export function mentions(text: string, memberId: string, workspaceId: string): boolean {
+  const here = (match: RegExpMatchArray) => isInWorkspace({ workspace: match[1] ?? null }, workspaceId);
+  if ([...text.matchAll(ANY_EVERYONE_LINK)].some(here)) return true;
+  return [...text.matchAll(ANY_MEMBER_LINK)].some((match) => here(match) && match[2] === memberId);
 }
 
 /** The `@query` being typed right before the caret, if any. */
@@ -59,6 +70,7 @@ function escapeForRegex(text: string): string {
  */
 export function withMentionLinks(
   text: string,
+  workspaceId: string,
   picked: ReadonlyMap<string, string>,
   pickedPages: ReadonlyMap<string, string> = new Map(),
 ): string {
@@ -70,11 +82,11 @@ export function withMentionLinks(
     "gu",
   );
   return text.replace(pattern, (whole, name: string) => {
-    if (name === "channel" || name === "here") return `[@${name}](shy://mention/${name})`;
+    if (name === "channel" || name === "here") return `[@${name}](${appLink(workspaceId, "mention", name)})`;
     const id = picked.get(name);
-    if (id) return memberLink(name, id);
+    if (id) return memberLink(workspaceId, name, id);
     const page = pickedPages.get(name);
-    return page ? `${PAGE_LINK_PREFIX}${page}` : whole;
+    return page ? appLink(workspaceId, "page", page) : whole;
   });
 }
 

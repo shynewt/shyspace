@@ -22,6 +22,12 @@ export function memberTint(id: string): string {
   return `hsl(${avatarHue(id)} 70% 62% / 0.2)`;
 }
 
+/** The background of an avatar's letter tile, for `id`. */
+export function avatarBackground(id: string): string {
+  const hue = avatarHue(id);
+  return `linear-gradient(140deg, hsl(${hue} 70% 62%), hsl(${hue + 24} 62% 48%))`;
+}
+
 export function initials(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "?";
@@ -48,7 +54,6 @@ export function Avatar({
   /** A green ring while they talk in a huddle; pass it only where speaking can show. */
   isSpeaking?: boolean;
 }) {
-  const hue = avatarHue(id);
   return (
     <div
       aria-hidden="true"
@@ -57,7 +62,7 @@ export function Avatar({
         width: size,
         height: size,
         fontSize: size * 0.38,
-        background: `linear-gradient(140deg, hsl(${hue} 70% 62%), hsl(${hue + 24} 62% 48%))`,
+        background: avatarBackground(id),
       }}
     >
       {isBot ? <Bot size={size * 0.55} strokeWidth={2.2} /> : initials(name)}

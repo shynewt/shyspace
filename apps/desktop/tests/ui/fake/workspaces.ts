@@ -7,7 +7,7 @@
 
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import type { Change, Session, WorkspaceBadge, WorkspaceItem, WorkspaceLook } from "../../../src/lib/api";
-import { argument, requireString } from "./helpers";
+import { argument, requireString, workspaceIdFor } from "./helpers";
 
 /** Returned by `answer` for commands that aren't about workspaces. */
 export const NOT_WORKSPACES = Symbol("not a workspaces command");
@@ -43,7 +43,7 @@ export class FakeWorkspaces {
 
   /** Another workspace on this device, joined earlier; returns its id. */
   add(name: string): string {
-    const id = `w-${name.toLowerCase().replaceAll(/\W+/g, "-")}`;
+    const id = workspaceIdFor(name);
     this.items().push({ workspace_id: id, name, icon: null, is_live: true, is_muted: false });
     this.context.emitFrom(null, { kind: "workspaces" });
     return id;

@@ -26,6 +26,6 @@ export function repliesOf<T extends Stored>(messages: readonly T[], root: string
   return messages.filter((message) => message.id !== root && rootOf(messages, message.id) === root);
 }
 
-export function followsByDefault(me: string, root: Stored, replies: readonly Stored[]): boolean {
-  return [root, ...replies].some((message) => message.author === me || mentions(message.text, me));
+export function followsByDefault(me: string, workspaceId: string, root: Stored, replies: readonly Stored[]): boolean {
+  return [root, ...replies].some((message) => message.author === me || mentions(message.text, me, workspaceId));
 }

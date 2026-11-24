@@ -106,7 +106,7 @@ function commandOptions(query: string): Option[] {
   ];
 }
 
-function memberOptions(query: string, members: Member[], me: string): Option[] {
+function memberOptions(query: string, members: Member[], me: string, workspaceId: string): Option[] {
   return members
     .filter((member) => member.active && member.name && matches(member.name, query))
     .slice(0, MAX_PEOPLE_OR_PAGES)
@@ -115,11 +115,12 @@ function memberOptions(query: string, members: Member[], me: string): Option[] {
       label: member.name,
       icon: <MemberAvatar id={member.id} name={member.name} isBot={member.is_bot} size={20} />,
       detail: member.id === me ? "you" : member.is_bot ? "agent" : "",
-      choose: (view, suggestion) => replaceTrigger(view, suggestion, `${memberLink(member.name, member.id)} `),
+      choose: (view, suggestion) =>
+        replaceTrigger(view, suggestion, `${memberLink(workspaceId, member.name, member.id)} `),
     }));
 }
 
-function pageOptions(query: string, pages: Page[], currentPage: string): Option[] {
+function pageOptions(query: string, pages: Page[], currentPage: string, workspaceId: string): Option[] {
   const wanted = query.trim().toLowerCase();
   return pages
     .filter((page) => page.id !== currentPage && (page.title || "Untitled").toLowerCase().includes(wanted))
@@ -134,7 +135,7 @@ function pageOptions(query: string, pages: Page[], currentPage: string): Option[
         detail: pages.find((candidate) => candidate.id === page.parent)?.title ?? "",
         // Titles come from other members: kept out of the markdown, they can't
         // break the link. Its chip draws the page's current title.
-        choose: (view, suggestion) => replaceTrigger(view, suggestion, `[](${pageLink(page.id)}) `),
+        choose: (view, suggestion) => replaceTrigger(view, suggestion, `[](${pageLink(workspaceId, page.id)}) `),
       };
     });
 }
@@ -165,10 +166,10 @@ export function SuggestionMenu({
   const query = suggestion?.query ?? "";
   const options = useMemo(() => {
     if (kind === "command") return commandOptions(query);
-    if (kind === "member") return memberOptions(query, members, session.me);
-    if (kind === "page") return pageOptions(query, pages, pageId);
+    if (kind === "member") return memberOptions(query, members, session.me, session.workspace_id);
+    if (kind === "page") return pageOptions(query, pages, pageId, session.workspace_id);
     return [];
-  }, [kind, query, members, session.me, pages, pageId]);
+  }, [kind, query, members, session.me, session.workspace_id, pages, pageId]);
 
   // A new query starts at the top of the list.
   const [shownFor, setShownFor] = useState({ kind, query });

@@ -19,6 +19,7 @@ import { useLive } from "../../lib/useLive";
 import { linkedMessageView, useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, memberColor, memberTint } from "../../ui";
 import { ProfileCardAt } from "../members/ProfileCardAt";
+import { useWorkspaceLinks } from "../shell/useWorkspaceLinks";
 import { formattingKeymap } from "./editor/commands";
 import {
   type ImageHost,
@@ -130,6 +131,9 @@ function PageEditor({
   const [{ showCursorsInPages, shareCursorInPages }] = usePreferences();
   const shareRef = useRef(shareCursorInPages);
   shareRef.current = shareCursorInPages;
+  const currentWorkspaceLinks = useWorkspaceLinks();
+  const workspaceLinksRef = useRef(currentWorkspaceLinks);
+  workspaceLinksRef.current = currentWorkspaceLinks;
   const textRef = useRef<Y.Text | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
@@ -287,6 +291,7 @@ function PageEditor({
               onMisleadingLink: (linkText, url) => setMisleadingLink({ text: linkText, url }),
               onOpenFile: setViewingFile,
               images: imageHost.current,
+              links: () => workspaceLinksRef.current,
             }),
             Prec.highest(
               keymap.of([

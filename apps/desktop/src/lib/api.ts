@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { appLink } from "./appLinks";
 import { reportError } from "./toast";
 import type { RestartOutcome } from "./updateFlow";
 
@@ -636,7 +637,5 @@ function subscribe<T>(event: string, listener: (payload: T) => void): () => void
   };
 }
 
-export const PAGE_LINK_PREFIX = "shy://page/";
-export const MESSAGE_LINK_PREFIX = "shy://message/";
-export const messageLink = (id: string) => `${MESSAGE_LINK_PREFIX}${id}`;
-export const pageLink = (id: string) => `${PAGE_LINK_PREFIX}${id}`;
+export const messageLink = (workspaceId: string, id: string) => appLink(workspaceId, "message", id);
+export const pageLink = (workspaceId: string, id: string) => appLink(workspaceId, "page", id);

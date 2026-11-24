@@ -12,6 +12,7 @@ import { reportError, showToast } from "../../lib/toast";
 import { linkedMessageView, useWorkspace, type View } from "../../lib/workspace";
 import { Button, ContextMenu, Dialog, IconButton, type MenuAction, RelativeTime } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
+import { useWorkspaceLinks } from "../shell/useWorkspaceLinks";
 import { FileActions } from "./FileActions";
 import { FileIcon } from "./FileIcon";
 import { PdfPages } from "./PdfPages";
@@ -121,6 +122,7 @@ function TextViewer(props: ViewerProps) {
   const [loaded, setLoaded] = useState<LoadedText>({ status: "loading" });
   const { session, pages, navigate } = useWorkspace();
   const memberName = useMemberNames();
+  const workspaceLinks = useWorkspaceLinks();
   const openElsewhere = (view: View | null) => {
     if (!view) return;
     onOpenChange(false);
@@ -160,6 +162,7 @@ function TextViewer(props: ViewerProps) {
                 memberName={memberName}
                 pageTitle={(id) => pages.find((page) => page.id === id)?.title || undefined}
                 onOpenPage={(id) => openElsewhere({ kind: "page", id })}
+                workspaceLinks={workspaceLinks}
                 onOpenMessage={(id) => {
                   api
                     .linkedMessage(id)

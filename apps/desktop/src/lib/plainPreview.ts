@@ -4,9 +4,8 @@
  */
 
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { ANY_MESSAGE_LINK, ANY_PAGE_LINK, MESSAGE_LINK, PAGE_LINK } from "./markdown";
+import { appLinkPattern, isInWorkspace, parseAppLink } from "./appLinks";
 import { isCheapToFormat } from "./markdownBudget";
-import { everyoneMentioned, mentionedMemberId } from "./mentions";
 import { displayName } from "./people";
 
 /** Previews show a line or two; longer ones are cut after this many characters. */
@@ -26,6 +25,8 @@ type MarkdownNode = {
 type Names = {
   pageTitle: (id: string) => string | undefined;
   memberName: (id: string) => string | undefined;
+  /** The workspace the text is in; links into another aren't named. */
+  workspaceId: string;
   /** Where each `[label]: address` definition points, by identifier. */
   definitions: ReadonlyMap<string, string>;
 };
@@ -44,10 +45,11 @@ export function plainPreview(
   text: string,
   pageTitle: (id: string) => string | undefined,
   memberName: (id: string) => string | undefined,
+  workspaceId: string,
 ): string {
   if (!isCheapToFormat(text)) return shortened(oneLine(text.slice(0, PREVIEW_CHARS * 2)));
   const tree: MarkdownNode = fromMarkdown(text);
-  const names = { pageTitle, memberName, definitions: definitionsIn(tree) };
+  const names = { pageTitle, memberName, workspaceId, definitions: definitionsIn(tree) };
   return shortened(oneLine(blockLines(tree, names).map(plainLine).filter(Boolean).join(" · ")));
 }
 
@@ -106,21 +108,34 @@ function labelOf(link: MarkdownNode, names: Names): string {
 }
 
 function linkText(url: string, link: MarkdownNode, names: Names): string {
-  const label = labelOf(link, names);
-  const memberId = mentionedMemberId(url);
-  if (memberId) return `@${names.memberName(memberId) ?? displayName("", memberId)}`;
-  const everyone = everyoneMentioned(url);
-  if (everyone) return `@${everyone}`;
-  const page = url.match(PAGE_LINK)?.[1];
-  if (page) return names.pageTitle(page) ?? "Untitled page";
-  if (MESSAGE_LINK.test(url)) return "a linked message";
-  return label;
+  const appLink = parseAppLink(url);
+  if (!appLink) return labelOf(link, names);
+  if (!isInWorkspace(appLink, names.workspaceId)) return ELSEWHERE;
+  switch (appLink.kind) {
+    case "member":
+      return `@${names.memberName(appLink.id) ?? displayName("", appLink.id)}`;
+    case "mention":
+      return `@${appLink.id}`;
+    case "page":
+      return names.pageTitle(appLink.id) ?? "Untitled page";
+    case "message":
+      return "a linked message";
+  }
 }
 
+const ELSEWHERE = "a link to another workspace";
+const ANY_PAGE_LINK = appLinkPattern("page");
+const ANY_MESSAGE_LINK = appLinkPattern("message");
+
 function withBareLinksNamed(text: string, names: Names): string {
+  const isHere = (workspace: string | undefined) => isInWorkspace({ workspace: workspace ?? null }, names.workspaceId);
   return text
-    .replace(ANY_PAGE_LINK, (_, id: string) => names.pageTitle(id) ?? "Untitled page")
-    .replace(ANY_MESSAGE_LINK, "a linked message");
+    .replace(ANY_PAGE_LINK, (_, workspace: string | undefined, id: string) =>
+      isHere(workspace) ? (names.pageTitle(id) ?? "Untitled page") : ELSEWHERE,
+    )
+    .replace(ANY_MESSAGE_LINK, (_, workspace: string | undefined) =>
+      isHere(workspace) ? "a linked message" : ELSEWHERE,
+    );
 }
 
 /** A callout's `[!note]`, a task's `[ ]` and strikethrough's `~~` read as text to the plain parser. */

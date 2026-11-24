@@ -204,7 +204,9 @@ test("a sent message's link can be copied and it can be saved for later", async 
   await row.hover();
   await row.getByRole("button", { name: "Sent message actions" }).click();
   await page.getByRole("menuitem", { name: "Copy link" }).click();
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(/^shy:\/\/message\//);
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toMatch(/^shy:\/\/61636d6500000000\/message\//);
 
   await row.hover();
   await row.getByRole("button", { name: "Sent message actions" }).click();
@@ -231,7 +233,7 @@ test("Drafts & sent is a place in the history, and the app reopens there", async
   await expect(heading).toBeVisible();
 
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.w-acme") ?? ""))
+    .poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.61636d6500000000") ?? ""))
     .toContain('"drafts"');
   await page.reload();
   await expect(heading).toBeVisible();

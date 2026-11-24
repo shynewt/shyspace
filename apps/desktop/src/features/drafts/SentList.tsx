@@ -99,7 +99,7 @@ function SentRow({ item }: { item: LinkedMessage }) {
   const open = () => navigate(linkedMessageView(item));
   const copyLink = () =>
     navigator.clipboard
-      .writeText(messageLink(message.id))
+      .writeText(messageLink(session.workspace_id, message.id))
       .then(() => showToast("Link copied. Paste it in any channel to share this message."), reportError);
   const menu: MenuItem[] = [
     { label: "Open in context", icon: <SquareArrowOutUpRight size={14} />, onSelect: open },
@@ -116,7 +116,7 @@ function SentRow({ item }: { item: LinkedMessage }) {
           onSelect: () => api.saveForLater(message.id, null).catch(reportError),
         },
   ];
-  const isAwaiting = isAwaitingReply(message, threadRoot, session.me);
+  const isAwaiting = isAwaitingReply(message, threadRoot, session.me, session.workspace_id);
   const hasResponses = message.reply_count > 0 || message.reactions.length > 0;
 
   return (
@@ -164,7 +164,7 @@ function SentRow({ item }: { item: LinkedMessage }) {
           </span>
         }
       >
-        {plainPreview(message.text, (id) => titles.get(id), memberName)}
+        {plainPreview(message.text, (id) => titles.get(id), memberName, session.workspace_id)}
       </ListRow>
     </li>
   );

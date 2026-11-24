@@ -14,7 +14,9 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
+import type { AppLink, WorkspaceLinks } from "../../../lib/appLinks";
 import { MOD_LABEL } from "../../../lib/shortcuts";
+import { avatarBackground, initials } from "../../../ui";
 import { CalloutLabelWidget } from "./callouts";
 import { fileIcon, messageIcon, pageIcon } from "./icons";
 import { type ImageHost, type ImageProps, imageHost, imageSelectionLook } from "./images";
@@ -27,12 +29,15 @@ import {
   memberOpener,
   messageOpener,
   misleadingLinkAsker,
+  openElsewhere,
   openFile,
   openLink,
   openMember,
   openMessage,
   openPage,
   pageOpener,
+  workspaceLinks,
+  workspaceLinksOf,
 } from "./openLinks";
 import { tablePreview } from "./tables";
 import { toggleTaskAt } from "./tasks";
@@ -80,6 +85,7 @@ export function livePreview({
   onMisleadingLink,
   onOpenFile,
   images,
+  links,
 }: {
   onOpenPage: (pageId: string) => void;
   onOpenMessage: (messageId: string) => void;
@@ -88,6 +94,8 @@ export function livePreview({
   onOpenFile: (fileId: string) => void;
   /** Draws a page's images into their widgets. */
   images: ImageHost;
+  /** The page's workspace and the others on this device, as they are now. */
+  links: () => WorkspaceLinks;
 }) {
   return [
     pageTitles,
@@ -95,6 +103,7 @@ export function livePreview({
     knownMembers,
     fileOpener.of(onOpenFile),
     imageHost.of(images),
+    workspaceLinks.of(links),
     imageSelectionLook,
     pageOpener.of(onOpenPage),
     messageOpener.of(onOpenMessage),
@@ -178,6 +187,7 @@ const previewPlugin = ViewPlugin.fromClass(
         syntaxTree(this.view.state),
         this.view.visibleRanges,
         this.revealed,
+        workspaceLinksOf(this.view.state).workspaceId,
       )) {
         switch (item.kind) {
           case "hide":
@@ -226,6 +236,15 @@ const previewPlugin = ViewPlugin.fromClass(
           case "image": {
             const { fileId, width, caption } = item;
             const chip = Decoration.replace({ widget: new ImageWidget({ fileId, width, caption }) });
+            decorations.push(chip.range(item.from, item.to));
+            chips.push(chip.range(item.from, item.to));
+            break;
+          }
+          case "elsewhere": {
+            const name = item.link.workspace
+              ? workspaceLinksOf(this.view.state).workspaceOf(item.link.workspace)?.name
+              : undefined;
+            const chip = Decoration.replace({ widget: new ElsewhereChipWidget(item.link, name) });
             decorations.push(chip.range(item.from, item.to));
             chips.push(chip.range(item.from, item.to));
             break;
@@ -462,6 +481,67 @@ class MessageChipWidget extends WidgetType {
   }
 }
 
+/**
+ * A page or message link into another workspace: on this device, a chip
+ * naming the kind and the workspace, opening it there; elsewhere, quiet words.
+ */
+class ElsewhereChipWidget extends WidgetType {
+  /** `workspaceName` is undefined when this device isn't in that workspace. */
+  constructor(
+    readonly link: AppLink,
+    readonly workspaceName: string | undefined,
+  ) {
+    super();
+  }
+
+  eq(other: ElsewhereChipWidget) {
+    return (
+      other.link.workspace === this.link.workspace &&
+      other.link.kind === this.link.kind &&
+      other.link.id === this.link.id &&
+      other.workspaceName === this.workspaceName
+    );
+  }
+
+  toDOM(view: EditorView) {
+    const chip = document.createElement("span");
+    if (this.workspaceName === undefined) {
+      chip.className = "cm-md-elsewhere";
+      chip.textContent = "link to a workspace you're not in";
+      return chip;
+    }
+    const kind = this.link.kind === "page" ? "Page" : "Message";
+    chip.className = "cm-md-page cm-md-page-elsewhere";
+    chip.setAttribute("role", "link");
+    chip.setAttribute("aria-label", `Open the ${this.link.kind} in ${this.workspaceName}`);
+    const name = document.createElement("span");
+    name.className = "cm-md-workspace-name";
+    name.textContent = this.workspaceName;
+    chip.append(
+      this.link.kind === "page" ? pageIcon() : messageIcon(),
+      `${kind} in `,
+      workspaceTile(this.link.workspace ?? "", this.workspaceName),
+      name,
+    );
+    chip.addEventListener("mousedown", (event) => event.preventDefault());
+    chip.addEventListener("click", (event) => {
+      event.preventDefault();
+      openElsewhere(view, this.link);
+    });
+    return chip;
+  }
+}
+
+/** A workspace's letter tile, as its rail draws it, small. */
+function workspaceTile(workspaceId: string, name: string): HTMLElement {
+  const tile = document.createElement("span");
+  tile.className = "cm-md-workspace-tile";
+  tile.setAttribute("aria-hidden", "true");
+  tile.style.background = avatarBackground(workspaceId);
+  tile.textContent = initials(name);
+  return tile;
+}
+
 class MentionWidget extends WidgetType {
   /** `memberId` is null for @channel, @here and people who aren't members: those open nothing. */
   constructor(
@@ -497,7 +577,7 @@ class MentionWidget extends WidgetType {
 const linkTooltip = hoverTooltip(
   (view, position) => {
     const link = linkAt(view.state, position);
-    if (!link || link.pageId || link.messageId) return null;
+    if (!link || link.pageId || link.messageId || link.elsewhere) return null;
     return {
       pos: link.from,
       end: link.to,

@@ -22,6 +22,7 @@ import { type LinkNames, visibleText } from "./visibleText";
 /** What the chat needs from the rest of the fake. */
 export type ChatContext = {
   me: () => string;
+  workspaceId: () => string;
   isAdmin: () => boolean;
   members: () => readonly Member[];
   tick: () => number;
@@ -184,7 +185,7 @@ export class FakeChat {
     if (!channel) throw new Error(`fake backend: no channel ${channelId}`);
     const id = this.writeMessage(author, channel.id, text, null);
     const level = this.notifyLevels.get(channel.id) ?? "all";
-    if (level === "all" || (level === "mentions" && mentions(text, this.context.me()))) {
+    if (level === "all" || (level === "mentions" && mentions(text, this.context.me(), this.context.workspaceId()))) {
       const member = this.context.members().find((candidate) => candidate.id === author);
       this.context.notify({
         kind: "alert",
@@ -309,7 +310,8 @@ export class FakeChat {
       author_is_bot: author?.is_bot ?? false,
       can_edit: message.author === this.context.me(),
       can_delete: this.mayDelete(message.id),
-      mentions_me: message.author !== this.context.me() && mentions(message.text, this.context.me()),
+      mentions_me:
+        message.author !== this.context.me() && mentions(message.text, this.context.me(), this.context.workspaceId()),
       saved: this.context.savedMark(message.id),
       ...this.threadSummary(message),
       reactions: Array.from(counts, ([emoji, entry]) => ({ emoji, ...entry })),
@@ -326,7 +328,9 @@ export class FakeChat {
 
   private threadSummary(message: StoredMessage) {
     const replies = repliesOf(this.messages, message.id).sort(compareMessages);
-    const isFollowing = this.followChoices.get(message.id) ?? followsByDefault(this.context.me(), message, replies);
+    const isFollowing =
+      this.followChoices.get(message.id) ??
+      followsByDefault(this.context.me(), this.context.workspaceId(), message, replies);
     const read = this.readMarkers.get(message.id);
     const last = replies.at(-1);
     return {
@@ -435,7 +439,9 @@ export class FakeChat {
       can_delete: this.mayDelete(channel.id),
       ...this.context.privateView(channel.id),
       unread: this.unreadIn(channel.id).filter((message) => isInChannel(this.messages, message)).length,
-      unread_mentions: this.unreadIn(channel.id).filter((message) => mentions(message.text, this.context.me())).length,
+      unread_mentions: this.unreadIn(channel.id).filter((message) =>
+        mentions(message.text, this.context.me(), this.context.workspaceId()),
+      ).length,
       last_read: this.readMarkers.get(channel.id) ?? null,
       notify: this.notifyLevels.get(channel.id) ?? "all",
     }));
@@ -446,7 +452,9 @@ export class FakeChat {
     const me = this.context.me();
     const items: InboxItem[] = [];
     for (const channel of this.channels) {
-      for (const message of this.unreadIn(channel.id).filter((unread) => mentions(unread.text, me))) {
+      for (const message of this.unreadIn(channel.id).filter((unread) =>
+        mentions(unread.text, me, this.context.workspaceId()),
+      )) {
         const root = rootOf(this.messages, message.id);
         items.push({
           message: this.present(message),
@@ -460,7 +468,8 @@ export class FakeChat {
       );
       for (const root of roots) {
         const replies = repliesOf(this.messages, root.id);
-        if (!(this.followChoices.get(root.id) ?? followsByDefault(me, root, replies))) continue;
+        if (!(this.followChoices.get(root.id) ?? followsByDefault(me, this.context.workspaceId(), root, replies)))
+          continue;
         const read = this.readMarkers.get(root.id);
         for (const reply of replies) {
           const isNew = reply.author !== me && (!read || isAfter(reply, read));

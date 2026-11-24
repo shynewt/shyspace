@@ -24,7 +24,7 @@ function ancestorsOf(page: Page | undefined, pages: Page[]): Page[] {
 }
 
 export function PageView({ pageId }: { pageId: string }) {
-  const { pages, navigate } = useWorkspace();
+  const { pages, navigate, session } = useWorkspace();
   const page = pages.find((candidate) => candidate.id === pageId);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const title = useRef<{ focus: () => void }>(null);
@@ -37,7 +37,7 @@ export function PageView({ pageId }: { pageId: string }) {
 
   const copyLink = () =>
     navigator.clipboard
-      .writeText(pageLink(pageId))
+      .writeText(pageLink(session.workspace_id, pageId))
       .then(() => showToast("Link copied. Paste it in any channel to share this page."), reportError);
 
   const createSubpage = async () => {

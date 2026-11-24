@@ -13,9 +13,9 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { api, type Message, messageLink, pageLink } from "../../lib/api";
+import { api, type Message, messageLink } from "../../lib/api";
 import { MAX_SHOWN_REACTIONS } from "../../lib/limits";
-import { ChatMarkdown, messageIdsIn, pageIdsIn } from "../../lib/markdown";
+import { ChatMarkdown, cardLinkKey, messageIdsIn, pageIdsIn } from "../../lib/markdown";
 import { useMember, useMemberNames } from "../../lib/members";
 import { displayName, formatFullDate, formatTime } from "../../lib/people";
 import { plainPreview } from "../../lib/plainPreview";
@@ -40,6 +40,7 @@ import { remindMeItem } from "../later/remindMeItem";
 import { MemberAvatar } from "../members/MemberAvatar";
 import { ProfileCard, ProfileCardAvatar, ProfileCardTrigger } from "../members/ProfileCard";
 import { StatusEmoji } from "../members/StatusEmoji";
+import { useWorkspaceLinks } from "../shell/useWorkspaceLinks";
 import { MessageCard } from "./MessageCard";
 import { MessageFiles } from "./MessageFiles";
 import { PageCard } from "./PageCard";
@@ -80,22 +81,27 @@ export const MessageItem = memo(function MessageItem({
   useContextMenu(article, openMenu);
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const memberName = useMemberNames();
+  const workspaceLinks = useWorkspaceLinks();
   const linkedMessages = useMemo(
     () =>
-      messageIdsIn(message.text)
+      messageIdsIn(message.text, session.workspace_id)
         .filter((id) => id !== message.id)
         .slice(0, MAX_CARDS_PER_MESSAGE),
-    [message],
+    [message, session.workspace_id],
   );
   const linkedPages = useMemo(
     () =>
-      pageIdsIn(message.text)
+      pageIdsIn(message.text, session.workspace_id)
         .filter((id) => titles.has(id))
         .slice(0, MAX_CARDS_PER_MESSAGE),
-    [message.text, titles],
+    [message.text, titles, session.workspace_id],
   );
   const cardLinks = useMemo(
-    () => new Set([...linkedPages.map(pageLink), ...linkedMessages.map(messageLink)]),
+    () =>
+      new Set([
+        ...linkedPages.map((id) => cardLinkKey("page", id)),
+        ...linkedMessages.map((id) => cardLinkKey("message", id)),
+      ]),
     [linkedPages, linkedMessages],
   );
   const name = displayName(message.author_name, message.author);
@@ -179,6 +185,7 @@ export const MessageItem = memo(function MessageItem({
                 onOpenPage={(id) => navigate({ kind: "page", id })}
                 onOpenMessage={openLinkedMessage}
                 cardLinks={cardLinks}
+                workspaceLinks={workspaceLinks}
                 renderMemberMention={(memberId, label, className) => (
                   <ProfileCard memberId={memberId} onMention={onMention}>
                     <ProfileCardTrigger className={className}>{label}</ProfileCardTrigger>
@@ -313,7 +320,7 @@ export const MessageItem = memo(function MessageItem({
         >
           {isConfirmingDelete && (
             <blockquote className="selectable line-clamp-3 border-l-3 border-surface-3 pl-2.5 text-sm text-ink">
-              {plainPreview(message.text, (id) => titles.get(id), memberName)}
+              {plainPreview(message.text, (id) => titles.get(id), memberName, session.workspace_id)}
             </blockquote>
           )}
         </ConfirmDialog>
@@ -335,6 +342,7 @@ function MessageMenu({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { session } = useWorkspace();
   const [isPicking, setPicking] = useState(false);
   const remindMs = message.saved && !message.saved.is_done ? message.saved.remind_ms : null;
   const remind = (at: number | null) => api.saveForLater(message.id, at).catch(reportError);
@@ -349,7 +357,11 @@ function MessageMenu({
     {
       label: "Copy link",
       icon: <Link2 size={14} />,
-      onSelect: () => copy(messageLink(message.id), "Link copied. Paste it in any channel to share this message."),
+      onSelect: () =>
+        copy(
+          messageLink(session.workspace_id, message.id),
+          "Link copied. Paste it in any channel to share this message.",
+        ),
     },
   ];
   items.push(

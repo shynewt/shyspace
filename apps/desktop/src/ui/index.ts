@@ -1,4 +1,4 @@
-export { Avatar, memberColor, memberTint } from "./Avatar";
+export { Avatar, avatarBackground, initials, memberColor, memberTint } from "./Avatar";
 export { AvatarStack } from "./AvatarStack";
 export { Badge } from "./Badge";
 export { Button } from "./Button";

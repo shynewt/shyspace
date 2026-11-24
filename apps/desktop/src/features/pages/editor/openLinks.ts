@@ -1,6 +1,7 @@
 /** Opening a page's links: web and mail links in their apps, page and message links in shyspace, mentions as profile cards. */
-import { Facet } from "@codemirror/state";
+import { type EditorState, Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+import type { AppLink, WorkspaceLinks } from "../../../lib/appLinks";
 import { isMisleadingLink, openExternal } from "../../../lib/contact";
 import { reportError } from "../../../lib/toast";
 import { externalUrl, type LinkTarget } from "./links";
@@ -9,6 +10,23 @@ import { externalUrl, type LinkTarget } from "./links";
 export const pageOpener = Facet.define<(pageId: string) => void, ((pageId: string) => void) | undefined>({
   combine: (openers) => openers[0],
 });
+
+/** The workspace the page is in, and the others on this device; given by the screen that hosts it. */
+export const workspaceLinks = Facet.define<() => WorkspaceLinks, (() => WorkspaceLinks) | undefined>({
+  combine: (sources) => sources[0],
+});
+
+export function workspaceLinksOf(state: EditorState): WorkspaceLinks {
+  const links = state.facet(workspaceLinks);
+  if (!links) throw new Error("the page editor was set up without its workspace's links");
+  return links();
+}
+
+/** Opens a page or message link of another workspace there; one this device isn't in opens nothing. */
+export function openElsewhere(view: EditorView, link: AppLink): void {
+  const links = workspaceLinksOf(view.state);
+  if (link.workspace && links.workspaceOf(link.workspace)) links.openElsewhere(link);
+}
 
 /** How the editor opens one of the page's files; given by the screen that hosts it. */
 export const fileOpener = Facet.define<(fileId: string) => void, ((fileId: string) => void) | undefined>({
@@ -50,6 +68,10 @@ export function openMember(view: EditorView, memberId: string, anchor: CardAncho
 }
 
 export function openLink(view: EditorView, link: LinkTarget): void {
+  if (link.elsewhere) {
+    openElsewhere(view, link.elsewhere);
+    return;
+  }
   if (link.pageId) {
     openPage(view, link.pageId);
     return;

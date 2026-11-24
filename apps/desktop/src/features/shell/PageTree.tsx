@@ -5,6 +5,7 @@ import { api, type Page, pageLink } from "../../lib/api";
 import { startPageDrag } from "../../lib/pageDrag";
 import { usePreferences } from "../../lib/preferences";
 import { reportError, showToast } from "../../lib/toast";
+import { useWorkspace } from "../../lib/workspace";
 import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, springs, tweens } from "../../ui";
 import { NavItem } from "./NavItem";
 
@@ -50,11 +51,12 @@ function PageNode({
         ...(open ? [] : [page.id]),
       ],
     });
+  const { session } = useWorkspace();
   const [isMenuOpen, setMenuOpen] = useState(false);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
   const copyLink = () =>
     navigator.clipboard
-      .writeText(pageLink(page.id))
+      .writeText(pageLink(session.workspace_id, page.id))
       .then(() => showToast("Link copied. Paste it in any channel to share this page."), reportError);
   const items: MenuItem[] = [
     { label: "New sub-page", icon: <Plus size={14} />, onSelect: () => onCreateChild(page.id) },
@@ -78,7 +80,7 @@ function PageNode({
         label={title}
         icon={<FileText size={15} />}
         onContextMenu={() => setMenuOpen(true)}
-        onDragStart={(event) => startPageDrag(event, page.id)}
+        onDragStart={(event) => startPageDrag(event, session.workspace_id, page.id)}
         leading={
           // Pages without sub-pages keep the toggle's space, so nesting lines up.
           hasChildren ? (

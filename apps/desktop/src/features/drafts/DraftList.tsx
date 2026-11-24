@@ -46,7 +46,7 @@ const rowMotion = {
 };
 
 function DraftRow({ draft }: { draft: Draft }) {
-  const { navigate, pages } = useWorkspace();
+  const { navigate, pages, session } = useWorkspace();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const memberName = useMemberNames();
   const isThread = draft.target !== draft.channel;
@@ -85,7 +85,7 @@ function DraftRow({ draft }: { draft: Draft }) {
           </span>
         }
       >
-        {plainPreview(draft.text, (id) => titles.get(id), memberName)}
+        {plainPreview(draft.text, (id) => titles.get(id), memberName, session.workspace_id)}
       </ListRow>
     </motion.li>
   );

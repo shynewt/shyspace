@@ -47,7 +47,7 @@ test("a pasted message link shows a card that jumps to the message", async ({ pa
   await composer.fill("The plan is to ship on Friday");
   await composer.press("Enter");
   const link = await copyFromMessage(page, "ship on Friday", "Copy link");
-  expect(link).toMatch(/^shy:\/\/message\/[0-9a-f]+$/);
+  expect(link).toMatch(/^shy:\/\/61636d6500000000\/message\/[0-9a-f]+$/);
 
   await composer.fill(`See ${link}`);
   await composer.press("Enter");

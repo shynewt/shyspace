@@ -75,7 +75,7 @@ export function InboxView() {
 }
 
 function AttentionRow({ item }: { item: InboxItem }) {
-  const { navigate, pages } = useWorkspace();
+  const { navigate, pages, session } = useWorkspace();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const memberName = useMemberNames();
   const { message } = item;
@@ -101,7 +101,7 @@ function AttentionRow({ item }: { item: InboxItem }) {
           </>
         }
       >
-        {plainPreview(message.text, (id) => titles.get(id), memberName)}
+        {plainPreview(message.text, (id) => titles.get(id), memberName, session.workspace_id)}
       </ListRow>
     </motion.li>
   );

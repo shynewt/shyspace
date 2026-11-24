@@ -341,7 +341,9 @@ test("launching reopens a DM", async ({ page }) => {
     .getByRole("button", { name: /^Grace, direct message/ })
     .click();
   await expect(page.getByLabel("Message Grace")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.w-acme") ?? "")).toContain("dm:");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.61636d6500000000") ?? ""))
+    .toContain("dm:");
 
   await page.reload();
   await expect(page.getByLabel("Message Grace")).toBeVisible();
@@ -384,7 +386,7 @@ test("launching reopens the thread you had open", async ({ page }) => {
   const thread = page.getByRole("complementary", { name: "Thread" });
   await expect(thread.getByText("Lisbon?")).toBeVisible();
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.w-acme") ?? ""))
+    .poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.61636d6500000000") ?? ""))
     .toContain("thread");
 
   await page.reload();
@@ -427,7 +429,7 @@ test("launching reopens the last channel where you left it", async ({ page }) =>
   await scrollToMessage(page, "Message 25");
   // Message 24's end is still in view, so it's the top visible message.
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.w-acme") ?? ""))
+    .poll(() => page.evaluate(() => localStorage.getItem("shyspace.lastView.61636d6500000000") ?? ""))
     .toContain(await page.evaluate(() => window.fake.messageWithText("Message 24")));
 
   await page.reload();

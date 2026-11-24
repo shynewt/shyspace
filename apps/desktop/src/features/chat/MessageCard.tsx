@@ -13,7 +13,7 @@ import { ChannelName } from "../private/ChannelName";
 
 /** A message shared by link: who said it and where; opens it in place. */
 export function MessageCard({ messageId }: { messageId: string }) {
-  const { channels, pages, navigate } = useWorkspace();
+  const { channels, pages, navigate, session } = useWorkspace();
   const members = useMembers();
   const titles = useMemo(() => new Map(pages.map((page) => [page.id, page.title || "Untitled"])), [pages]);
   const memberName = useMemberNames();
@@ -61,7 +61,7 @@ export function MessageCard({ messageId }: { messageId: string }) {
           <b className="font-semibold text-ink">{author}</b> in <ChannelName channelId={message.channel} />
         </span>
         <span className="mt-0.5 line-clamp-2 block text-sm">
-          {plainPreview(message.text, (id) => titles.get(id), memberName)}
+          {plainPreview(message.text, (id) => titles.get(id), memberName, session.workspace_id)}
         </span>
       </span>
     </motion.button>

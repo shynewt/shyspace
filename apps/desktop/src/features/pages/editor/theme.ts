@@ -137,6 +137,32 @@ const editorTheme = EditorView.theme({
   ".cm-md-page svg": { display: "inline", verticalAlign: "-0.12em", marginRight: "0.25em" },
   ".cm-md-page:hover": { backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent)" },
   ".cm-md-page-missing": { cursor: "default", color: "var(--text-muted)", backgroundColor: "var(--surface-2)" },
+  // A long workspace name in a chip is cut, so the chip stays in its line.
+  ".cm-md-workspace-name": {
+    display: "inline-block",
+    maxWidth: "10rem",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    verticalAlign: "bottom",
+  },
+  ".cm-md-workspace-tile": {
+    display: "inline-grid",
+    placeItems: "center",
+    width: "14px",
+    height: "14px",
+    marginRight: "0.25em",
+    borderRadius: "30%",
+    color: "white",
+    fontSize: "5.5px",
+    fontWeight: "600",
+    verticalAlign: "-0.15em",
+  },
+  ".cm-md-elsewhere": { color: "var(--text-muted)" },
+  // Its name is cut instead, so the chip stays whole on one line.
+  ".cm-md-page-elsewhere": { whiteSpace: "nowrap" },
+  // The label of a link that shows as plain text, whatever the highlighter makes of links.
+  ".cm-md-plain, .cm-md-plain *": { color: "inherit", textDecoration: "none" },
   ".cm-md-mention[role=button]": { cursor: "pointer" },
   // Opaque, so a selection running through an image tints only the text around it.
   ".cm-page-image": { display: "block", backgroundColor: "var(--surface)" },

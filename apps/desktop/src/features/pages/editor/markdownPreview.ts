@@ -6,10 +6,11 @@
  */
 import type { syntaxTree } from "@codemirror/language";
 import type { Text } from "@codemirror/state";
+import type { AppLink } from "../../../lib/appLinks";
 import { type CalloutKind, calloutMarker } from "../../../lib/callouts";
 import { isMentionLink, mentionedMemberId } from "../../../lib/mentions";
 import { fileIdOf, parseFileImageUrl, unescapeLinkText } from "./images";
-import { BARE_MESSAGE_LINK, BARE_PAGE_LINK, messageIdOf, pageIdOf } from "./links";
+import { BARE_MESSAGE_LINK, BARE_PAGE_LINK, elsewhereOf, messageIdOf, pageIdOf } from "./links";
 
 export type SyntaxTree = ReturnType<typeof syntaxTree>;
 type SyntaxNode = SyntaxTree["topNode"];
@@ -33,7 +34,9 @@ export type PreviewItem =
   /** A link to one of the page's files, drawn as a chip; `label` is the link's text. */
   | { kind: "file"; from: number; to: number; fileId: string; label: string }
   /** An image of one of the page's files; `width` is a percent of the column, or null for its own size. */
-  | { kind: "image"; from: number; to: number; fileId: string; width: number | null; caption: string };
+  | { kind: "image"; from: number; to: number; fileId: string; width: number | null; caption: string }
+  /** A page or message link into another workspace. */
+  | { kind: "elsewhere"; from: number; to: number; link: AppLink };
 
 const BARE_MESSAGE_LABEL = "a message";
 
@@ -51,8 +54,9 @@ export function previewItems(
   tree: SyntaxTree,
   ranges: readonly { from: number; to: number }[],
   revealedLines: ReadonlySet<number>,
+  workspaceId: string,
 ): PreviewItem[] {
-  const builder = new PreviewBuilder(doc, revealedLines);
+  const builder = new PreviewBuilder(doc, revealedLines, workspaceId);
   for (const range of ranges) {
     tree.iterate({ from: range.from, to: range.to, enter: (node) => builder.visit(node.node, range) });
     builder.addBareAppLinks(tree.topNode, range);
@@ -66,6 +70,7 @@ class PreviewBuilder {
   constructor(
     private readonly doc: Text,
     private readonly revealedLines: ReadonlySet<number>,
+    private readonly workspaceId: string,
   ) {}
 
   items(): PreviewItem[] {
@@ -148,13 +153,18 @@ class PreviewBuilder {
     for (const match of text.matchAll(BARE_PAGE_LINK)) {
       const from = range.from + match.index;
       if (isInside(top, from, NOT_A_CHIP)) continue;
-      this.add({ kind: "page", from, to: from + match[0].length, pageId: match[1] });
+      const to = from + match[0].length;
+      const elsewhere = elsewhereOf(match[0], this.workspaceId);
+      if (elsewhere) this.add({ kind: "elsewhere", from, to, link: elsewhere });
+      else this.add({ kind: "page", from, to, pageId: match[2] });
     }
     for (const match of text.matchAll(BARE_MESSAGE_LINK)) {
       const from = range.from + match.index;
       if (isInside(top, from, NOT_A_CHIP)) continue;
       const to = from + match[0].length;
-      this.add({ kind: "message", from, to, messageId: match[1], label: BARE_MESSAGE_LABEL });
+      const elsewhere = elsewhereOf(match[0], this.workspaceId);
+      if (elsewhere) this.add({ kind: "elsewhere", from, to, link: elsewhere });
+      else this.add({ kind: "message", from, to, messageId: match[2], label: BARE_MESSAGE_LABEL });
     }
   }
 
@@ -214,7 +224,19 @@ class PreviewBuilder {
     const labelFrom = marks[0].to;
     const labelTo = marks[1].from;
     const isOneLine = this.doc.lineAt(link.from).number === this.doc.lineAt(link.to).number;
-    const pageId = pageIdOf(href);
+    const elsewhere = elsewhereOf(href, this.workspaceId);
+    if (elsewhere && isOneLine) {
+      if (elsewhere.kind === "page" || elsewhere.kind === "message") {
+        this.add({ kind: "elsewhere", from: link.from, to: link.to, link: elsewhere });
+      } else {
+        // A mention of someone in another workspace: its text, plain, never a chip.
+        this.add({ kind: "style", from: labelFrom, to: labelTo, className: "cm-md-plain" });
+        this.hide(link.from, labelFrom);
+        this.hide(labelTo, link.to);
+      }
+      return false;
+    }
+    const pageId = pageIdOf(href, this.workspaceId);
     if (pageId && isOneLine) {
       this.add({ kind: "page", from: link.from, to: link.to, pageId });
       return false;
@@ -225,15 +247,16 @@ class PreviewBuilder {
       this.add({ kind: "file", from: link.from, to: link.to, fileId, label });
       return false;
     }
-    const messageId = messageIdOf(href);
+    const messageId = messageIdOf(href, this.workspaceId);
     if (messageId && isOneLine) {
       const label = plainText(this.doc.sliceString(labelFrom, labelTo)).trim() || BARE_MESSAGE_LABEL;
       this.add({ kind: "message", from: link.from, to: link.to, messageId, label });
       return false;
     }
-    if (isMentionLink(href) && isOneLine) {
+    if (isMentionLink(href, this.workspaceId) && isOneLine) {
       const label = this.doc.sliceString(labelFrom, labelTo);
-      this.add({ kind: "mention", from: link.from, to: link.to, label, memberId: mentionedMemberId(href) });
+      const memberId = mentionedMemberId(href, this.workspaceId);
+      this.add({ kind: "mention", from: link.from, to: link.to, label, memberId });
       return false;
     }
     this.add({ kind: "style", from: labelFrom, to: labelTo, className: "cm-md-link" });
