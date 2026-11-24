@@ -57,6 +57,12 @@ export function useImage(source: ImageSource | null): LoadedImage {
   return image;
 }
 
+/** A workspace's picture as an image URL, once loaded; null shows its letter. */
+export function useWorkspaceIcon(workspaceId: string, icon: string | null): string | null {
+  const image = useImage(icon ? { key: `${workspaceId}:${icon}`, load: () => api.workspaceIcon(workspaceId) } : null);
+  return image.status === "shown" ? image.url : null;
+}
+
 /** A shared file as an image, if it may be one small enough to load by itself. */
 export function useFileImage(file: FileInfo): LoadedImage {
   return useImage(mayShowInline(file) ? { key: file.id, load: () => api.fileBytes(file.id) } : null);

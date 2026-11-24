@@ -1,6 +1,7 @@
 /** The sections of the Settings window, so any screen can open it at one. */
 export type SettingsSection =
   | "profile"
+  | "workspace"
   | "appearance"
   | "notifications"
   | "huddles"
@@ -29,6 +30,7 @@ export const SETTINGS_SECTIONS: { id: SettingsSection; label: string; group: Set
   { id: "notifications", label: "Notifications", group: "you" },
   { id: "huddles", label: "Huddles", group: "you" },
   { id: "privacy", label: "Privacy & security", group: "you" },
+  { id: "workspace", label: "Workspace", group: "workspace" },
   { id: "members", label: "Members", group: "workspace" },
   { id: "agents", label: "Agents", group: "workspace" },
   { id: "storage", label: "Storage", group: "workspace" },

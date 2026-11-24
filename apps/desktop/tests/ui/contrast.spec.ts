@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { PALETTE_SWATCHES } from "../../src/lib/palettes";
 
 /** WCAG AA for normal-size text. */
 const AA_TEXT = 4.5;
@@ -15,6 +16,11 @@ const TEXT_PAIRS: [string, Color][] = [
   ["--text-muted", "--surface-2"],
   ["--text-faint", "--surface"],
   ["--text-faint", "--bg"],
+  // Hovered rows and cards.
+  ["--text-faint", "--surface-2"],
+  ["--danger-text", "--surface-2"],
+  ["--warning-text", "--surface-2"],
+  ["--success-text", "--surface-2"],
   ["--accent-text", "--surface"],
   ["--accent-text", "--bg"],
   ["--accent-text", "--accent-soft"],
@@ -40,6 +46,9 @@ const GRAPHIC_PAIRS: [string, string][] = [
 ];
 
 const ACCENTS = ["violet", "blue", "indigo", "teal", "pink", "graphite"];
+const THEMES = ["shy", "paper", "fjord", "moss", "dusk", "contrast"];
+/** WCAG AAA, which the Contrast theme's text meets. */
+const AAA_TEXT = 7;
 
 /** Reads #rrggbb, or the short #rgb a built stylesheet may use for it. */
 function channels(hex: string): number[] {
@@ -170,3 +179,70 @@ for (const scheme of ["light", "dark"] as const) {
     expect(accents.size, "each accent has its own color").toBe(ACCENTS.length);
   });
 }
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`every theme meets WCAG AA with every accent in ${scheme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await openApp(page);
+    const failures: string[] = [];
+    const backgrounds = new Set<string>();
+    for (const theme of THEMES) {
+      await page.evaluate((theme) => document.documentElement.setAttribute("data-palette", theme), theme);
+      backgrounds.add(await background(page));
+      for (const accent of ACCENTS) {
+        await page.evaluate((accent) => document.documentElement.setAttribute("data-accent", accent), accent);
+        failures.push(...(await unreadablePairs(page)).map((failure) => `${theme}, ${accent}: ${failure}`));
+      }
+    }
+    expect(failures).toEqual([]);
+    expect(backgrounds.size, "each theme has its own background").toBe(THEMES.length);
+  });
+
+  test(`the Contrast theme's text meets WCAG AAA in ${scheme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await openApp(page);
+    await page.evaluate(() => document.documentElement.setAttribute("data-palette", "contrast"));
+    const resolve = await tokens(page);
+    const failures = ["--text", "--text-muted"].flatMap((text) =>
+      ["--bg", "--surface", "--surface-2"].flatMap((back) => {
+        const ratio = contrast(resolve(text), resolve(back));
+        return ratio < AAA_TEXT ? [`${text} on ${back}: ${ratio.toFixed(2)}`] : [];
+      }),
+    );
+    expect(failures).toEqual([]);
+  });
+}
+
+const SWATCH_KEYS = ["bg", "surface", "border", "text", "muted"] as const;
+
+test("the theme cards draw each theme's own colours", async ({ page }) => {
+  await openApp(page);
+  const mismatches: string[] = [];
+  for (const [palette, sides] of Object.entries(PALETTE_SWATCHES)) {
+    for (const scheme of ["light", "dark"] as const) {
+      const shown = await page.evaluate(
+        ([palette, scheme]) => {
+          const root = document.documentElement;
+          root.setAttribute("data-palette", palette);
+          root.setAttribute("data-theme", scheme);
+          const style = getComputedStyle(root);
+          const token = (name: string) => style.getPropertyValue(name).trim();
+          return {
+            bg: token("--bg"),
+            surface: token("--surface"),
+            border: token("--border"),
+            text: token("--text"),
+            muted: token("--text-muted"),
+          };
+        },
+        [palette, scheme] as const,
+      );
+      for (const key of SWATCH_KEYS) {
+        const card = sides[scheme][key];
+        if (luminance(shown[key]) !== luminance(card))
+          mismatches.push(`${palette} ${scheme} ${key}: card ${card}, page ${shown[key]}`);
+      }
+    }
+  }
+  expect(mismatches).toEqual([]);
+});

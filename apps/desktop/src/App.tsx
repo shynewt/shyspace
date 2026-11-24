@@ -3,8 +3,8 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { Shell } from "./features/shell/Shell";
 import { WorkspacesProvider } from "./features/shell/Workspaces";
-import { api, type Session } from "./lib/api";
-import { useAccent, useTheme } from "./lib/preferences";
+import { api, type Session, type WorkspaceLook } from "./lib/api";
+import { useLook, useTheme } from "./lib/preferences";
 import { reportError } from "./lib/toast";
 import { useUpdateChecks } from "./lib/updates";
 import { useNoBrowserMenu } from "./lib/useContextMenu";
@@ -25,8 +25,9 @@ export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   useNoBrowserMenu();
   useInputModality();
+  const [workspaceLook, setWorkspaceLook] = useState<WorkspaceLook | null>(null);
   useTheme();
-  useAccent();
+  useLook(workspaceLook);
   useUpdateChecks();
 
   useEffect(() => {
@@ -77,7 +78,13 @@ export function App() {
           <Onboarding key="onboarding" onReady={(session) => setPhase({ kind: "ready", session })} />
         )}
         {(phase.kind === "ready" || phase.kind === "adding") && (
-          <WorkspacesProvider key="workspaces" session={phase.session} onSession={showSession} onAdd={addWorkspace}>
+          <WorkspacesProvider
+            key="workspaces"
+            session={phase.session}
+            onSession={showSession}
+            onAdd={addWorkspace}
+            onLook={setWorkspaceLook}
+          >
             {phase.kind === "adding" ? (
               <Onboarding
                 onReady={showSession}

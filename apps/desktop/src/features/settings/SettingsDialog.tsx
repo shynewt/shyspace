@@ -16,6 +16,7 @@ import { ProfileSettings } from "./ProfileSettings";
 import { RecoverySettings } from "./RecoverySettings";
 import { StorageAttentionSign } from "./StorageProtection";
 import { StorageSettings } from "./StorageSettings";
+import { WorkspaceSettings } from "./WorkspaceSettings";
 
 /** Profile and Members take a field or tab from the target, so they're rendered apart from these. */
 const SECTION_VIEWS: Record<SettingsSection, { icon: ReactNode; description: string; content: ReactNode }> = {
@@ -43,6 +44,11 @@ const SECTION_VIEWS: Record<SettingsSection, { icon: ReactNode; description: str
     icon: <ShieldCheck size={15} />,
     description: "How your conversations are protected.",
     content: <PrivacySettings />,
+  },
+  workspace: {
+    icon: <Palette size={15} />,
+    description: "The workspace's icon and default look.",
+    content: <WorkspaceSettings />,
   },
   members: {
     icon: <Users size={15} />,

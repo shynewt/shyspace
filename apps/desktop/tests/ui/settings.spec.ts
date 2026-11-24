@@ -77,7 +77,7 @@ test("the accent colour can be chosen, kept and set back", async ({ page }) => {
   await openSettings(page);
   await page.keyboard.press("Control+,");
   await settings.getByRole("tab", { name: "Appearance" }).click();
-  await settings.getByRole("radiogroup", { name: "Theme" }).getByRole("radio", { checked: true }).focus();
+  await settings.getByRole("radiogroup", { name: "Light or dark" }).getByRole("radio", { checked: true }).focus();
   await page.keyboard.press("Tab");
   await expect(accents.getByRole("radio", { name: "Teal" })).toBeFocused();
   await expect(accents.getByRole("radio", { name: "Teal" })).toHaveCSS("outline-style", "solid");
@@ -106,7 +106,7 @@ test("text on accent fills follows the accent", async ({ page }) => {
 test("the arrow keys move between choices", async ({ page }) => {
   const settings = await openSettings(page);
   await settings.getByRole("tab", { name: "Appearance" }).click();
-  const theme = settings.getByRole("radiogroup", { name: "Theme" });
+  const theme = settings.getByRole("radiogroup", { name: "Light or dark" });
   await theme.getByRole("radio", { name: "System" }).focus();
 
   await page.keyboard.press("ArrowRight");
@@ -145,6 +145,7 @@ test("settings group your sections and the workspace's", async ({ page }) => {
     "Notifications",
     "Huddles",
     "Privacy & security",
+    "Workspace",
     "Members",
     "Agents",
     "Storage",

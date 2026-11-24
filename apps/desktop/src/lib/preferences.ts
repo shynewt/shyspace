@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { WorkspaceLook } from "./api";
 import { reportError } from "./toast";
 
 /**
@@ -8,14 +9,21 @@ import { reportError } from "./toast";
 export type Theme = "system" | "light" | "dark";
 export const ACCENTS = ["violet", "blue", "indigo", "teal", "pink", "graphite"] as const;
 export type Accent = (typeof ACCENTS)[number];
+/** Named theme pairs, each with a light and a dark side; Shy is the default. */
+export const PALETTES = ["shy", "paper", "fjord", "moss", "dusk", "contrast"] as const;
+export type Palette = (typeof PALETTES)[number];
+/** Follows the workspace's default (Shy and Violet when it has none). */
+export const WORKSPACE_DEFAULT = "workspace";
 /** "system" follows the operating system's reduce-motion setting. */
 export type ReduceMotion = "system" | "on" | "off";
 
 export type RecentEmoji = { emoji: string; label: string };
 
 type Preferences = {
+  /** Light or dark. */
   theme: Theme;
-  accent: Accent;
+  palette: Palette | typeof WORKSPACE_DEFAULT;
+  accent: Accent | typeof WORKSPACE_DEFAULT;
   reduceMotion: ReduceMotion;
   /** Show message text in desktop notifications (off hides it). */
   alertsShowText: boolean;
@@ -35,7 +43,8 @@ type Preferences = {
 
 const DEFAULTS: Preferences = {
   theme: "system",
-  accent: "violet",
+  palette: WORKSPACE_DEFAULT,
+  accent: WORKSPACE_DEFAULT,
   reduceMotion: "system",
   alertsShowText: true,
   recentEmoji: [],
@@ -94,13 +103,45 @@ export function useTheme() {
   }, [theme]);
 }
 
-/** Applies the chosen accent colour to the page; Violet is the stylesheet's default. */
-export function useAccent() {
-  const [{ accent }] = usePreferences();
+function isPalette(name: string | null): name is Palette {
+  return PALETTES.some((palette) => palette === name);
+}
+
+function isAccent(name: string | null): name is Accent {
+  return ACCENTS.some((accent) => accent === name);
+}
+
+/** The workspace's defaults, as the app shows them: a name it doesn't know means none. */
+export function workspaceDefaults(look: WorkspaceLook | null): { palette: Palette; accent: Accent } {
+  return {
+    palette: look && isPalette(look.theme) ? look.theme : "shy",
+    accent: look && isAccent(look.accent) ? look.accent : "violet",
+  };
+}
+
+/** What this device shows: its own choice, else the workspace's default. */
+export function shownLook(
+  choice: Pick<Preferences, "palette" | "accent">,
+  look: WorkspaceLook | null,
+): { palette: Palette; accent: Accent } {
+  const defaults = workspaceDefaults(look);
+  return {
+    palette: choice.palette === WORKSPACE_DEFAULT ? defaults.palette : choice.palette,
+    accent: choice.accent === WORKSPACE_DEFAULT ? defaults.accent : choice.accent,
+  };
+}
+
+/** Applies the shown theme pair and accent to the page; Shy and Violet are the stylesheet's defaults. */
+export function useLook(look: WorkspaceLook | null) {
+  const [preferences] = usePreferences();
+  const { palette, accent } = shownLook(preferences, look);
   useEffect(() => {
-    if (accent === "violet") document.documentElement.removeAttribute("data-accent");
-    else document.documentElement.setAttribute("data-accent", accent);
-  }, [accent]);
+    const root = document.documentElement;
+    if (palette === "shy") root.removeAttribute("data-palette");
+    else root.setAttribute("data-palette", palette);
+    if (accent === "violet") root.removeAttribute("data-accent");
+    else root.setAttribute("data-accent", accent);
+  }, [palette, accent]);
 }
 
 const MOTION_CONFIG: Record<ReduceMotion, "user" | "always" | "never"> = {

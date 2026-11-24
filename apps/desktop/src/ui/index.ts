@@ -32,5 +32,6 @@ export { SegmentedControl } from "./SegmentedControl";
 export { Select, type SelectOption } from "./Select";
 export { Spinner } from "./Spinner";
 export { Switch } from "./Switch";
+export { type ThemeSwatchColors, ThemeSwatches, type ThemeSwatchOption } from "./ThemeSwatches";
 export { Toasts } from "./Toasts";
 export { Tooltip, TooltipProvider } from "./Tooltip";

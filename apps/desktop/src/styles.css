@@ -25,7 +25,7 @@
   --text: #22201c;
   --text-muted: #68645d;
   /* Informational: timestamps, hints, section labels. Meets WCAG AA. */
-  --text-faint: #737069;
+  --text-faint: #6d6a63;
   /* Decoration only (icons beside a label, chevrons): never the only way to read something. */
   --text-decorative: #a29e95;
   /* The plain colors are for fills, dots and icons; the -text ones for text. */
@@ -50,7 +50,7 @@
     --border: #2e2e2a;
     --text: #ecebe6;
     --text-muted: #9c9a92;
-    --text-faint: #8c8a84;
+    --text-faint: #8d8b85;
     --text-decorative: #6c6a63;
     --danger: #c64b5f;
     --danger-text: #ef6b80;
@@ -62,6 +62,163 @@
     --syntax-type: #5ccfc4;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
     --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 64px rgb(0 0 0 / 0.55);
+  }
+}
+
+/*
+ * Theme pairs, chosen per device or as the workspace's default
+ * (data-palette on <html>). Shy is the default above. Every pair keeps all
+ * text readable (WCAG AA) on bg, surface and surface-2 with every accent;
+ * Contrast's text meets AAA.
+ */
+
+[data-palette="paper"] {
+  --bg: #f6f1e7;
+  --surface: #fdf9f1;
+  --surface-2: #eee6d6;
+  --surface-3: #eadfcb;
+  --border: #e2d8c4;
+  --text: #2b241a;
+  --text-muted: #6b5f4c;
+  --text-faint: #706455;
+  --danger-text: #a8344a;
+  --text-decorative: #998b79;
+  --success-text: #21734e;
+  --warning-text: #895c0d;
+
+  @variant dark {
+    --bg: #1c1813;
+    --surface: #231e18;
+    --surface-2: #2c261f;
+    --surface-3: #362f26;
+    --border: #383026;
+    --text: #ede4d3;
+    --text-muted: #a89a84;
+    --text-faint: #9a8d79;
+    --danger-text: #ef6b80;
+    --success-text: #4cc48c;
+    --warning-text: #e3a83a;
+    --text-decorative: #7a6e5c;
+  }
+}
+
+[data-palette="fjord"] {
+  --bg: #f2f5f8;
+  --surface: #ffffff;
+  --surface-2: #e8edf2;
+  --surface-3: #dee5ec;
+  --border: #d9e0e8;
+  --text: #1d2733;
+  --text-muted: #56657a;
+  --text-faint: #5c6b7f;
+  --danger-text: #b33a4e;
+  --text-decorative: #8391a5;
+  --success-text: #237750;
+  --warning-text: #8d600d;
+
+  @variant dark {
+    --bg: #171c25;
+    --surface: #1d232e;
+    --surface-2: #222833;
+    --surface-3: #2c3442;
+    --border: #313a48;
+    --text: #e6ebf2;
+    --text-muted: #a3aebd;
+    --text-faint: #9ca7b6;
+    --success-text: #4cc48c;
+    --warning-text: #e3a83a;
+    --text-decorative: #79889c;
+    --danger-text: #ef879c;
+  }
+}
+
+[data-palette="moss"] {
+  --bg: #f2f4ef;
+  --surface: #fcfdfa;
+  --surface-2: #e8ebe3;
+  --surface-3: #e1e5da;
+  --border: #d9ded1;
+  --text: #1f261d;
+  --text-muted: #5a6656;
+  --text-faint: #606b5c;
+  --danger-text: #b33a4e;
+  --text-decorative: #869381;
+  --success-text: #22754f;
+  --warning-text: #8b5e0d;
+
+  @variant dark {
+    --bg: #161b16;
+    --surface: #1d231d;
+    --surface-2: #252c25;
+    --surface-3: #2d362d;
+    --border: #303830;
+    --text: #e5ebe2;
+    --text-muted: #9aa696;
+    --text-faint: #8d9889;
+    --danger-text: #ef6b80;
+    --success-text: #4cc48c;
+    --warning-text: #e3a83a;
+    --text-decorative: #6e7a6a;
+  }
+}
+
+[data-palette="dusk"] {
+  --bg: #f4f2f7;
+  --surface: #fdfcfe;
+  --surface-2: #ebe8f0;
+  --surface-3: #e3dfea;
+  --border: #ddd8e6;
+  --text: #251f2e;
+  --text-muted: #635a70;
+  --text-faint: #6d647a;
+  --danger-text: #b33a4e;
+  --text-decorative: #938ba0;
+  --success-text: #22754f;
+  --warning-text: #8b5e0d;
+
+  @variant dark {
+    --bg: #1d1a24;
+    --surface: #24202d;
+    --surface-2: #2c2836;
+    --surface-3: #343040;
+    --border: #383242;
+    --text: #ece7f2;
+    --text-muted: #a79fb5;
+    --text-faint: #9890a6;
+    --danger-text: #ef6b80;
+    --success-text: #4cc48c;
+    --warning-text: #e3a83a;
+    --text-decorative: #796f8a;
+  }
+}
+
+[data-palette="contrast"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f0f0f0;
+  --surface-3: #e8e8e8;
+  --border: #8a8a8a;
+  --text: #000000;
+  --text-muted: #3d3d3d;
+  --text-faint: #454545;
+  --danger-text: #b33a4e;
+  --success-text: #247951;
+  --warning-text: #8f620d;
+  --text-decorative: #6b6b6b;
+
+  @variant dark {
+    --bg: #0d0d0d;
+    --surface: #141414;
+    --surface-2: #1f1f1f;
+    --surface-3: #282828;
+    --border: #7a7a7a;
+    --text: #ffffff;
+    --text-muted: #d0d0d0;
+    --text-faint: #c4c4c4;
+    --danger-text: #ef6b80;
+    --success-text: #4cc48c;
+    --warning-text: #e3a83a;
+    --text-decorative: #a5a5a5;
   }
 }
 

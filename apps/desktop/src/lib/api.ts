@@ -15,6 +15,11 @@ export type WorkspaceItem = {
   /** Muted on this device: no notifications from it. */
   is_muted: boolean;
 };
+/** The theme and accent an admin chose as the workspace's default; null for none. Names the app doesn't know mean none. */
+export type WorkspaceLook = {
+  theme: string | null;
+  accent: string | null;
+};
 /** What a workspace's rail icon shows: the same counts as its sidebar. */
 export type WorkspaceBadge = {
   workspace_id: string;
@@ -269,8 +274,10 @@ export type Change =
   | { kind: "storage_protection" }
   /** The bucket key rotation (`storage_rotation`) changed. */
   | { kind: "key_rotation" }
-  /** The workspaces on this device changed: added, left, moved, selected, or run live or not. */
+  /** The workspaces on this device changed: added, left, moved, selected, renamed or given an icon, or run live or not. */
   | { kind: "workspaces" }
+  /** The shown workspace's default theme or accent changed. */
+  | { kind: "workspace_look" }
   /** How far this device's upload into `channel` has got, in bytes of the files. */
   | { kind: "upload"; channel: string; sent: number; total: number }
   | { kind: "sync" }
@@ -361,6 +368,16 @@ export const api = {
   setWorkspaceMuted: (workspaceId: string, muted: boolean) =>
     invoke<void>("set_workspace_muted", { workspaceId, muted }),
   markWorkspaceRead: (workspaceId: string) => invoke<void>("mark_workspace_read", { workspaceId }),
+  workspaceLook: () => invoke<WorkspaceLook>("workspace_look"),
+  /** Admin only; null clears a default. */
+  setWorkspaceLook: (theme: string | null, accent: string | null) =>
+    invoke<void>("set_workspace_look", { theme, accent }),
+  /** Empty if it has none. */
+  workspaceIcon: async (workspaceId: string) =>
+    new Uint8Array(await invoke<ArrayBuffer>("workspace_icon", { workspaceId })),
+  /** Admin only: an already cropped PNG, JPEG or WebP; null goes back to the letter. */
+  setWorkspaceIcon: (image: Uint8Array | null) =>
+    invoke<void>("set_workspace_icon", { image: image ? Array.from(image) : [] }),
   /** Holds every workspace's notifications until then; null lets them show again. */
   setNotificationsPaused: (untilMs: number | null) => invoke<void>("set_notifications_paused", { untilMs }),
   notificationsPaused: () => invoke<number | null>("notifications_paused"),

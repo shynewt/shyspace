@@ -7,11 +7,13 @@ import {
   type Session,
   type WorkspaceBadge,
   type WorkspaceItem,
+  type WorkspaceLook,
 } from "../../lib/api";
 import { saveEverythingBeforeSwitch } from "../../lib/beforeSwitch";
 import { shownView } from "../../lib/shownView";
 import { dismissUndoToasts, reportError, showToast } from "../../lib/toast";
 import { useAlerts } from "../../lib/useAlerts";
+import { useLive } from "../../lib/useLive";
 import { usePresence } from "../../lib/usePresence";
 import { useReminders } from "../../lib/useReminders";
 import { savedItemView, type View } from "../../lib/workspace";
@@ -21,6 +23,8 @@ type WorkspacesValue = {
   workspaces: WorkspaceItem[];
   badges: ReadonlyMap<string, WorkspaceBadge>;
   shownId: string;
+  /** The shown workspace's default theme and accent; null until loaded. */
+  look: WorkspaceLook | null;
   /** Shows another workspace, then runs `open` there if given (a notification's message). */
   select: (workspaceId: string, open?: Opener) => void;
   /** Opens something in `workspaceId`: right away if it's shown, else after showing it. */
@@ -66,12 +70,15 @@ export function WorkspacesProvider({
   session,
   onSession,
   onAdd,
+  onLook,
   children,
 }: {
   session: Session;
   /** The session to show next; null when the last workspace was left. */
   onSession: (session: Session | null) => void;
   onAdd: () => void;
+  /** The shown workspace's look, to apply to the page; null once no workspace is shown. */
+  onLook: (look: WorkspaceLook | null) => void;
   children: ReactNode;
 }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([]);
@@ -163,9 +170,30 @@ export function WorkspacesProvider({
     api.setAttentionCount(attention).catch(reportError);
   }, [attention]);
 
+  const [look, setLook] = useState<WorkspaceLook | null>(null);
+  useEffect(() => onLook(look), [look, onLook]);
+  useEffect(() => () => onLook(null), [onLook]);
+
   const value = useMemo(
-    () => ({ workspaces, badges, shownId: session.workspace_id, select, openIn, leave, add: onAdd }),
-    [workspaces, badges, session.workspace_id, select, openIn, leave, onAdd],
+    () => ({ workspaces, badges, shownId: session.workspace_id, look, select, openIn, leave, add: onAdd }),
+    [workspaces, badges, session.workspace_id, look, select, openIn, leave, onAdd],
   );
-  return <WorkspacesContext.Provider value={value}>{children}</WorkspacesContext.Provider>;
+  return (
+    <WorkspacesContext.Provider value={value}>
+      <ShownWorkspaceLook key={session.workspace_id} onLook={setLook} />
+      {children}
+    </WorkspacesContext.Provider>
+  );
+}
+
+const loadLook = () => api.workspaceLook();
+const isLookChange = (change: Change) => change.kind === "workspace_look";
+
+/** Loads the shown workspace's look, kept current; keyed by workspace, so a switch loads the next one's. */
+function ShownWorkspaceLook({ onLook }: { onLook: (look: WorkspaceLook) => void }) {
+  const look = useLive(loadLook, isLookChange);
+  useEffect(() => {
+    if (look) onLook(look);
+  }, [look, onLook]);
+  return null;
 }

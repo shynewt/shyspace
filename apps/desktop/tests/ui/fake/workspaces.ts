@@ -6,7 +6,7 @@
  */
 
 import type { InvokeArgs } from "@tauri-apps/api/core";
-import type { Change, Session, WorkspaceBadge, WorkspaceItem } from "../../../src/lib/api";
+import type { Change, Session, WorkspaceBadge, WorkspaceItem, WorkspaceLook } from "../../../src/lib/api";
 import { argument, requireString } from "./helpers";
 
 /** Returned by `answer` for commands that aren't about workspaces. */
@@ -32,6 +32,8 @@ export class FakeWorkspaces {
   leaveFails: string | null = null;
   /** Until when every workspace's notifications are held, as `set_notifications_paused` left it. */
   pausedUntil: number | null = null;
+  private looks = new Map<string, WorkspaceLook>();
+  private icons = new Map<string, number[]>();
 
   constructor(context: WorkspacesContext) {
     this.context = context;
@@ -51,6 +53,17 @@ export class FakeWorkspaces {
   setBadge(workspaceId: string, unread: boolean, mentions: number, attention = mentions): void {
     this.badges.set(workspaceId, { unread, mentions, attention });
     this.context.emitFrom(workspaceId, { kind: "channels" });
+  }
+
+  /** The admin of `workspaceId` chose this look, as their op arriving would set it. */
+  receiveLook(workspaceId: string, look: WorkspaceLook): void {
+    this.looks.set(workspaceId, look);
+    this.context.emitFrom(workspaceId, { kind: "workspace_look" });
+  }
+
+  /** The admin of `workspaceId` set its icon (empty for the letter), as their op arriving would. */
+  receiveIcon(workspaceId: string, image: number[]): void {
+    this.setIcon(workspaceId, image);
   }
 
   /** Whether the core would hold back a notification from `workspaceId`. */
@@ -96,9 +109,45 @@ export class FakeWorkspaces {
       }
       case "notifications_paused":
         return this.pausedUntil;
+      case "workspace_look":
+        return this.looks.get(this.shownId()) ?? { theme: null, accent: null };
+      case "set_workspace_look": {
+        this.requireAdmin();
+        const look = { theme: lookName(argument(args, "theme")), accent: lookName(argument(args, "accent")) };
+        this.looks.set(this.shownId(), look);
+        this.context.emitFrom(this.shownId(), { kind: "workspace_look" });
+        return null;
+      }
+      case "workspace_icon":
+        return new Uint8Array(this.icons.get(requireString(args, "workspaceId")) ?? []).buffer;
+      case "set_workspace_icon": {
+        this.requireAdmin();
+        const image = argument(args, "image");
+        if (!Array.isArray(image)) throw new Error("fake backend: set_workspace_icon takes bytes");
+        this.setIcon(this.shownId(), image);
+        return null;
+      }
       default:
         return NOT_WORKSPACES;
     }
+  }
+
+  private shownId(): string {
+    const id = this.context.session()?.workspace_id;
+    if (!id) throw new Error("fake backend: no workspace");
+    return id;
+  }
+
+  private requireAdmin(): void {
+    if (!this.context.session()?.is_admin)
+      throw new Error("only the workspace admin can change the workspace's icon and look");
+  }
+
+  private setIcon(workspaceId: string, image: number[]): void {
+    if (image.length === 0) this.icons.delete(workspaceId);
+    else this.icons.set(workspaceId, image);
+    this.item(workspaceId).icon = image.length === 0 ? null : `icon-${Math.random().toString(16).slice(2)}`;
+    this.context.emitFrom(workspaceId, { kind: "workspaces" });
   }
 
   private items(): WorkspaceItem[] {
@@ -160,4 +209,12 @@ export class FakeWorkspaces {
     this.context.emitFrom(null, { kind: "workspaces" });
     return next;
   }
+}
+
+/** As in the core: a theme or accent name is a-z, 1 to 24 letters, or null for none. */
+function lookName(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || !/^[a-z]{1,24}$/.test(value))
+    throw new Error(`not a theme or accent name: ${String(value)}`);
+  return value;
 }

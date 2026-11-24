@@ -1,5 +1,7 @@
 import { Bell, Plus, Settings, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { PALETTE_NAMES, PALETTE_SWATCHES } from "../lib/palettes";
+import { PALETTES, type Palette } from "../lib/preferences";
 import { showToast } from "../lib/toast";
 import {
   Avatar,
@@ -35,6 +37,7 @@ import {
   Spinner,
   Switch,
   TextArea,
+  ThemeSwatches,
   Tooltip,
 } from "../ui";
 
@@ -43,6 +46,7 @@ export default function Gallery() {
   const [isDialogOpen, setDialogOpen] = useState(false);
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [segment, setSegment] = useState<"one" | "two" | "three">("one");
+  const [galleryPalette, setGalleryPalette] = useState<Palette>("fjord");
   const [isSwitchOn, setSwitchOn] = useState(true);
   const [isSpeaking, setSpeaking] = useState(true);
   return (
@@ -118,6 +122,19 @@ export default function Gallery() {
               value={segment}
               onChange={setSegment}
               width="full"
+            />
+          </div>
+          <div className="w-full max-w-[460px]">
+            <ThemeSwatches
+              label="Example theme"
+              options={PALETTES.map((palette) => ({
+                value: palette,
+                label: PALETTE_NAMES[palette],
+                detail: palette === "shy" ? "the workspace's default" : undefined,
+                ...PALETTE_SWATCHES[palette],
+              }))}
+              value={galleryPalette}
+              onChange={setGalleryPalette}
             />
           </div>
         </Example>

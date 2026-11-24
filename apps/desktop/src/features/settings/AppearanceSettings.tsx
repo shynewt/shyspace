@@ -1,15 +1,45 @@
-import { type ReduceMotion, type Theme, usePreferences } from "../../lib/preferences";
-import { SegmentedControl } from "../../ui";
+import { PALETTE_NAMES, PALETTE_SWATCHES } from "../../lib/palettes";
+import {
+  PALETTES,
+  type ReduceMotion,
+  shownLook,
+  type Theme,
+  usePreferences,
+  WORKSPACE_DEFAULT,
+  workspaceDefaults,
+} from "../../lib/preferences";
+import { SegmentedControl, ThemeSwatches } from "../../ui";
+import { useWorkspaces } from "../shell/Workspaces";
 import { AccentSwatches } from "./AccentSwatches";
 import { Setting } from "./layout";
 
 export function AppearanceSettings() {
   const [preferences, update] = usePreferences();
+  const { look } = useWorkspaces();
+  const defaults = workspaceDefaults(look);
+  const shown = shownLook(preferences, look);
   return (
     <>
-      <Setting title="Theme" description="System follows your computer's light or dark setting.">
-        <SegmentedControl<Theme>
+      <Setting
+        title="Theme"
+        description="Each theme has a light and a dark side. Picking one changes only this device; picking the workspace's follows it."
+      >
+        <ThemeSwatches
           label="Theme"
+          options={PALETTES.map((palette) => ({
+            value: palette,
+            label: PALETTE_NAMES[palette],
+            detail: palette === defaults.palette ? "the workspace's default" : undefined,
+            ...PALETTE_SWATCHES[palette],
+          }))}
+          value={shown.palette}
+          // Picking the workspace's own follows it from then on.
+          onChange={(palette) => update({ palette: palette === defaults.palette ? WORKSPACE_DEFAULT : palette })}
+        />
+      </Setting>
+      <Setting title="Light or dark" description="System follows your computer's light or dark setting.">
+        <SegmentedControl<Theme>
+          label="Light or dark"
           options={[
             { value: "system", label: "System" },
             { value: "light", label: "Light" },
@@ -20,7 +50,10 @@ export function AppearanceSettings() {
         />
       </Setting>
       <Setting title="Accent colour" description="Buttons, links, highlights and the focus ring.">
-        <AccentSwatches value={preferences.accent} onChange={(accent) => update({ accent })} />
+        <AccentSwatches
+          value={shown.accent}
+          onChange={(accent) => update({ accent: accent === defaults.accent ? WORKSPACE_DEFAULT : accent })}
+        />
       </Setting>
       <Setting
         title="Reduce motion"

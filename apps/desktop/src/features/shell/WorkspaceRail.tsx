@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Bell, BellOff, CheckCheck, LogOut, Plus } from "lucide-react";
 import { useState } from "react";
 import { api, type WorkspaceBadge, type WorkspaceItem } from "../../lib/api";
+import { useWorkspaceIcon } from "../../lib/files";
 import { shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import {
@@ -58,6 +59,7 @@ function RailItem({
 }) {
   const { shownId, select } = useWorkspaces();
   const id = workspace.workspace_id;
+  const iconUrl = useWorkspaceIcon(id, workspace.icon);
   const isShown = id === shownId;
   const mentions = workspace.is_muted || isShown ? 0 : (badge?.mentions ?? 0);
   const hasUnread = !workspace.is_muted && !isShown && Boolean(badge?.unread);
@@ -133,7 +135,7 @@ function RailItem({
                   : "opacity-80 hover:opacity-100",
             )}
           >
-            <Avatar id={id} name={workspace.name} size={32} />
+            <Avatar id={id} name={workspace.name} size={32} pictureUrl={iconUrl} />
             {mentions > 0 && (
               <CountBadge tone="danger" className="absolute -top-1.5 -right-2 ring-2 ring-bg">
                 {mentions > 99 ? "99+" : mentions}
