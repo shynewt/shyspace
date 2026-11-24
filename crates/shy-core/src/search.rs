@@ -1,6 +1,7 @@
 //! Search queries: words to find, plus filters. `from:Ada` (quotes for
 //! names with spaces, `me` for yourself), `in:#channel`, `before:2026-11-19`
-//! and `after:2026-11-01`. Any filter limits results to messages.
+//! and `after:2026-11-01`. Any filter limits results to messages. Also the
+//! snippet a result shows.
 
 use anyhow::{Context, Result, bail, ensure};
 
@@ -18,6 +19,47 @@ impl SearchQuery {
     pub fn has_filters(&self) -> bool {
         self.from.is_some() || self.channel.is_some() || self.before_ms.is_some() || self.after_ms.is_some()
     }
+}
+
+/// Words a snippet shows, as many as the search index's own snippets did.
+const SNIPPET_WORDS: usize = 12;
+/// Words a snippet shows before the first match.
+const WORDS_BEFORE_MATCH: usize = 4;
+
+/// A short window of `text` (already one line of what the reader sees)
+/// around the first word one of `words` starts, each such word marked
+/// \u{1}…\u{2} and a cut end marked "…"; the start when nothing matches.
+/// Words are compared ignoring case, not accents, unlike the index.
+pub fn snippet(text: &str, words: &str) -> String {
+    let wanted: Vec<String> = words
+        .split_whitespace()
+        .map(|word| word.trim_matches('"').to_lowercase())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let is_match = |word: &str| {
+        let word = word.to_lowercase();
+        let word = word.trim_start_matches(|character: char| !character.is_alphanumeric());
+        wanted.iter().any(|wanted| word.starts_with(wanted.as_str()))
+    };
+    let all: Vec<&str> = text.split_whitespace().collect();
+    let first = all.iter().position(|word| is_match(word)).unwrap_or(0);
+    let start = first.saturating_sub(WORDS_BEFORE_MATCH);
+    let end = (start + SNIPPET_WORDS).min(all.len());
+    let shown: Vec<String> = all[start..end]
+        .iter()
+        .map(|word| match is_match(word) {
+            true => format!("\u{1}{word}\u{2}"),
+            false => (*word).to_owned(),
+        })
+        .collect();
+    let mut snippet = shown.join(" ");
+    if start > 0 {
+        snippet.insert(0, '…');
+    }
+    if end < all.len() {
+        snippet.push('…');
+    }
+    snippet
 }
 
 pub fn parse(query: &str) -> Result<SearchQuery> {

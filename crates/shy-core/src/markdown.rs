@@ -1,8 +1,12 @@
-//! The words a reader sees in markdown, for the search index: link and
-//! mention names without their addresses, no markdown marks, no HTML (chat
-//! hides it), and no bare app links (`shy://…`), which show as chips.
+//! The words a reader sees in markdown: for the search index, link and
+//! mention labels without their addresses, no markdown marks, no HTML (chat
+//! hides it), and no bare app links (`shy://…`), which show as chips; for
+//! previews, the same with every app link named by its real target, as its
+//! chip names it.
 
-use pulldown_cmark::{Event, Options, Parser, TagEnd};
+use std::collections::HashMap;
+
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 const APP_LINK: &str = "shy://";
 
@@ -28,6 +32,90 @@ pub(crate) fn visible_text(markdown: &str) -> String {
         }
     }
     without_app_links(&text)
+}
+
+/// Who and what app links point to, for naming them in previews.
+pub(crate) struct LinkNames {
+    /// Member id (hex) to name.
+    pub(crate) members: HashMap<String, String>,
+    /// Page id to title.
+    pub(crate) pages: HashMap<String, String>,
+}
+
+impl LinkNames {
+    /// What a chip for `link` says, and the text after the link's id (a
+    /// bare link can run into punctuation); `None` for a link no chip names.
+    fn name(&self, link: &str) -> Option<(String, String)> {
+        let (kind, rest) = link.strip_prefix(APP_LINK)?.split_once('/')?;
+        let id_end = rest
+            .find(|character: char| !character.is_ascii_alphanumeric())
+            .unwrap_or(rest.len());
+        let (id, after) = rest.split_at(id_end);
+        let name = match kind {
+            "member" => {
+                let name = self.members.get(id).map(|name| name.trim()).unwrap_or_default();
+                match name.is_empty() {
+                    true => format!("@member {}", id.get(..6).unwrap_or(id)),
+                    false => format!("@{name}"),
+                }
+            }
+            "mention" if id == "channel" || id == "here" => format!("@{id}"),
+            "page" => {
+                let title = self.pages.get(id).map(|title| title.trim()).unwrap_or_default();
+                match title.is_empty() {
+                    true => "Untitled page".to_owned(),
+                    false => title.to_owned(),
+                }
+            }
+            "message" => "a linked message".to_owned(),
+            _ => return None,
+        };
+        Some((name, after.to_owned()))
+    }
+}
+
+/// What a reader sees of `markdown` on one line, with every app link named
+/// by its real target: never its author's label, and found through the
+/// parser, so a reference link resolves wherever its definition is.
+pub(crate) fn preview_text(markdown: &str, names: &LinkNames) -> String {
+    let mut text = String::with_capacity(markdown.len());
+    let mut is_in_named_link = false;
+    for event in Parser::new_ext(markdown, options()) {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                if let Some((name, _)) = names.name(&dest_url) {
+                    text.push_str(&name);
+                    is_in_named_link = true;
+                }
+            }
+            Event::End(TagEnd::Link) => is_in_named_link = false,
+            _ if is_in_named_link => {}
+            Event::Text(words) | Event::Code(words) => text.push_str(&with_bare_links_named(&words, names)),
+            Event::SoftBreak | Event::HardBreak => text.push(' '),
+            Event::End(end) if !is_inline(end) => text.push(' '),
+            _ => {}
+        }
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `text` with each bare app link replaced by its name, or dropped if no
+/// chip names it.
+fn with_bare_links_named(text: &str, names: &LinkNames) -> String {
+    let mut named = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(APP_LINK) {
+        named.push_str(&rest[..start]);
+        let link = &rest[start..];
+        let end = link.find(char::is_whitespace).unwrap_or(link.len());
+        if let Some((name, after)) = names.name(&link[..end]) {
+            named.push_str(&name);
+            named.push_str(&after);
+        }
+        rest = &link[end..];
+    }
+    named.push_str(rest);
+    named
 }
 
 fn is_inline(end: TagEnd) -> bool {
@@ -60,6 +148,39 @@ fn without_app_links(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names() -> LinkNames {
+        LinkNames {
+            members: [("ab12".to_owned(), "Eve".to_owned())].into(),
+            pages: [("p1".to_owned(), "Plan".to_owned())].into(),
+        }
+    }
+
+    #[test]
+    fn previews_name_app_links_by_their_target_and_keep_other_labels() {
+        let text = "hi [@Ada](shy://member/ab12) and [@channel](shy://mention/channel)\n\n\
+                    [site](https://a.b), [doc](shy://page/p1) and <shy://page/p1>; [file](shy://file/f1)";
+        assert_eq!(
+            preview_text(text, &names()),
+            "hi @Eve and @channel site, Plan and Plan; file"
+        );
+    }
+
+    #[test]
+    fn text_full_of_link_starts_previews_quickly() {
+        let adversarial = format!(
+            "{}[@Ada](shy://member/ab12)",
+            "[@x] [".repeat(crate::ops::MAX_MESSAGE_CHARS / 6)
+        );
+        let started = std::time::Instant::now();
+        let preview = preview_text(&adversarial, &names());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert!(preview.ends_with("@Eve"), "the real link at the end is named");
+    }
 
     fn words(markdown: &str) -> Vec<String> {
         visible_text(markdown)

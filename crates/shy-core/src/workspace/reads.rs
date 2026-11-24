@@ -7,7 +7,8 @@ use anyhow::{Context, Result};
 
 use super::{State, Workspace};
 use crate::{
-    mentions::{mentions, with_plain_mentions},
+    markdown::{LinkNames, preview_text},
+    mentions::mentions,
     ops::{Op, now_ms},
     pages, search,
     storage::{Reply, SearchFilters},
@@ -172,6 +173,11 @@ impl Workspace {
                 .or_default()
                 .push(reply);
         }
+        // Names only when some thread has a reply to preview.
+        let names = match replies.is_empty() {
+            true => None,
+            false => Some(state.store.link_names(&self.inner.config.admin)?),
+        };
         for message in &mut messages {
             message.mentions_me = message.author != my_id && mentions(&message.text, &my_id);
             message.saved = state.store.saved_mark(&message.id)?;
@@ -191,7 +197,10 @@ impl Workspace {
             message.last_reply_ms = thread.iter().map(|reply| reply.created_ms).max();
             message.recent_reply_authors = recent_authors(&thread);
             message.last_reply_author = thread.last().map(|reply| reply.author.clone());
-            message.last_reply_preview = thread.last().map(|reply| reply_preview(&reply.text));
+            message.last_reply_preview = match (thread.last(), &names) {
+                (Some(reply), Some(names)) => Some(reply_preview(&reply.text, names)),
+                _ => None,
+            };
             message.is_following = match state.store.following_choice(&message.id)? {
                 Some(choice) => choice,
                 None => follows_by_default(
@@ -293,10 +302,15 @@ impl Workspace {
             filters.channel = Some(found.id);
         }
         let mut hits = state.store.search(&query.text, &filters, limit)?;
+        let names = state.store.link_names(&self.inner.config.admin)?;
         for hit in &mut hits {
-            if hit.kind == "message" {
+            let markdown = if hit.kind == "message" {
                 hit.thread_root = state.store.thread_root(&hit.id)?.filter(|root| *root != hit.id);
-            }
+                state.store.message_text(&hit.id)?.unwrap_or_default()
+            } else {
+                pages::read(state.store.page_state(&hit.id)?.as_deref())?
+            };
+            hit.snippet = search::snippet(&preview_text(&markdown, &names), &query.text);
         }
         Ok(hits)
     }
@@ -335,12 +349,10 @@ fn recent_authors(thread: &[&Reply]) -> Vec<String> {
     authors
 }
 
-/// `text` on one line with mentions as @name, cut on a character boundary.
-fn reply_preview(text: &str) -> String {
-    let line = with_plain_mentions(text)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+/// What a reader sees of `text` on one line, app links named, cut on a
+/// character boundary.
+fn reply_preview(text: &str, names: &LinkNames) -> String {
+    let line = preview_text(text, names);
     if line.chars().count() <= REPLY_PREVIEW_CHARS {
         return line;
     }

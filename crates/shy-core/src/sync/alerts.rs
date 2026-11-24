@@ -6,7 +6,8 @@
 use anyhow::Result;
 
 use crate::{
-    mentions::{mentions, with_plain_mentions},
+    markdown::preview_text,
+    mentions::mentions,
     ops::{MAX_MESSAGE_CHARS, Op, VerifiedOp, cut_to, now_ms},
     views::{Change, NotifyLevel},
     workspace::{State, Workspace, follows_by_default},
@@ -59,13 +60,8 @@ impl Workspace {
             .find(|member| member.id == author)
             .map(|member| member.name)
             .unwrap_or_default();
-        let mut preview: String = with_plain_mentions(text)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(PREVIEW_CHARS)
-            .collect();
+        let names = state.store.link_names(&self.inner.config.admin)?;
+        let mut preview: String = preview_text(text, &names).chars().take(PREVIEW_CHARS).collect();
         if preview.is_empty() {
             // Files go out before their message, so they are here already.
             preview = match state.store.files_of_message(id, channel)?.as_slice() {

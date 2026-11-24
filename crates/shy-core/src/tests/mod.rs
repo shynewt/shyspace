@@ -17,6 +17,7 @@ mod mentions;
 mod notes;
 mod notifications;
 mod presence;
+mod previews;
 mod private;
 mod private_attacks;
 mod protection;

@@ -232,7 +232,8 @@ impl Store {
 
     /// Messages and pages matching `text` (each word as a prefix). With
     /// `filters`, only messages that also pass them; with no text, the
-    /// newest messages that pass them.
+    /// newest messages that pass them. Snippets are left empty: they are
+    /// made from what the reader sees (`search::snippet`).
     pub fn search(&self, text: &str, filters: &SearchFilters, limit: u32) -> Result<Vec<SearchHit>> {
         let match_expression = match_expression(text);
         if match_expression.is_empty() && filters.is_empty() {
@@ -269,7 +270,7 @@ impl Store {
             .collect::<String>();
         let sql = if match_expression.is_empty() {
             format!(
-                "SELECT 'message', m.id, COALESCE(n.name, c.name, ''), COALESCE(e.text, m.text), m.channel,
+                "SELECT 'message', m.id, COALESCE(n.name, c.name, ''), '', m.channel,
                         m.author, m.created_ms
                  FROM messages m
                  LEFT JOIN message_edits e ON e.message = m.id
@@ -286,7 +287,7 @@ impl Store {
             values.insert(0, Box::new(match_expression));
             format!(
                 "SELECT s.kind, s.ref, COALESCE(NULLIF(s.title, ''), n.name, c.name, ''),
-                        snippet(search, 3, '\u{1}', '\u{2}', '…', 12), m.channel,
+                        '', m.channel,
                         m.author, COALESCE(m.created_ms, p.updated_ms)
                  FROM search s
                  LEFT JOIN messages m ON s.kind = 'message' AND m.id = s.ref
@@ -311,6 +312,35 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// A message's text as it stands, edits included.
+    pub(crate) fn message_text(&self, message: &str) -> Result<Option<String>> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT COALESCE(e.text, m.text) FROM messages m
+                 LEFT JOIN message_edits e ON e.message = m.id WHERE m.id = ?",
+                [message],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Everyone's name and every page's title, for naming app links.
+    pub(crate) fn link_names(&self, admin: &PublicKey) -> Result<crate::markdown::LinkNames> {
+        Ok(crate::markdown::LinkNames {
+            members: self
+                .members(admin)?
+                .into_iter()
+                .map(|member| (member.id, member.name))
+                .collect(),
+            pages: self
+                .pages()?
+                .into_iter()
+                .map(|page| (page.id, page.title))
+                .collect(),
+        })
     }
 
     /// A member's status, if set and not expired at `now_ms`.
