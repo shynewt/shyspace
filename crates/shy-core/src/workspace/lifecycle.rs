@@ -488,6 +488,7 @@ impl Workspace {
                 device_key,
                 identity,
                 huddle_media: options.media.clone(),
+                device_settings: options.device_settings.clone(),
                 config,
                 state: Mutex::new(state),
                 bucket: RwLock::new(bucket),

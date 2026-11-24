@@ -37,6 +37,7 @@ use tokio::sync::{Notify, broadcast};
 
 use crate::{
     config::WorkspaceConfig,
+    device_settings::DeviceSettingsFile,
     huddle::media::HuddleMedia,
     keys::DeviceKey,
     membership::{admin::drop_unsealed_deliveries, mls::Mls},
@@ -66,6 +67,9 @@ pub struct WorkspaceOptions {
     pub protocols: Option<ExtraProtocols>,
     /// Without one, the workspace can show huddles but not join them.
     pub media: Option<Arc<dyn HuddleMedia>>,
+    /// The device's settings, where its huddle devices are kept; without
+    /// them (a workspace opened on its own) the workspace keeps its own.
+    pub(crate) device_settings: Option<Arc<DeviceSettingsFile>>,
 }
 
 impl WorkspaceOptions {
@@ -86,6 +90,7 @@ impl From<Networking> for WorkspaceOptions {
             networking,
             protocols: None,
             media: None,
+            device_settings: None,
         }
     }
 }
@@ -145,6 +150,7 @@ pub(crate) struct Inner {
     pub connect: Connector,
     pub net: Option<Net>,
     pub huddle_media: Option<Arc<dyn HuddleMedia>>,
+    pub(crate) device_settings: Option<Arc<DeviceSettingsFile>>,
     pub events: broadcast::Sender<Change>,
     /// Wakes the sync loop early: after a local write or a peer's nudge.
     pub wake: Notify,

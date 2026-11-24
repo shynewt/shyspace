@@ -3,6 +3,7 @@
 
 pub mod config;
 pub mod crypto;
+mod device_settings;
 pub mod files;
 pub mod huddle;
 pub mod identity;

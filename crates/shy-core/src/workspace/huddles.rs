@@ -433,9 +433,13 @@ impl Workspace {
             ensure!(id.len() <= MAX_DEVICE_ID_CHARS, "that isn't a device's id");
         }
         media.set_devices(choice.clone())?;
-        self.state()
-            .store
-            .set_meta(DEVICES_META, &serde_json::to_vec(&choice)?)?;
+        match &self.inner.device_settings {
+            Some(device_settings) => device_settings.set_huddle_devices(&choice)?,
+            None => self
+                .state()
+                .store
+                .set_meta(DEVICES_META, &serde_json::to_vec(&choice)?)?,
+        }
         self.emit(Change::HuddleDevices);
         Ok(())
     }
@@ -482,7 +486,25 @@ impl Workspace {
         }
     }
 
+    /// The devices are the device's, kept in its settings; a workspace opened
+    /// on its own keeps them itself. A choice a workspace kept itself (as
+    /// builds before device-wide choices did) becomes the device's the first
+    /// time the device has none.
     fn saved_devices(&self) -> Result<DeviceChoice> {
+        let Some(device_settings) = &self.inner.device_settings else {
+            return self.own_saved_devices();
+        };
+        if let Some(choice) = device_settings.huddle_devices()? {
+            return Ok(choice);
+        }
+        let own = self.own_saved_devices()?;
+        if own != DeviceChoice::default() {
+            device_settings.set_huddle_devices(&own)?;
+        }
+        Ok(own)
+    }
+
+    fn own_saved_devices(&self) -> Result<DeviceChoice> {
         match self.state().store.meta(DEVICES_META)? {
             Some(bytes) => serde_json::from_slice(&bytes).context("the saved huddle devices can't be read"),
             None => Ok(DeviceChoice::default()),

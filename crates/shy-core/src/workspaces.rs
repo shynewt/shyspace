@@ -12,16 +12,16 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use serde::{Deserialize, Serialize};
 
 use crate::{
     BucketConfig, DataDir, JoinCancel, Profile, Workspace, WorkspaceOptions,
     config::WorkspaceConfig,
+    device_settings::{DeviceSettings, DeviceSettingsFile},
     keys::KeyStorage,
     membership::{invite::Invite, recovery::kit_workspace_id},
     ops::{new_random_id, now_ms},
@@ -62,29 +62,6 @@ pub struct Opened {
 pub struct WorkspaceEntry {
     pub workspace_id: String,
     pub name: String,
-}
-
-/// This device's choices about its workspaces.
-#[derive(Default, Serialize, Deserialize)]
-struct DeviceSettings {
-    /// The order they're shown in.
-    #[serde(default)]
-    workspace_ids: Vec<String>,
-    /// Most recently selected first.
-    #[serde(default)]
-    recent: Vec<String>,
-    #[serde(default)]
-    muted: Vec<String>,
-    #[serde(default)]
-    notifications_paused_until_ms: Option<i64>,
-    /// Workspaces whose folder is being deleted: a leave cut short is
-    /// finished from here.
-    #[serde(default)]
-    leaving: Vec<String>,
-    /// The single folder of earlier versions was moved (or there was none),
-    /// so start-up needn't look for it again.
-    #[serde(default)]
-    is_single_folder_handled: bool,
 }
 
 /// A workspace id names a folder, and comes from invites and recovery kits
@@ -151,8 +128,9 @@ pub struct Workspaces {
     connect: Connector,
     /// The open workspaces, the selected one first, then by last use.
     open: Mutex<Vec<Workspace>>,
-    /// Held across each change to `workspaces.json`, so two can't interleave.
-    settings_lock: Mutex<()>,
+    /// `workspaces.json`, shared with the workspaces for the choices that are
+    /// the device's (its huddle devices).
+    settings_file: Arc<DeviceSettingsFile>,
 }
 
 impl Workspaces {
@@ -179,13 +157,22 @@ impl Workspaces {
     }
 
     fn laid_out(layout: Layout, keys: DeviceKeys, connect: Connector) -> Self {
+        let settings_file = Arc::new(DeviceSettingsFile::new(layout.settings_file()));
         Self {
             layout,
             keys,
             connect,
             open: Mutex::default(),
-            settings_lock: Mutex::default(),
+            settings_file,
         }
+    }
+
+    /// `options` with this device's settings, so the workspace keeps its
+    /// device-wide choices there.
+    fn with_device_settings(&self, options: impl Into<WorkspaceOptions>) -> WorkspaceOptions {
+        let mut options = options.into();
+        options.device_settings = Some(self.settings_file.clone());
+        options
     }
 
     /// The folder and device key of `workspace_id`'s workspace.
@@ -275,7 +262,7 @@ impl Workspaces {
             profile,
             bucket,
             self.connect.clone(),
-            options,
+            self.with_device_settings(options),
         )
         .await?;
         self.add_open(workspace)
@@ -291,7 +278,14 @@ impl Workspaces {
     ) -> Result<Workspace> {
         let workspace_id = Invite::decode(invite_code)?.workspace_id;
         let data = self.prepare_folder(&workspace_id)?;
-        let workspace = Workspace::join_cancellable(&data, invite_code, profile, options, cancel).await?;
+        let workspace = Workspace::join_cancellable(
+            &data,
+            invite_code,
+            profile,
+            self.with_device_settings(options),
+            cancel,
+        )
+        .await?;
         self.add_open(workspace)
     }
 
@@ -303,7 +297,13 @@ impl Workspaces {
     ) -> Result<Workspace> {
         let workspace_id = kit_workspace_id(recovery_kit)?;
         let data = self.prepare_folder(&workspace_id)?;
-        let workspace = Workspace::restore_with(&data, recovery_kit, self.connect.clone(), options).await?;
+        let workspace = Workspace::restore_with(
+            &data,
+            recovery_kit,
+            self.connect.clone(),
+            self.with_device_settings(options),
+        )
+        .await?;
         self.add_open(workspace)
     }
 
@@ -515,45 +515,11 @@ impl Workspaces {
     /// Changes `workspaces.json` under the settings lock, so two changes
     /// can't interleave or lose one another.
     fn update_settings(&self, change: impl FnOnce(&mut DeviceSettings)) -> Result<()> {
-        let _changing = self
-            .settings_lock
-            .lock()
-            .expect("settings lock poisoned by an earlier panic");
-        let mut settings = self.settings()?;
-        change(&mut settings);
-        self.save_settings(&settings)
+        self.settings_file.update(change)
     }
 
-    /// This device's choices. A file that can't be read is reported and
-    /// treated as empty: it only holds the order, recency, mutes and a
-    /// pause, and losing those is better than opening no workspace.
     fn settings(&self) -> Result<DeviceSettings> {
-        let path = self.layout.settings_file();
-        match std::fs::read(&path) {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes).unwrap_or_else(|error| {
-                tracing::error!("{} is unreadable, so it's ignored: {error}", path.display());
-                DeviceSettings::default()
-            })),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(DeviceSettings::default()),
-            Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
-        }
-    }
-
-    /// Written whole to a new file and renamed over the old one, so a crash
-    /// leaves either version, never half of one.
-    fn save_settings(&self, settings: &DeviceSettings) -> Result<()> {
-        let path = self.layout.settings_file();
-        let partial = PathBuf::from(format!("{}.partial", path.display()));
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut file =
-            std::fs::File::create(&partial).with_context(|| format!("writing {}", partial.display()))?;
-        std::io::Write::write_all(&mut file, &serde_json::to_vec_pretty(settings)?)
-            .with_context(|| format!("writing {}", partial.display()))?;
-        file.sync_all()
-            .with_context(|| format!("writing {}", partial.display()))?;
-        std::fs::rename(&partial, &path).with_context(|| format!("writing {}", path.display()))
+        self.settings_file.read()
     }
 
     /// Opens every workspace here not open yet, the last used first, and
@@ -577,7 +543,9 @@ impl Workspaces {
                 continue;
             }
             let data = self.folder(&workspace_id)?;
-            match Workspace::open_with(&data, self.connect.clone(), options()).await {
+            match Workspace::open_with(&data, self.connect.clone(), self.with_device_settings(options()))
+                .await
+            {
                 Ok(workspace) => {
                     self.open_lock().push(workspace.clone());
                     opened.workspaces.push(workspace);

@@ -1,9 +1,12 @@
 //! Several workspaces on one device (#22): each in its own folder, the
 //! single folder of older devices moved once, and leaving.
 
+use std::sync::Arc;
+
 use super::support::*;
 use crate::{
-    Networking, Profile, Workspace,
+    Networking, Profile, Workspace, WorkspaceOptions,
+    huddle::media::{DeviceChoice, fake::FakeMedia},
     workspaces::{DeviceKeys, MoveStep, Workspaces},
 };
 
@@ -705,4 +708,74 @@ async fn a_workspace_badge_counts_its_attention_as_the_window_badge_does() {
         4,
         "1 mention, 2 in the DM, 1 reminder"
     );
+}
+
+fn with_audio() -> WorkspaceOptions {
+    WorkspaceOptions::from(Networking::Offline).with_media(Arc::new(FakeMedia::default()))
+}
+
+fn headset() -> DeviceChoice {
+    DeviceChoice {
+        input: Some("headset-mic".into()),
+        output: Some("headset".into()),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_huddle_devices_are_the_devices_in_every_workspace() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), with_audio())
+        .await
+        .unwrap();
+    let beta = workspaces
+        .create("Beta", profile(), test_bucket_config(), with_audio())
+        .await
+        .unwrap();
+
+    acme.set_huddle_devices(headset()).unwrap();
+
+    assert_eq!(beta.huddle_devices().unwrap().chosen, headset());
+    drop((acme, beta));
+    drop(workspaces);
+    let reopened = device.workspaces();
+    reopened.open_all(with_audio).await.unwrap();
+    for workspace in reopened.open_workspaces() {
+        assert_eq!(workspace.huddle_devices().unwrap().chosen, headset());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspaces_own_device_choice_moves_to_the_device_once() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), with_audio())
+        .await
+        .unwrap();
+    let acme_id = acme.workspace_id().to_owned();
+    drop(acme);
+    drop(workspaces);
+    // Saved by the workspace itself, as builds before device-wide choices did.
+    let data = device.workspaces().folder(&acme_id).unwrap();
+    let alone = Workspace::open_with(&data, connector(&device.bucket), with_audio())
+        .await
+        .unwrap();
+    alone.set_huddle_devices(headset()).unwrap();
+    drop(alone);
+
+    let workspaces = device.workspaces();
+    workspaces.open_all(with_audio).await.unwrap();
+    let beta = workspaces
+        .create("Beta", profile(), test_bucket_config(), with_audio())
+        .await
+        .unwrap();
+    let acme = workspaces
+        .open_workspaces()
+        .into_iter()
+        .find(|workspace| workspace.workspace_id() == acme_id)
+        .unwrap();
+    assert_eq!(acme.huddle_devices().unwrap().chosen, headset());
+    assert_eq!(beta.huddle_devices().unwrap().chosen, headset());
 }
