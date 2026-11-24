@@ -128,6 +128,14 @@ jobs:
           test -n "$app"
           # Ad-hoc signed: the bundle must be whole, or macOS calls it damaged.
           codesign --verify --deep --strict --verbose=2 "$app"
+          # The hardened runtime blocks the microphone unless the app is entitled to it.
+          has_microphone() {
+            # Shown for the record: the flags say whether the runtime is on (adhoc,runtime).
+            codesign -d --verbose=2 "$1" 2>&1 | grep -E 'flags=|Signature=' || true
+            codesign -d --entitlements - --xml "$1" 2>/dev/null | grep -q 'com.apple.security.device.audio-input' \
+              || { echo "::error::$1 isn't entitled to the microphone"; return 1; }
+          }
+          has_microphone "$app"
           # Without notarization Gatekeeper refuses it; shown for information only.
           spctl -a -vv "$app" || true
           # A tag's update package holds the app an update installs: it must be whole too.
@@ -137,6 +145,7 @@ jobs:
             mkdir -p "$RUNNER_TEMP/update"
             tar -xzf "$update" -C "$RUNNER_TEMP/update"
             codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP"/update/*.app
+            has_microphone "$(find "$RUNNER_TEMP/update" -maxdepth 1 -name '*.app' | head -n 1)"
           fi
       - name: Build the shy CLI
         run: cargo build --release -p shy-cli --features vendored-openssl
