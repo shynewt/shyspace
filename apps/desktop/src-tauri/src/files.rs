@@ -19,7 +19,7 @@ use shy_core::{
     workspace::{FileSource, NewFile},
 };
 use tauri::{
-    AppHandle, DragDropEvent, Emitter, PhysicalPosition, State,
+    AppHandle, DragDropEvent, Emitter, LogicalPosition, PhysicalPosition, State,
     ipc::{InvokeBody, Request, Response},
 };
 use tauri_plugin_dialog::DialogExt;
@@ -166,12 +166,15 @@ pub struct DropPoint {
 }
 
 impl DropPoint {
-    fn from_physical(position: PhysicalPosition<f64>, scale_factor: f64) -> Self {
-        let logical = position.to_logical::<f64>(scale_factor);
-        Self {
-            x: logical.x,
-            y: logical.y,
-        }
+    /// Tauri calls every drop point physical, but only WebView2 reports device
+    /// pixels; WebKitGTK and WKWebView already report the page's own pixels.
+    fn from_window(position: PhysicalPosition<f64>, scale_factor: f64) -> Self {
+        let page = if cfg!(windows) {
+            position.to_logical::<f64>(scale_factor)
+        } else {
+            LogicalPosition::new(position.x, position.y)
+        };
+        Self { x: page.x, y: page.y }
     }
 }
 
@@ -183,11 +186,10 @@ struct FilesDropped {
 }
 
 /// Stages files dropped on the window and tells the UI about them, and where.
-/// `scale_factor` turns the window's pixels into the page's.
+/// `scale_factor` turns Windows' device pixels into the page's.
 pub fn on_drag_drop(app: &AppHandle, staged: &StagedFiles, event: &DragDropEvent, scale_factor: Option<f64>) {
-    let at = |position: &PhysicalPosition<f64>| {
-        scale_factor.map(|scale| DropPoint::from_physical(*position, scale))
-    };
+    let at =
+        |position: &PhysicalPosition<f64>| scale_factor.map(|scale| DropPoint::from_window(*position, scale));
     let (files, position) = match event {
         DragDropEvent::Enter { position, .. } | DragDropEvent::Over { position } => {
             let _ = app.emit("file-drag", at(position));
@@ -477,9 +479,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_drop_point_is_in_page_pixels() {
-        let point = DropPoint::from_physical(PhysicalPosition::new(300.0, 150.0), 2.0);
+    #[cfg(windows)]
+    fn a_drop_point_on_windows_turns_device_pixels_into_page_pixels() {
+        let point = DropPoint::from_window(PhysicalPosition::new(300.0, 150.0), 2.0);
         assert_eq!(point, DropPoint { x: 150.0, y: 75.0 });
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn a_drop_point_on_linux_and_macos_is_already_in_page_pixels() {
+        let point = DropPoint::from_window(PhysicalPosition::new(300.0, 150.0), 2.0);
+        assert_eq!(point, DropPoint { x: 300.0, y: 150.0 });
     }
 
     #[test]
