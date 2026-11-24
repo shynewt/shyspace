@@ -102,6 +102,24 @@ jobs:
       - name: Huddle audio's system libraries
         if: runner.os == 'Linux'
         run: sudo apt-get install -y libasound2-dev libpipewire-0.3-dev clang libclang-dev
+      - name: Developer ID signing and notarization for a tag
+        if: github.ref_type == 'tag' && runner.os == 'macOS'
+        # Set only here: an empty variable on other runs could make the build
+        # try an empty certificate. The identity replaces the ad-hoc "-".
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            value="${!name}"
+            test -n "$value" || { echo "::error::the release environment has no $name"; exit 1; }
+            delimiter="EOF_$(openssl rand -hex 16)"
+            printf '%s<<%s\n%s\n%s\n' "$name" "$delimiter" "$value" "$delimiter" >> "$GITHUB_ENV"
+          done
       - name: Build the app, and attach it to the draft release for a tag
         uses: tauri-apps/tauri-action@v1.0.0
         env:
@@ -116,7 +134,7 @@ jobs:
           # Empty without a tag, so the action only keeps workflow artifacts.
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: shyspace ${{ github.ref_name }}
-          releaseBody: "Installed apps update themselves once this is published. macOS: the app isn't signed with an Apple identity; drag it to Applications, open it once, and if macOS refuses, allow it in System Settings › Privacy & Security › Open Anyway."
+          releaseBody: "Installed apps update themselves once this is published. macOS: signed with a Developer ID and notarized."
           # A draft until it's looked over; published as a normal release, since apps only see the latest one.
           releaseDraft: true
           prerelease: false
@@ -136,8 +154,19 @@ jobs:
               || { echo "::error::$1 isn't entitled to the microphone"; return 1; }
           }
           has_microphone "$app"
-          # Without notarization Gatekeeper refuses it; shown for information only.
-          spctl -a -vv "$app" || true
+          # Gatekeeper must accept a tag's app: Developer ID signed, notarized,
+          # the ticket stapled. An ad-hoc build is refused; shown for information.
+          is_released() {
+            codesign -dvv "$1" 2>&1 | grep -q '^Authority=Developer ID Application' \
+              || { echo "::error::$1 isn't signed with a Developer ID"; return 1; }
+            spctl -a -vv "$1"
+            xcrun stapler validate "$1"
+          }
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            is_released "$app"
+          else
+            spctl -a -vv "$app" || true
+          fi
           # A tag's update package holds the app an update installs: it must be whole too.
           update=$(find target/release/bundle/macos -maxdepth 1 -name '*.app.tar.gz' | head -n 1)
           if [ "$GITHUB_REF_TYPE" = tag ]; then
@@ -145,7 +174,12 @@ jobs:
             mkdir -p "$RUNNER_TEMP/update"
             tar -xzf "$update" -C "$RUNNER_TEMP/update"
             codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP"/update/*.app
-            has_microphone "$(find "$RUNNER_TEMP/update" -maxdepth 1 -name '*.app' | head -n 1)"
+            updated_app=$(find "$RUNNER_TEMP/update" -maxdepth 1 -name '*.app' | head -n 1)
+            has_microphone "$updated_app"
+            # An update replaces the app in place, so it carries no quarantine and
+            # needs no ticket; its signature must still be the Developer ID.
+            codesign -dvv "$updated_app" 2>&1 | grep -q '^Authority=Developer ID Application' \
+              || { echo "::error::the update's app isn't signed with a Developer ID"; exit 1; }
           fi
       - name: Build the shy CLI
         run: cargo build --release -p shy-cli --features vendored-openssl
