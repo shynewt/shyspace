@@ -158,7 +158,7 @@ test.describe("as a member", () => {
     await expect(settings.getByRole("listitem").filter({ hasText: "Ada" })).toContainText("Admin");
     await expect(settings.getByRole("tablist", { name: "Members" })).toHaveCount(0);
     await expect(settings.getByRole("button", { name: /^Remove/ })).toHaveCount(0);
-    await settings.getByRole("tab", { name: "Agents" }).click();
-    await expect(settings.getByText("Ask Ada to add an agent.")).toBeVisible();
+    // Agents show in this list with their tag; adding one is the admin's, so there's no Agents section.
+    await expect(settings.getByRole("tab", { name: "Agents" })).toHaveCount(0);
   });
 });

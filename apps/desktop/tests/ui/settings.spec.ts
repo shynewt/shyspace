@@ -330,18 +330,28 @@ test("a recovery kit that can't restore the workspace says why, instead of showi
   await expect(page.getByRole("dialog", { name: "Your recovery kit" })).toHaveCount(0);
 });
 
-test("members see who manages storage and recovery", async ({ page }) => {
+test("members see their own sections and the member list, not the admin's", async ({ page }) => {
   await page.goto("?start=member");
   await expect(page.getByLabel("Message #general")).toBeVisible();
   await page.keyboard.press("Control+,");
-  const settings = page.getByRole("dialog", { name: "Settings" });
+  const sections = page.getByRole("dialog", { name: "Settings" }).getByRole("tablist", { name: "Settings sections" });
+  await expect(sections.getByRole("tab")).toHaveText([
+    "Profile",
+    "Appearance",
+    "Notifications",
+    "Huddles",
+    "Privacy & security",
+    "Members",
+  ]);
+  await page.keyboard.press("Escape");
 
-  await settings.getByRole("tab", { name: "Storage" }).click();
-  await expect(settings.getByRole("tabpanel")).toContainText("Managed by Ada.");
-  await expect(settings.getByLabel("Secret key")).toHaveCount(0);
-  await settings.getByRole("tab", { name: "Recovery" }).click();
-  await expect(settings.getByRole("tabpanel")).toContainText("Managed by Ada.");
-  await expect(settings.getByRole("button", { name: "Show recovery kit" })).toHaveCount(0);
+  await page.keyboard.press("Control+k");
+  await page.getByLabel("Search messages and pages").fill("settings");
+  const options = page.getByRole("listbox").getByRole("option");
+  await expect(options.filter({ hasText: "Settings: Members" })).toHaveCount(1);
+  for (const hidden of ["Workspace", "Agents", "Storage", "Recovery"]) {
+    await expect(options.filter({ hasText: `Settings: ${hidden}` })).toHaveCount(0);
+  }
 });
 
 /** The cheat sheet's transform in each frame while it opens: "none" throughout when motion is reduced. */

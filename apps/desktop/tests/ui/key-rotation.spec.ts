@@ -99,8 +99,9 @@ test("stopping asks first, and says the removed member's key may still work", as
 test("members never see the key change", async ({ page }) => {
   await page.goto("?start=member");
   await expect(page.getByLabel("Message #general")).toBeVisible();
-  const { panel } = await openStorage(page);
-  await expect(panel).toContainText("bucket the admin chose");
-  await expect(card(panel)).toHaveCount(0);
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings.getByRole("tab", { name: "Profile" })).toBeVisible();
+  await expect(settings.getByRole("tab", { name: /^Storage/ })).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: "only the admin" })).toHaveCount(0);
 });

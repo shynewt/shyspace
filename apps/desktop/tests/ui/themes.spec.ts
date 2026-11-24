@@ -125,12 +125,9 @@ test.describe("as a member", () => {
     await expect(page.getByLabel("Message #general")).toBeVisible();
   });
 
-  test("members see the workspace's look but can't change it", async ({ page }) => {
-    await openSection(page, "Workspace");
-    const section = settings(page);
-    await expect(section).toContainText("Managed by Ada");
-    await expect(section.getByRole("radiogroup", { name: "Default theme" }).getByRole("radio").first()).toBeDisabled();
-    await expect(section.getByRole("button", { name: "Use the letter" })).toHaveCount(0);
-    await expect(section.getByLabel("Choose a workspace picture")).toHaveCount(0);
+  test("members have no Workspace section: the look is the admin's to set", async ({ page }) => {
+    await page.keyboard.press("Control+,");
+    await expect(settings(page).getByRole("tab", { name: "Profile" })).toBeVisible();
+    await expect(settings(page).getByRole("tab", { name: "Workspace" })).toHaveCount(0);
   });
 });

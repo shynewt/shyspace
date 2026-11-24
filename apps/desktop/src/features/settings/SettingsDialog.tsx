@@ -2,7 +2,7 @@ import { Bell, Bot, HardDrive, Headphones, LifeBuoy, Palette, ShieldCheck, UserR
 import { motion } from "motion/react";
 import { Tabs } from "radix-ui";
 import { Fragment, type ReactNode } from "react";
-import { SETTINGS_SECTIONS, type SettingsGroup, type SettingsSection, type SettingsTarget } from "../../lib/settings";
+import { type SettingsGroup, type SettingsSection, type SettingsTarget, sectionsShownTo } from "../../lib/settings";
 import { useWorkspace } from "../../lib/workspace";
 import { cx, Dialog, instantAfterAKey, springs } from "../../ui";
 import { WaitingRequestsBadge } from "../members/JoinRequests";
@@ -105,17 +105,20 @@ function SettingsWindow({
 }) {
   const { session } = useWorkspace();
   const membersTab = target.membersTab ?? "members";
+  const sections = sectionsShownTo(session);
+  // A section this person can't see (a stale link, say) opens at the first one instead.
+  const shownSection = sections.some((section) => section.id === target.section) ? target.section : "profile";
   const groups: { id: SettingsGroup; title: string }[] = [
     { id: "you", title: "You" },
     { id: "workspace", title: session.workspace_name },
   ];
   const choose = (value: string) => {
-    const section = SETTINGS_SECTIONS.find((candidate) => candidate.id === value);
+    const section = sections.find((candidate) => candidate.id === value);
     if (section) onNavigate({ section: section.id });
   };
   return (
     <Tabs.Root
-      value={target.section}
+      value={shownSection}
       onValueChange={choose}
       orientation="vertical"
       className="@container/settings mt-4 flex h-settings max-h-[calc(100dvh-6rem)] border-t border-line"
@@ -132,22 +135,24 @@ function SettingsWindow({
             >
               {group.title}
             </div>
-            {SETTINGS_SECTIONS.filter((section) => section.group === group.id).map((section) => (
-              <SectionTab
-                key={section.id}
-                section={section.id}
-                label={section.label}
-                isActive={section.id === target.section}
-                badge={
-                  (section.id === "members" && session.is_admin && <WaitingRequestsBadge />) ||
-                  (section.id === "storage" && <StorageAttentionSign />)
-                }
-              />
-            ))}
+            {sections
+              .filter((section) => section.group === group.id)
+              .map((section) => (
+                <SectionTab
+                  key={section.id}
+                  section={section.id}
+                  label={section.label}
+                  isActive={section.id === shownSection}
+                  badge={
+                    (section.id === "members" && session.is_admin && <WaitingRequestsBadge />) ||
+                    (section.id === "storage" && <StorageAttentionSign />)
+                  }
+                />
+              ))}
           </Fragment>
         ))}
       </Tabs.List>
-      {SETTINGS_SECTIONS.map((section) => (
+      {sections.map((section) => (
         // Every section stays mounted while Settings is open, so typed text and
         // a save still running survive looking at another section.
         <Tabs.Content

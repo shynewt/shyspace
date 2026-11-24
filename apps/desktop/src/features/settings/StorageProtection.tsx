@@ -15,8 +15,11 @@ export function useStorageProtection(): ProtectionCheck | undefined {
 
 /** What someone should act on in Storage, if anything: a key a removed member has, or a bucket that can lose data. */
 function useStorageAttention(): string | null {
+  const { session } = useWorkspace();
   const isUnprotected = useStorageProtection()?.state === "unprotected";
   const rotation = useStorageRotation();
+  // Only the admin can fix either, so only the admin is asked to.
+  if (!session.is_admin) return null;
   if (rotation) return "Change the storage key";
   return isUnprotected ? "Storage can lose data" : null;
 }

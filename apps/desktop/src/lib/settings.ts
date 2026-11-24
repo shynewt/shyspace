@@ -24,15 +24,28 @@ export type SettingsTarget = { section: SettingsSection; membersTab?: MembersTab
 
 export type SettingsGroup = "you" | "workspace";
 
-export const SETTINGS_SECTIONS: { id: SettingsSection; label: string; group: SettingsGroup }[] = [
+type SectionInfo = {
+  id: SettingsSection;
+  label: string;
+  group: SettingsGroup;
+  /** Only the admin can act here, so a member doesn't see it at all (the core refuses them anyway). */
+  isAdminOnly?: boolean;
+};
+
+const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: "profile", label: "Profile", group: "you" },
   { id: "appearance", label: "Appearance", group: "you" },
   { id: "notifications", label: "Notifications", group: "you" },
   { id: "huddles", label: "Huddles", group: "you" },
   { id: "privacy", label: "Privacy & security", group: "you" },
-  { id: "workspace", label: "Workspace", group: "workspace" },
+  { id: "workspace", label: "Workspace", group: "workspace", isAdminOnly: true },
   { id: "members", label: "Members", group: "workspace" },
-  { id: "agents", label: "Agents", group: "workspace" },
-  { id: "storage", label: "Storage", group: "workspace" },
-  { id: "recovery", label: "Recovery", group: "workspace" },
+  { id: "agents", label: "Agents", group: "workspace", isAdminOnly: true },
+  { id: "storage", label: "Storage", group: "workspace", isAdminOnly: true },
+  { id: "recovery", label: "Recovery", group: "workspace", isAdminOnly: true },
 ];
+
+/** The sections someone sees: all of them for the admin, a member's own and Members otherwise. */
+export function sectionsShownTo(session: { is_admin: boolean }): SectionInfo[] {
+  return SETTINGS_SECTIONS.filter((section) => session.is_admin || !section.isAdminOnly);
+}

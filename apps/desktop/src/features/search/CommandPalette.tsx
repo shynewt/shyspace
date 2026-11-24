@@ -16,7 +16,7 @@ import { api, type SearchHit } from "../../lib/api";
 import { useChannelNames } from "../../lib/channels";
 import { useMembers } from "../../lib/members";
 import { displayName, formatWhen } from "../../lib/people";
-import { SETTINGS_SECTIONS } from "../../lib/settings";
+import { sectionsShownTo } from "../../lib/settings";
 import { hasCommandModifier, shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
 import { useWorkspace, type View } from "../../lib/workspace";
@@ -155,7 +155,7 @@ function PaletteBody({
         : []),
       // Settings sections show only while searching, so the empty palette stays short.
       ...(needle
-        ? SETTINGS_SECTIONS.map((section) => ({
+        ? sectionsShownTo({ is_admin: session.is_admin }).map((section) => ({
             title: `Settings: ${section.label}`,
             icon: <Settings size={15} />,
             onChoose: () => openSettings({ section: section.id }),

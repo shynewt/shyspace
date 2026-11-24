@@ -126,15 +126,13 @@ test.describe("as a member", () => {
     await expect(page.getByLabel("Message #general")).toBeVisible();
   });
 
-  test("members see the warning and who fixes it", async ({ page }) => {
+  test("members aren't asked about storage they can't fix", async ({ page }) => {
     await page.evaluate(() => window.fake.setStorageProtection("unprotected"));
-    const storage = await openStorage(page);
-
-    await expect(storage.getByRole("region", { name: "Storage protection" })).toContainText(
-      "Your storage can lose data",
-    );
-    await expect(storage).toContainText("Ask Ada to fix this");
-    await expect(storage).toContainText("Managed by Ada.");
+    const me = page.getByRole("button", { name: /^Grace/ });
+    await expect(me).toBeVisible();
+    await expect(me.getByRole("img", { name: "Storage needs attention" })).toHaveCount(0);
+    await me.click();
+    await expect(page.getByRole("menuitem", { name: "Storage needs attention" })).toHaveCount(0);
   });
 });
 
