@@ -372,13 +372,23 @@ pub struct StorageSettings {
 pub struct WorkspaceItem {
     pub workspace_id: String,
     pub name: String,
-    /// The workspace's picture; `None` shows a letter tile.
+    /// The id of the workspace's icon, which changes with it (load the
+    /// bytes with `workspace_icon`); `None` shows a letter tile.
     pub icon: Option<String>,
     /// Checking the bucket at full pace (one of the most recently used);
     /// the others check every few minutes, though gossip still delivers live.
     pub is_live: bool,
     /// Muted on this device: no notifications from it.
     pub is_muted: bool,
+}
+
+/// The theme and accent the admin chose for everyone; `None` is the app's
+/// default. Names are checked, not interpreted: an app shows a name it
+/// doesn't know as its default.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct WorkspaceLook {
+    pub theme: Option<String>,
+    pub accent: Option<String>,
 }
 
 /// What a workspace's rail icon shows: the same counts as its sidebar.
@@ -542,8 +552,10 @@ pub enum Change {
     /// The bucket key rotation (`storage_rotation`) changed.
     KeyRotation,
     /// The workspaces on this device changed: one was added, left, moved,
-    /// selected, or started or stopped running live.
+    /// selected, started or stopped running live, or got a new icon.
     Workspaces,
+    /// The workspace's default look changed.
+    WorkspaceLook,
     /// How far this device's upload of files into `channel` (or a page) has
     /// got, in bytes of the files themselves.
     Upload {

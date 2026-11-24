@@ -433,6 +433,18 @@ impl Workspace {
     /// Shares a new picture (an already cropped PNG, JPEG or WebP), or
     /// removes ours with `None`. The old one leaves the bucket.
     pub async fn set_profile_picture(&self, image: Option<Vec<u8>>) -> Result<()> {
+        self.share_picture(image, |picture| Op::ProfilePicture { picture })
+            .await
+    }
+
+    /// Uploads `image` (checked like every picture), or nothing for `None`,
+    /// and writes the op `to_op` makes of it. The upload leaves the bucket
+    /// again if the op can't be written.
+    pub(super) async fn share_picture(
+        &self,
+        image: Option<Vec<u8>>,
+        to_op: impl FnOnce(Option<BlobRef>) -> Op,
+    ) -> Result<()> {
         let picture = match image {
             Some(image) => {
                 let size = u64::try_from(image.len())?;
@@ -446,7 +458,7 @@ impl Workspace {
             None => None,
         };
         let blob_id = picture.as_ref().map(|picture| picture.id.clone());
-        if let Err(error) = self.write(Op::ProfilePicture { picture }) {
+        if let Err(error) = self.write(to_op(picture)) {
             if let Some(blob_id) = blob_id {
                 self.abandon_blob(&self.picture_cache(), &blob_id).await;
             }
@@ -458,14 +470,24 @@ impl Workspace {
 
     /// A member's picture, if they shared one.
     pub async fn profile_picture(&self, member: &PublicKey) -> Result<Option<Vec<u8>>> {
-        let Some(picture) = self.state().store.profile_picture(member.as_bytes())? else {
+        let picture = self.state().store.profile_picture(member.as_bytes())?;
+        self.picture_bytes(member, picture).await
+    }
+
+    /// The bytes of `owner`'s `picture`, from the cache or the bucket.
+    pub(super) async fn picture_bytes(
+        &self,
+        owner: &PublicKey,
+        picture: Option<BlobRef>,
+    ) -> Result<Option<Vec<u8>>> {
+        let Some(picture) = picture else {
             return Ok(None);
         };
         let mut content = Vec::new();
         read_blob_into(
             &self.bucket(),
             &self.picture_cache(),
-            member,
+            owner,
             &picture,
             &mut content,
         )

@@ -19,7 +19,7 @@ use shy_core::{
         Channel, Draft, DueReminder, Inbox, Invite, LaterItem, LinkedMessage, Member, Message, MessageCursor,
         NotifyLevel, OldKeyCheck, Page, PageEditorSession, PrivateMembers, ProtectionCheck, SearchHit,
         SectionSort, SidebarSection, StatusUpdate, StorageRotation, StorageSettings, WorkspaceBadge,
-        WorkspaceItem,
+        WorkspaceItem, WorkspaceLook,
     },
     workspace::StorageUpdate,
     workspaces::{DeviceKeys, Workspaces},
@@ -846,6 +846,26 @@ async fn clear_status(state: State<'_, AppState>) -> CommandResult<()> {
     current(&state).await?.clear_status().map_err(failed)
 }
 
+/// The shown workspace's default look, as its admin set it.
+#[tauri::command]
+async fn workspace_look(state: State<'_, AppState>) -> CommandResult<WorkspaceLook> {
+    current(&state).await?.workspace_look().map_err(failed)
+}
+
+/// Sets the shown workspace's default look; `None` leaves the app's
+/// default. Admin only.
+#[tauri::command]
+async fn set_workspace_look(
+    state: State<'_, AppState>,
+    theme: Option<String>,
+    accent: Option<String>,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_workspace_look(theme.as_deref(), accent.as_deref())
+        .map_err(failed)
+}
+
 #[tauri::command]
 /// Away or back is about the person, so it shows in every workspace.
 async fn set_away(state: State<'_, AppState>, away: bool) -> CommandResult<()> {
@@ -1086,6 +1106,10 @@ pub fn run() {
             files::files,
             files::profile_picture,
             files::set_profile_picture,
+            files::workspace_icon,
+            files::set_workspace_icon,
+            workspace_look,
+            set_workspace_look,
             session,
             create_workspace,
             join_workspace,

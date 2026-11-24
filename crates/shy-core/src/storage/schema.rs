@@ -9,7 +9,13 @@ use anyhow::{Context, Result, ensure};
 use rusqlite::Connection;
 
 /// Every migration in order; the first is the schema as of v0.1.0.
-const MIGRATIONS: &[&str] = &[FIRST_SCHEMA];
+const MIGRATIONS: &[&str] = &[FIRST_SCHEMA, WORKSPACE_LOOK];
+
+/// The workspace's icon and default look, set by the admin.
+const WORKSPACE_LOOK: &str = r#"
+CREATE TABLE workspace_icon (id INTEGER PRIMARY KEY CHECK (id = 1), blob BLOB, lamport INTEGER NOT NULL);
+CREATE TABLE workspace_look (id INTEGER PRIMARY KEY CHECK (id = 1), look BLOB NOT NULL, lamport INTEGER NOT NULL);
+"#;
 
 const FIRST_SCHEMA: &str = r#"
 CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);
@@ -124,9 +130,11 @@ INSERT INTO sidebar_sections (id, name, position) VALUES ('channels', 'Channels'
 "#;
 
 /// Raised when the rules for showing ops change (what a view holds, not
-/// its tables): a store whose views were built under other rules has them
-/// rebuilt from its log on opening.
-pub(crate) const VIEW_RULES: u8 = 1;
+/// its tables), or a new kind of op is added: a store whose views were built
+/// under other rules has them rebuilt from its log on opening, which also
+/// applies ops of new kinds that an older version kept as unreadable. Rules
+/// 2 add the workspace icon and look.
+pub(crate) const VIEW_RULES: u8 = 2;
 pub(crate) const VIEW_RULES_META: &str = "view_rules";
 
 /// What stores made before migrations recorded instead of a count: a hash
@@ -210,7 +218,7 @@ mod tests {
             )
             .unwrap();
         assert!(tables > 40, "{tables} tables");
-        assert_eq!(version(&db), 1);
+        assert_eq!(version(&db), i32::try_from(MIGRATIONS.len()).unwrap());
     }
 
     #[test]
@@ -239,16 +247,18 @@ mod tests {
     #[test]
     fn a_store_from_a_newer_app_is_refused_clearly() {
         let mut db = Connection::open_in_memory().unwrap();
-        migrate(
-            &mut db,
-            &[FIRST_SCHEMA, "CREATE TABLE added (id TEXT PRIMARY KEY);"],
-        )
-        .unwrap();
+        let mut newer = MIGRATIONS.to_vec();
+        newer.push("CREATE TABLE added (id TEXT PRIMARY KEY);");
+        migrate(&mut db, &newer).unwrap();
 
         let error = create_or_migrate(&mut db).unwrap_err();
 
         assert!(error.to_string().contains("update shyspace"), "{error}");
-        assert_eq!(version(&db), 2, "left as it was");
+        assert_eq!(
+            version(&db),
+            i32::try_from(newer.len()).unwrap(),
+            "left as it was"
+        );
     }
 
     /// Stores made before migrations hold this number or a count: a fingerprint computed
@@ -283,7 +293,27 @@ mod tests {
 
         create_or_migrate(&mut db).unwrap();
 
-        assert_eq!(version(&db), 1);
+        assert_eq!(version(&db), i32::try_from(MIGRATIONS.len()).unwrap());
+    }
+
+    /// A store from v0.1.0 gains the tables added since, keeping its data.
+    #[test]
+    fn a_store_from_the_first_release_gains_the_workspace_look_tables() {
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate(&mut db, &[FIRST_SCHEMA]).unwrap();
+
+        create_or_migrate(&mut db).unwrap();
+
+        db.execute(
+            "INSERT INTO workspace_look (id, look, lamport) VALUES (1, x'00', 1)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO workspace_icon (id, blob, lamport) VALUES (1, NULL, 1)",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

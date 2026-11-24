@@ -115,6 +115,8 @@ impl Store {
             | Op::Sealed { .. }
             | Op::ProfileDetails { .. }
             | Op::ProfilePicture { .. }
+            | Op::WorkspaceIcon { .. }
+            | Op::WorkspaceLook { .. }
             | Op::File { .. } => {
                 return Ok(false);
             }

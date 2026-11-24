@@ -144,6 +144,26 @@ pub enum Op {
         id: EntityId,
         name: String,
     },
+    /// The workspace's icon; `None` shows its first letter instead. Admin
+    /// only; the latest one wins.
+    WorkspaceIcon {
+        picture: Option<crate::files::blob::BlobRef>,
+    },
+    /// The theme and accent members see unless they choose their own;
+    /// `None` leaves the app's default. Admin only; the latest one wins. The
+    /// names are bounded (`is_look_name`), not interpreted: an app shows a
+    /// name it doesn't know as its default.
+    WorkspaceLook {
+        theme: Option<String>,
+        accent: Option<String>,
+    },
+}
+
+const MAX_LOOK_NAME_CHARS: usize = 24;
+
+/// Whether `name` may name a theme or accent: 1 to 24 lowercase letters.
+pub fn is_look_name(name: &str) -> bool {
+    (1..=MAX_LOOK_NAME_CHARS).contains(&name.len()) && name.bytes().all(|byte| byte.is_ascii_lowercase())
 }
 
 /// An op that is validly signed but breaks a rule (someone else's id, an
@@ -208,14 +228,18 @@ impl Op {
             | Op::KeyGrant { .. }
             | Op::Sealed { .. }
             | Op::ProfileDetails { .. }
-            | Op::ProfilePicture { .. } => Vec::new(),
+            | Op::ProfilePicture { .. }
+            | Op::WorkspaceIcon { .. }
+            | Op::WorkspaceLook { .. } => Vec::new(),
         }
     }
 
     /// Whether `author` may make this change in a workspace run by `admin`.
     pub fn is_permitted(&self, author: &PublicKey, admin: &PublicKey) -> bool {
         match self {
-            Op::StorageSettings { .. } => author == admin,
+            Op::StorageSettings { .. } | Op::WorkspaceIcon { .. } | Op::WorkspaceLook { .. } => {
+                author == admin
+            }
             Op::MessageEdit { id, .. } | Op::FileRename { id, .. } => is_owned_by(id, author),
             Op::Delete { id } => author == admin || is_owned_by(id, author),
             _ => true,

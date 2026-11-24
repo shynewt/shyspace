@@ -1308,3 +1308,32 @@ async fn an_upload_makes_three_requests() {
         "{requests}"
     );
 }
+
+/// The admin sets the workspace's icon and default look; every member sees
+/// them, and clearing them brings back the defaults.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admin_sets_the_workspace_icon_and_look_for_everyone() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let icon = [b"\x89PNG\r\n\x1a\n".as_slice(), b"acme"].concat();
+    admin.set_workspace_icon(Some(icon.clone())).await.unwrap();
+    admin.set_workspace_look(Some("dusk"), Some("teal")).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    assert_eq!(bob.workspace_icon().await.unwrap(), Some(icon));
+    assert!(bob.workspace_icon_id().unwrap().is_some());
+    let look = bob.workspace_look().unwrap();
+    assert_eq!(
+        (look.theme.as_deref(), look.accent.as_deref()),
+        (Some("dusk"), Some("teal"))
+    );
+
+    admin.set_workspace_icon(None).await.unwrap();
+    admin.set_workspace_look(None, None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    assert_eq!(bob.workspace_icon().await.unwrap(), None);
+    assert_eq!(
+        bob.workspace_look().unwrap(),
+        crate::views::WorkspaceLook::default()
+    );
+}

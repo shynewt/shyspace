@@ -416,6 +416,30 @@ pub async fn set_profile_picture(state: State<'_, AppState>, image: Vec<u8>) -> 
         .map_err(failed)
 }
 
+/// A workspace's icon as raw bytes; empty if it has none. Takes the
+/// workspace's id: the rail shows every workspace on this device.
+#[tauri::command]
+pub async fn workspace_icon(state: State<'_, AppState>, workspace_id: String) -> CommandResult<Response> {
+    let workspace = state
+        .workspaces
+        .find(&workspace_id)
+        .ok_or_else(|| "that workspace isn't open".to_owned())?;
+    let icon = workspace.workspace_icon().await.map_err(failed)?;
+    Ok(Response::new(icon.unwrap_or_default()))
+}
+
+/// Sets the shown workspace's icon from an already cropped picture; empty
+/// bytes go back to its letter. Admin only.
+#[tauri::command]
+pub async fn set_workspace_icon(state: State<'_, AppState>, image: Vec<u8>) -> CommandResult<()> {
+    let image = (!image.is_empty()).then_some(image);
+    current(&state)
+        .await?
+        .set_workspace_icon(image)
+        .await
+        .map_err(failed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

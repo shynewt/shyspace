@@ -4638,3 +4638,122 @@ async fn a_forged_decline_is_ignored_and_the_join_goes_on() {
         "the key the admin approved is still there"
     );
 }
+
+/// Only the admin sets the workspace's icon and look: anyone else's op is
+/// ignored everywhere, and the app refuses to send one.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_admin_sets_the_workspace_icon_and_look() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    assert!(bob.set_workspace_look(Some("dusk"), None).is_err());
+    let icon = [b"\x89PNG\r\n\x1a\n".as_slice(), b"bob"].concat();
+    assert!(bob.set_workspace_icon(Some(icon)).await.is_err());
+
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal(Op::WorkspaceLook {
+            theme: Some("dusk".into()),
+            accent: None,
+        }))
+        .unwrap();
+    admin
+        .receive(forger.seal(Op::WorkspaceIcon { picture: None }))
+        .unwrap();
+
+    assert_eq!(
+        admin.workspace_look().unwrap(),
+        crate::views::WorkspaceLook::default()
+    );
+    assert_eq!(admin.workspace_icon_id().unwrap(), None);
+}
+
+/// Look names are plain lowercase words of at most 24 letters: anything
+/// else is refused before sending and skipped when it arrives.
+#[tokio::test(flavor = "multi_thread")]
+async fn workspace_look_names_are_bounded() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    for bad in ["", "Dusk", "dusk-2", "dusk mode", "<b>", &"a".repeat(25)] {
+        assert!(admin.set_workspace_look(Some(bad), None).is_err(), "{bad:?}");
+        assert!(admin.set_workspace_look(None, Some(bad)).is_err(), "{bad:?}");
+    }
+    let longest = "a".repeat(24);
+    admin.set_workspace_look(Some(&longest), Some("violet")).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    assert_eq!(bob.workspace_look().unwrap().theme, Some(longest.clone()));
+
+    let forged = Forger::new(&admin).seal(Op::WorkspaceLook {
+        theme: Some("x".repeat(10_000)),
+        accent: None,
+    });
+    bob.receive(forged).unwrap();
+
+    assert_eq!(bob.workspace_look().unwrap().theme, Some(longest));
+}
+
+/// The admin's latest look wins in any order and when applied twice, and a
+/// tie (only a forged op makes one) ends the same everywhere.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_workspace_look_merges_the_same_in_any_order() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let mut forger = Forger::new(&admin);
+    let look = |theme: &str| Op::WorkspaceLook {
+        theme: Some(theme.into()),
+        accent: None,
+    };
+    let older = forger.seal_at(100, look("dawn"));
+    let newer = forger.seal_at(200, look("dusk"));
+    let tied_one = forger.seal_at(300, look("moss"));
+    let tied_other = forger.seal_at(300, look("sand"));
+
+    for envelope in [&older, &newer, &tied_one, &tied_other] {
+        bob.receive(envelope.clone()).unwrap();
+    }
+    for envelope in [&tied_other, &tied_one, &newer, &older, &newer] {
+        carol.receive(envelope.clone()).unwrap();
+    }
+    // Ops that arrived ahead of their turn wait until a pass retries them.
+    bob.sync().await;
+    carol.sync().await;
+
+    assert_eq!(bob.workspace_look().unwrap(), carol.workspace_look().unwrap());
+    assert_eq!(bob.workspace_look().unwrap().theme.as_deref(), Some("sand"));
+}
+
+/// An app that predates the workspace look can't read its op: it keeps it
+/// as unreadable and goes on with the admin's later ops. Once updated, its
+/// views are rebuilt under the new rules, and the look applies.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_look_kept_as_unreadable_applies_after_updating() {
+    use crate::storage::VIEW_RULES_META;
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    admin.set_workspace_look(Some("dusk"), None).unwrap();
+    let look = admin
+        .state()
+        .store
+        .unpushed(&admin.me())
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    // What v0.1.0 does with an op it can't read: kept, never applied; and
+    // the view rules it recorded.
+    bob.state().store.insert_applied(&look, true).unwrap();
+    bob.state().store.set_meta(VIEW_RULES_META, &[1]).unwrap();
+    assert_eq!(
+        bob.workspace_look().unwrap(),
+        crate::views::WorkspaceLook::default()
+    );
+    bob.shutdown().await.unwrap();
+    drop(bob);
+
+    let updated = Workspace::open_with(
+        &data_dir(&root.path().join("bob")),
+        connector(&bucket),
+        Networking::Offline,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(updated.workspace_look().unwrap().theme.as_deref(), Some("dusk"));
+}

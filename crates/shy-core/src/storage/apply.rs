@@ -12,12 +12,12 @@ use crate::{
     markdown::visible_text,
     ops::{
         MAX_ID_CHARS, MAX_INDEXED_PAGE_CHARS, MAX_MESSAGE_CHARS, MAX_REACTIONS_PER_AUTHOR, Op, VerifiedOp,
-        clean_display_name, clean_emoji, clean_page_title, cut_to, is_emoji_only, is_owned_by,
+        clean_display_name, clean_emoji, clean_page_title, cut_to, is_emoji_only, is_look_name, is_owned_by,
         is_valid_channel_name, is_valid_status, now_ms, rule_violation,
     },
     pages,
     private::{crypto::is_valid_sealing_public_key, ids::is_private_id},
-    views::Change,
+    views::{Change, WorkspaceLook},
 };
 
 /// When an op shows as made: its author's clock, but never later than we
@@ -288,18 +288,34 @@ impl Store {
                 super::files::file_change(file.place.clone(), file.message.as_deref())
             }
             Op::ProfilePicture { picture } => {
-                if let Some(picture) = picture {
-                    picture
-                        .check()
-                        .map_err(|error| rule_violation(format!("malformed picture: {error:#}")))?;
-                    if picture.size > MAX_PICTURE_BYTES {
-                        return Err(rule_violation("picture too large"));
-                    }
-                }
-                if !self.put_profile_picture(author, picture.as_ref(), lamport)? {
+                check_picture(picture.as_ref())?;
+                let slot = super::files::PictureSlot::Member(author);
+                if !self.put_picture(slot, author, picture.as_ref(), lamport)? {
                     return Ok(None);
                 }
                 Change::Members
+            }
+            Op::WorkspaceIcon { picture } => {
+                check_picture(picture.as_ref())?;
+                let slot = super::files::PictureSlot::Workspace;
+                if !self.put_picture(slot, author, picture.as_ref(), lamport)? {
+                    return Ok(None);
+                }
+                Change::Workspaces
+            }
+            Op::WorkspaceLook { theme, accent } => {
+                let names = [theme, accent].into_iter().flatten();
+                if !names.clone().all(|name| is_look_name(name)) {
+                    return Err(rule_violation("a theme or accent name that isn't a plain word"));
+                }
+                let look = WorkspaceLook {
+                    theme: theme.clone(),
+                    accent: accent.clone(),
+                };
+                if !self.put_workspace_look(&look, lamport)? {
+                    return Ok(None);
+                }
+                Change::WorkspaceLook
             }
             Op::SealingKey { public } => {
                 if !is_valid_sealing_public_key(public) {
@@ -357,4 +373,19 @@ impl Store {
         let visible = visible_text(cut_to(&text, MAX_INDEXED_PAGE_CHARS));
         self.index_for_search("page", id, &title, &visible)
     }
+}
+
+/// A picture (a member's or the workspace icon) must name a well-formed blob
+/// no larger than a picture may be.
+fn check_picture(picture: Option<&crate::files::blob::BlobRef>) -> Result<()> {
+    let Some(picture) = picture else {
+        return Ok(());
+    };
+    picture
+        .check()
+        .map_err(|error| rule_violation(format!("malformed picture: {error:#}")))?;
+    if picture.size > MAX_PICTURE_BYTES {
+        return Err(rule_violation("picture too large"));
+    }
+    Ok(())
 }

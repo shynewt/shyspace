@@ -35,6 +35,8 @@ pub(super) const SHARED_VIEW_TABLES: &[&str] = &[
     "files",
     "profile_pictures",
     "file_names",
+    "workspace_icon",
+    "workspace_look",
 ];
 
 /// A page's updates gathered during a replay, written once at the end.
@@ -158,7 +160,13 @@ impl Store {
 
     /// Everything a rebuild may have changed, for anything showing it.
     pub(crate) fn all_view_changes(&self) -> Result<Vec<Change>> {
-        let mut changes = vec![Change::Channels, Change::Pages, Change::Members];
+        let mut changes = vec![
+            Change::Channels,
+            Change::Pages,
+            Change::Members,
+            Change::Workspaces,
+            Change::WorkspaceLook,
+        ];
         for channel in self.channels()? {
             changes.push(Change::Messages { channel: channel.id });
         }

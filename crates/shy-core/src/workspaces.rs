@@ -642,19 +642,25 @@ impl Workspaces {
     /// The workspaces here as the rail shows them, in the person's order.
     pub fn rail(&self) -> Result<Vec<WorkspaceItem>> {
         let muted = self.settings()?.muted;
-        Ok(self
-            .list()?
-            .into_iter()
-            .map(|entry| WorkspaceItem {
-                is_live: self
-                    .find(&entry.workspace_id)
-                    .is_some_and(|workspace| workspace.cadence() == Cadence::Live),
+        let mut items = Vec::new();
+        for entry in self.list()? {
+            let open = self.find(&entry.workspace_id);
+            // One unreadable icon shows a letter, not a broken rail.
+            let icon = open.as_ref().and_then(|workspace| {
+                workspace.workspace_icon_id().unwrap_or_else(|error| {
+                    tracing::warn!("couldn't read a workspace's icon: {error:#}");
+                    None
+                })
+            });
+            items.push(WorkspaceItem {
+                is_live: open.is_some_and(|workspace| workspace.cadence() == Cadence::Live),
                 is_muted: muted.contains(&entry.workspace_id),
-                icon: None,
+                icon,
                 workspace_id: entry.workspace_id,
                 name: entry.name,
-            })
-            .collect())
+            });
+        }
+        Ok(items)
     }
 
     pub fn mute(&self, workspace_id: &str) -> Result<()> {

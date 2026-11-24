@@ -7,6 +7,7 @@ mod files;
 mod forks;
 mod invites;
 mod later;
+mod look;
 mod oplog;
 mod page_cache;
 mod private;

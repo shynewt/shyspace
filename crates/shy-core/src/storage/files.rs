@@ -40,6 +40,13 @@ const FILE_COLUMNS: &str =
     "f.id, f.place, f.message, f.author, COALESCE(n.name, f.name), f.media_type, f.created_ms, f.blob";
 const FILES: &str = "files f LEFT JOIN file_names n ON n.file = f.id";
 
+/// Where a picture is kept: a member's own, or the workspace's icon.
+#[derive(Clone, Copy)]
+pub(super) enum PictureSlot<'a> {
+    Member(&'a [u8]),
+    Workspace,
+}
+
 impl Store {
     /// Keeps a file from someone else, cleaned. For an id used twice, the
     /// op earliest in its author's log wins, whatever order they opened in.
@@ -174,17 +181,18 @@ impl Store {
             .map_err(Into::into)
     }
 
-    /// Keeps a member's picture unless a newer one is kept. Whichever loses
-    /// leaves the bucket, through its author's device, unless it is the one
-    /// still shown; the same picture arriving again changes nothing. Returns
-    /// whether the picture shown changed.
-    pub(super) fn put_profile_picture(
+    /// Keeps `owner`'s picture in `slot` unless a newer one is kept.
+    /// Whichever loses leaves the bucket, through its owner's device, unless
+    /// it is the one still shown; the same picture arriving again changes
+    /// nothing. Returns whether the picture shown changed.
+    pub(super) fn put_picture(
         &self,
-        member: &[u8],
+        slot: PictureSlot<'_>,
+        owner: &[u8],
         picture: Option<&BlobRef>,
         lamport: u64,
     ) -> Result<bool> {
-        let kept = self.kept_picture(member)?;
+        let kept = self.kept_picture(slot)?;
         if kept.as_ref().is_some_and(|(kept_picture, kept_lamport)| {
             *kept_lamport == lamport && kept_picture.as_ref() == picture
         }) {
@@ -211,43 +219,65 @@ impl Store {
             if let Some(picture) = picture
                 && kept_id.as_deref() != Some(picture.id.as_str())
             {
-                self.request_blob_removal(member, &picture.id, member)?;
+                self.request_blob_removal(owner, &picture.id, owner)?;
             }
             return Ok(false);
         }
         if let Some(old_id) = kept_id
             && Some(&old_id) != id_of(picture).as_ref()
         {
-            self.request_blob_removal(member, &old_id, member)?;
+            self.request_blob_removal(owner, &old_id, owner)?;
         }
         if let Some(picture) = picture {
             // A picture shown again (only a forged op reuses an id) stays.
             self.db.execute(
                 "DELETE FROM blob_removals WHERE author = ? AND blob_id = ?",
-                params![member, picture.id],
+                params![owner, picture.id],
             )?;
         }
-        self.db.execute(
-            "INSERT INTO profile_pictures (member, blob, lamport) VALUES (?1, ?2, ?3)
-             ON CONFLICT (member) DO UPDATE SET blob = ?2, lamport = ?3",
-            params![member, encoded, lamport],
-        )?;
+        match slot {
+            PictureSlot::Member(member) => self.db.execute(
+                "INSERT INTO profile_pictures (member, blob, lamport) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (member) DO UPDATE SET blob = ?2, lamport = ?3",
+                params![member, encoded, lamport],
+            )?,
+            PictureSlot::Workspace => self.db.execute(
+                "INSERT INTO workspace_icon (id, blob, lamport) VALUES (1, ?1, ?2)
+                 ON CONFLICT (id) DO UPDATE SET blob = ?1, lamport = ?2",
+                params![encoded, lamport],
+            )?,
+        };
         Ok(true)
     }
 
     pub fn profile_picture(&self, member: &[u8]) -> Result<Option<BlobRef>> {
-        Ok(self.kept_picture(member)?.and_then(|(picture, _)| picture))
+        Ok(self
+            .kept_picture(PictureSlot::Member(member))?
+            .and_then(|(picture, _)| picture))
     }
 
-    fn kept_picture(&self, member: &[u8]) -> Result<Option<(Option<BlobRef>, u64)>> {
-        let row: Option<(Option<Vec<u8>>, u64)> = self
-            .db
-            .query_row(
-                "SELECT blob, lamport FROM profile_pictures WHERE member = ?",
-                [member],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
+    pub fn workspace_icon(&self) -> Result<Option<BlobRef>> {
+        Ok(self
+            .kept_picture(PictureSlot::Workspace)?
+            .and_then(|(picture, _)| picture))
+    }
+
+    fn kept_picture(&self, slot: PictureSlot<'_>) -> Result<Option<(Option<BlobRef>, u64)>> {
+        let read = |row: &rusqlite::Row<'_>| Ok((row.get(0)?, row.get(1)?));
+        let row: Option<(Option<Vec<u8>>, u64)> = match slot {
+            PictureSlot::Member(member) => self
+                .db
+                .query_row(
+                    "SELECT blob, lamport FROM profile_pictures WHERE member = ?",
+                    [member],
+                    read,
+                )
+                .optional()?,
+            PictureSlot::Workspace => self
+                .db
+                .query_row("SELECT blob, lamport FROM workspace_icon WHERE id = 1", [], read)
+                .optional()?,
+        };
         row.map(|(blob, lamport)| {
             let picture = blob
                 .map(|bytes| postcard::from_bytes(&bytes))
