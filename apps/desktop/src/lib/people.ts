@@ -74,7 +74,9 @@ export function formatDay(ms: number) {
   yesterday.setDate(today.getDate() - 1);
   if (date.toDateString() === today.toDateString()) return "Today";
   if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return date.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  // Another year's day says its year, so it reads right and isn't taken for this year's same date.
+  const year = date.getFullYear() === today.getFullYear() ? undefined : "numeric";
+  return date.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year });
 }
 
 export type DayGroup<Item> = { label: string; items: Item[] };
