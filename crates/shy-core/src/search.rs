@@ -26,6 +26,14 @@ const SNIPPET_WORDS: usize = 12;
 /// Words a snippet shows before the first match.
 const WORDS_BEFORE_MATCH: usize = 4;
 
+/// The snippet for a message or page written as `markdown`: what a reader
+/// sees, app links named, around the first matching word. Only as much as
+/// the index holds of a page is read, so a huge page isn't parsed whole.
+pub(crate) fn snippet_of(markdown: &str, names: &crate::markdown::LinkNames, words: &str) -> String {
+    let indexed = crate::ops::cut_to(markdown, crate::ops::MAX_INDEXED_PAGE_CHARS);
+    snippet(&crate::markdown::preview_text(indexed, names), words)
+}
+
 /// A short window of `text` (already one line of what the reader sees)
 /// around the first word one of `words` starts, each such word marked
 /// \u{1}…\u{2} and a cut end marked "…"; the start when nothing matches.
@@ -130,6 +138,20 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only what the index holds of a page is read for its snippet, so a
+    /// huge page isn't parsed whole at every search.
+    #[test]
+    fn a_snippet_reads_only_the_indexed_start_of_a_page() {
+        let names = crate::markdown::LinkNames {
+            members: std::collections::HashMap::new(),
+            pages: std::collections::HashMap::new(),
+        };
+        let page = format!("{}needle", "x ".repeat(crate::ops::MAX_INDEXED_PAGE_CHARS));
+        let shown = snippet_of(&page, &names, "needle");
+        assert!(!shown.contains('\u{1}'), "{shown}");
+        assert!(shown.starts_with("x x"), "{shown}");
+    }
 
     #[test]
     fn filters_and_words_are_separated() {

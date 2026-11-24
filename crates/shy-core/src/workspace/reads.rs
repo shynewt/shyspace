@@ -310,7 +310,7 @@ impl Workspace {
             } else {
                 pages::read(state.store.page_state(&hit.id)?.as_deref())?
             };
-            hit.snippet = search::snippet(&preview_text(&markdown, &names), &query.text);
+            hit.snippet = search::snippet_of(&markdown, &names, &query.text);
         }
         Ok(hits)
     }

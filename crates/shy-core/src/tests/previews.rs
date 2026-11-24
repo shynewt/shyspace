@@ -140,3 +140,14 @@ async fn a_search_by_filters_alone_shows_plain_named_text() {
     let hits = admin.search("from:bob", 10).unwrap();
     assert_eq!(hits[0].snippet, "hi @Ada");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_cant_fake_a_highlight_in_its_snippet() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "\u{1}fake\u{2} budget", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let snippet = &admin.search("budget", 10).unwrap()[0].snippet;
+    assert_eq!(snippet, "fake \u{1}budget\u{2}");
+}

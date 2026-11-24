@@ -22,8 +22,12 @@ fn options() -> Options {
 
 pub(crate) fn visible_text(markdown: &str) -> String {
     let mut text = String::with_capacity(markdown.len());
+    let mut images_open = 0_usize;
     for event in Parser::new_ext(markdown, options()) {
         match event {
+            Event::Start(Tag::Image { .. }) => images_open += 1,
+            Event::End(TagEnd::Image) => images_open = images_open.saturating_sub(1),
+            _ if images_open > 0 => {}
             Event::Text(words) | Event::Code(words) => text.push_str(&words),
             Event::SoftBreak | Event::HardBreak => text.push('\n'),
             Event::End(TagEnd::TableCell) => text.push(' '),
@@ -47,9 +51,12 @@ impl LinkNames {
     /// bare link can run into punctuation); `None` for a link no chip names.
     fn name(&self, link: &str) -> Option<(String, String)> {
         let (kind, rest) = link.strip_prefix(APP_LINK)?.split_once('/')?;
-        let id_end = rest
-            .find(|character: char| !character.is_ascii_alphanumeric())
-            .unwrap_or(rest.len());
+        let id_end = match kind {
+            "message" => message_id_end(rest),
+            _ => rest
+                .find(|character: char| !character.is_ascii_alphanumeric())
+                .unwrap_or(rest.len()),
+        };
         let (id, after) = rest.split_at(id_end);
         let name = match kind {
             "member" => {
@@ -80,8 +87,13 @@ impl LinkNames {
 pub(crate) fn preview_text(markdown: &str, names: &LinkNames) -> String {
     let mut text = String::with_capacity(markdown.len());
     let mut is_in_named_link = false;
+    let mut images_open = 0_usize;
     for event in Parser::new_ext(markdown, options()) {
         match event {
+            // Chat shows no images, so their alt text isn't seen either.
+            Event::Start(Tag::Image { .. }) => images_open += 1,
+            Event::End(TagEnd::Image) => images_open = images_open.saturating_sub(1),
+            _ if images_open > 0 => {}
             Event::Start(Tag::Link { dest_url, .. }) => {
                 if let Some((name, _)) = names.name(&dest_url) {
                     text.push_str(&name);
@@ -96,7 +108,28 @@ pub(crate) fn preview_text(markdown: &str, names: &LinkNames) -> String {
             _ => {}
         }
     }
+    // Control characters would fake a snippet's match marks, or reach a
+    // system notification.
+    let text: String = text.chars().filter(|character| !character.is_control()).collect();
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Where a message id ends in `text`: an optional `p:<hex>/` or `dm:<hex>/`
+/// (a private channel's or DM's message), then hex, as the desktop reads it.
+fn message_id_end(text: &str) -> usize {
+    let hex_end = |from: usize| {
+        text[from..]
+            .find(|character: char| !character.is_ascii_hexdigit())
+            .map_or(text.len(), |end| from + end)
+    };
+    let place = ["p:", "dm:"]
+        .iter()
+        .find_map(|prefix| text.strip_prefix(prefix).map(|_| prefix.len()))
+        .and_then(|start| {
+            let end = hex_end(start);
+            (end > start && text[end..].starts_with('/')).then_some(end + 1)
+        });
+    hex_end(place.unwrap_or(0))
 }
 
 /// `text` with each bare app link replaced by its name, or dropped if no
@@ -163,6 +196,28 @@ mod tests {
         assert_eq!(
             preview_text(text, &names()),
             "hi @Eve and @channel site, Plan and Plan; file"
+        );
+    }
+
+    #[test]
+    fn images_show_nothing_in_previews_or_the_index() {
+        let text = "see ![@Boss](shy://member/ab12) ![photo](https://a.b/c.png) now";
+        assert_eq!(preview_text(text, &names()), "see now");
+        assert_eq!(words(text), ["see", "now"]);
+    }
+
+    #[test]
+    fn control_characters_never_reach_a_preview() {
+        let text = "\u{1}fake\u{2} mark \u{7}bell\u{1b}[31m";
+        assert_eq!(preview_text(text, &names()), "fake mark bell[31m");
+    }
+
+    #[test]
+    fn a_private_message_link_is_named_whole() {
+        let text = "see shy://message/p:abc123/def456. and [it](shy://message/dm:ab/cd)";
+        assert_eq!(
+            preview_text(text, &names()),
+            "see a linked message. and a linked message"
         );
     }
 
