@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type FileInfo, type StagedFile } from "./api";
+import { api, type FileInfo, type StagedFile, shownWorkspaceId } from "./api";
 import { showableImageType } from "./imageHeaders";
 
 /**
@@ -69,9 +69,11 @@ export function useStagedImage(file: StagedFile): LoadedImage {
 }
 
 /**
- * Loaded pictures for the whole app, by member and picture id: ids are
- * public, so someone could reuse another member's under their own name.
- * A handful per member at most, so they're kept for the session.
+ * Loaded pictures for the whole app, by workspace, member and picture id: ids
+ * are public, so someone could reuse another member's under their own name.
+ * A handful per member at most, so they're kept for the session. Only a
+ * picture that loaded is kept: one whose bytes haven't arrived yet, or that
+ * loaded while the workspace was switched, is asked for again.
  */
 const pictures = new Map<string, Promise<string | null>>();
 
@@ -81,7 +83,8 @@ export function usePicture(member: string, picture: string | null): string | nul
   useEffect(() => {
     if (!picture) return setUrl(null);
     let isCurrent = true;
-    const key = `${member}:${picture}`;
+    const workspaceId = shownWorkspaceId();
+    const key = `${workspaceId}:${member}:${picture}`;
     let loading = pictures.get(key);
     if (!loading) {
       loading = api.profilePicture(member).then((bytes) => {
@@ -89,8 +92,12 @@ export function usePicture(member: string, picture: string | null): string | nul
         return type ? URL.createObjectURL(new Blob([bytes as BlobPart], { type })) : null;
       });
       pictures.set(key, loading);
-      // A failure (say, offline) is tried again next time it's shown.
-      loading.catch(() => pictures.delete(key));
+      // A failure (say, offline), nothing to show, or an answer from the workspace
+      // switched to meanwhile is tried again next time it's shown.
+      loading.then(
+        (loaded) => (loaded === null || shownWorkspaceId() !== workspaceId) && pictures.delete(key),
+        () => pictures.delete(key),
+      );
     }
     loading.then(
       (loaded) => isCurrent && setUrl(loaded),

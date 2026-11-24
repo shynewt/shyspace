@@ -160,6 +160,20 @@ export class FakeFiles {
     return id;
   }
 
+  /** `member` names a new picture whose bytes haven't arrived yet, as a profile op seen before its file would. */
+  announcePicture(member: string): void {
+    const target = this.context.members().find((candidate) => candidate.id === member);
+    if (!target) throw new Error("fake files: no such member");
+    this.pictures.delete(member);
+    target.picture = randomHex(16);
+    this.context.notify({ kind: "members" });
+  }
+
+  /** The bytes of `member`'s announced picture arrive, under the same id. */
+  pictureArrives(member: string, image: number[]): void {
+    this.pictures.set(member, image);
+  }
+
   setPicture(member: string, image: number[]): null {
     const target = this.context.members().find((candidate) => candidate.id === member);
     if (!target) throw new Error("fake files: no such member");

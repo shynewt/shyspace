@@ -781,3 +781,20 @@ test("a file shared into a page shows in Files under its page, and leads back to
   await row.getByRole("button", { name: "Show budget.csv in its page" }).click();
   await expect(page.getByLabel("Page title")).toHaveValue("Launch plan");
 });
+
+test("a picture that hadn't arrived when first shown appears the next time", async ({ page }) => {
+  const grace = await page.evaluate(() => {
+    const id = window.fake.addMember("Grace");
+    window.fake.files.announcePicture(id);
+    window.fake.receiveMessage(id, "general", "Morning");
+    return id;
+  });
+  const message = page.getByRole("article").filter({ hasText: "Morning" });
+  await expect(message).toBeVisible();
+  await expect(message.locator("img")).toHaveCount(0);
+
+  await page.evaluate(([id, png]) => window.fake.files.pictureArrives(id, png), [grace, PNG] as const);
+  await page.getByRole("button", { name: "Inbox" }).click();
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await expect(page.getByRole("article").filter({ hasText: "Morning" }).locator("img")).toHaveCount(1);
+});
