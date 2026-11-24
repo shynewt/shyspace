@@ -1,5 +1,6 @@
 //! This device's settings that aren't any one workspace's (`workspaces.json`):
-//! the workspaces' order, recency, mutes and pause, and the huddle devices.
+//! the workspaces' order, recency, mutes and pause, and the huddle devices and
+//! sounds.
 //! Shared by the workspace manager and the workspaces it opens.
 
 use std::{path::PathBuf, sync::Mutex};
@@ -33,6 +34,9 @@ pub(crate) struct DeviceSettings {
     /// The microphone and speaker huddles use, whichever workspace calls.
     #[serde(default)]
     pub(crate) huddle_devices: Option<DeviceChoice>,
+    /// Whether huddles play join and leave sounds on this device.
+    #[serde(default)]
+    pub(crate) huddle_sounds: Option<bool>,
 }
 
 pub(crate) struct DeviceSettingsFile {
@@ -95,5 +99,13 @@ impl DeviceSettingsFile {
 
     pub(crate) fn set_huddle_devices(&self, choice: &DeviceChoice) -> Result<()> {
         self.update(|settings| settings.huddle_devices = Some(choice.clone()))
+    }
+
+    pub(crate) fn huddle_sounds(&self) -> Result<Option<bool>> {
+        Ok(self.read()?.huddle_sounds)
+    }
+
+    pub(crate) fn set_huddle_sounds(&self, is_on: bool) -> Result<()> {
+        self.update(|settings| settings.huddle_sounds = Some(is_on))
     }
 }

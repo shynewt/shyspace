@@ -779,3 +779,51 @@ async fn a_workspaces_own_device_choice_moves_to_the_device_once() {
     assert_eq!(acme.huddle_devices().unwrap().chosen, headset());
     assert_eq!(beta.huddle_devices().unwrap().chosen, headset());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn huddle_sounds_are_the_devices_in_every_workspace() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), with_audio())
+        .await
+        .unwrap();
+    let beta = workspaces
+        .create("Beta", profile(), test_bucket_config(), with_audio())
+        .await
+        .unwrap();
+    assert!(beta.huddle_sounds().unwrap(), "on until turned off");
+
+    acme.set_huddle_sounds(false).unwrap();
+
+    assert!(!beta.huddle_sounds().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspaces_own_sounds_setting_moves_to_the_device_once() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), with_audio())
+        .await
+        .unwrap();
+    let acme_id = acme.workspace_id().to_owned();
+    drop(acme);
+    drop(workspaces);
+    let data = device.workspaces().folder(&acme_id).unwrap();
+    let alone = Workspace::open_with(&data, connector(&device.bucket), with_audio())
+        .await
+        .unwrap();
+    alone.set_huddle_sounds(false).unwrap();
+    drop(alone);
+
+    let workspaces = device.workspaces();
+    workspaces.open_all(with_audio).await.unwrap();
+    let acme = workspaces.open_workspaces().into_iter().next().unwrap();
+    assert!(!acme.huddle_sounds().unwrap());
+    let beta = workspaces
+        .create("Beta", profile(), test_bucket_config(), with_audio())
+        .await
+        .unwrap();
+    assert!(!beta.huddle_sounds().unwrap());
+}

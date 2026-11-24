@@ -444,20 +444,41 @@ impl Workspace {
         Ok(())
     }
 
-    /// Whether huddles play join and leave sounds on this device.
+    /// Whether huddles play join and leave sounds on this device: kept in
+    /// its settings like the devices, and taken over from the workspace's
+    /// own setting the first time the device has none.
     pub fn huddle_sounds(&self) -> Result<bool> {
-        match self.state().store.meta(SOUNDS_META)? {
-            Some(bytes) => {
-                serde_json::from_slice(&bytes).context("the saved huddle sounds setting can't be read")
-            }
-            None => Ok(true),
+        let Some(device_settings) = &self.inner.device_settings else {
+            return Ok(self.own_huddle_sounds()?.unwrap_or(true));
+        };
+        if let Some(is_on) = device_settings.huddle_sounds()? {
+            return Ok(is_on);
         }
+        let Some(own) = self.own_huddle_sounds()? else {
+            return Ok(true);
+        };
+        device_settings.set_huddle_sounds(own)?;
+        Ok(own)
+    }
+
+    fn own_huddle_sounds(&self) -> Result<Option<bool>> {
+        self.state()
+            .store
+            .meta(SOUNDS_META)?
+            .map(|bytes| {
+                serde_json::from_slice(&bytes).context("the saved huddle sounds setting can't be read")
+            })
+            .transpose()
     }
 
     pub fn set_huddle_sounds(&self, is_on: bool) -> Result<()> {
-        self.state()
-            .store
-            .set_meta(SOUNDS_META, &serde_json::to_vec(&is_on)?)?;
+        match &self.inner.device_settings {
+            Some(device_settings) => device_settings.set_huddle_sounds(is_on)?,
+            None => self
+                .state()
+                .store
+                .set_meta(SOUNDS_META, &serde_json::to_vec(&is_on)?)?,
+        }
         self.emit(Change::HuddleSounds);
         Ok(())
     }
