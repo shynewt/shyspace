@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronUp, Copy, FileText, MessageSquare } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, FileText, Quote } from "lucide-react";
 import {
   type ComponentProps,
   createContext,
@@ -402,7 +402,7 @@ function LinkElsewhere({
   const workspace = link.workspace ? workspaceLinks.workspaceOf(link.workspace) : undefined;
   if (!link.workspace || !workspace) return <span className="text-muted">link to a workspace you're not in</span>;
   const { name } = workspace;
-  const Icon = link.kind === "page" ? FileText : MessageSquare;
+  const Icon = link.kind === "page" ? FileText : Quote;
   const kind = link.kind === "page" ? "Page" : "Message";
   const description = `Open the ${link.kind} in ${name}`;
   return (
