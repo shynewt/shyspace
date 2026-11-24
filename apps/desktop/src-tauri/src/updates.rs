@@ -15,7 +15,11 @@ use crate::{AppState, CommandResult, open_workspaces, shut_down, tray};
 
 /// The update this run found, from download to restart.
 #[derive(Default)]
-pub struct PendingUpdate(Mutex<Option<Stage>>);
+pub struct PendingUpdate {
+    stage: Mutex<Option<Stage>>,
+    /// Held through a check, so checks that overlap download once.
+    checking: tokio::sync::Mutex<()>,
+}
 
 enum Stage {
     Downloaded(Box<Downloaded>),
@@ -33,7 +37,7 @@ struct Downloaded {
 
 impl PendingUpdate {
     fn slot(&self) -> MutexGuard<'_, Option<Stage>> {
-        self.0
+        self.stage
             .lock()
             .expect("the pending update's lock is never held across a panic")
     }
@@ -43,6 +47,22 @@ impl PendingUpdate {
             Stage::Downloaded(downloaded) => Some(downloaded.update.version.clone()),
             Stage::Installed { version } => Some(version.clone()),
         }
+    }
+
+    /// Runs `check` unless an update is already here; a check that starts
+    /// while another runs waits for it and takes what it found.
+    async fn check_once<Checked>(&self, check: impl FnOnce() -> Checked) -> CommandResult<Option<String>>
+    where
+        Checked: Future<Output = CommandResult<Option<Stage>>>,
+    {
+        let _checking = self.checking.lock().await;
+        if let Some(version) = self.version() {
+            return Ok(Some(version));
+        }
+        if let Some(found) = check().await? {
+            self.slot().get_or_insert(found);
+        }
+        Ok(self.version())
     }
 }
 
@@ -66,22 +86,19 @@ pub async fn check_for_update(
     if cfg!(debug_assertions) {
         return Ok(None);
     }
-    if let Some(version) = pending.version() {
-        return Ok(Some(version));
-    }
-    let updater = app.updater().map_err(|error| error.to_string())?;
-    let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
-        return Ok(None);
-    };
-    let bytes = update
-        .download(|_, _| {}, || {})
-        .await
-        .map_err(|error| error.to_string())?;
-    // A check that finished first keeps its download.
     pending
-        .slot()
-        .get_or_insert(Stage::Downloaded(Box::new(Downloaded { update, bytes })));
-    Ok(pending.version())
+        .check_once(|| async {
+            let updater = app.updater().map_err(|error| error.to_string())?;
+            let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
+                return Ok(None);
+            };
+            let bytes = update
+                .download(|_, _| {}, || {})
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(Some(Stage::Downloaded(Box::new(Downloaded { update, bytes }))))
+        })
+        .await
 }
 
 /// Installs the downloaded update and restarts into it, after uploading what
@@ -171,4 +188,46 @@ async fn take_unless_in_huddle(state: &AppState) -> Result<Vec<Workspace>, InHud
         return Err(InHuddle);
     }
     Ok(state.workspaces.close_all())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn overlapping_checks_download_once() {
+        let pending = PendingUpdate::default();
+        let downloads = AtomicUsize::new(0);
+        let check = || async {
+            downloads.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            Ok(Some(Stage::Installed {
+                version: "0.2.0".into(),
+            }))
+        };
+
+        let (first, second) = tokio::join!(pending.check_once(check), pending.check_once(check));
+
+        assert_eq!(downloads.load(Ordering::SeqCst), 1);
+        assert_eq!(first.unwrap().as_deref(), Some("0.2.0"));
+        assert_eq!(second.unwrap().as_deref(), Some("0.2.0"));
+    }
+
+    #[tokio::test]
+    async fn a_check_that_finds_nothing_lets_the_next_one_look_again() {
+        let pending = PendingUpdate::default();
+        let found = pending.check_once(|| async { Ok(None) }).await;
+        assert_eq!(found.unwrap(), None);
+
+        let found = pending
+            .check_once(|| async {
+                Ok(Some(Stage::Installed {
+                    version: "0.2.0".into(),
+                }))
+            })
+            .await;
+        assert_eq!(found.unwrap().as_deref(), Some("0.2.0"));
+    }
 }
