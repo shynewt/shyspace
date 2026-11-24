@@ -73,6 +73,14 @@ export function NavItem({
           style={{ left: depth * INDENT_PX }}
         />
       )}
+      {/* Under the whole row, "…" included, like the selected highlight. */}
+      {!isActive && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 right-0 rounded-lg bg-surface-2/70 opacity-0 group-hover:opacity-100"
+          style={{ left: depth * INDENT_PX }}
+        />
+      )}
       {leading}
       <button
         type="button"
@@ -99,7 +107,7 @@ export function NavItem({
         }
         className={cx(
           "focus-ring-inset relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-base",
-          isActive ? "font-medium text-ink" : "text-muted hover:bg-surface-2/70 hover:text-ink",
+          isActive ? "font-medium text-ink" : "text-muted group-hover:text-ink",
           hasUnread && "font-semibold text-ink",
           isMuted && !hasUnread && !isActive && "opacity-60",
         )}
