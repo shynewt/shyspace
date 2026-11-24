@@ -30,4 +30,5 @@ mod storage;
 mod succession;
 mod support;
 mod threads;
+mod upgrade;
 mod workspaces;
