@@ -60,3 +60,17 @@ test("hostile message text can't stall the previews", async ({ page }) => {
     timeout: 3000,
   });
 });
+
+test("a thread's latest reply and a search result show the core's plain text as it is", async ({ page }) => {
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    const root = window.fake.receiveMessage(grace, "general", "Who checks the totals?");
+    window.fake.receiveReply(grace, root, "*kept* as typed");
+  });
+  await page.getByRole("button", { name: "general", exact: true }).click();
+  await expect(page.getByRole("button", { name: /1 reply/ })).toContainText("*kept* as typed");
+
+  await page.keyboard.press("Control+k");
+  await page.getByLabel("Search messages and pages").fill("kept");
+  await expect(page.getByRole("option", { name: /as typed/ })).toContainText("*kept* as typed");
+});

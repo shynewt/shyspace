@@ -1,4 +1,5 @@
 /** The chat side of the fake: channels, messages, threads and personal state. */
+
 import type {
   Change,
   Channel,
@@ -16,6 +17,7 @@ import { mentions } from "../../../src/lib/mentions";
 import { argument, ownedId, requireString } from "./helpers";
 import type { PrivateView } from "./private";
 import { followsByDefault, isInChannel, repliesOf, rootOf } from "./threads";
+import { type LinkNames, visibleText } from "./visibleText";
 
 /** What the chat needs from the rest of the fake. */
 export type ChatContext = {
@@ -30,6 +32,7 @@ export type ChatContext = {
   filesOf: (message: string) => FileInfo[];
   /** A message was deleted, with its files. */
   onMessageDeleted: (message: string) => void;
+  pageTitle: (id: string) => string | undefined;
 };
 
 /** Returned by `answer` for commands that aren't about chat. */
@@ -58,14 +61,9 @@ type StoredReaction = { message: string; author: string; emoji: string };
 
 const REPLY_PREVIEW_CHARS = 100;
 
-/** Like the core: mentions shown as @name. */
-function withPlainMentions(text: string): string {
-  return text.replace(/\[(@[^\]]*)\]\(shy:\/\/(?:member|mention)\/[0-9a-z]+\)/g, "$1");
-}
-
-/** Like the core: one line, mentions as @name, cut on a character boundary. */
-function replyPreview(text: string): string {
-  const characters = Array.from(withPlainMentions(text).split(/\s+/).filter(Boolean).join(" "));
+/** Like the core: visible text on one line, links named, cut on a character boundary. */
+function replyPreview(text: string, names: LinkNames): string {
+  const characters = Array.from(visibleText(text, names));
   if (characters.length <= REPLY_PREVIEW_CHARS) return characters.join("");
   return `${characters
     .slice(0, REPLY_PREVIEW_CHARS - 1)
@@ -195,7 +193,7 @@ export class FakeChat {
         message: id,
         author,
         author_name: member?.name ?? "",
-        preview: withPlainMentions(text),
+        preview: visibleText(text, this.linkNames()),
       });
     }
     return id;
@@ -319,6 +317,13 @@ export class FakeChat {
     };
   }
 
+  private linkNames(): LinkNames {
+    return {
+      member: (id) => this.context.members().find((member) => member.id === id)?.name,
+      page: this.context.pageTitle,
+    };
+  }
+
   private threadSummary(message: StoredMessage) {
     const replies = repliesOf(this.messages, message.id).sort(compareMessages);
     const isFollowing = this.followChoices.get(message.id) ?? followsByDefault(this.context.me(), message, replies);
@@ -329,7 +334,7 @@ export class FakeChat {
       last_reply_ms: last?.created_ms ?? null,
       recent_reply_authors: recentAuthors(replies),
       last_reply_author: last?.author ?? null,
-      last_reply_preview: last === undefined ? null : replyPreview(last.text),
+      last_reply_preview: last === undefined ? null : replyPreview(last.text, this.linkNames()),
       is_following: isFollowing,
       unread_replies: isFollowing
         ? replies.filter((reply) => reply.author !== this.context.me() && (!read || isAfter(reply, read))).length

@@ -243,9 +243,7 @@ export const MessageItem = memo(function MessageItem({
               )}
             </div>
           )}
-          {onOpenThread && message.reply_count > 0 && (
-            <ThreadSummary message={message} pageTitle={(id) => titles.get(id)} onOpen={onOpenThread} />
-          )}
+          {onOpenThread && message.reply_count > 0 && <ThreadSummary message={message} onOpen={onOpenThread} />}
         </div>
 
         <div

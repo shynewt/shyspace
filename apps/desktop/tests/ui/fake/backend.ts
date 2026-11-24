@@ -52,6 +52,7 @@ import { FakePrivate, NOT_PRIVATE } from "./private";
 import { search } from "./search";
 import { FakeSections } from "./sections";
 import { sentMessages } from "./sent";
+import type { LinkNames } from "./visibleText";
 import { FakeWorkspaces, NOT_WORKSPACES } from "./workspaces";
 
 /** The fake bucket refuses this secret, like a provider rejecting bad keys. */
@@ -101,6 +102,7 @@ export class FakeBackend {
     privateView: (channel) => this.private.view(channel),
     filesOf: (message) => this.files.filesOf(message),
     onMessageDeleted: (message) => this.files.dropFilesOf(message),
+    pageTitle: (id) => this.pages.find((page) => page.id === id)?.title,
   });
   private private = new FakePrivate({
     me: () => this.me(),
@@ -112,6 +114,7 @@ export class FakeBackend {
     privateView: (channel) => this.private.view(channel),
     filesOf: (message) => this.files.filesOf(message),
     onMessageDeleted: (message) => this.files.dropFilesOf(message),
+    pageTitle: (id) => this.pages.find((page) => page.id === id)?.title,
     listChannel: (id, name) => this.chat.listChannel(id, name),
   });
   readonly files = new FakeFiles({
@@ -204,6 +207,13 @@ export class FakeBackend {
   storageProvider: StorageProvider = "r2";
   /** What `check_old_key_deleted` finds next. */
   oldKeyCheck: OldKeyCheck = "dead";
+
+  private linkNames(): LinkNames {
+    return {
+      member: (id) => this.members.find((member) => member.id === id)?.name,
+      page: (id) => this.pages.find((page) => page.id === id)?.title,
+    };
+  }
 
   /** Makes joins wait for `approveJoin`, as a real admin's answer does. */
   holdJoins(): void {
@@ -661,6 +671,7 @@ export class FakeBackend {
           messages: this.chat.messages,
           channels: this.chat.channels,
           pages: this.pages,
+          names: this.linkNames(),
         });
       case "status":
         return {

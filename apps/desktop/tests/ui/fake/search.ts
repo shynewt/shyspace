@@ -1,6 +1,7 @@
 import type * as Y from "yjs";
 import type { SearchHit } from "../../../src/lib/api";
 import { rootOf } from "./threads";
+import { type LinkNames, visibleText } from "./visibleText";
 
 const HIGHLIGHT_START = "\u0001";
 const HIGHLIGHT_END = "\u0002";
@@ -16,10 +17,11 @@ type Searchable = {
   }[];
   channels: readonly { id: string; name: string }[];
   pages: readonly { id: string; title: string; doc: Y.Doc; updated_ms: number }[];
+  names: LinkNames;
 };
 
 /** Like the core: every term must start a word; matches are marked. */
-export function search(query: string, { messages, channels, pages }: Searchable): SearchHit[] {
+export function search(query: string, { messages, channels, pages, names }: Searchable): SearchHit[] {
   const terms = searchTerms(query);
   if (terms.length === 0) return [];
   const matches = (text: string) => matchesTerms(terms, text);
@@ -31,7 +33,7 @@ export function search(query: string, { messages, channels, pages }: Searchable)
       kind: "message",
       id: message.id,
       title: channel?.name ?? "",
-      snippet: highlight(message.text, terms),
+      snippet: highlight(visibleText(message.text, names), terms),
       channel: message.channel,
       thread_root: rootOf(messages, message.id) === message.id ? null : rootOf(messages, message.id),
       author: message.author,
@@ -45,7 +47,7 @@ export function search(query: string, { messages, channels, pages }: Searchable)
       kind: "page",
       id: page.id,
       title: page.title,
-      snippet: highlight(body, terms),
+      snippet: highlight(visibleText(body, names), terms),
       channel: null,
       thread_root: null,
       author: null,

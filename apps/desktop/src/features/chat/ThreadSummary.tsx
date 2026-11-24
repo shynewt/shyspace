@@ -1,8 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import type { Message } from "../../lib/api";
-import { useMemberNames, useMembers } from "../../lib/members";
+import { useMembers } from "../../lib/members";
 import { displayName, formatWhen } from "../../lib/people";
-import { cutPreview } from "../../lib/plainPreview";
 import { CountBadge, cx, RelativeTime } from "../../ui";
 import { ReplierAvatars } from "./ReplierAvatars";
 
@@ -11,17 +10,8 @@ import { ReplierAvatars } from "./ReplierAvatars";
  * count, and who said what last. The whole line is one button that opens
  * the thread.
  */
-export function ThreadSummary({
-  message,
-  pageTitle,
-  onOpen,
-}: {
-  message: Message;
-  pageTitle: (id: string) => string | undefined;
-  onOpen: () => void;
-}) {
+export function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
   const members = useMembers();
-  const memberName = useMemberNames();
   const memberFor = (id: string) => members?.find((member) => member.id === id);
   const nameOf = (id: string) => displayName(memberFor(id)?.name ?? "", id);
 
@@ -29,8 +19,8 @@ export function ThreadSummary({
   const countText = `${count} ${count === 1 ? "reply" : "replies"}`;
   const unread = message.unread_replies;
   const lastAuthor = message.last_reply_author === null ? null : nameOf(message.last_reply_author);
-  const preview =
-    message.last_reply_preview === null ? "" : cutPreview(message.last_reply_preview, pageTitle, memberName);
+  // Plain text from the core, links already named.
+  const preview = message.last_reply_preview ?? "";
   const label = [
     countText,
     lastAuthor !== null && message.last_reply_ms !== null

@@ -14,9 +14,8 @@ import { motion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SearchHit } from "../../lib/api";
 import { useChannelNames } from "../../lib/channels";
-import { useMemberNames, useMembers } from "../../lib/members";
+import { useMembers } from "../../lib/members";
 import { displayName, formatWhen } from "../../lib/people";
-import { cutPreview } from "../../lib/plainPreview";
 import { SETTINGS_SECTIONS } from "../../lib/settings";
 import { hasCommandModifier, shortcutKeys } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
@@ -86,7 +85,6 @@ function PaletteBody({
   const { channels, pages, navigate, session, openSettings } = useWorkspace();
   const names = useChannelNames();
   const members = useMembers();
-  const memberName = useMemberNames();
   const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [selected, setSelected] = useState(0);
@@ -112,8 +110,7 @@ function PaletteBody({
   }, [query]);
 
   const items = useMemo<Item[]>(() => {
-    const titles = new Map(pages.map((page) => [page.id, page.title || "Untitled"]));
-    const snippet = (text: string) => <Snippet text={readableSnippet(text, (id) => titles.get(id), memberName)} />;
+    const snippet = (text: string) => <Snippet text={text} />;
     const needle = query.trim().toLowerCase();
     const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
     const go = (view: View) => () => navigate(view);
@@ -225,19 +222,7 @@ function PaletteBody({
       ];
     });
     return [...jumpTo, ...found, ...actions];
-  }, [
-    query,
-    hits,
-    channels,
-    names,
-    members,
-    memberName,
-    pages,
-    navigate,
-    session.is_admin,
-    onMarkAllRead,
-    openSettings,
-  ]);
+  }, [query, hits, channels, names, members, pages, navigate, session.is_admin, onMarkAllRead, openSettings]);
 
   useEffect(() => {
     list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });
@@ -335,20 +320,6 @@ function PaletteBody({
 
 const MATCH_START = String.fromCharCode(1);
 const MATCH_END = String.fromCharCode(2);
-const MATCH_MARKS = new RegExp(`[${MATCH_START}${MATCH_END}]`, "g");
-/** An app link like `shy://page/<id>`, with or without match marks inside it. */
-const MARKED_APP_LINK = new RegExp(`${MATCH_START}?shy${MATCH_END}?://[^\\s)\\]]*`, "g");
-
-/** The snippet as plain words, keeping the match marks that fall on visible text. */
-function readableSnippet(
-  text: string,
-  pageTitle: (id: string) => string | undefined,
-  memberName: (id: string) => string | undefined,
-): string {
-  const withPlainLinks = text.replace(MARKED_APP_LINK, (link) => link.replace(MATCH_MARKS, ""));
-  return cutPreview(withPlainLinks, pageTitle, memberName);
-}
-
 /** The core wraps matches in \u0001…\u0002; render them as highlights. */
 function Snippet({ text }: { text: string }) {
   const parts: Array<{ start: number; text: string; isMatch: boolean }> = [];
