@@ -189,12 +189,15 @@ jobs:
         run: |
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP"
           feed="$RUNNER_TEMP/latest.json"
+          # latest.json points at assets by API URL; the file name says what kind of package it is.
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | map({(.apiUrl): .name}) | add')
           version=$(jq -r .version "$feed")
           test "v${version#v}" = "$TAG" || { echo "::error::latest.json offers $version, not $TAG"; exit 1; }
           while read -r platform installer package; do
-            jq -e --arg platform "$platform" --arg installer "$installer" --arg package "$package" '
+            jq -e --arg platform "$platform" --arg installer "$installer" --arg package "$package" --argjson assets "$assets" '
               (.platforms["\($platform)-\($installer)"] // .platforms[$platform]) as $entry
-              | ($entry.signature // "" | length > 0) and ($entry.url // "" | test($package))
+              | ($assets[$entry.url // ""] // ($entry.url // "" | sub(".*/"; ""))) as $file
+              | ($entry.signature // "" | length > 0) and ($file | test($package))
             ' "$feed" > /dev/null || { echo "::error::latest.json has no signed $installer update for $platform"; exit 1; }
             signed=$(jq -r --arg platform "$platform" --arg installer "$installer" '
               (.platforms["\($platform)-\($installer)"] // .platforms[$platform]).signature
