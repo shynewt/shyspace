@@ -52,6 +52,45 @@ test("notification text can be hidden", async ({ page }) => {
     .toEqual([{ title: "Grace in #random", body: "New message" }]);
 });
 
+test("on macOS the app sits in the Dock, with the menu bar item off until turned on", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() => {
+    window.fake.appIcon.platform = "macos";
+  });
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Notifications" }).click();
+  const menuBar = settings.getByRole("switch", { name: "Show shyspace in the menu bar" });
+  const dockCount = settings.getByRole("switch", { name: "Show the unread count on the Dock icon" });
+  await expect(menuBar).not.toBeChecked();
+  await expect(dockCount).toBeChecked();
+  await expect(settings.getByRole("switch", { name: "Monochrome tray icon" })).toHaveCount(0);
+
+  await menuBar.click();
+  await dockCount.click();
+
+  await expect(menuBar).toBeChecked();
+  await expect(dockCount).not.toBeChecked();
+  expect(await page.evaluate(() => window.fake.appIcon)).toMatchObject({
+    is_in_menu_bar: true,
+    shows_unread_count: false,
+  });
+});
+
+test("on Linux and Windows the tray icon can be a one-colour planet", async ({ page }) => {
+  const settings = await openSettings(page);
+  await settings.getByRole("tab", { name: "Notifications" }).click();
+  const monochrome = settings.getByRole("switch", { name: "Monochrome tray icon" });
+  await expect(monochrome).not.toBeChecked();
+  await expect(settings.getByRole("switch", { name: "Show shyspace in the menu bar" })).toHaveCount(0);
+
+  await monochrome.click();
+
+  await expect(monochrome).toBeChecked();
+  expect(await page.evaluate(() => window.fake.appIcon.is_tray_monochrome)).toBe(true);
+});
+
 test("the accent colour can be chosen, kept and set back", async ({ page }) => {
   const settings = await openSettings(page);
   await settings.getByRole("tab", { name: "Appearance" }).click();

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <mask id="shape" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+      <rect width="32" height="32" fill="#fff"/>
+      <path d="M3.4 16A12.6 4 0 0 0 28.6 16" transform="rotate(-18 16 16)" fill="none" stroke="#000" stroke-width="5.6"/>
+      <g transform="rotate(-14 16 16)"><circle cx="13" cy="14.2" r="1.5" fill="#000"/><circle cx="19" cy="14.2" r="1.5" fill="#000"/></g>
+    </mask>
+  </defs>
+  <g mask="url(#shape)">
+    <ellipse cx="16" cy="16" rx="12.6" ry="4" transform="rotate(-18 16 16)" fill="none" stroke="#fff" stroke-width="2.8"/>
+    <circle cx="16" cy="16" r="8.6" fill="#fff"/>
+    <path d="M3.4 16A12.6 4 0 0 0 28.6 16" transform="rotate(-18 16 16)" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>
+  </g>
+</svg>

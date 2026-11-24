@@ -7,7 +7,7 @@ use super::support::*;
 use crate::{
     Networking, Profile, Workspace, WorkspaceOptions,
     huddle::media::{DeviceChoice, fake::FakeMedia},
-    workspaces::{DeviceKeys, MoveStep, Workspaces},
+    workspaces::{AppIcon, DeviceKeys, MoveStep, Workspaces},
 };
 
 fn profile() -> Profile<'static> {
@@ -826,4 +826,33 @@ async fn a_workspaces_own_sounds_setting_moves_to_the_device_once() {
         .await
         .unwrap();
     assert!(!beta.huddle_sounds().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_icon_settings_start_quiet_and_are_kept() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    assert_eq!(
+        workspaces.app_icon().unwrap(),
+        AppIcon {
+            is_in_menu_bar: false,
+            shows_unread_count: true,
+            is_tray_monochrome: false,
+        },
+        "no menu bar item, a count on the app's icon, the tray in colour"
+    );
+
+    workspaces.set_in_menu_bar(true).unwrap();
+    workspaces.set_shows_unread_count(false).unwrap();
+    workspaces.set_tray_monochrome(true).unwrap();
+    drop(workspaces);
+
+    assert_eq!(
+        device.workspaces().app_icon().unwrap(),
+        AppIcon {
+            is_in_menu_bar: true,
+            shows_unread_count: false,
+            is_tray_monochrome: true,
+        }
+    );
 }

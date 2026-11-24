@@ -37,6 +37,15 @@ pub(crate) struct DeviceSettings {
     /// Whether huddles play join and leave sounds on this device.
     #[serde(default)]
     pub(crate) huddle_sounds: Option<bool>,
+    /// A menu bar item on macOS, beside the Dock icon.
+    #[serde(default)]
+    pub(crate) is_in_menu_bar: Option<bool>,
+    /// The unread count on the Dock or taskbar icon.
+    #[serde(default)]
+    pub(crate) shows_unread_count: Option<bool>,
+    /// The tray icon as a one-colour glyph, on Linux and Windows.
+    #[serde(default)]
+    pub(crate) is_tray_monochrome: Option<bool>,
 }
 
 pub(crate) struct DeviceSettingsFile {

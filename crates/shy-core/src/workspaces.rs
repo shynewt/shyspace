@@ -58,6 +58,18 @@ pub struct Opened {
     pub failed: Vec<(String, anyhow::Error)>,
 }
 
+/// How the app shows itself outside its window on this device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct AppIcon {
+    /// A menu bar item on macOS (Linux and Windows always have a tray icon).
+    pub is_in_menu_bar: bool,
+    /// The unread count on the Dock or taskbar icon.
+    pub shows_unread_count: bool,
+    /// The tray icon as a one-colour glyph instead of the app icon (Linux,
+    /// Windows); the macOS menu bar item is always one.
+    pub is_tray_monochrome: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceEntry {
     pub workspace_id: String,
@@ -643,6 +655,28 @@ impl Workspaces {
         self.update_settings(|settings| {
             settings.muted.retain(|id| id != workspace_id);
         })
+    }
+
+    /// How the app shows itself outside its window on this device.
+    pub fn app_icon(&self) -> Result<AppIcon> {
+        let settings = self.settings()?;
+        Ok(AppIcon {
+            is_in_menu_bar: settings.is_in_menu_bar.unwrap_or(false),
+            shows_unread_count: settings.shows_unread_count.unwrap_or(true),
+            is_tray_monochrome: settings.is_tray_monochrome.unwrap_or(false),
+        })
+    }
+
+    pub fn set_in_menu_bar(&self, is_in_menu_bar: bool) -> Result<()> {
+        self.update_settings(|settings| settings.is_in_menu_bar = Some(is_in_menu_bar))
+    }
+
+    pub fn set_shows_unread_count(&self, shows_unread_count: bool) -> Result<()> {
+        self.update_settings(|settings| settings.shows_unread_count = Some(shows_unread_count))
+    }
+
+    pub fn set_tray_monochrome(&self, is_tray_monochrome: bool) -> Result<()> {
+        self.update_settings(|settings| settings.is_tray_monochrome = Some(is_tray_monochrome))
     }
 
     /// Holds every workspace's notifications until `until_ms`.

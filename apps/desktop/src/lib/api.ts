@@ -309,6 +309,17 @@ export type Change =
   /** Whether huddles play join and leave sounds on this device changed. */
   | { kind: "huddle_sounds" };
 
+/** How the app shows itself outside its window on this device, and on which system. */
+export type AppIcon = {
+  platform: string;
+  /** A menu bar item on macOS (Linux and Windows always have a tray icon). */
+  is_in_menu_bar: boolean;
+  /** The unread count on the Dock or taskbar icon. */
+  shows_unread_count: boolean;
+  /** The tray icon as a one-colour planet instead of the app icon (Linux, Windows). */
+  is_tray_monochrome: boolean;
+};
+
 /** What a click on a desktop notification opens. */
 export type AlertTarget = { kind: "message" | "channel"; id: string };
 
@@ -391,6 +402,10 @@ export const api = {
   /** Holds every workspace's notifications until then; null lets them show again. */
   setNotificationsPaused: (untilMs: number | null) => invoke<void>("set_notifications_paused", { untilMs }),
   notificationsPaused: () => invoke<number | null>("notifications_paused"),
+  appIcon: () => invoke<AppIcon>("app_icon"),
+  setInMenuBar: (isShown: boolean) => invoke<void>("set_in_menu_bar", { isShown }),
+  setShowsUnreadCount: (isShown: boolean) => invoke<void>("set_shows_unread_count", { isShown }),
+  setTrayMonochrome: (isMonochrome: boolean) => invoke<void>("set_tray_monochrome", { isMonochrome }),
   testBucket: (bucket: BucketConfig) => invoke<void>("test_bucket", { bucket }),
   storageSettings: () => invoke<StorageSettings>("storage_settings"),
   /** The last check's result, without asking the bucket. */

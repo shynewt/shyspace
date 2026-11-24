@@ -10,6 +10,7 @@ import { emit } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 import type {
   AlertTarget,
+  AppIcon,
   BucketConfig,
   Change,
   Channel,
@@ -71,6 +72,8 @@ export class FakeBackend {
   private isHoldingJoins = false;
   /** What the window title, taskbar and tray last showed as needing you. */
   attentionCount = 0;
+  /** How the app shows itself outside its window; tests set `platform` to see another system's settings. */
+  appIcon: AppIcon = { platform: "linux", is_in_menu_bar: false, shows_unread_count: true, is_tray_monochrome: false };
   private pendingJoin: { approve: () => void; cancel: () => void } | null = null;
   /** The update the app has downloaded and could restart into, as `check_for_update` reports it. */
   readyUpdate: string | null = null;
@@ -608,6 +611,17 @@ export class FakeBackend {
         return null;
       case "set_attention_count":
         this.attentionCount = argument(args, "count") as number;
+        return null;
+      case "app_icon":
+        return { ...this.appIcon };
+      case "set_in_menu_bar":
+        this.appIcon.is_in_menu_bar = argument(args, "isShown") === true;
+        return null;
+      case "set_shows_unread_count":
+        this.appIcon.shows_unread_count = argument(args, "isShown") === true;
+        return null;
+      case "set_tray_monochrome":
+        this.appIcon.is_tray_monochrome = argument(args, "isMonochrome") === true;
         return null;
       case "test_bucket":
         return this.testBucket(argument(args, "bucket") as BucketConfig);

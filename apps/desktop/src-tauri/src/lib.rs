@@ -23,7 +23,7 @@ use shy_core::{
         WorkspaceItem, WorkspaceLook,
     },
     workspace::StorageUpdate,
-    workspaces::{DeviceKeys, Workspaces},
+    workspaces::{AppIcon, DeviceKeys, Workspaces},
 };
 use shy_media::ShyMedia;
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, ipc::Response};
@@ -357,6 +357,49 @@ async fn join_workspace(
         .lock()
         .map_err(|_| "join state lock poisoned".to_owned())? = None;
     Ok(install(&app, &joined.map_err(failed)?))
+}
+
+/// How the app shows itself outside its window, and on which system.
+#[derive(Serialize)]
+struct AppIconView {
+    platform: &'static str,
+    #[serde(flatten)]
+    icon: AppIcon,
+}
+
+#[tauri::command]
+fn app_icon(state: State<'_, AppState>) -> CommandResult<AppIconView> {
+    Ok(AppIconView {
+        platform: std::env::consts::OS,
+        icon: state.workspaces.app_icon().map_err(failed)?,
+    })
+}
+
+#[tauri::command]
+fn set_in_menu_bar(app: AppHandle, state: State<'_, AppState>, is_shown: bool) -> CommandResult<()> {
+    state.workspaces.set_in_menu_bar(is_shown).map_err(failed)?;
+    tray::show_in_menu_bar(&app, is_shown);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_shows_unread_count(app: AppHandle, state: State<'_, AppState>, is_shown: bool) -> CommandResult<()> {
+    state
+        .workspaces
+        .set_shows_unread_count(is_shown)
+        .map_err(failed)?;
+    let count = app.state::<tray::Attention>().count();
+    tray::show_attention(&app, count).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_tray_monochrome(app: AppHandle, state: State<'_, AppState>, is_monochrome: bool) -> CommandResult<()> {
+    state
+        .workspaces
+        .set_tray_monochrome(is_monochrome)
+        .map_err(failed)?;
+    tray::redraw(&app);
+    Ok(())
 }
 
 /// How many things need you, shown outside the window.
@@ -1055,8 +1098,9 @@ pub fn run() {
             });
             window::create_main_window(app.handle())?;
             alerts::follow_clicks(app.handle())?;
-            let has_tray = tray::try_install(app.handle());
-            app.manage(tray::HasTray(has_tray));
+            app.manage(tray::HasTray::default());
+            app.manage(tray::Attention::default());
+            tray::install_at_start(app.handle());
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             app.manage(updates::PendingUpdate::default());
@@ -1068,8 +1112,13 @@ pub fn run() {
             if let WindowEvent::DragDrop(drop) = event {
                 files::on_drag_drop(window.app_handle(), &window.state::<files::StagedFiles>(), drop);
             }
+            if let WindowEvent::ThemeChanged(_) = event {
+                tray::redraw(window.app_handle());
+            }
+            // On macOS the app stays in the Dock, as Mac apps do: closing the
+            // window hides it, the Dock icon brings it back, Quit ends it.
             if let WindowEvent::CloseRequested { api, .. } = event
-                && window.state::<tray::HasTray>().0
+                && (cfg!(target_os = "macos") || window.state::<tray::HasTray>().get())
             {
                 api.prevent_close();
                 if let Err(error) = window.hide() {
@@ -1146,6 +1195,10 @@ pub fn run() {
             open_notes,
             cancel_join,
             set_attention_count,
+            app_icon,
+            set_in_menu_bar,
+            set_shows_unread_count,
+            set_tray_monochrome,
             private_members,
             add_to_private_channel,
             remove_from_private_channel,
