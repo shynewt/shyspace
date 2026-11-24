@@ -284,3 +284,21 @@ test("a channel in the shown workspace isn't taken for the call's, even with the
   // The fake shares channel ids across workspaces, as two workspaces' ids could collide.
   await expect(page.getByRole("main").getByRole("button", { name: "Leave the huddle" })).toHaveCount(0);
 });
+
+test("switching workspace drops an Undo that would act on the other one", async ({ page }) => {
+  await openApp(page);
+  await addTeam(page);
+  await page.getByLabel("Message #general").fill("maybe not");
+  await page
+    .getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: /^Drafts & sent/ })
+    .click();
+  const row = page.getByRole("list", { name: "Drafts" }).getByRole("listitem").filter({ hasText: "maybe not" });
+  await row.hover();
+  await row.getByRole("button", { name: "Discard draft" }).click();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
+
+  await page.keyboard.press("Control+2");
+  await expect(workspaceMenu(page, "Team")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveCount(0);
+});

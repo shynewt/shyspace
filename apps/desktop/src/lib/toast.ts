@@ -37,6 +37,17 @@ export function showUndoToast(text: string, undo: () => Promise<void>) {
   show({ text, tone: "success", action: { kind: "undo", run: undo } }, UNDO_TOAST_MS);
 }
 
+/**
+ * Takes away every Undo still on screen. Undo acts on the selected workspace,
+ * so once another is shown it would undo there instead.
+ */
+export function dismissUndoToasts() {
+  const kept = toasts.filter((toast) => toast.action?.kind !== "undo");
+  if (kept.length === toasts.length) return;
+  toasts = kept;
+  publish();
+}
+
 /** A reminder that came due, with a button to open what was saved. */
 export function showReminderToast(text: string, open: () => void) {
   show({ text, tone: "reminder", action: { kind: "open", run: open } }, REMINDER_TOAST_MS);

@@ -10,7 +10,7 @@ import {
 } from "../../lib/api";
 import { saveEverythingBeforeSwitch } from "../../lib/beforeSwitch";
 import { shownView } from "../../lib/shownView";
-import { reportError, showToast } from "../../lib/toast";
+import { dismissUndoToasts, reportError, showToast } from "../../lib/toast";
 import { useAlerts } from "../../lib/useAlerts";
 import { usePresence } from "../../lib/usePresence";
 import { useReminders } from "../../lib/useReminders";
@@ -107,6 +107,7 @@ export function WorkspacesProvider({
         onSession(session);
         return;
       }
+      dismissUndoToasts();
       saveEverythingBeforeSwitch()
         .then(() => api.selectWorkspace(workspaceId))
         .then((next) => {
