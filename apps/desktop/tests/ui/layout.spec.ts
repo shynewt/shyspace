@@ -188,15 +188,20 @@ for (const size of SIZES) {
 
     test("a thread fits beside or over its channel", async ({ page }) => {
       await openAt(page, size, "thread");
+      // The thread loads after the channel and may still be sliding in: wait for it to settle.
+      await expect(thread(page).getByRole("button", { name: "Close thread" })).toBeVisible();
       await expectNoSidewaysScroll(page);
       await expectOneLineHeader(viewHeader(page));
       await expectOneLineHeader(thread(page).locator("header"));
       await expectTitleWins(viewHeader(page).getByRole("heading", { name: LONG_CHANNEL }));
-      expect(await isClickable(thread(page).getByRole("button", { name: "Close thread" }))).toBe(true);
-      expect(await isClickable(thread(page).getByRole("button", { name: /Follow/ }))).toBe(true);
-      const threadBox = await thread(page).boundingBox();
-      expect(threadBox?.x ?? -1).toBeGreaterThanOrEqual(0);
-      expect((threadBox?.x ?? 0) + (threadBox?.width ?? 0)).toBeLessThanOrEqual(size.width + 1);
+      await expect.poll(() => isClickable(thread(page).getByRole("button", { name: "Close thread" }))).toBe(true);
+      await expect.poll(() => isClickable(thread(page).getByRole("button", { name: /Follow/ }))).toBe(true);
+      await expect
+        .poll(async () => {
+          const box = await thread(page).boundingBox();
+          return box !== null && box.x >= 0 && box.x + box.width <= size.width + 1;
+        }, "the thread stays inside the window")
+        .toBe(true);
     });
 
     test("the inbox fits", async ({ page }) => {
