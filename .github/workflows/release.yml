@@ -120,6 +120,10 @@ jobs:
             delimiter="EOF_$(openssl rand -hex 16)"
             printf '%s<<%s\n%s\n%s\n' "$name" "$delimiter" "$value" "$delimiter" >> "$GITHUB_ENV"
           done
+          # Named in the config too, merged over tauri.conf.json's ad-hoc "-", so
+          # the identity can't lose to it.
+          jq -n --arg identity "$APPLE_SIGNING_IDENTITY" '{bundle: {macOS: {signingIdentity: $identity}}}' \
+            > "$RUNNER_TEMP/signing.conf.json"
       - name: Build the app, and attach it to the draft release for a tag
         uses: tauri-apps/tauri-action@v1.0.0
         env:
@@ -130,7 +134,10 @@ jobs:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
           # A tag also builds the signed update packages and latest.json, which the apps update from.
-          args: --features vendored-openssl ${{ github.ref_type == 'tag' && '--config src-tauri/tauri.release.conf.json' || '' }}
+          args: >-
+            --features vendored-openssl
+            ${{ github.ref_type == 'tag' && '--config src-tauri/tauri.release.conf.json' || '' }}
+            ${{ github.ref_type == 'tag' && runner.os == 'macOS' && format('--config {0}/signing.conf.json', runner.temp) || '' }}
           # Empty without a tag, so the action only keeps workflow artifacts.
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: shyspace ${{ github.ref_name }}
