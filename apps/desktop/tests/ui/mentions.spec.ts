@@ -7,6 +7,13 @@ test.beforeEach(async ({ page }) => {
     window.fake.addMember("Gregor", { kind: "bot" });
   });
   await page.getByRole("button", { name: "general", exact: true }).click();
+  // Names only become mentions once the composer knows the members.
+  const composer = page.getByLabel("Message #general");
+  await composer.pressSequentially("@Gr");
+  await expect(
+    page.getByRole("listbox", { name: "People and pages to mention" }).getByRole("option", { name: /Grace/ }),
+  ).toBeVisible();
+  await composer.fill("");
 });
 
 test("typing @ suggests people, and the picked name becomes a mention", async ({ page }) => {

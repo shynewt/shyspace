@@ -114,6 +114,7 @@ test("the edited mark sits on the message's last line", async ({ page }) => {
   await send(page, "Lunch at noon");
   const composer = page.getByLabel("Message #general");
   await composer.press("ArrowUp");
+  await expect(composer).toHaveValue("Lunch at noon");
   await composer.fill("Lunch at one");
   await composer.press("Enter");
 

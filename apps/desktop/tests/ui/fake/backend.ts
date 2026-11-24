@@ -267,6 +267,8 @@ export class FakeBackend {
 
   /** Desktop notifications the app asked to show. */
   readonly alertsShown: { title: string; body: string }[] = [];
+  /** The bodies of alerts a muted workspace or the pause held back. */
+  readonly alertsHeld: string[] = [];
   /** Whose picture each alert in `alertsShown` came with, if it was a PNG; null for none. */
   readonly alertPictures: (string | null)[] = [];
   /** What each alert in `alertsShown` opens when clicked, if anything. */
@@ -608,7 +610,10 @@ export class FakeBackend {
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
       case "show_alert":
         // As in the core: a muted workspace, or the pause, holds it back.
-        if (this.workspaces.isSilenced(requireString(args, "workspaceId"))) return null;
+        if (this.workspaces.isSilenced(requireString(args, "workspaceId"))) {
+          this.alertsHeld.push(requireString(args, "body"));
+          return null;
+        }
         this.alertWorkspaces.push(requireString(args, "workspaceId"));
         this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
         this.alertPictures.push(alertPicture(argument(args, "picture")));

@@ -45,7 +45,10 @@ test("new replies in a thread you follow show until you open it", async ({ page 
 
   await summary.click();
   await expect(
-    page.getByRole("complementary", { name: "Thread" }).getByRole("article").filter({ hasText: "Me" }),
+    page
+      .getByRole("complementary", { name: "Thread" })
+      .getByRole("article")
+      .filter({ has: page.getByText("Me", { exact: true }) }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: /1 new/ })).toHaveCount(0);
 });

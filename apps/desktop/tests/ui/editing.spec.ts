@@ -62,6 +62,9 @@ test("mentions stay mentions through an edit", async ({ page }) => {
   await page.evaluate(() => window.fake.addMember("Grace"));
   const composer = page.getByLabel("Message #general");
   await composer.pressSequentially("Thanks @Gra");
+  await expect(
+    page.getByRole("listbox", { name: "People and pages to mention" }).getByRole("option", { name: /Grace/ }),
+  ).toBeVisible();
   await composer.press("Enter");
   await composer.pressSequentially("for this");
   await composer.press("Enter");

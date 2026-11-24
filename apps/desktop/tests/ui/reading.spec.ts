@@ -226,7 +226,7 @@ test("unread you read or cleared is saved before you leave, so a restart can't b
   await sidebarChannel(page, /^random, 2 unread/).click();
   await expect(log(page, "random").getByText("Two")).toBeInViewport();
   await sidebarChannel(page, /^general\b/).click();
-  expect(await unreadIn(page, "random")).toBe(0);
+  await expect.poll(() => unreadIn(page, "random")).toBe(0);
 
   await graceSays(page, "random", "Three");
   await sidebarChannel(page, /^random, 1 unread/).click();

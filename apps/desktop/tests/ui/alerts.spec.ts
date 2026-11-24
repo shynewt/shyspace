@@ -74,6 +74,10 @@ test("every channel's alerts can be set and reset in Settings", async ({ page })
   await expect
     .poll(() => page.evaluate(() => window.fake.handle("channels", undefined)))
     .toContainEqual(expect.objectContaining({ name: "random", notify: "nothing" }));
+  await expect(general.getByRole("radio", { name: "Mentions only" })).toBeChecked();
+  await expect
+    .poll(() => page.evaluate(() => window.fake.handle("channels", undefined)))
+    .toContainEqual(expect.objectContaining({ name: "general", notify: "mentions" }));
 
   await settings.getByRole("button", { name: "Reset all to every message" }).click();
   await expect(random.getByRole("radio", { name: "Every message" })).toBeChecked();

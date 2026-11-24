@@ -89,6 +89,7 @@ test("a muted workspace, or the pause, holds its notifications back", async ({ p
   await page.getByRole("menuitemradio", { name: "For 1 hour" }).click();
   await expect(page.getByRole("img", { name: "Notifications paused" })).toBeVisible();
   await page.evaluate((id) => window.fake.alertFrom(id, "Grace", "design", "Paused"), team);
+  await expect.poll(() => page.evaluate(() => window.fake.alertsHeld)).toEqual(["Paused"]);
 
   await page.getByRole("button", { name: /^Ada\b/ }).click();
   await page.getByRole("menuitem", { name: /^Resume notifications/ }).click();

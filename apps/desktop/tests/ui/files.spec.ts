@@ -91,6 +91,7 @@ test("a file that fails to send stays in the box with its text", async ({ page }
     window.fake.files.failNextSend = true;
   });
   await page.getByRole("button", { name: "Attach files" }).click();
+  await expect(page.getByRole("list", { name: "Files to send" }).getByText("report.pdf")).toBeVisible();
   const composer = page.getByLabel("Message #general");
   await composer.fill("The report");
   await composer.press("Enter");
@@ -136,6 +137,7 @@ test("someone else's file can be saved but not deleted; your own can be deleted"
     window.fake.files.pickNext = [{ name: "mine.txt", type: "text/plain", bytes: [1] }];
   });
   await page.getByRole("button", { name: "Attach files" }).click();
+  await expect(page.getByRole("list", { name: "Files to send" }).getByText("mine.txt")).toBeVisible();
   await page.getByLabel("Message #general").fill("Mine");
   await page.getByLabel("Message #general").press("Enter");
   const mine = page.getByRole("article").filter({ hasText: "Mine" });

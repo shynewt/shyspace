@@ -360,8 +360,10 @@ test("a private channel you were removed from is skipped in history", async ({ p
     .getByRole("button", { name: /^ops, private channel/ })
     .click();
   await expect(page.getByLabel("Message #ops")).toBeVisible();
-  await openChannel(page, "random");
+  // Removed while it's open, so the app's having seen it shows.
   await page.evaluate(() => window.fake.removeMeFromPrivateChannel("ops"));
+  await expect(page.getByText("You're no longer in this channel.").first()).toBeVisible();
+  await openChannel(page, "random");
 
   await page.keyboard.press("Alt+ArrowLeft");
   await expect(page.getByLabel("Message #general")).toBeVisible();
