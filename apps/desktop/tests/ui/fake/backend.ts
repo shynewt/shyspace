@@ -250,6 +250,8 @@ export class FakeBackend {
   private rotation: StorageRotation | null = null;
   /** The provider a removal's key change names; the core tells it from the endpoint. */
   storageProvider: StorageProvider = "r2";
+  /** Whether the window fills the screen, as macOS full screen would. */
+  private isFullscreen = false;
   /** What `check_old_key_deleted` finds next. */
   oldKeyCheck: OldKeyCheck = "dead";
 
@@ -288,6 +290,12 @@ export class FakeBackend {
     if (this.restartFails !== null) throw new Error(this.restartFails);
     this.restartedInto = this.readyUpdate;
     return "restarting";
+  }
+
+  /** The window enters or leaves full screen; Tauri reports that as a resize. */
+  setFullscreen(isFullscreen: boolean): void {
+    this.isFullscreen = isFullscreen;
+    void emit("tauri://resize", { width: 1240, height: 800 });
   }
 
   /** Sets what checking the bucket finds, as a provider's settings would. */
@@ -518,6 +526,8 @@ export class FakeBackend {
     switch (command) {
       case "plugin:app|version":
         return "1.2.3";
+      case "plugin:window|is_fullscreen":
+        return this.isFullscreen;
       case "check_for_update":
         this.updateChecks += 1;
         return this.readyUpdate;

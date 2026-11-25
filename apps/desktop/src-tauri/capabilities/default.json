@@ -5,6 +5,8 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
     { "identifier": "opener:allow-open-url", "deny": [{ "url": "mailto:*[?]*" }] },
     "opener:allow-default-urls",
     "notification:allow-is-permission-granted"

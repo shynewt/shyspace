@@ -4,7 +4,8 @@
  * box usually has focus and plain letters belong to it.
  */
 
-const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+import { isMac } from "./platform";
+
 export const MOD_LABEL = isMac ? "⌘" : "Ctrl";
 
 /**

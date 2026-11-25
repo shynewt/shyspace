@@ -4,7 +4,7 @@
  * `?start=onboarding` begins with no workspace, `?start=member` as Grace, a
  * regular member. `?seed=<text>` makes ids the same on every load.
  */
-import { mockIPC } from "@tauri-apps/api/mocks";
+import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { FakeBackend } from "./backend";
 import { seedIds } from "./helpers";
 
@@ -17,6 +17,7 @@ declare global {
 }
 
 mockIPC((command, args) => window.fake.handle(command, args), { shouldMockEvents: true });
+mockWindows("main");
 const params = new URLSearchParams(window.location.search);
 const seed = params.get("seed");
 if (seed) seedIds(seed);

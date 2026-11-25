@@ -3,6 +3,7 @@ import { MotionConfig } from "motion/react";
 import { type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { TitleBar } from "./features/shell/TitleBar";
 import { forgetLastView } from "./lib/lastView";
 import { useReducedMotionConfig } from "./lib/preferences";
 import { Button, EmptyState, ErrorBoundary, TooltipProvider, tweens } from "./ui";
@@ -13,13 +14,18 @@ if (!root) throw new Error("index.html has no #root element");
 
 createRoot(root).render(
   <StrictMode>
-    <ErrorBoundary fallback={<ScreenFailed />}>
-      <ChosenMotion>
-        <TooltipProvider>
-          <App />
-        </TooltipProvider>
-      </ChosenMotion>
-    </ErrorBoundary>
+    <div className="flex h-full flex-col">
+      <TitleBar />
+      <div className="min-h-0 flex-1">
+        <ErrorBoundary fallback={<ScreenFailed />}>
+          <ChosenMotion>
+            <TooltipProvider>
+              <App />
+            </TooltipProvider>
+          </ChosenMotion>
+        </ErrorBoundary>
+      </div>
+    </div>
   </StrictMode>,
 );
 
@@ -39,7 +45,7 @@ function ScreenFailed() {
     window.location.reload();
   };
   return (
-    <div role="alert" className="h-screen bg-bg text-ink">
+    <div role="alert" className="h-full bg-bg text-ink">
       <EmptyState
         icon={<TriangleAlert size={22} aria-hidden />}
         title="Something went wrong showing this screen"

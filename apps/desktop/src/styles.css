@@ -394,6 +394,8 @@
   --width-sidebar: 264px;
   --width-sidebar-compact: 232px;
   --width-rail: 52px;
+  /* macOS puts its window buttons in a 28pt title bar; the drawn one keeps them there. */
+  --height-title-bar: 28px;
   --width-side-panel: 380px;
   /* What a channel keeps beside a docked side panel; with less, the panel slides over it. */
   --width-channel-min: 560px;
