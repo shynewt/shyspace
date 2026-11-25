@@ -4,10 +4,12 @@
 
 <p align="center"><b>A team workspace for chat, pages and AI agents. End-to-end encrypted, with no server to run.</b></p>
 
+<p align="center"><a href="https://shyspace.app">shyspace.app</a></p>
+
 <p align="center">
-  <a href="https://github.com/shynewt/shyspace/releases/latest"><img alt="Download for macOS" src="https://img.shields.io/badge/macOS-Download-1f2328?style=for-the-badge&logo=apple&logoColor=white"></a>
-  <a href="https://github.com/shynewt/shyspace/releases/latest"><img alt="Download for Windows" src="https://img.shields.io/badge/Windows-Download-1f2328?style=for-the-badge&logo=windows&logoColor=white"></a>
-  <a href="https://github.com/shynewt/shyspace/releases/latest"><img alt="Download for Linux" src="https://img.shields.io/badge/Linux-Download-1f2328?style=for-the-badge&logo=linux&logoColor=white"></a>
+  <a href="https://shyspace.app/download"><img alt="Download for macOS" src="https://img.shields.io/badge/macOS-Download-1f2328?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://shyspace.app/download"><img alt="Download for Windows" src="https://img.shields.io/badge/Windows-Download-1f2328?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="https://shyspace.app/download"><img alt="Download for Linux" src="https://img.shields.io/badge/Linux-Download-1f2328?style=for-the-badge&logo=linux&logoColor=white"></a>
 </p>
 
 <p align="center">
