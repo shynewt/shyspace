@@ -132,3 +132,18 @@ async fn actions_on_a_message_that_is_gone_say_so() {
     assert!(error.to_string().contains("no longer there"), "{error}");
     assert!(admin.mark_alert_read("missing").is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_to_a_message_deleted_since_its_alert_isnt_sent() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let question = bob.send_message(&general, "lunch?", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    bob.delete_message(&question).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let error = admin.reply_to_alert(&question, "yes").unwrap_err();
+
+    assert!(error.to_string().contains("no longer there"), "{error}");
+    assert!(admin.keep_unsent_reply(&question, "yes").is_err());
+}
