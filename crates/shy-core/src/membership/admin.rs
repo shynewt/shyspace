@@ -11,7 +11,7 @@ use super::{
     commit::{self, FrozenAuthor},
     invite::{Answer, Grant, Invite, JoinRequest, declined_bytes},
     keyring::KeyHistory,
-    request_seal::{NotForThisInvite, RequestSlot, open_request, request_key_pair},
+    request_seal::{NotForThisInvite, RequestSlot, is_unsealed_request, open_request, request_key_pair},
 };
 use crate::{
     config,
@@ -242,6 +242,9 @@ impl Workspace {
                     self.emit(Change::Invites);
                 }
                 Err(_) if !self.is_new_refused_request(&token, &bytes) => {}
+                Err(_) if is_unsealed_request(&bytes) => warn!(
+                    "a join request came unsealed, from a version of shyspace older than 0.1.4; send that person a new invite"
+                ),
                 Err(error) if error.downcast_ref::<NotForThisInvite>().is_some() => {
                     debug!("ignoring a join request: {error:#}");
                 }

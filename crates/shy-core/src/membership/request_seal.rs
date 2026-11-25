@@ -116,6 +116,12 @@ pub(crate) fn open_request(identity: &SecretKey, slot: RequestSlot<'_>, bytes: &
     postcard::from_bytes(&plaintext).context("reading an opened join request")
 }
 
+/// Whether `bytes` is a join request as versions before sealing sent it,
+/// in the clear, so the admin can be told to send a new invite.
+pub(crate) fn is_unsealed_request(bytes: &[u8]) -> bool {
+    postcard::from_bytes::<JoinRequest>(bytes).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +218,15 @@ mod tests {
             first,
             request_key_pair(&SecretKey::generate(), "first").unwrap().public
         );
+    }
+
+    #[test]
+    fn a_request_from_an_older_version_is_told_apart() {
+        let admin = SecretKey::generate();
+        let sealed = seal_request(&invite_for(&admin, "first"), &request()).unwrap();
+        assert!(is_unsealed_request(&postcard::to_stdvec(&request()).unwrap()));
+        assert!(!is_unsealed_request(&sealed));
+        assert!(!is_unsealed_request(b"junk"));
     }
 
     #[test]
