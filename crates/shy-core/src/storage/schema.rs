@@ -2,8 +2,9 @@
 //! is how many it has had. Stored data is kept from v0.1.0 on,
 //! so a change is a new migration at the end (additive), never an edit to
 //! one already released. A store from a newer app is refused ("update
-//! shyspace"): everyone moves to new versions together. Migrations run in
-//! one transaction, so they can't use `VACUUM` or `PRAGMA foreign_keys`.
+//! shyspace"): everyone moves to new versions together. One from a build
+//! that never shipped can't be read by any release, so it is refused as
+//! such. Migrations run in one transaction, so they can't use `VACUUM` or `PRAGMA foreign_keys`.
 
 use anyhow::{Context, Result, ensure};
 use rusqlite::Connection;
@@ -162,6 +163,10 @@ fn fingerprint_before_migrations() -> i32 {
     }
 }
 
+/// Above this, a `user_version` is no migration count but the fingerprint
+/// of a build that never shipped.
+const LARGEST_COUNT: i32 = 1_000;
+
 /// Sets up a new store, or brings an existing one up to date.
 pub(super) fn create_or_migrate(db: &mut Connection) -> Result<()> {
     migrate(db, MIGRATIONS)
@@ -173,6 +178,10 @@ fn migrate(db: &mut Connection, migrations: &[&str]) -> Result<()> {
         applied = 1;
     }
     let known = i32::try_from(migrations.len())?;
+    ensure!(
+        (0..=LARGEST_COUNT).contains(&applied),
+        "this workspace was made by a different, unreleased build of shyspace; create it again"
+    );
     ensure!(
         applied <= known,
         "this workspace was opened by a newer version of shyspace; update shyspace"
@@ -269,6 +278,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_store_from_an_unreleased_build_is_not_called_newer() {
+        for unknown in [1_234_567_890, -1_234_567_890, -1] {
+            let mut db = Connection::open_in_memory().unwrap();
+            db.execute_batch(FIRST_SCHEMA).unwrap();
+            db.pragma_update(None, "user_version", unknown).unwrap();
+
+            let error = create_or_migrate(&mut db).unwrap_err();
+
+            let message = error.to_string();
+            assert!(!message.contains("update shyspace"), "{unknown}: {message}");
+            assert!(message.contains("unreleased build"), "{unknown}: {message}");
+            assert_eq!(version(&db), unknown, "left as it was");
+        }
+    }
+
     /// Stores made before migrations hold this number or a count: a fingerprint computed
     /// from the code alone would follow an edit to the first migration and
     /// stop matching them.
@@ -295,7 +320,7 @@ mod tests {
         db.pragma_update(None, "user_version", fingerprint_before_migrations())
             .unwrap();
         assert!(
-            fingerprint_before_migrations() > 1_000,
+            fingerprint_before_migrations() > LARGEST_COUNT,
             "can't be taken for a count"
         );
 
