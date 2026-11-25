@@ -66,10 +66,11 @@ export function Composer({
     (sentLength > 0 || hasFiles) && !isTooLong && !(hasFiles && attachments.problem) && !attachments.upload;
 
   const updateText = useCallback((next: string) => setText(next), []);
-  // While editing, the draft is set aside and comes back afterwards.
+  // While editing, the draft is set aside and comes back afterwards; a draft
+  // stored meanwhile (a reply kept from a notification) joins it there.
   const [setAside, setSetAside] = useState("");
   const conversation = threadRoot ?? channelId;
-  const isDraftBack = useDraft(conversation, editing ? setAside : text, updateText);
+  const isDraftBack = useDraft(conversation, editing ? setAside : text, editing ? setSetAside : updateText);
   // An edit left unsaved here comes back with its text, not the message's.
   const resumed = useRef<{ messageId: string; text: string } | null>(null);
   const resumeEdit = useCallback(

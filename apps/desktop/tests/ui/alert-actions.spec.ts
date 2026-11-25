@@ -156,6 +156,29 @@ test("a reply kept as a draft shows in the message box already open there", asyn
   await expect(page.getByLabel("Message #random")).toHaveValue("yes");
 });
 
+test("a reply kept as a draft while you edit a message waits behind the edit", async ({ page }) => {
+  const message = await graceWritesInRandom(page, "Lunch?");
+  await openRandom(page);
+  const composer = page.getByLabel("Message #random");
+  await composer.fill("Lunch at noon");
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("");
+  await composer.press("ArrowUp");
+  await composer.fill("Lunch at one");
+  await page.evaluate(() => {
+    window.fake.notifications.failReplies = true;
+  });
+
+  await replyFromAlert(page, message, "yes");
+  await expect
+    .poll(() => page.evaluate(() => window.fake.alertsShown))
+    .toContainEqual({ title: "Your reply wasn't sent", body: "It's saved as a draft." });
+  await expect(composer).toHaveValue("Lunch at one");
+
+  await composer.press("Escape");
+  await expect(composer).toHaveValue("yes");
+});
+
 test("a reply kept as a draft joins what you're typing there, losing neither", async ({ page }) => {
   const message = await graceWritesInRandom(page, "Lunch?");
   await openRandom(page);
