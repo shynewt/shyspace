@@ -159,6 +159,15 @@ impl Store {
         let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
+
+    /// The admin's commits moving on from `first` up to `before`, in order.
+    pub fn commit_records_between(&self, first: u64, before: u64) -> Result<Vec<(u64, Vec<u8>)>> {
+        let mut statement = self.db.prepare(
+            "SELECT from_epoch, signed FROM commits WHERE from_epoch >= ? AND from_epoch < ? ORDER BY from_epoch",
+        )?;
+        let rows = statement.query_map([first, before], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
 }
 
 fn to_epoch_key(bytes: Vec<u8>) -> Result<EpochKey> {

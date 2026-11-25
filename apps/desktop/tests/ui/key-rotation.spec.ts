@@ -51,7 +51,9 @@ test("removing a member walks the admin through changing the storage key", async
 
   const moves = rotation.getByRole("list", { name: "Moved to the new key" });
   await expect(moves.getByRole("listitem").filter({ hasText: "Linus" })).toContainText("Not yet");
-  await expect(rotation).toContainText("Deleting the old key now cuts off 1 person who hasn't moved yet");
+  await expect(rotation).toContainText(
+    "Deleting the old key now cuts off 1 person who hasn't moved yet, until another member is online to pass them the new key.",
+  );
   await page.evaluate(() => window.fake.memberMovesToNewKey("Linus"));
   await expect(moves.getByRole("listitem").filter({ hasText: "Linus" })).toContainText("Moved");
   await expect(rotation).toContainText("Everyone has moved");

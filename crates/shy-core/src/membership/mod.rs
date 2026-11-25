@@ -3,7 +3,7 @@
 
 pub mod admin;
 pub(crate) mod commit;
-mod follow;
+pub(crate) mod follow;
 pub mod invite;
 pub(crate) mod keyring;
 pub mod mls;

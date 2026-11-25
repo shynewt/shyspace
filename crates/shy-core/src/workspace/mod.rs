@@ -202,6 +202,11 @@ pub(crate) struct Inner {
     pub seen_fork_proofs: Mutex<std::collections::HashMap<String, String>>,
     /// When we last dialed each peer over gossip, by our clock.
     pub last_dialed_ms: Mutex<std::collections::HashMap<iroh::PublicKey, i64>>,
+    /// Whom we asked for the storage settings since our key stopped
+    /// working; in memory only.
+    pub key_round: Mutex<crate::sync::key_handoff::KeyRound>,
+    /// When we last answered each member asking for the storage settings.
+    pub key_answers: Mutex<std::collections::HashMap<PublicKey, tokio::time::Instant>>,
     /// Others' presence, from heartbeats; in memory only.
     pub presence: Mutex<presence::PresenceBook>,
     pub huddles: Mutex<huddles::HuddleState>,

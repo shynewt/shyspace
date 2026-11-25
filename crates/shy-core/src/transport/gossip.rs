@@ -26,8 +26,19 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use super::direct::{DIRECT_ALPN, Direct, DirectMessage};
-use crate::{huddle::beacon::Beacon, ops::Envelope, sync::Hint, workspace::Heartbeat};
+use super::{
+    direct::{DIRECT_ALPN, Direct, DirectMessage},
+    key_handoff::{KEY_HANDOFF_ALPN, KeyHandoff, KeyRequestIn},
+};
+use crate::{
+    huddle::beacon::Beacon,
+    ops::Envelope,
+    sync::{
+        Hint,
+        key_handoff::{KeyAnswer, KeyRequest},
+    },
+    workspace::Heartbeat,
+};
 
 const MAX_MESSAGE_SIZE: usize = 256 * 1024;
 
@@ -61,6 +72,8 @@ pub enum Incoming {
         from: PublicKey,
         message: DirectMessage,
     },
+    /// A member asks for the storage settings, as its key stopped working.
+    KeyRequest(KeyRequestIn),
 }
 
 /// Who may be connected, and the connections they have open with us.
@@ -196,7 +209,8 @@ impl Net {
             .spawn(endpoint.clone());
         let mut router = Router::builder(endpoint.clone())
             .accept(iroh_gossip::ALPN, gossip.clone())
-            .accept(DIRECT_ALPN, Direct::new(incoming.clone()));
+            .accept(DIRECT_ALPN, Direct::new(incoming.clone()))
+            .accept(KEY_HANDOFF_ALPN, KeyHandoff::new(incoming.clone()));
         if let Some(extra) = extra {
             router = (extra.0)(&endpoint, router);
         }
@@ -315,6 +329,11 @@ impl Net {
     /// Sends a message straight to one member's device.
     pub async fn send_direct(&self, to: PublicKey, message: &DirectMessage) -> Result<()> {
         super::direct::send_direct(self.router.endpoint(), to, message).await
+    }
+
+    /// Asks one member's device for the storage settings.
+    pub async fn ask_for_storage_key(&self, member: PublicKey, request: &KeyRequest) -> Result<KeyAnswer> {
+        super::key_handoff::ask_for_storage_key(self.router.endpoint(), member, request).await
     }
 
     pub async fn nudge(&self) -> Result<()> {
@@ -612,5 +631,92 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_removed_member_we_connected_to_is_cut_off() {
         removed_member_is_cut_off(Dialer::Alice).await;
+    }
+
+    const ASKED: KeyRequest = KeyRequest {
+        epoch: 3,
+        settings_lamport: 40,
+    };
+
+    /// Answers every request for the storage settings with `answer`, and
+    /// passes on who asked what.
+    fn answer_key_requests(
+        mut inbox: mpsc::Receiver<Incoming>,
+        answer: Option<KeyAnswer>,
+    ) -> mpsc::UnboundedReceiver<(PublicKey, KeyRequest)> {
+        let (asked, asks) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(incoming) = inbox.recv().await {
+                if let Incoming::KeyRequest(request) = incoming {
+                    let _ = asked.send((request.from, request.request));
+                    let _ = request.reply.send(answer.clone());
+                }
+            }
+        });
+        asks
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_member_asking_for_the_storage_settings_gets_the_answer() {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice, alice_inbox) = local_net(&lookup).await;
+        let (bob_id, bob, _bob_inbox) = local_net(&lookup).await;
+        alice.set_members(&[alice_id, bob_id]);
+        bob.set_members(&[alice_id, bob_id]);
+        let mut asks = answer_key_requests(alice_inbox, Some(KeyAnswer::TooFarBehind));
+
+        let answer = bob.ask_for_storage_key(alice_id, &ASKED).await.unwrap();
+
+        assert_eq!(answer, KeyAnswer::TooFarBehind);
+        assert_eq!(asks.recv().await, Some((bob_id, ASKED)));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_outsider_cant_ask_for_the_storage_settings() {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice, alice_inbox) = local_net(&lookup).await;
+        let (outsider_id, outsider, _outsider_inbox) = local_net(&lookup).await;
+        alice.set_members(&[alice_id]);
+        outsider.set_members(&[alice_id, outsider_id]);
+        let mut asks = answer_key_requests(alice_inbox, Some(KeyAnswer::TooFarBehind));
+
+        assert!(outsider.ask_for_storage_key(alice_id, &ASKED).await.is_err());
+        assert!(asks.try_recv().is_err(), "the workspace never saw the request");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_oversized_request_for_the_storage_settings_is_refused_unread() {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice, alice_inbox) = local_net(&lookup).await;
+        let (bob_id, bob, _bob_inbox) = local_net(&lookup).await;
+        alice.set_members(&[alice_id, bob_id]);
+        bob.set_members(&[alice_id, bob_id]);
+        let mut asks = answer_key_requests(alice_inbox, Some(KeyAnswer::TooFarBehind));
+
+        let asking = async {
+            let connection = bob.router.endpoint().connect(alice_id, KEY_HANDOFF_ALPN).await?;
+            let (mut send, mut receive) = connection.open_bi().await?;
+            send.write_all(&[0; 64]).await?;
+            send.finish()?;
+            anyhow::Ok(receive.read_to_end(1024).await?)
+        };
+        let answered = tokio::time::timeout(Duration::from_secs(10), asking)
+            .await
+            .unwrap();
+
+        assert!(answered.is_err());
+        assert!(asks.try_recv().is_err(), "the workspace never saw the request");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_request_the_workspace_declines_gets_no_answer() {
+        let lookup = MemoryLookup::new();
+        let (alice_id, alice, alice_inbox) = local_net(&lookup).await;
+        let (bob_id, bob, _bob_inbox) = local_net(&lookup).await;
+        alice.set_members(&[alice_id, bob_id]);
+        bob.set_members(&[alice_id, bob_id]);
+        let _asks = answer_key_requests(alice_inbox, None);
+
+        assert!(bob.ask_for_storage_key(alice_id, &ASKED).await.is_err());
     }
 }

@@ -33,6 +33,17 @@ pub fn key_tag(access_key_id: &str) -> [u8; 8] {
     tag
 }
 
+/// Whether the bucket refused the keys (401 or 403), rather than failing
+/// for any other reason.
+pub fn is_refused(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<object_store::Error>(),
+            Some(object_store::Error::PermissionDenied { .. } | object_store::Error::Unauthenticated { .. })
+        )
+    })
+}
+
 pub struct ListedHead {
     pub author: PublicKey,
     /// Changes whenever the head is replaced.

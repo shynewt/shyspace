@@ -6,6 +6,7 @@ pub(crate) mod alerts;
 mod forks;
 mod gaps;
 mod heads;
+pub(crate) mod key_handoff;
 mod pacing;
 pub use pacing::Cadence;
 mod packing;
@@ -27,6 +28,7 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use tracing::warn;
 
+use key_handoff::KeyState;
 pub(crate) use pacing::has_slept;
 use pacing::{Pacing, SHORT_WAIT};
 
@@ -45,6 +47,8 @@ use crate::{
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
 /// How often commit slots, fork proofs and peers are looked at between sweeps.
 const SLOW_DUTIES_EVERY: Duration = Duration::from_secs(10 * 60);
+const KEY_REFUSED: &str = "The storage key on this device no longer works. It gets the new one from another member once one is online.";
+const KEY_TOO_FAR_BEHIND: &str = "This device has been away too long to get the new storage key from another member. Ask the admin for a new invite.";
 /// Batches bursts of writes (like typing) into one bucket upload.
 const PUSH_DEBOUNCE: Duration = Duration::from_millis(600);
 
@@ -118,6 +122,7 @@ impl Workspace {
                             warn!("ignoring a direct huddle beacon: {error:#}");
                         }
                     }
+                    Incoming::KeyRequest(asked) => receiver.answer_key_request(asked),
                     Incoming::Message(Wire::Presence(heartbeat)) => {
                         match receiver.receive_heartbeat(&heartbeat) {
                             Ok(true) => receiver.emit(Change::Members),
@@ -449,6 +454,18 @@ impl Workspace {
             // the result on its own.
             if let Err(error) = self.check_storage_protection_when_due().await {
                 warn!("couldn't check whether the bucket keeps deleted data: {error:#}");
+            }
+        }
+        // A refused key is checked for only after a pass that failed.
+        if !errors.is_empty()
+            && let Some(net) = &self.inner.net
+        {
+            match self.recover_storage_key(net).await {
+                Ok(KeyState::Working) => {}
+                Ok(KeyState::Recovered) => self.inner.wake.notify_one(),
+                Ok(KeyState::Refused) => errors.insert(0, anyhow::anyhow!(KEY_REFUSED)),
+                Ok(KeyState::TooFarBehind) => errors.insert(0, anyhow::anyhow!(KEY_TOO_FAR_BEHIND)),
+                Err(error) => errors.push(error),
             }
         }
         {

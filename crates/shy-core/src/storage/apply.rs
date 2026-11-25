@@ -237,7 +237,12 @@ impl Store {
             }
             Op::StorageSettings { bucket } => {
                 config::check_settings_change(self, bucket)?;
-                if !config::update_bucket(self, bucket, lamport)? {
+                let is_changed = config::update_bucket(self, bucket, lamport)?;
+                // Also when the settings came first from another member.
+                if lamport == config::bucket_lamport(self)? {
+                    config::record_settings_op(self, verified.seq)?;
+                }
+                if !is_changed {
                     return Ok(None);
                 }
                 Change::Storage

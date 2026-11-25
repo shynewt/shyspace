@@ -5,10 +5,15 @@ use anyhow::{Context, Result};
 use super::commit;
 use crate::{views::Change, workspace::Workspace};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CommitOutcome {
+    MovedOn,
+    RemovedSelf,
+}
+
 impl Workspace {
     pub(crate) async fn follow_admin_commits(&self) -> Result<()> {
-        let admin = self.inner.config.admin;
-        if self.me() == admin {
+        if self.is_admin() {
             return Ok(());
         }
         loop {
@@ -22,39 +27,49 @@ impl Workspace {
             let Some(bytes) = self.bucket().commit(epoch).await? else {
                 return Ok(());
             };
-            let verified = commit::verify(&bytes, epoch, &admin)
-                .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
-            // Frozen logs first: if undoing a removed member's late ops fails,
-            // nothing has moved on and the whole commit is retried.
-            let is_rebuilt = {
-                let state = self.state();
-                let mut is_rebuilt = false;
-                for frozen in &verified.frozen {
-                    is_rebuilt |=
-                        state
-                            .store
-                            .freeze_author(&frozen.member, frozen.last_seq, self.apply_context())?;
-                }
-                is_rebuilt
-            };
-            if is_rebuilt {
-                self.emit_all_views_changed()?;
-            }
-            let outcome = {
-                let mut state = self.state();
-                let outcome = state.mls.process_commit(&verified.commit, &admin)?;
-                state.store.put_commit_record(epoch, &bytes)?;
-                state.record_epoch()?;
-                outcome
-            };
-            self.forget_skipped_segments();
-            if outcome.removed_self {
-                self.mark_removed();
-                self.emit(Change::Removed);
+            if self.apply_admin_commit(epoch, &bytes)? == CommitOutcome::RemovedSelf {
                 return Ok(());
             }
-            self.emit(Change::Members);
         }
+    }
+
+    /// Applies the admin's commit that moves us on from `epoch`, wherever
+    /// its bytes came from: they're checked against the admin's signature.
+    pub(crate) fn apply_admin_commit(&self, epoch: u64, bytes: &[u8]) -> Result<CommitOutcome> {
+        let admin = self.inner.config.admin;
+        let verified = commit::verify(bytes, epoch, &admin)
+            .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
+        // Frozen logs first: if undoing a removed member's late ops fails,
+        // nothing has moved on and the whole commit is retried.
+        let is_rebuilt = {
+            let state = self.state();
+            let mut is_rebuilt = false;
+            for frozen in &verified.frozen {
+                is_rebuilt |=
+                    state
+                        .store
+                        .freeze_author(&frozen.member, frozen.last_seq, self.apply_context())?;
+            }
+            is_rebuilt
+        };
+        if is_rebuilt {
+            self.emit_all_views_changed()?;
+        }
+        let outcome = {
+            let mut state = self.state();
+            let outcome = state.mls.process_commit(&verified.commit, &admin)?;
+            state.store.put_commit_record(epoch, bytes)?;
+            state.record_epoch()?;
+            outcome
+        };
+        self.forget_skipped_segments();
+        if outcome.removed_self {
+            self.mark_removed();
+            self.emit(Change::Removed);
+            return Ok(CommitOutcome::RemovedSelf);
+        }
+        self.emit(Change::Members);
+        Ok(CommitOutcome::MovedOn)
     }
 
     /// Re-uploads any admin commit we know of that is missing or altered in

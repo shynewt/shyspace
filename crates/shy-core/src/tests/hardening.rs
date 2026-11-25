@@ -4927,3 +4927,156 @@ async fn an_insert_packed_with_mentions_is_read_in_linear_time() {
     assert!(started.elapsed() < std::time::Duration::from_secs(30));
     assert_eq!(admin.inbox().unwrap().page_mentions.len(), 1);
 }
+
+mod storage_key_handoff {
+    //! Storage settings one member hands another whose bucket key stopped
+    //! working (see `sync/key_handoff.rs`).
+
+    use iroh::SecretKey;
+
+    use super::{
+        super::key_rotation::{FIRST_KEY, Provider, admin_bob_carol, change_key},
+        *,
+    };
+    use crate::sync::key_handoff::{KeyAnswer, KeyRequest};
+
+    fn key_in_use(member: &Workspace) -> String {
+        member.storage_settings().unwrap().access_key_id
+    }
+
+    /// What Bob hands Carol for `request`, which must be settings.
+    fn settings_from(
+        bob: &Workspace,
+        carol: &Workspace,
+        request: &KeyRequest,
+    ) -> (Vec<(u64, Vec<u8>)>, Envelope) {
+        match bob.key_answer_for(&carol.me(), request).unwrap() {
+            KeyAnswer::Settings { commits, settings } => (commits, settings),
+            other => panic!("expected settings, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn storage_settings_not_signed_by_the_admin_are_refused() {
+        let provider = Provider::new();
+        let (_root, admin, bob, carol) = admin_bob_carol(&provider).await;
+        let mut bucket = carol.bucket_config().unwrap();
+        bucket.access_key_id = "bobs-key".into();
+        bucket.secret_access_key = "bobs-secret".into();
+        let signed_by_bob = Forger::new(&bob).seal_at(1 << 20, Op::StorageSettings { bucket });
+        let mut claiming_the_admin = signed_by_bob.clone();
+        claiming_the_admin.author = admin.me();
+
+        for settings in [signed_by_bob, claiming_the_admin] {
+            let handed = KeyAnswer::Settings {
+                commits: Vec::new(),
+                settings,
+            };
+            assert!(carol.take_key_answer(handed).is_err());
+            assert_eq!(key_in_use(&carol), FIRST_KEY);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn forged_or_missing_commits_handed_over_change_nothing() {
+        let provider = Provider::new();
+        let (root, admin, bob, carol) = admin_bob_carol(&provider).await;
+        let dave = join_connected(
+            &admin,
+            &root.path().join("dave"),
+            &provider.bucket(),
+            provider.connector(),
+            "Dave",
+        )
+        .await;
+        sync_all(&[&admin, &bob, &carol, &dave]).await;
+        let epoch = dave.state().mls.epoch().unwrap();
+        let request = dave.key_request().unwrap();
+
+        admin.remove_member(&carol.my_id()).await.unwrap();
+        admin.remove_member(&bob.my_id()).await.unwrap();
+        change_key(&admin, "second").await;
+        let (commits, settings) = settings_from(&admin, &dave, &request);
+        assert_eq!(commits.len(), 2);
+
+        let forged = vec![(epoch, b"not a commit".to_vec()), commits[1].clone()];
+        let only_the_second = vec![commits[1].clone()];
+        for commits in [forged, only_the_second] {
+            let handed = KeyAnswer::Settings {
+                commits,
+                settings: settings.clone(),
+            };
+            assert!(dave.take_key_answer(handed).is_err());
+            assert_eq!(dave.state().mls.epoch().unwrap(), epoch);
+            assert_eq!(key_in_use(&dave), FIRST_KEY);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn older_storage_settings_handed_over_change_nothing() {
+        let provider = Provider::new();
+        let (_root, admin, bob, carol) = admin_bob_carol(&provider).await;
+        let first = carol.key_request().unwrap();
+        change_key(&admin, "second").await;
+        sync_all(&[&admin, &bob]).await;
+        let older = settings_from(&bob, &carol, &first);
+        change_key(&admin, "third").await;
+        sync_all(&[&admin, &bob, &carol]).await;
+        assert_eq!(key_in_use(&carol), "third");
+
+        let handed = KeyAnswer::Settings {
+            commits: older.0,
+            settings: older.1,
+        };
+        assert!(!carol.take_key_answer(handed).unwrap());
+        assert_eq!(key_in_use(&carol), "third");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn only_another_current_member_is_answered() {
+        let provider = Provider::new();
+        let (_root, admin, bob, carol) = admin_bob_carol(&provider).await;
+        let request = KeyRequest {
+            epoch: 0,
+            settings_lamport: 0,
+        };
+        change_key(&admin, "second").await;
+        sync_all(&[&admin, &bob]).await;
+
+        let stranger = SecretKey::generate().public();
+        assert!(bob.key_answer_for(&stranger, &request).is_err());
+        assert!(bob.key_answer_for(&bob.me(), &request).is_err());
+        assert!(bob.key_answer_for(&carol.me(), &request).is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_member_asking_again_and_again_is_answered_once_a_minute() {
+        let provider = Provider::new();
+        let (_root, admin, bob, carol) = admin_bob_carol(&provider).await;
+
+        assert!(bob.may_answer_key_request(&carol.me()));
+        assert!(!bob.may_answer_key_request(&carol.me()));
+        assert!(
+            bob.may_answer_key_request(&admin.me()),
+            "others are still answered"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handed_over_settings_carry_no_readable_credentials() {
+        let provider = Provider::new();
+        let (_root, admin, bob, carol) = admin_bob_carol(&provider).await;
+        let request = carol.key_request().unwrap();
+        change_key(&admin, "second").await;
+        sync_all(&[&admin, &bob]).await;
+        let (commits, settings) = settings_from(&bob, &carol, &request);
+        let answer = KeyAnswer::Settings { commits, settings };
+
+        let on_the_wire = postcard::to_stdvec(&answer).unwrap();
+        let secret = b"second-secret";
+        assert!(!on_the_wire.windows(secret.len()).any(|window| window == secret));
+        let printed = format!("{answer:?}");
+        assert!(!printed.contains("second"), "{printed}");
+        assert!(printed.len() < 80, "only counts are printed: {printed}");
+    }
+}

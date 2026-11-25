@@ -15,6 +15,7 @@ const BUCKET_META: &str = "bucket_config";
 /// plain workspace.json, so an edited file can't name a new admin.
 const IDENTITY_META: &str = "workspace_identity";
 const BUCKET_LAMPORT_META: &str = "bucket_config_lamport";
+const SETTINGS_OP_META: &str = "bucket_config_op_seq";
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceConfig {
@@ -146,7 +147,26 @@ pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) 
     }
     store.set_meta(BUCKET_META, &serde_json::to_vec(bucket)?)?;
     store.set_meta(BUCKET_LAMPORT_META, &lamport.to_be_bytes())?;
+    store.delete_meta(SETTINGS_OP_META)?;
     Ok(true)
+}
+
+/// Remembers which of the admin's ops set the bucket settings in use, so
+/// they can be handed to a member whose key stopped working.
+pub(crate) fn record_settings_op(store: &Store, seq: u64) -> Result<()> {
+    store.set_meta(SETTINGS_OP_META, &seq.to_be_bytes())
+}
+
+/// The seq of the admin's op that set the settings in use, if they came
+/// from one this device applied (not with an invite, nor handed over).
+pub(crate) fn settings_op_seq(store: &Store) -> Result<Option<u64>> {
+    let Some(bytes) = store.meta(SETTINGS_OP_META)? else {
+        return Ok(None);
+    };
+    let bytes: [u8; 8] = bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("corrupt settings op seq"))?;
+    Ok(Some(u64::from_be_bytes(bytes)))
 }
 
 /// Writes a file only its owner can read.

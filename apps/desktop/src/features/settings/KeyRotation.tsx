@@ -127,7 +127,8 @@ function RotationSteps({ rotation }: { rotation: StorageRotation }) {
           {rotation.has_new_key && waiting > 0 && (
             <p className="text-warning-text">
               Deleting the old key now cuts off {waiting} {waiting === 1 ? "person who hasn't" : "people who haven't"}{" "}
-              moved yet: they'd need a new invite.
+              moved yet, until another member is online to pass them the new key. If nobody is, they'd need a new
+              invite.
             </p>
           )}
           {rotation.members.length > 0 && (

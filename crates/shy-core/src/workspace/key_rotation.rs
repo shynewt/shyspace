@@ -14,7 +14,10 @@ use crate::{
     config,
     ops::Op,
     storage::Store,
-    transport::{bucket::BucketConfig, heads::key_tag},
+    transport::{
+        bucket::BucketConfig,
+        heads::{is_refused, key_tag},
+    },
     views::{Change, MemberMove, OldKeyCheck, OldKeyState, StorageProvider, StorageRotation, member_id},
 };
 
@@ -76,17 +79,6 @@ fn provider_of(endpoint: &str) -> StorageProvider {
     } else {
         StorageProvider::Other
     }
-}
-
-/// Whether the bucket refused these keys (401 or 403), rather than
-/// failing for any other reason.
-fn is_refused(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| {
-        matches!(
-            cause.downcast_ref::<object_store::Error>(),
-            Some(object_store::Error::PermissionDenied { .. } | object_store::Error::Unauthenticated { .. })
-        )
-    })
 }
 
 impl Workspace {
