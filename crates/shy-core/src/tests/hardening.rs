@@ -5317,3 +5317,35 @@ async fn an_object_larger_than_its_stated_size_is_cut_off_while_reading() {
         "what fits still reads"
     );
 }
+
+/// Mentions of you are kept one per page and author, and an update may
+/// name any page; one member mentioning you in page after page keeps only
+/// their newest, and can't push anyone else's out.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_mentioning_you_in_many_pages_cant_fill_the_inbox() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let carols_page = carol.create_page("Notes", None).unwrap();
+    carol
+        .edit_page(&carols_page, crate::pages::Edit::Append(&page_mention_of(&admin)))
+        .unwrap();
+    sync_all(&[&admin, &carol]).await;
+
+    for round in 0..60 {
+        let page = bob.create_page(&format!("Spam {round}"), None).unwrap();
+        bob.edit_page(&page, crate::pages::Edit::Append(&page_mention_of(&admin)))
+            .unwrap();
+    }
+    sync_all(&[&admin, &bob]).await;
+
+    let mentions = admin.inbox().unwrap().page_mentions;
+    let from = |member: &Workspace| {
+        mentions
+            .iter()
+            .filter(|mention| mention.author == member.my_id())
+            .count()
+    };
+    assert_eq!(from(&bob), 50, "only Bob's newest");
+    assert_eq!(from(&carol), 1, "Carol's stays");
+}

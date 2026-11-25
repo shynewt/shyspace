@@ -119,6 +119,7 @@ impl Workspace {
     /// removed member's late edits, undone by a rebuild. Deleted text still
     /// counts; its mention points where it was.
     pub(crate) fn forget_undone_page_mentions(&self, state: &State) -> Result<Vec<Change>> {
+        state.store.forget_read_page_mentions()?;
         let mut by_page: BTreeMap<String, Vec<PageMentionSpot>> = BTreeMap::new();
         for spot in state.store.page_mention_positions()? {
             by_page.entry(spot.page.clone()).or_default().push(spot);
