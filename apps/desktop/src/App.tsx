@@ -20,6 +20,8 @@ type Phase =
   | { kind: "onboarding" }
   /** Workspaces are on this device but wouldn't open. */
   | { kind: "failed"; reason: string }
+  /** Creating, joining or restoring a workspace from the failed screen, with a way back to it. */
+  | { kind: "replacing"; reason: string }
   | { kind: "ready"; session: Session }
   /** Joining, creating or restoring another workspace, with a way back to `session`. */
   | { kind: "adding"; session: Session };
@@ -76,7 +78,21 @@ export function App() {
             </motion.div>
           </motion.div>
         )}
-        {phase.kind === "failed" && <OpenFailed key="failed" reason={phase.reason} onRetry={open} />}
+        {phase.kind === "failed" && (
+          <OpenFailed
+            key="failed"
+            reason={phase.reason}
+            onRetry={open}
+            onSetUpAnother={() => setPhase({ kind: "replacing", reason: phase.reason })}
+          />
+        )}
+        {phase.kind === "replacing" && (
+          <Onboarding
+            key="replacing"
+            onReady={(session) => setPhase({ kind: "ready", session })}
+            onCancel={() => setPhase({ kind: "failed", reason: phase.reason })}
+          />
+        )}
         {phase.kind === "onboarding" && (
           <Onboarding key="onboarding" onReady={(session) => setPhase({ kind: "ready", session })} />
         )}
