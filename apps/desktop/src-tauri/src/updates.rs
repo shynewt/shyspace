@@ -102,15 +102,19 @@ pub async fn check_for_update(
         .inspect_err(|error| tracing::warn!("checking for an update failed: {error}"))
 }
 
-/// The feed answers with an error status (404) until the first release is
-/// published, and the updater reports any error status as `ReleaseNotFound`:
-/// there's nothing to update to. Network, format and signature failures
-/// stay errors.
+/// The updater reports any error status from the feed as `ReleaseNotFound`,
+/// without the status, so a missing feed can't be told from a failing one.
+/// Either way there's nothing to update to now, so it's no update, said in
+/// the log: a published feed shouldn't answer with an error. Network,
+/// format and signature failures stay errors.
 fn nothing_unless_published<Found>(
     checked: Result<Option<Found>, tauri_plugin_updater::Error>,
 ) -> CommandResult<Option<Found>> {
     match checked {
-        Err(tauri_plugin_updater::Error::ReleaseNotFound) => Ok(None),
+        Err(tauri_plugin_updater::Error::ReleaseNotFound) => {
+            tracing::warn!("the update feed answered with an error status; no update is offered");
+            Ok(None)
+        }
         checked => checked.map_err(|error| error.to_string()),
     }
 }
