@@ -197,9 +197,11 @@ pub(crate) struct Inner {
     pub cadence: Mutex<crate::sync::Cadence>,
     /// What each author has in the bucket, for relaying ops that never got there.
     pub relays: Mutex<crate::sync::RelayState>,
-    /// Fork proof objects in the bucket already looked at, by path, with the
-    /// version we saw: our own found intact, and ones found overwritten.
+    /// Copies of our fork proofs found intact in the bucket this run, by
+    /// path, with the version seen.
     pub seen_fork_proofs: Mutex<std::collections::HashMap<String, String>>,
+    /// Failed downloads of fork proof objects this run, by path.
+    pub fork_proof_failures: Mutex<std::collections::HashMap<String, u32>>,
     /// When we last dialed each peer over gossip, by our clock.
     pub last_dialed_ms: Mutex<std::collections::HashMap<iroh::PublicKey, i64>>,
     /// Whom we asked for the storage settings since our key stopped

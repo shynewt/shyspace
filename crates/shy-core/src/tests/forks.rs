@@ -5,7 +5,7 @@ use super::support::*;
 use crate::{
     Workspace,
     ops::{Envelope, Op, new_owned_id},
-    transport::bucket::{Bucket, fork_proof_path},
+    transport::bucket::Bucket,
 };
 
 fn message(author: &Workspace, channel: &str, text: &str) -> Op {
@@ -122,8 +122,8 @@ async fn a_copy_encrypted_again_frames_nobody() {
         encrypted_again(&fork.for_admin, &epoch_key, 100),
     );
     let proof = postcard::to_stdvec(&copies).unwrap();
-    let path = fork_proof_path(&fork.bob.me(), fork.for_admin.seq, &proof);
-    fork.bucket
+    let (path, _) = fork
+        .bucket
         .put_fork_proof(&fork.bob.me(), fork.for_admin.seq, proof)
         .await
         .unwrap();
@@ -186,8 +186,8 @@ async fn a_proof_for_an_epoch_far_ahead_is_refused_and_not_fetched_again() {
     let mut far_ahead = fork.for_carol.clone();
     far_ahead.epoch += 1_000;
     let proof = postcard::to_stdvec(&(fork.for_admin.clone(), far_ahead)).unwrap();
-    let path = fork_proof_path(&fork.bob.me(), fork.for_admin.seq, &proof);
-    fork.bucket
+    let (path, _) = fork
+        .bucket
         .put_fork_proof(&fork.bob.me(), fork.for_admin.seq, proof)
         .await
         .unwrap();

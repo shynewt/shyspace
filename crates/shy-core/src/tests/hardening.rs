@@ -12,7 +12,7 @@ use bytes::Bytes;
 use futures_lite::{StreamExt, stream};
 use iroh::SecretKey;
 use object_store::{
-    CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
+    CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore, ObjectStoreExt,
     PutMultipartOptions, PutOptions, PutPayload, PutResult, memory::InMemory, path::Path,
 };
 
@@ -2979,6 +2979,11 @@ struct FlakyStore {
     refused_reads: std::sync::atomic::AtomicUsize,
     /// Every download claims a size of one byte, whatever it holds.
     understates_sizes: std::sync::atomic::AtomicBool,
+    /// Puts over an existing object under this prefix are refused, as a
+    /// retention lock does.
+    refuse_overwrites_under: Mutex<Option<String>>,
+    /// Every key downloaded, in order.
+    downloads: Mutex<Vec<String>>,
 }
 
 impl fmt::Display for FlakyStore {
@@ -3057,6 +3062,15 @@ impl ObjectStore for FlakyStore {
         if is_refused {
             return Err(Self::failure());
         }
+        let is_locked = self
+            .refuse_overwrites_under
+            .lock()
+            .unwrap()
+            .clone()
+            .is_some_and(|locked| location.as_ref().starts_with(&locked));
+        if is_locked && self.inner.head(location).await.is_ok() {
+            return Err(Self::failure());
+        }
         let put = self.inner.put_opts(location, payload, opts).await?;
         self.unreadable.lock().unwrap().remove(location.as_ref());
         Ok(put)
@@ -3069,6 +3083,7 @@ impl ObjectStore for FlakyStore {
         self.inner.put_multipart_opts(location, opts).await
     }
     async fn get_opts(&self, location: &Path, options: GetOptions) -> object_store::Result<GetResult> {
+        self.downloads.lock().unwrap().push(location.to_string());
         let is_blip = self.unreadable_once.lock().unwrap().remove(location.as_ref());
         if is_blip || self.unreadable.lock().unwrap().contains(location.as_ref()) {
             self.refused_reads
@@ -3411,8 +3426,8 @@ async fn an_unreadable_fork_proof_doesnt_stop_the_others() {
     assert!(downloads <= 3, "downloaded {downloads} times");
 }
 
-/// Our own fork proof made unreadable in the bucket is put back, without
-/// first needing to read what's there.
+/// Our own fork proof made unreadable in the bucket is put back, under a
+/// new name.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unreadable_copy_of_our_fork_proof_is_put_back() {
     let root = tempfile::tempdir().unwrap();
@@ -3422,7 +3437,11 @@ async fn an_unreadable_copy_of_our_fork_proof_is_put_back() {
 
     admin.sync().await;
 
-    assert!(bucket.fork_proof(&proof).await.is_ok(), "readable again");
+    let mut readable = 0;
+    for path in store.keys_under(&format!("ops/forks/{}/", bob.my_id())).await {
+        readable += usize::from(matches!(bucket.fork_proof(&path).await, Ok(Some(_))));
+    }
+    assert_eq!(readable, 1, "a readable copy is back");
 }
 
 /// A head that can't be read is settled once its author's log is read, not
@@ -5316,4 +5335,192 @@ async fn an_object_larger_than_its_stated_size_is_cut_off_while_reading() {
         Some(b"small".as_slice()),
         "what fits still reads"
     );
+}
+
+mod fork_proof_names {
+    //! Fork proofs go up under names nobody can know beforehand (see
+    //! `sync/forks.rs`).
+
+    use super::*;
+
+    /// Two versions of Bob's next op, neither in his log.
+    fn two_versions(admin: &Workspace, bob: &Workspace) -> (Envelope, Envelope) {
+        let general = channel_id(admin, "general");
+        let message = |text: &str| Op::Message {
+            id: crate::ops::new_owned_id(&bob.me()),
+            channel: general.clone(),
+            text: text.into(),
+            reply_to: None,
+        };
+        let one = Forger::new(bob).seal(message("one version"));
+        let other = Forger::new(bob).seal(message("another version"));
+        (one, other)
+    }
+
+    fn proof_downloads(store: &FlakyStore, bob: &Workspace) -> usize {
+        let prefix = format!("ops/forks/{}/", bob.my_id());
+        let downloads = store.downloads.lock().unwrap();
+        downloads.iter().filter(|key| key.starts_with(&prefix)).count()
+    }
+
+    /// Bob knows both versions, so he could compute the proof and its old
+    /// name; on a bucket that refuses overwrites, junk he put there first
+    /// would have kept the real proof out for good.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_forking_author_cant_take_the_proofs_name_first_on_a_locked_bucket() {
+        let root = tempfile::tempdir().unwrap();
+        let (store, bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+        *store.refuse_overwrites_under.lock().unwrap() = Some("ops/".into());
+        let (one, other) = two_versions(&admin, &bob);
+        for proof in [(one.clone(), other.clone()), (other.clone(), one.clone())] {
+            let proof = postcard::to_stdvec(&proof).unwrap();
+            let predictable = format!(
+                "ops/forks/{}/{:020}/{}",
+                bob.my_id(),
+                one.seq,
+                blake3::hash(&proof).to_hex()
+            );
+            bucket.put_raw(&predictable, b"junk".to_vec()).await.unwrap();
+        }
+
+        admin.receive(one.clone()).unwrap();
+        admin.receive(other).unwrap();
+        carol.receive(one.clone()).unwrap();
+        admin.sync().await;
+        carol.sync().await;
+
+        assert!(carol.state().store.is_forked(&bob.me(), one.seq).unwrap());
+    }
+
+    /// Junk names, even empty ones that sort before any real proof, cost
+    /// one download each, ever, also across a restart, and don't hold the
+    /// real proof back.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn junk_names_cost_one_download_each_ever() {
+        let root = tempfile::tempdir().unwrap();
+        let (store, bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+        let (one, other) = two_versions(&admin, &bob);
+        let junk = 200;
+        for index in 0..junk {
+            let name = format!("ops/forks/{}/{:020}/junk-{index}", bob.my_id(), one.seq);
+            bucket.put_raw(&name, Vec::new()).await.unwrap();
+        }
+        admin.receive(one.clone()).unwrap();
+        admin.receive(other).unwrap();
+        carol.receive(one.clone()).unwrap();
+        admin.sync().await;
+        store.downloads.lock().unwrap().clear();
+
+        carol.sync().await;
+        assert!(carol.state().store.is_forked(&bob.me(), one.seq).unwrap());
+        let first = proof_downloads(&store, &bob);
+        assert!(first <= junk + 1, "each once: {first}");
+        carol.sync().await;
+        drop(carol);
+        let carol = Workspace::open_with(
+            &data_dir(&root.path().join("carol")),
+            connector(&bucket),
+            Networking::Offline,
+        )
+        .await
+        .unwrap();
+        carol.sync().await;
+
+        let junk_downloads = store
+            .downloads
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|key| key.contains("/junk-"))
+            .count();
+        assert_eq!(junk_downloads, junk, "each junk name once, never again");
+        // Besides, Carol checks once a run that the bucket holds her proof.
+        assert!(proof_downloads(&store, &bob) <= first + 1);
+    }
+
+    /// The admin, holding the proof, keeps one copy in the bucket however
+    /// often it syncs or restarts.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_holder_puts_up_its_proof_once_across_restarts() {
+        let root = tempfile::tempdir().unwrap();
+        let (store, bucket, admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+        let (one, other) = two_versions(&admin, &bob);
+        admin.receive(one).unwrap();
+        admin.receive(other).unwrap();
+        for _ in 0..3 {
+            admin.sync().await;
+        }
+        drop(admin);
+        let admin = Workspace::open_with(
+            &data_dir(&root.path().join("ada")),
+            connector(&bucket),
+            Networking::Offline,
+        )
+        .await
+        .unwrap();
+        admin.sync().await;
+
+        let copies = store.keys_under(&format!("ops/forks/{}/", bob.my_id())).await;
+        assert_eq!(copies.len(), 1, "{copies:?}");
+    }
+
+    /// Junk named like a copy of the proof (its hash, then anything) is
+    /// checked, found not to hold it, and the real proof still goes up.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn junk_named_after_the_proof_doesnt_stop_it_going_up() {
+        let root = tempfile::tempdir().unwrap();
+        let (store, bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+        *store.refuse_overwrites_under.lock().unwrap() = Some("ops/".into());
+        let (one, other) = two_versions(&admin, &bob);
+        for proof in [(one.clone(), other.clone()), (other.clone(), one.clone())] {
+            let hash = blake3::hash(&postcard::to_stdvec(&proof).unwrap()).to_hex();
+            let lookalike = format!("ops/forks/{}/{:020}/{hash}-junk", bob.my_id(), one.seq);
+            bucket.put_raw(&lookalike, b"junk".to_vec()).await.unwrap();
+        }
+
+        admin.receive(one.clone()).unwrap();
+        admin.receive(other).unwrap();
+        carol.receive(one.clone()).unwrap();
+        admin.sync().await;
+        carol.sync().await;
+
+        assert!(carol.state().store.is_forked(&bob.me(), one.seq).unwrap());
+    }
+
+    /// A real proof whose downloads fail for a while (a slow link, or
+    /// someone filling other failure counts) is tried again in a later run,
+    /// never given up on for good.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_proof_that_failed_to_download_is_tried_again_in_a_later_run() {
+        let root = tempfile::tempdir().unwrap();
+        let (store, bucket, admin, bob, carol) = on_a_flaky_store(root.path()).await;
+        let (one, other) = two_versions(&admin, &bob);
+        admin.receive(one.clone()).unwrap();
+        admin.receive(other).unwrap();
+        carol.receive(one.clone()).unwrap();
+        admin.sync().await;
+        let proof = store
+            .keys_under(&format!("ops/forks/{}/", bob.my_id()))
+            .await
+            .pop()
+            .unwrap();
+        store.unreadable.lock().unwrap().insert(proof);
+        for _ in 0..4 {
+            carol.sync().await;
+        }
+        assert!(!carol.state().store.is_forked(&bob.me(), one.seq).unwrap());
+
+        store.unreadable.lock().unwrap().clear();
+        drop(carol);
+        let carol = Workspace::open_with(
+            &data_dir(&root.path().join("carol")),
+            connector(&bucket),
+            Networking::Offline,
+        )
+        .await
+        .unwrap();
+        carol.sync().await;
+
+        assert!(carol.state().store.is_forked(&bob.me(), one.seq).unwrap());
+    }
 }

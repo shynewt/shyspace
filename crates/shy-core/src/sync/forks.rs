@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use bytes::Bytes;
 use iroh::PublicKey;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -18,10 +19,20 @@ use crate::{
     crypto,
     ops::Envelope,
     storage::CheckedFork,
-    transport::bucket::{ListedObject, ListedProof, MAX_FORK_PROOF_BYTES, fork_proof_path},
+    transport::bucket::{ListedProof, MAX_FORK_PROOF_BYTES},
     views::Change,
     workspace::{State, Workspace},
 };
+
+/// Bytes of new fork proof objects fetched a pass, smallest first, and at
+/// least one: each object is fetched once, ever, so this only spreads out
+/// the work junk listed under many names costs.
+const PROOF_BYTES_PER_PASS: u64 = MAX_FORK_PROOF_BYTES;
+const PROOF_FETCHES_PER_PASS: usize = 1_000;
+/// Downloads of one proof object that may fail in a run before it waits
+/// for the next run: a failure is never taken as an answer, as the network
+/// may be to blame.
+const PROOF_FETCH_TRIES: u32 = 3;
 
 /// Two versions of one op, each one byte-for-byte as it arrived.
 #[derive(Serialize, Deserialize)]
@@ -80,10 +91,17 @@ impl Workspace {
     }
 
     /// Learns the forks proved in the bucket, and puts there the proofs of
-    /// ours it lacks (also bringing back any that went missing).
+    /// ours it lacks (also bringing back any that went missing). Each object
+    /// is fetched once, ever: its name is new for every copy put, and what
+    /// it held is remembered in the store, so junk under many names costs
+    /// one download each. Smallest first, a share of bytes a pass.
     pub(super) async fn share_forks(&self) -> Result<()> {
         let bucket = self.bucket();
-        let listed = bucket.fork_proofs().await?;
+        let mut listed = bucket.fork_proofs().await?;
+        listed.sort_by_key(|listing| listing.size);
+        let mut bytes_left = PROOF_BYTES_PER_PASS;
+        let mut fetches_left = PROOF_FETCHES_PER_PASS;
+        let mut has_fetched = false;
         let mut proved = Vec::new();
         for listing in &listed {
             let ListedProof {
@@ -91,44 +109,30 @@ impl Workspace {
             } = listing;
             let should_fetch = {
                 let store = &self.state().store;
-                !self.is_seen(listing)
-                    && !store.is_forked(author, *seq)?
-                    && store.should_fetch_fork_proof(path)?
+                !store.is_forked(author, *seq)? && store.should_fetch_fork_proof(path)?
             };
-            if !should_fetch {
+            if !should_fetch || self.has_failed_too_often(listing) {
                 continue;
             }
-            let proof = match bucket.fork_proof(path).await {
-                Ok(Some(proof)) => proof,
-                Ok(None) => continue,
-                // Anyone with the bucket keys can put one a plain GET is
-                // refused; given up after a few tries, until it changes.
-                Err(error) => {
-                    warn!("passing over the fork proof {path} for now: it can't be fetched: {error:#}");
-                    let object = ListedObject {
-                        key: path.clone(),
-                        version: listing.version.clone(),
-                    };
-                    if self.is_given_up_after_failing(&object) {
-                        self.mark_seen(listing);
-                    }
-                    continue;
-                }
-            };
-            // Someone overwrote it: not the proof its name promises. Its
-            // holders put it back, which makes a new version to look at.
-            if !is_named_for(path, &proof) {
-                warn!("the fork proof {path} was overwritten");
-                self.mark_seen(listing);
+            if fetches_left == 0 || (has_fetched && listing.size > bytes_left) {
                 continue;
             }
+            has_fetched = true;
+            fetches_left -= 1;
+            bytes_left = bytes_left.saturating_sub(listing.size);
+            let Some(proof) = self.fetch_fork_proof(listing).await? else {
+                continue;
+            };
             let state = self.state();
             match judge(&state, author, *seq, &proof)? {
-                Verdict::Forked => proved.push(CheckedFork {
-                    author: *author,
-                    seq: *seq,
-                    proof: proof.to_vec(),
-                }),
+                Verdict::Forked => {
+                    self.found_ours(listing);
+                    proved.push(CheckedFork {
+                        author: *author,
+                        seq: *seq,
+                        proof: proof.to_vec(),
+                    });
+                }
                 Verdict::Refused(reason) => {
                     warn!("ignoring the fork proof {path}: {reason}");
                     state.store.mark_fork_proof_checked(path, None)?;
@@ -145,46 +149,107 @@ impl Workspace {
         self.put_back_fork_proofs(&listed).await
     }
 
-    /// Puts our proofs in the bucket where they're missing, were
-    /// overwritten or can't be read. Each version of an object is fetched at
-    /// most once. One that can't be put back doesn't stop the others; the
-    /// first error is returned at the end.
+    /// Puts each of our proofs in the bucket unless an object listed for it
+    /// (one named after its hash) holds exactly it. Each such object is
+    /// checked once: one found holding it is remembered for this run, one
+    /// that doesn't is remembered in the store. One that can't be put
+    /// doesn't stop the others; the first error is returned at the end.
     async fn put_back_fork_proofs(&self, listed: &[ListedProof]) -> Result<()> {
         let bucket = self.bucket();
         let known = self.state().store.fork_proofs()?;
         let mut first_failure = None;
         for (author, seq, proof) in known {
-            let path = fork_proof_path(&author, seq, &proof);
-            let listing = listed.iter().find(|listing| listing.path == path);
-            let is_intact = match listing {
-                None => false,
-                Some(listing) if self.is_seen(listing) => true,
-                Some(listing) => {
-                    let is_ours = match bucket.fork_proof(&path).await {
-                        Ok(stored) => stored.is_some_and(|stored| *stored == proof),
-                        Err(error) => {
-                            warn!("our fork proof {path} can't be read, so it is put back: {error:#}");
-                            false
-                        }
-                    };
-                    if is_ours {
-                        self.mark_seen(listing);
-                    }
-                    is_ours
+            let hash = blake3::hash(&proof).to_hex();
+            let copies: Vec<&ListedProof> = listed
+                .iter()
+                .filter(|listing| listing.author == author && listing.seq == seq)
+                .filter(|listing| {
+                    listing
+                        .path
+                        .rsplit('/')
+                        .next()
+                        .is_some_and(|name| name.starts_with(hash.as_str()))
+                })
+                .collect();
+            let mut is_there = copies.iter().any(|listing| self.is_ours(listing));
+            for listing in copies {
+                if is_there {
+                    break;
                 }
-            };
-            if !is_intact && let Err(error) = bucket.put_fork_proof(&author, seq, proof).await {
-                first_failure.get_or_insert(error);
+                if !self.state().store.should_fetch_fork_proof(&listing.path)?
+                    || self.has_failed_too_often(listing)
+                {
+                    continue;
+                }
+                match self.fetch_fork_proof(listing).await? {
+                    Some(stored) if *stored == proof => {
+                        self.found_ours(listing);
+                        is_there = true;
+                    }
+                    Some(_) => self.state().store.mark_fork_proof_checked(&listing.path, None)?,
+                    None => {}
+                }
+            }
+            if is_there {
+                continue;
+            }
+            match bucket.put_fork_proof(&author, seq, proof).await {
+                Ok((path, Some(version))) => {
+                    self.seen_fork_proofs().insert(path, version);
+                }
+                // Without a version to know it by, it's checked next time.
+                Ok((_, None)) => {}
+                Err(error) => {
+                    first_failure.get_or_insert(error);
+                }
             }
         }
         first_failure.map_or(Ok(()), Err)
     }
 
-    fn is_seen(&self, listing: &ListedProof) -> bool {
+    /// The object's bytes, or `None` if there are none to judge: gone or
+    /// larger than any proof (remembered in the store, as it will never be
+    /// read), or failing to download (counted for this run only).
+    async fn fetch_fork_proof(&self, listing: &ListedProof) -> Result<Option<Bytes>> {
+        match self.bucket().fork_proof(&listing.path).await {
+            Ok(Some(proof)) => Ok(Some(proof)),
+            Ok(None) => {
+                self.state().store.mark_fork_proof_checked(&listing.path, None)?;
+                Ok(None)
+            }
+            // Anyone with the bucket keys can put one a plain GET is
+            // refused; it waits for the next run after a few tries.
+            Err(error) => {
+                warn!(
+                    "passing over the fork proof {} for now: it can't be fetched: {error:#}",
+                    listing.path
+                );
+                let mut failures = self.fork_proof_failures();
+                let count = failures.entry(listing.path.clone()).or_insert(0);
+                *count = count.saturating_add(1);
+                Ok(None)
+            }
+        }
+    }
+
+    fn has_failed_too_often(&self, listing: &ListedProof) -> bool {
+        self.fork_proof_failures()
+            .get(&listing.path)
+            .is_some_and(|count| *count >= PROOF_FETCH_TRIES)
+    }
+
+    fn fork_proof_failures(&self) -> std::sync::MutexGuard<'_, HashMap<String, u32>> {
+        self.inner
+            .fork_proof_failures
+            .lock()
+            .expect("fork proof failures lock poisoned by an earlier panic")
+    }
+
+    fn is_ours(&self, listing: &ListedProof) -> bool {
         self.seen_fork_proofs().get(&listing.path) == Some(&listing.version)
     }
 
-    fn mark_seen(&self, listing: &ListedProof) {
+    fn found_ours(&self, listing: &ListedProof) {
         self.seen_fork_proofs()
             .insert(listing.path.clone(), listing.version.clone());
     }
@@ -247,9 +312,4 @@ fn judge(state: &State, author: &PublicKey, seq: u64, proof: &[u8]) -> Result<Ve
         (None, [first, second]) if first != second => Verdict::Forked,
         _ => Verdict::Refused("the same op twice".into()),
     })
-}
-
-/// Whether `proof` is what the bucket path it came from was named after.
-fn is_named_for(path: &str, proof: &[u8]) -> bool {
-    path.rsplit('/').next() == Some(blake3::hash(proof).to_hex().as_str())
 }

@@ -523,6 +523,7 @@ impl Workspace {
                 refused_requests: Mutex::default(),
                 cadence: Mutex::new(Default::default()),
                 seen_fork_proofs: Mutex::new(std::collections::HashMap::new()),
+                fork_proof_failures: Mutex::default(),
                 last_dialed_ms: Mutex::new(std::collections::HashMap::new()),
                 presence: Mutex::new(Default::default()),
                 huddles: Mutex::new(Default::default()),

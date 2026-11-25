@@ -82,7 +82,7 @@ Everything is under a `<workspace id>/` prefix. Only ciphertext and public ids a
 | Path | Content |
 |---|---|
 | `ops/<author>/<last seq>-<first seq>-<nonce>-<hash>` | a segment of that author's envelopes, written create-only; the name leads with the last seq so a reader lists exactly what holds more than it has, holds a random nonce picked at upload so nobody can take the name first, and ends in a BLAKE3 hash of the nonce and the bytes. Packs are segments too: when an author has pushed through a multiple of 16, 256 or 4096 ops, they upload that aligned range again as one object (if it fits), so a reader catching up fetches a few wide objects rather than one per upload. Usually written by the author; any member may relay the author's own signed ops there when the author's upload never came, and readers check every op either way |
-| `ops/forks/<author>/<seq>/<hash>` | proof that the author signed two versions of that op: both envelopes |
+| `ops/forks/<author>/<seq>/<hash>-<random>` | proof that the author signed two versions of that op: both envelopes, under a name nobody can know beforehand (older proofs have just the hash) |
 | `mls/commit/<from epoch>` | admin-signed MLS commits; any member puts one back within 10 minutes if its slot goes missing or holds something else |
 | `invites/<token>/request` | a joiner's request, sealed to the admin, written through a presigned link |
 | `invites/<token>/answer` | the admin's answer, read through a presigned link |

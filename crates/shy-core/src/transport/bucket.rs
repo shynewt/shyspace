@@ -3,7 +3,7 @@
 //!
 //! Layout under the workspace prefix:
 //!   ops/<author>/<last seq>-<first seq>-<nonce>-<hash>   segments of envelopes
-//!   ops/forks/<author>/<seq>/<hash>       proof an author signed two versions of one op
+//!   ops/forks/<author>/<seq>/<hash>-<random> proof an author signed two versions of one op
 //!   mls/commit/<from epoch>               admin-signed commits, one per epoch
 //!   invites/<token>/request               a joiner's request (via presigned link)
 //!   invites/<token>/answer                the admin's answer (via presigned link)
@@ -314,16 +314,22 @@ pub struct ListedProof {
     pub path: String,
     /// Changes whenever the object is written again.
     pub version: String,
+    pub size: u64,
 }
 /// Two versions as large as a segment may hold, and their framing.
 pub const MAX_FORK_PROOF_BYTES: u64 = 2 * MAX_OBJECT_SIZE + 4096;
 
-pub fn fork_proof_path(author: &PublicKey, seq: u64, proof: &[u8]) -> String {
+/// A new name for a fork proof. The random part keeps the author who
+/// forked, who could compute the proof too, from taking its name first
+/// where a lock refuses overwrites. Readers judge a proof by its content,
+/// never by its name.
+fn new_fork_proof_path(author: &PublicKey, seq: u64, proof: &[u8]) -> String {
     format!(
-        "{FORKS_PREFIX}/{}/{}/{}",
+        "{FORKS_PREFIX}/{}/{}/{}-{}",
         member_id(author),
         padded(seq),
-        blake3::hash(proof).to_hex()
+        blake3::hash(proof).to_hex(),
+        hex::encode(rand::random::<[u8; 16]>())
     )
 }
 
@@ -548,12 +554,22 @@ impl Bucket {
         }
     }
 
-    /// Stores proof that `author` signed two versions of op `seq`. The proof
-    /// checks itself, and its name holds its hash, so readers can tell when
-    /// someone overwrote it.
-    pub async fn put_fork_proof(&self, author: &PublicKey, seq: u64, proof: Vec<u8>) -> Result<()> {
-        self.put(&Path::from(fork_proof_path(author, seq, &proof)), proof)
+    /// Stores proof that `author` signed two versions of op `seq`, under a
+    /// new name; the proof checks itself. Returns the name and, when the
+    /// store gives one, the version a listing will show.
+    pub async fn put_fork_proof(
+        &self,
+        author: &PublicKey,
+        seq: u64,
+        proof: Vec<u8>,
+    ) -> Result<(String, Option<String>)> {
+        let path = new_fork_proof_path(author, seq, &proof);
+        let written = self
+            .store
+            .put(&Path::from(path.as_str()), PutPayload::from(proof))
             .await
+            .context("putting a fork proof")?;
+        Ok((path, written.e_tag))
     }
 
     /// Every fork proof in the bucket. Names that don't parse are skipped.
@@ -578,6 +594,7 @@ impl Bucket {
                     seq,
                     path: meta.location.to_string(),
                     version,
+                    size: meta.size,
                 });
             }
         }
