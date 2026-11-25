@@ -33,6 +33,21 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByLabel("Message #general")).toBeVisible();
 });
 
+test("the key change warns that open invites stop working with the old key", async ({ page }) => {
+  await removeGrace(page);
+  const { panel } = await openStorage(page);
+  const rotation = card(panel);
+  await saveNewKey(panel);
+  await page.getByRole("button", { name: "I saved it" }).click();
+  const warning = "Deleting the old key also stops invites made before the change working. Make new ones afterwards.";
+  await expect(rotation).toContainText("Let everyone move to the new key");
+  await expect(rotation).not.toContainText(warning);
+
+  await page.evaluate(() => window.fake.handle("create_invite", { label: "for Ada" }));
+
+  await expect(rotation).toContainText(warning);
+});
+
 test("removing a member walks the admin through changing the storage key", async ({ page }) => {
   await removeGrace(page);
   const { tab, panel } = await openStorage(page);

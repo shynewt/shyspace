@@ -32,6 +32,6 @@ The steps list each member as **Moved** or **Not yet**, and a member moves the n
 
 Delete it at your provider. On AWS, deactivate it first, then delete it. Then choose **I deleted the old key**, and the app checks that the old key is refused.
 
-If an invite stops working after the change, make a new one ([#279](https://github.com/shynewt/shyspace/issues/279)).
+Invites made before the change stop working once the old key is deleted, since their links are signed with it; make new ones. The steps remind you while any invite is open or waiting for your answer, and someone trying an old invite is told to ask you for a new one.
 
 If you decide not to change the key, choose **Don't change the key**. The removed member's key may then keep working.

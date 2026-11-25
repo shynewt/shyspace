@@ -78,6 +78,9 @@ function RotationSteps({ rotation }: { rotation: StorageRotation }) {
   const steps = PROVIDER_STEPS[rotation.provider];
   const nameOf = (id: string) => displayName(members?.find((member) => member.id === id)?.name ?? "", id);
   const waiting = rotation.members.filter((move) => !move.has_moved).length;
+  // Their links are signed with the key in use when they were made.
+  const invites = useLive(api.invites, (change) => change.kind === "invites");
+  const hasPendingInvites = invites?.some((invite) => invite.state === "open" || invite.state === "requested") ?? false;
   const check = useFormAction(async () => {
     const found = await api.checkOldKeyDeleted();
     if (found === "dead") showToast("The old key is deleted. Removed members can't reach the bucket any more.");
@@ -129,6 +132,11 @@ function RotationSteps({ rotation }: { rotation: StorageRotation }) {
               Deleting the old key now cuts off {waiting} {waiting === 1 ? "person who hasn't" : "people who haven't"}{" "}
               moved yet, until another member is online to pass them the new key. If nobody is, they'd need a new
               invite.
+            </p>
+          )}
+          {rotation.has_new_key && hasPendingInvites && (
+            <p className="text-warning-text">
+              Deleting the old key also stops invites made before the change working. Make new ones afterwards.
             </p>
           )}
           {rotation.members.length > 0 && (
