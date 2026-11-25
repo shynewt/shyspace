@@ -52,7 +52,7 @@ The macOS app is signed and notarized by Apple. The Windows installer isn't sign
 
 ## Getting started
 
-1. **Set up a bucket.** A workspace needs one S3-compatible bucket: Scaleway, AWS S3, Cloudflare R2, your own MinIO, or another provider. [Setting up storage](docs/storage-setup.md) takes about 15 minutes and shows how to keep anyone with the bucket keys from deleting your history.
+1. **Set up a bucket.** A workspace needs one S3-compatible bucket: Scaleway, AWS S3, Cloudflare R2, your own MinIO, or another provider. [Choose a provider](docs/guide/storage/choose-a-provider.md) takes 15 to 30 minutes and shows how to keep anyone with the bucket keys from deleting your history.
 2. **Create a workspace** in the app with your bucket's details.
 3. **Invite people.** Choose **Invite people** in the menu under the workspace's name and send them the code. When they ask to join, you approve them; only then can they read anything.
 4. **Save a recovery kit** (Settings › Recovery). If you lose your device, it's how you get your workspace back as its admin.

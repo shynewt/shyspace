@@ -12,6 +12,7 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 | A removed member | read what they already had | read anything written after removal |
 | A current member | write as themselves | write as someone else, take over others' messages, change membership |
 | Someone who copies a member's data directory | nothing, without the device key | read messages, keys or credentials |
+| The relay and discovery servers devices connect through (n0's public ones, `presets::N0` in `transport/gossip.rs`) | see a device's IP address, when it's online, and which members' devices it talks to (by their public ids, which are their identity keys) and how much | read or forge content |
 
 ## Defenses, and where they live
 
@@ -89,7 +90,8 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 - Shared files aren't under the lock that protects `ops/` (they must stay deletable), so anyone with the bucket keys can delete or overwrite their pieces; a changed piece is refused, but the file is then lost unless the bucket keeps versions. A removed member keeps the bucket keys until the admin changes them (the app asks after every removal), and until then can still fetch the pieces of files shared before their removal, whose keys they already had. See #122.
 - **Huddle ghosts on public channels:** gossip doesn't say who first sent a message, so a member can replay another member's recent "joined" beacon (within the 2-minute clock skew) to a device that never heard that session, for example one that just restarted. The same works on a device that lost track of the session for 90 s (a dropped network) and missed its leave. The person then shows in the huddle for up to 90 s, but no audio flows, since nobody publishes at that session's path any more. Private huddles aren't affected: their beacons are bound to the sending device.
 - **Page cursor replays:** as with huddle beacons, gossip doesn't say who first sent a message, so a member can replay another member's beacon or cursor from the last 30 s to a device that hadn't heard it. The other member then shows on the page, at a place they recently were, until the 40 s timeout.
-- **Huddle audio over relays:** audio is encrypted between the two devices by QUIC, so a relay can't hear it, but it isn't sealed with the channel's key as messages are. Adding SFrame-style encryption with the channel key, for private channels first, is planned (#15).
+- **Huddle audio over relays:** audio is encrypted between the two devices by QUIC, so a relay can't hear it, but it isn't sealed with the channel's key as messages are. Adding SFrame-style encryption with the channel key, for private channels first, is planned (#275).
+- **Join request names:** the name a joiner types travels unencrypted in their join request (`JoinRequest.name`, `membership/invite.rs`), so anyone who reads the bucket can see it (#276).
 - Single admin. A recovery kit restores a lost admin device, but there is still only one admin at a time; restoring while the old device is alive would cause conflicting membership changes (#5).
 
 Issues labeled `security` track these: <https://github.com/shynewt/shyspace/issues?q=label%3Asecurity>
