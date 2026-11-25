@@ -182,6 +182,9 @@ pub fn show(app: &AppHandle, alert: Alert) -> Result<(), String> {
         let picture = picture.map(|picture| save_picture(app, &picture)).transpose()?;
         return crate::notify_macos::show(&identifier, &title, &body, category, picture.as_deref());
     }
+    // Linux notification servers may read the body as markup; members wrote it.
+    #[cfg(target_os = "linux")]
+    let body = escaped_for_markup(&body);
     let mut builder = app.notification().builder().title(title).body(body);
     if let Some(target) = target {
         let opened = OpenedAlert { workspace_id, target };
@@ -191,6 +194,22 @@ pub fn show(app: &AppHandle, alert: Alert) -> Result<(), String> {
         builder = builder.icon(save_picture(app, &picture)?);
     }
     builder.show().map_err(|error| error.to_string())
+}
+
+/// `text` with what notification markup reads as markup escaped, so a link
+/// or tag a member typed shows as typed.
+#[cfg(any(target_os = "linux", test))]
+fn escaped_for_markup(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 /// Most bytes a picture may take; an avatar needs a few kilobytes.
@@ -237,6 +256,15 @@ mod tests {
             member: member.into(),
             png: png.to_vec(),
         }
+    }
+
+    #[test]
+    fn a_members_text_shows_as_typed_not_as_markup() {
+        assert_eq!(
+            escaped_for_markup(r#"<a href="https://evil.example">click</a> & <b>more</b>"#),
+            r#"&lt;a href="https://evil.example"&gt;click&lt;/a&gt; &amp; &lt;b&gt;more&lt;/b&gt;"#
+        );
+        assert_eq!(escaped_for_markup("plain words"), "plain words");
     }
 
     #[test]
