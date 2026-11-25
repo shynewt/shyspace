@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/shynewt/shyspace/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/shynewt/shyspace?label=latest"></a>
+  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-6e7781">
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
 </p>
 
@@ -25,6 +26,8 @@
 </p>
 
 Shyspace is where your team talks, writes docs and works with AI agents, and nobody outside the team can read any of it. There's no server. Your devices talk to each other directly, and when someone's offline, what they missed waits for them in a storage bucket you choose (anything S3-compatible). The bucket only ever sees encrypted data.
+
+**Alpha.** shyspace works and we use it every day, but it's early: expect rough edges and changes between versions. Your data is kept across updates. The encryption hasn't had an independent security audit yet.
 
 It runs on macOS (Apple silicon), Windows and Linux. Apps for iOS and Android are coming soon ([#19](https://github.com/shynewt/shyspace/issues/19)).
 
