@@ -75,6 +75,8 @@ export class FakeBackend {
   /** What the window title, taskbar and tray last showed as needing you. */
   attentionCount = 0;
   /** How the app shows itself outside its window; tests set `platform` to see another system's settings. */
+  /** Makes opening the workspaces fail with this reason, as when a folder is locked. */
+  sessionFailure: string | null = null;
   /** The system's record of opening at login; `refusal` makes turning it on or off fail with that reason. */
   openAtLogin: { isOn: boolean; refusal: string | null } = { isOn: false, refusal: null };
   appIcon: AppIcon = { platform: "linux", is_in_menu_bar: false, shows_unread_count: true, is_tray_monochrome: false };
@@ -650,6 +652,7 @@ export class FakeBackend {
           limit: argument(args, "limit") as number,
         });
       case "session":
+        if (this.sessionFailure) throw new Error(this.sessionFailure);
         return this.session;
       case "create_workspace":
         return this.createWorkspace(

@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from "motion/react";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Onboarding } from "./features/onboarding/Onboarding";
+import { OpenFailed } from "./features/shell/OpenFailed";
 import { Shell } from "./features/shell/Shell";
 import { WorkspacesProvider } from "./features/shell/Workspaces";
 import { api, type Session, type WorkspaceLook } from "./lib/api";
 import { useLook, useTheme } from "./lib/preferences";
-import { reportError } from "./lib/toast";
+import { errorMessage } from "./lib/toast";
 import { useUpdateChecks } from "./lib/updates";
 import { useNoBrowserMenu } from "./lib/useContextMenu";
 import { useInputModality } from "./lib/useInputModality";
@@ -17,6 +18,8 @@ const Gallery = import.meta.env.DEV ? lazy(() => import("./dev/Gallery")) : null
 type Phase =
   | { kind: "loading" }
   | { kind: "onboarding" }
+  /** Workspaces are on this device but wouldn't open. */
+  | { kind: "failed"; reason: string }
   | { kind: "ready"; session: Session }
   /** Joining, creating or restoring another workspace, with a way back to `session`. */
   | { kind: "adding"; session: Session };
@@ -30,15 +33,14 @@ export function App() {
   useLook(workspaceLook);
   useUpdateChecks();
 
-  useEffect(() => {
+  const open = useCallback(() => {
+    setPhase({ kind: "loading" });
     api.session().then(
       (session) => setPhase(session ? { kind: "ready", session } : { kind: "onboarding" }),
-      (error) => {
-        reportError(error);
-        setPhase({ kind: "onboarding" });
-      },
+      (error: unknown) => setPhase({ kind: "failed", reason: errorMessage(error) }),
     );
   }, []);
+  useEffect(open, [open]);
 
   const showSession = useCallback(
     (session: Session | null) => setPhase(session ? { kind: "ready", session } : { kind: "onboarding" }),
@@ -74,6 +76,7 @@ export function App() {
             </motion.div>
           </motion.div>
         )}
+        {phase.kind === "failed" && <OpenFailed key="failed" reason={phase.reason} onRetry={open} />}
         {phase.kind === "onboarding" && (
           <Onboarding key="onboarding" onReady={(session) => setPhase({ kind: "ready", session })} />
         )}

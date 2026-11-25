@@ -173,16 +173,29 @@ pub(crate) async fn open_workspaces(app: &AppHandle, state: &AppState) -> Comman
         .open_all(|| state.online())
         .await
         .map_err(failed)?;
-    for (workspace_id, error) in opened.failed {
+    for (workspace_id, error) in &opened.failed {
         tracing::error!("couldn't open workspace {workspace_id}: {error:#}");
     }
     for workspace in &opened.workspaces {
         forward_changes(app, workspace);
     }
-    Ok(state
+    let selected = state
         .workspaces
         .selected()
-        .map(|workspace| session_of(&workspace)))
+        .map(|workspace| session_of(&workspace));
+    shown_after_opening(selected, &opened.failed)
+}
+
+/// What to show once opening is done. With workspaces on disk but none
+/// open, the reason, not onboarding: that would look as if they were gone.
+fn shown_after_opening(
+    selected: Option<Session>,
+    failed: &[(String, anyhow::Error)],
+) -> CommandResult<Option<Session>> {
+    match (selected, failed.first()) {
+        (None, Some((_, error))) => Err(format!("couldn't open your workspace: {error:#}")),
+        (selected, _) => Ok(selected),
+    }
 }
 
 /// The workspaces on this device, in the order the person arranged them.
@@ -1374,6 +1387,30 @@ pub(crate) async fn shut_down(workspaces: Vec<Workspace>) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn workspaces_that_wont_open_say_why_instead_of_looking_gone() {
+        let locked = || {
+            (
+                "w1".to_owned(),
+                anyhow::anyhow!("it's already open in another shyspace window"),
+            )
+        };
+
+        let shown = shown_after_opening(None, &[locked()]);
+
+        let Err(error) = shown else {
+            panic!("a workspace that won't open must say why");
+        };
+        assert!(error.starts_with("couldn't open your workspace"), "{error}");
+        assert!(error.contains("already open"), "{error}");
+        assert!(
+            matches!(shown_after_opening(None, &[]), Ok(None)),
+            "none yet: onboarding"
+        );
+    }
+
     /// `unsafe_code` is only denied in this crate, not forbidden, so that
     /// `notify_macos.rs` can call Objective-C; no other file may allow it.
     #[test]
