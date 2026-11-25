@@ -264,3 +264,31 @@ jobs:
           windows-x86_64 nsis -setup\.exe$
           windows-x86_64 msi \.msi$
           INSTALLS
+      - name: Attach each installer again under a name without the version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        # So a link to releases/latest/download/<name> always gets the newest.
+        # Copies only: the versioned files stay, and latest.json points at those.
+        run: |
+          version="${TAG#v}"
+          mkdir -p "$RUNNER_TEMP/fixed"
+          while read -r versioned fixed; do
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$versioned" --dir "$RUNNER_TEMP/fixed" \
+              || { echo "::error::the release has no $versioned"; exit 1; }
+            mv "$RUNNER_TEMP/fixed/$versioned" "$RUNNER_TEMP/fixed/$fixed"
+            gh release upload "$TAG" "$RUNNER_TEMP/fixed/$fixed" --repo "$GITHUB_REPOSITORY" --clobber
+            rm "$RUNNER_TEMP/fixed/$fixed"
+          done <<INSTALLERS
+          shyspace_${version}_aarch64.dmg shyspace-macos-arm64.dmg
+          shyspace_${version}_x64-setup.exe shyspace-windows-x64-setup.exe
+          shyspace_${version}_x64_en-US.msi shyspace-windows-x64.msi
+          shyspace_${version}_amd64.AppImage shyspace-linux-x86_64.AppImage
+          shyspace_${version}_amd64.deb shyspace-linux-x86_64.deb
+          shyspace-${version}-1.x86_64.rpm shyspace-linux-x86_64.rpm
+          INSTALLERS
+          names=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for fixed in shyspace-macos-arm64.dmg shyspace-windows-x64-setup.exe shyspace-windows-x64.msi \
+            shyspace-linux-x86_64.AppImage shyspace-linux-x86_64.deb shyspace-linux-x86_64.rpm; do
+            grep -qxF "$fixed" <<< "$names" || { echo "::error::the release has no $fixed"; exit 1; }
+          done
