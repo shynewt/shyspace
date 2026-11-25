@@ -351,7 +351,9 @@ export type AlertAction =
   /** No workspace means the one shown. */
   | { action: "open"; workspace_id: string | null; target: AlertTarget }
   | { action: "reply"; workspace_id: string; message: string; text: string }
-  | { action: "mark_read"; workspace_id: string; target: AlertTarget };
+  | { action: "mark_read"; workspace_id: string; target: AlertTarget }
+  /** A reply that waited too long: kept as a draft, never sent. */
+  | { action: "keep_as_draft"; workspace_id: string; message: string; text: string };
 /** Who can be mentioned in a workspace, for a reply typed outside the composer. */
 export type PeopleIn = { me: string; members: Member[] };
 

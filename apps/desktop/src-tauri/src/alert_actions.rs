@@ -5,7 +5,10 @@
 //! needs the composer's mention handling, and its workspace may still be
 //! opening.
 
-use std::sync::{Mutex, PoisonError};
+use std::{
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 use shy_core::{Workspace, views::Member};
@@ -77,6 +80,14 @@ pub enum AlertAction {
         workspace_id: String,
         target: AlertTarget,
     },
+    /// A reply that waited too long to be sent: kept as a draft instead,
+    /// never sent when its moment has passed.
+    #[cfg(any(target_os = "macos", test))]
+    KeepAsDraft {
+        workspace_id: String,
+        message: String,
+        text: String,
+    },
 }
 
 impl AlertAction {
@@ -91,9 +102,9 @@ impl AlertAction {
         match self {
             AlertAction::Open { workspace_id, .. } => workspace_id.as_deref(),
             #[cfg(any(target_os = "macos", test))]
-            AlertAction::Reply { workspace_id, .. } | AlertAction::MarkRead { workspace_id, .. } => {
-                Some(workspace_id)
-            }
+            AlertAction::Reply { workspace_id, .. }
+            | AlertAction::MarkRead { workspace_id, .. }
+            | AlertAction::KeepAsDraft { workspace_id, .. } => Some(workspace_id),
         }
     }
 }
@@ -136,23 +147,75 @@ pub fn response_to(identifier: &str, action: &str, typed: Option<String>) -> Opt
     }
 }
 
-/// Alert actions not yet taken by the frontend.
+/// How long an action waits for its workspace to open: a reply typed long
+/// ago mustn't go out much later, when its moment has passed.
+const ACTIONS_EXPIRE_AFTER: Duration = Duration::from_secs(5 * 60);
+
+/// Where an action's workspace is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspacePlace {
+    Open,
+    /// On this device, not open yet.
+    Closed,
+    /// Not on this device (left, or never here).
+    Gone,
+}
+
+/// Alert actions not yet taken by the frontend, with when each came.
 #[derive(Default)]
-pub struct PendingActions(Mutex<Vec<AlertAction>>);
+pub struct PendingActions(Mutex<Vec<(Instant, AlertAction)>>);
 
 impl PendingActions {
     pub fn push(&self, action: AlertAction) {
-        // The list only ever holds whole entries, so a panic elsewhere can't leave it broken.
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).push(action);
+        self.push_at(action, Instant::now());
     }
 
-    /// Takes the actions whose workspace is open, or that name none; the
-    /// rest wait for theirs.
-    pub fn take_where(&self, is_open: impl Fn(&str) -> bool) -> Vec<AlertAction> {
+    fn push_at(&self, action: AlertAction, now: Instant) {
+        // The list only ever holds whole entries, so a panic elsewhere can't leave it broken.
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((now, action));
+    }
+
+    /// Takes the actions whose workspace is open, or that name none. A
+    /// reply that waited too long becomes a draft to keep; other actions
+    /// that did are dropped, as are those whose workspace isn't on this
+    /// device. The rest wait for theirs.
+    pub fn take_where(&self, now: Instant, place: impl Fn(&str) -> WorkspacePlace) -> Vec<AlertAction> {
         let mut pending = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let (ready, waiting) = pending
-            .drain(..)
-            .partition(|action| action.workspace_id().is_none_or(&is_open));
+        let mut ready = Vec::new();
+        let mut waiting = Vec::new();
+        for (came, action) in pending.drain(..) {
+            let is_stale = now.duration_since(came) > ACTIONS_EXPIRE_AFTER;
+            let action = match (action, is_stale) {
+                #[cfg(any(target_os = "macos", test))]
+                (
+                    AlertAction::Reply {
+                        workspace_id,
+                        message,
+                        text,
+                    },
+                    true,
+                ) => AlertAction::KeepAsDraft {
+                    workspace_id,
+                    message,
+                    text,
+                },
+                #[cfg(any(target_os = "macos", test))]
+                (keep @ AlertAction::KeepAsDraft { .. }, _) => keep,
+                (_, true) => {
+                    tracing::info!("dropped an alert action that waited too long");
+                    continue;
+                }
+                (action, false) => action,
+            };
+            match action.workspace_id().map_or(WorkspacePlace::Open, &place) {
+                WorkspacePlace::Open => ready.push(action),
+                WorkspacePlace::Closed => waiting.push((came, action)),
+                WorkspacePlace::Gone => tracing::info!("dropped an alert action: its workspace isn't here"),
+            }
+        }
         *pending = waiting;
         ready
     }
@@ -181,7 +244,28 @@ pub fn take_alert_actions(
     state: State<'_, AppState>,
     pending: State<'_, PendingActions>,
 ) -> Vec<AlertAction> {
-    pending.take_where(|workspace_id| state.workspaces.find(workspace_id).is_some())
+    let here = match state.workspaces.list() {
+        Ok(entries) => Some(
+            entries
+                .into_iter()
+                .map(|entry| entry.workspace_id)
+                .collect::<Vec<_>>(),
+        ),
+        Err(error) => {
+            tracing::warn!("couldn't list this device's workspaces: {error:#}");
+            None
+        }
+    };
+    pending.take_where(Instant::now(), |workspace_id| {
+        if state.workspaces.find(workspace_id).is_some() {
+            return WorkspacePlace::Open;
+        }
+        // Unknown when the list can't be read: kept until it expires.
+        match &here {
+            Some(here) if !here.iter().any(|id| id == workspace_id) => WorkspacePlace::Gone,
+            _ => WorkspacePlace::Closed,
+        }
+    })
 }
 
 /// Who a reply typed in a notification can mention, in any open workspace.
@@ -369,12 +453,68 @@ mod tests {
             workspace_id: None,
             target: message("m1"),
         };
-        pending.push(read("open"));
-        pending.push(read("opening"));
-        pending.push(click.clone());
+        let now = Instant::now();
+        pending.push_at(read("open"), now);
+        pending.push_at(read("opening"), now);
+        pending.push_at(click.clone(), now);
+        let opening_later = |id: &str| match id {
+            "open" => WorkspacePlace::Open,
+            _ => WorkspacePlace::Closed,
+        };
 
-        assert_eq!(pending.take_where(|id| id == "open"), vec![read("open"), click]);
-        assert_eq!(pending.take_where(|id| id == "open"), vec![]);
-        assert_eq!(pending.take_where(|_| true), vec![read("opening")]);
+        assert_eq!(pending.take_where(now, opening_later), vec![read("open"), click]);
+        assert_eq!(pending.take_where(now, opening_later), vec![]);
+        assert_eq!(
+            pending.take_where(now, |_| WorkspacePlace::Open),
+            vec![read("opening")]
+        );
+    }
+
+    #[test]
+    fn a_reply_typed_long_ago_is_kept_as_a_draft_not_sent() {
+        let pending = PendingActions::default();
+        let reply = AlertAction::Reply {
+            workspace_id: "w".into(),
+            message: "m1".into(),
+            text: "on my way".into(),
+        };
+        let typed = Instant::now();
+        pending.push_at(reply.clone(), typed);
+        let later = typed + ACTIONS_EXPIRE_AFTER + Duration::from_secs(1);
+
+        assert_eq!(pending.take_where(later, |_| WorkspacePlace::Closed), vec![]);
+        assert_eq!(
+            pending.take_where(later, |_| WorkspacePlace::Open),
+            vec![AlertAction::KeepAsDraft {
+                workspace_id: "w".into(),
+                message: "m1".into(),
+                text: "on my way".into(),
+            }],
+            "waits for its workspace, then is kept"
+        );
+
+        pending.push_at(reply.clone(), typed);
+        let soon = typed + Duration::from_secs(60);
+        assert_eq!(pending.take_where(soon, |_| WorkspacePlace::Open), vec![reply]);
+    }
+
+    #[test]
+    fn actions_for_a_workspace_no_longer_here_are_dropped() {
+        let pending = PendingActions::default();
+        let now = Instant::now();
+        pending.push_at(
+            AlertAction::MarkRead {
+                workspace_id: "left".into(),
+                target: message("m1"),
+            },
+            now,
+        );
+
+        assert_eq!(pending.take_where(now, |_| WorkspacePlace::Gone), vec![]);
+        assert_eq!(
+            pending.take_where(now, |_| WorkspacePlace::Open),
+            vec![],
+            "dropped, not kept"
+        );
     }
 }

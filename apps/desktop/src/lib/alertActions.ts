@@ -53,6 +53,12 @@ async function carryOut(action: AlertAction, openIn: AlertWorkspaces["openIn"]):
   }
   if (action.action === "mark_read") return api.markAlertRead(action.workspace_id, action.target);
   const { workspace_id: workspaceId, message, text } = action;
+  if (action.action === "keep_as_draft") {
+    return api.keepUnsentReply(workspaceId, message, text).catch((keeping: unknown) => {
+      console.error("a late reply couldn't be kept as a draft", keeping);
+      return sayReplyIsLost(workspaceId, text);
+    });
+  }
   try {
     const { me, members } = await api.peopleIn(workspaceId);
     await api.replyToAlert(workspaceId, message, typedTextToSend(text, workspaceId, members, me));

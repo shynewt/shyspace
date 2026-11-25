@@ -76,6 +76,28 @@ test("a reply that can't be sent is kept as a draft and a notification says so",
   await expect(page.getByLabel("Message #random")).toHaveValue("yes");
 });
 
+test("a reply that waited too long is kept as a draft, not sent", async ({ page }) => {
+  const message = await graceWritesInRandom(page, "Lunch?");
+
+  await page.evaluate(
+    (message) =>
+      window.fake.notifications.respond({
+        action: "keep_as_draft",
+        workspace_id: window.fake.session?.workspace_id ?? "",
+        message,
+        text: "yes",
+      }),
+    message,
+  );
+
+  await expect
+    .poll(() => page.evaluate(() => window.fake.alertsShown))
+    .toContainEqual({ title: "Your reply wasn't sent", body: "It's saved as a draft." });
+  expect(await latestIn(page, "random")).toBe("Lunch?");
+  await page.getByRole("button", { name: /^random/ }).click();
+  await expect(page.getByLabel("Message #random")).toHaveValue("yes");
+});
+
 test("mark as read from a notification reads the channel", async ({ page }) => {
   const message = await graceWritesInRandom(page, "one");
   await page.evaluate(() => window.fake.receiveMessage(window.fake.memberNamed("Grace"), "random", "two"));
