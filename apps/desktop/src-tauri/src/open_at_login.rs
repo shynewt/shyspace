@@ -139,7 +139,7 @@ mod system {
     use anyhow::{Context, Result};
 
     use super::AT_LOGIN_ARGUMENT;
-    use crate::linux_autostart::{Autostart, autostart_dir};
+    use crate::linux_autostart::{Autostart, Program, autostart_dir};
 
     pub const REFUSED_HINT: &str =
         "Your desktop keeps shyspace from opening at login; check its startup settings";
@@ -153,12 +153,12 @@ mod system {
         Ok(Autostart::in_dir(&dir))
     }
 
-    /// The AppImage itself rather than its temporary mount, or the binary.
-    fn program() -> Result<PathBuf> {
-        match std::env::var_os("APPIMAGE") {
-            Some(appimage) => Ok(PathBuf::from(appimage)),
-            None => std::env::current_exe().context("finding the app's path"),
-        }
+    fn program() -> Result<Program> {
+        Ok(Program::running(
+            std::env::current_exe().context("finding the app's path")?,
+            std::env::var_os("APPIMAGE"),
+            std::env::var_os("APPDIR"),
+        ))
     }
 
     pub fn is_on() -> Result<bool> {
@@ -166,7 +166,7 @@ mod system {
     }
 
     pub fn turn_on() -> Result<()> {
-        autostart()?.turn_on(&program()?, AT_LOGIN_ARGUMENT)
+        autostart()?.turn_on(program()?.path(), AT_LOGIN_ARGUMENT)
     }
 
     pub fn turn_off() -> Result<()> {
@@ -174,10 +174,11 @@ mod system {
     }
 
     pub fn refresh() -> Result<()> {
-        if std::env::var_os("APPIMAGE").is_none() || !is_on()? {
+        let program = program()?;
+        if !program.refreshes_entry(is_on()?) {
             return Ok(());
         }
-        turn_on()
+        autostart()?.turn_on(program.path(), AT_LOGIN_ARGUMENT)
     }
 }
 

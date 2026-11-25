@@ -22,6 +22,54 @@ pub fn autostart_dir(xdg_config_home: Option<OsString>, home: Option<PathBuf>) -
     Some(config.join("autostart"))
 }
 
+/// What a login entry starts.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Program {
+    /// The AppImage file, which may move; its entry follows it.
+    AppImage(PathBuf),
+    /// An installed program (a `.deb` or `.rpm`, or a build).
+    Installed(PathBuf),
+}
+
+/// Linux adds this to the path of a program whose file was replaced (a
+/// package upgrade) while it runs.
+const REPLACED_SUFFIX: &str = " (deleted)";
+
+impl Program {
+    /// The program running now. `$APPIMAGE` names the AppImage file, but a
+    /// program started from inside another AppImage (a terminal, say)
+    /// inherits it, so it's trusted only when this program sits in that
+    /// AppImage's mount, `$APPDIR`.
+    pub fn running(current_exe: PathBuf, appimage: Option<OsString>, appdir: Option<OsString>) -> Program {
+        match (appimage, appdir) {
+            (Some(appimage), Some(appdir)) if current_exe.starts_with(&appdir) => {
+                Program::AppImage(PathBuf::from(appimage))
+            }
+            _ => Program::Installed(without_replaced_suffix(current_exe)),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        match self {
+            Program::AppImage(path) | Program::Installed(path) => path,
+        }
+    }
+
+    /// Whether the entry is written again at each start: only an
+    /// AppImage's, and only while it's on, so a build or a second install
+    /// never takes it over.
+    pub fn refreshes_entry(&self, is_on: bool) -> bool {
+        is_on && matches!(self, Program::AppImage(_))
+    }
+}
+
+fn without_replaced_suffix(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|text| text.strip_suffix(REPLACED_SUFFIX)) {
+        Some(original) => PathBuf::from(original),
+        None => path,
+    }
+}
+
 /// shyspace's autostart entry in a folder.
 pub struct Autostart {
     file: PathBuf,
@@ -148,6 +196,52 @@ mod tests {
             );
         }
         assert_eq!(autostart_dir(None, None), None);
+    }
+
+    #[test]
+    fn an_appimage_names_itself_only_from_inside_its_own_mount() {
+        let mounted = PathBuf::from("/tmp/.mount_shyspaXYZ/usr/bin/shyspace");
+        assert_eq!(
+            Program::running(
+                mounted,
+                Some("/home/ada/Apps/shyspace.AppImage".into()),
+                Some("/tmp/.mount_shyspaXYZ".into())
+            ),
+            Program::AppImage("/home/ada/Apps/shyspace.AppImage".into())
+        );
+        // An installed shyspace started from a terminal that is itself an AppImage.
+        assert_eq!(
+            Program::running(
+                "/usr/bin/shyspace".into(),
+                Some("/home/ada/Apps/Terminal.AppImage".into()),
+                Some("/tmp/.mount_TerminABC".into())
+            ),
+            Program::Installed("/usr/bin/shyspace".into())
+        );
+        assert_eq!(
+            Program::running("/usr/bin/shyspace".into(), Some("/x.AppImage".into()), None),
+            Program::Installed("/usr/bin/shyspace".into())
+        );
+    }
+
+    #[test]
+    fn a_program_replaced_by_an_upgrade_keeps_its_real_path() {
+        assert_eq!(
+            Program::running("/usr/bin/shyspace (deleted)".into(), None, None),
+            Program::Installed("/usr/bin/shyspace".into())
+        );
+    }
+
+    #[test]
+    fn only_an_appimage_that_is_on_rewrites_its_entry_at_start() {
+        let appimage = Program::AppImage("/a.AppImage".into());
+        let installed = Program::Installed("/usr/bin/shyspace".into());
+        assert!(appimage.refreshes_entry(true));
+        assert!(!appimage.refreshes_entry(false));
+        assert!(
+            !installed.refreshes_entry(true),
+            "a build or second install leaves it alone"
+        );
     }
 
     #[test]
