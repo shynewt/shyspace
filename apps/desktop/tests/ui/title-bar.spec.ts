@@ -21,6 +21,20 @@ test.describe("on macOS", () => {
     expect(sidebarBox?.y).toBe(stripBox?.height);
   });
 
+  test("an open dialog leaves the strip free to move the window", async ({ page }) => {
+    await page.keyboard.press("Meta+,");
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await expect(settings).toBeVisible();
+    const isStripOnTop = () =>
+      page.evaluate(() => document.elementFromPoint(300, 10)?.hasAttribute("data-tauri-drag-region") ?? false);
+    await expect.poll(isStripOnTop).toBe(true);
+
+    await page.mouse.move(300, 10);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(settings).toBeVisible();
+  });
+
   test("full screen hides the strip, as macOS hides the buttons there", async ({ page }) => {
     const strip = page.locator("[data-tauri-drag-region]");
     await page.evaluate(() => window.fake.setFullscreen(true));

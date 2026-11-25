@@ -76,6 +76,11 @@ export function Dialog({
         >
           <RadixDialog.Content
             asChild
+            onPointerDownOutside={(event) => {
+              // Pressing the window's drag strip moves the window; it isn't a click away from the dialog.
+              if (event.target instanceof Element && event.target.closest("[data-tauri-drag-region]"))
+                event.preventDefault();
+            }}
             onOpenAutoFocus={(event) => {
               opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
               if (initialFocus === "first") return;
