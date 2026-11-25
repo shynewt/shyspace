@@ -147,8 +147,9 @@ function providerSteps(prefix: string): { provider: string; steps: ReactNode }[]
       provider: "MinIO",
       steps: (
         <>
-          Run <code>mc version enable</code>, and give members a key whose policy leaves out{" "}
-          <code>s3:DeleteObjectVersion</code>.
+          Run <code>mc version enable</code>, and give the members' policy an explicit Deny on{" "}
+          <code>s3:DeleteObjectVersion</code> for {folder("*")}: in MinIO, leaving it out isn't enough. MinIO's
+          open-source edition is no longer maintained.
         </>
       ),
     },

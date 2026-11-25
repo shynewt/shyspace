@@ -114,6 +114,9 @@ test("the provider steps open from the keyboard and warn against locking everyth
   await page.keyboard.press("Enter");
   await expect(steps).toBeVisible();
   await expect(storage).toContainText("mc version enable");
+  // MinIO only refuses a version delete when a statement denies it; leaving the action out isn't enough.
+  await expect(storage).toContainText(/explicit Deny on s3:DeleteObjectVersion for \S+\/\*/);
+  await expect(storage).toContainText("MinIO's open-source edition is no longer maintained");
   await expect(storage).toContainText("Don't lock the whole bucket");
   // A lock refuses overwrites, and membership repairs mls/ by overwriting.
   await expect(storage).toContainText(/Don't lock \S*mls\/: membership changes repair it by overwriting/);
