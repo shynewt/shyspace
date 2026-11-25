@@ -12,17 +12,21 @@ use crate::{
 
 /// Edits share the drafts table with conversation drafts. Their key names
 /// the conversation the edit was made in, so it resumes there and keeps its
-/// channel if the message is deleted; ids never hold a colon, so keys can't
-/// clash.
-const EDIT_KEY_PREFIX: &str = "edit:";
+/// channel if the message is deleted. Every id starts with hex or a private
+/// kind (`dm:`, `p:`), so no conversation's own key starts like an edit's;
+/// private ids hold `:` and `/`, hence `|` between the parts.
+const EDIT_KEY_PREFIX: &str = "edit|";
+const EDIT_KEY_SEPARATOR: char = '|';
 
 fn edit_key(conversation: &str, message: &str) -> String {
-    format!("{EDIT_KEY_PREFIX}{conversation}:{message}")
+    format!("{EDIT_KEY_PREFIX}{conversation}{EDIT_KEY_SEPARATOR}{message}")
 }
 
-/// The conversation and message an edit's key names.
+/// The conversation and message an edit's key names. Split at the last
+/// separator: the message is yours, its id made here without one, while
+/// another member's conversation id isn't checked for it.
 fn parse_edit_key(key: &str) -> Option<(&str, &str)> {
-    key.strip_prefix(EDIT_KEY_PREFIX)?.split_once(':')
+    key.strip_prefix(EDIT_KEY_PREFIX)?.rsplit_once(EDIT_KEY_SEPARATOR)
 }
 
 impl Workspace {

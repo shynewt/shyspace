@@ -133,3 +133,43 @@ async fn an_edit_of_a_deleted_message_is_kept_after_the_draft_there() {
     sync_all(&[&admin, &bob]).await;
     assert!(bob.drafts().unwrap().is_empty(), "edits never leave the device");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_in_a_direct_message_is_kept_like_any_other() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let dm = admin.open_dm(&[bob.my_id()]).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let sent = admin.send_message(&dm, "lunch at noon", None).unwrap();
+
+    admin.set_edit_draft(&dm, &sent, "lunch at one").unwrap();
+    let edit = admin.drafts().unwrap().pop().expect("the edit is listed");
+    assert_eq!(
+        (edit.target.as_str(), edit.channel.as_str()),
+        (dm.as_str(), dm.as_str())
+    );
+    let editing = edit.editing.unwrap();
+    assert_eq!(editing.message, sent);
+    assert!(!editing.is_deleted);
+
+    admin.delete_message(&sent).unwrap();
+    assert!(admin.drafts().unwrap()[0].editing.as_ref().unwrap().is_deleted);
+    admin.set_draft(&dm, "a new thought").unwrap();
+    admin.keep_edit_of_deleted_message(&dm, &sent).unwrap();
+    let drafts = admin.drafts().unwrap();
+    assert_eq!(drafts.len(), 1, "nothing is left stuck in the table");
+    assert_eq!(drafts[0].text, "a new thought\n\nlunch at one");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_in_a_private_channels_thread_is_kept_for_that_thread() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let plans = bob.create_private_channel("plans", &[admin.my_id()]).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let root = admin.send_message(&plans, "release?", None).unwrap();
+    let reply = admin.send_message(&plans, "friday", Some(root.clone())).unwrap();
+
+    admin.set_edit_draft(&root, &reply, "thursday").unwrap();
+    let edit = admin.drafts().unwrap().pop().expect("the edit is listed");
+    assert_eq!((edit.target, edit.channel), (root, plans));
+    assert_eq!(edit.editing.unwrap().message, reply);
+}

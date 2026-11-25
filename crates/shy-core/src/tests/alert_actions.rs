@@ -49,6 +49,36 @@ async fn a_reply_to_a_channel_message_goes_in_the_channel() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_reply_leaves_both_the_draft_and_an_unsaved_edit_there() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mine = admin.send_message(&general, "lunch at noon", None).unwrap();
+    let question = bob.send_message(&general, "coming?", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    admin.set_draft(&general, "a new thought").unwrap();
+    admin.set_edit_draft(&general, &mine, "lunch at one").unwrap();
+
+    admin.reply_to_alert(&question, "yes").unwrap();
+
+    let drafts = admin.drafts().unwrap();
+    let draft = drafts
+        .iter()
+        .find(|d| d.editing.is_none())
+        .map(|d| d.text.as_str());
+    let edit = drafts
+        .iter()
+        .find(|d| d.editing.is_some())
+        .map(|d| d.text.as_str());
+    assert_eq!(
+        draft,
+        Some("a new thought"),
+        "the draft isn't replaced by the edit"
+    );
+    assert_eq!(edit, Some("lunch at one"));
+    assert_eq!(drafts.len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_reply_to_a_thread_reply_stays_in_that_thread() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");

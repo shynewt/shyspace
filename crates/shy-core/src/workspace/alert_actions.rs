@@ -37,7 +37,10 @@ impl Workspace {
     pub fn reply_to_alert(&self, message: &str, text: &str) -> Result<()> {
         let conversation = self.conversation_of(message)?;
         let target = conversation.draft_target().to_owned();
-        let draft = self.drafts()?.into_iter().find(|draft| draft.target == target);
+        let draft = self
+            .drafts()?
+            .into_iter()
+            .find(|draft| draft.target == target && draft.editing.is_none());
         self.send_message(&conversation.channel, text, conversation.thread_root)?;
         if let Some(draft) = draft {
             self.state()
