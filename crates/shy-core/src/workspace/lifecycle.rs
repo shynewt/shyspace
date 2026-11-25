@@ -506,6 +506,7 @@ impl Workspace {
                 skipped_segments: Mutex::new(std::collections::HashSet::new()),
                 fetch_failures: Mutex::new(std::collections::HashMap::new()),
                 page_live: Mutex::default(),
+                page_alert_times: Mutex::default(),
                 #[cfg(test)]
                 page_sent: Mutex::default(),
                 last_slow_duties: Mutex::new(None),

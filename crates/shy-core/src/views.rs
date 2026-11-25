@@ -397,11 +397,12 @@ pub struct WorkspaceBadge {
     pub workspace_id: String,
     /// Something unread outside muted channels, or any mention.
     pub unread: bool,
-    /// Mentions of you, plus unread messages in DMs that aren't muted.
+    /// Mentions of you (in pages too), plus unread messages in DMs that
+    /// aren't muted.
     pub mentions: u32,
     /// What needs you, counted as the window badge counts: mentions and
-    /// followed replies outside DMs, unread messages in unmuted DMs, and
-    /// reminders that came due.
+    /// followed replies outside DMs, mentions in pages, unread messages in
+    /// unmuted DMs, and reminders that came due.
     pub attention: u32,
 }
 
@@ -540,6 +541,21 @@ pub enum Change {
         /// One line of plain text, mentions shown as @name.
         preview: String,
     },
+    /// Someone else just mentioned you in a page, and your status allows
+    /// alerts. Only recent ones, like [`Change::Alert`].
+    PageAlert {
+        page: EntityId,
+        page_title: String,
+        /// The author's member id (hex) and name ("" until their profile arrives).
+        author: String,
+        author_name: String,
+        /// As in [`PageMention`].
+        preview: String,
+        /// As in [`PageMention`].
+        position: Vec<u8>,
+    },
+    /// Unread mentions of you in pages changed.
+    PageMentions,
     Channels,
     Messages {
         channel: EntityId,
@@ -693,6 +709,23 @@ pub struct Inbox {
     pub attention: Vec<InboxItem>,
     /// Channels with unread messages.
     pub channels: Vec<Channel>,
+    /// Unread mentions of you in pages, newest first: the latest from each
+    /// author in each page.
+    pub page_mentions: Vec<PageMention>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PageMention {
+    pub page: EntityId,
+    pub page_title: String,
+    /// The author's member id (hex).
+    pub author: String,
+    /// The mention's line as it was written, mentions shown as @name.
+    pub preview: String,
+    /// Where the mention is, as an encoded Yjs relative position: it stays
+    /// put as the page changes.
+    pub position: Vec<u8>,
+    pub mentioned_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

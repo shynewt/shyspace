@@ -9,12 +9,20 @@ use anyhow::{Context, Result, ensure};
 use rusqlite::Connection;
 
 /// Every migration in order; the first is the schema as of v0.1.0.
-const MIGRATIONS: &[&str] = &[FIRST_SCHEMA, WORKSPACE_LOOK];
+const MIGRATIONS: &[&str] = &[FIRST_SCHEMA, WORKSPACE_LOOK, PAGE_MENTIONS];
 
 /// The workspace's icon and default look, set by the admin.
 const WORKSPACE_LOOK: &str = r#"
 CREATE TABLE workspace_icon (id INTEGER PRIMARY KEY CHECK (id = 1), blob BLOB, lamport INTEGER NOT NULL);
 CREATE TABLE workspace_look (id INTEGER PRIMARY KEY CHECK (id = 1), look BLOB NOT NULL, lamport INTEGER NOT NULL);
+"#;
+
+/// Unread mentions of you in pages, one per page and author; this device only.
+const PAGE_MENTIONS: &str = r#"
+CREATE TABLE page_mentions (
+    page TEXT NOT NULL, author BLOB NOT NULL, position BLOB NOT NULL, preview TEXT NOT NULL,
+    mentioned_ms INTEGER NOT NULL, is_read INTEGER NOT NULL,
+    PRIMARY KEY (page, author));
 "#;
 
 const FIRST_SCHEMA: &str = r#"
@@ -311,6 +319,21 @@ mod tests {
         .unwrap();
         db.execute(
             "INSERT INTO workspace_icon (id, blob, lamport) VALUES (1, NULL, 1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_store_from_before_page_mentions_gains_their_table() {
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate(&mut db, &[FIRST_SCHEMA, WORKSPACE_LOOK]).unwrap();
+
+        create_or_migrate(&mut db).unwrap();
+
+        db.execute(
+            "INSERT INTO page_mentions (page, author, position, preview, mentioned_ms, is_read) \
+             VALUES ('p', x'00', x'00', '', 1, 0)",
             [],
         )
         .unwrap();

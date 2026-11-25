@@ -20,6 +20,7 @@ const PERSONAL_TABLES: &[&str] = &[
     "thread_follows",
     "drafts",
     "later",
+    "page_mentions",
 ];
 
 /// Everything a snapshot leaves out: what replaying the bucket gives back

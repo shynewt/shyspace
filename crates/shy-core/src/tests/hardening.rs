@@ -4840,3 +4840,90 @@ async fn a_mention_naming_another_workspace_doesnt_mention_anyone_here() {
             .mentions_me
     );
 }
+
+/// The desktop editor's form of a mention of `whom`.
+fn page_mention_of(whom: &Workspace) -> String {
+    format!(
+        "[@them]({})",
+        crate::links::app_link(&whom.inner.config.workspace_id, "member", &whom.my_id())
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_flood_of_page_mentions_alerts_a_few_times_and_keeps_one_inbox_entry() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = bob.create_page("Plan", None).unwrap();
+    bob.edit_page(&page, crate::pages::Edit::Append(&"filler line\n".repeat(2_000)))
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let mut changes = admin.subscribe();
+
+    for round in 0..100 {
+        let text = format!("{round} {}", page_mention_of(&admin));
+        bob.edit_page(&page, crate::pages::Edit::Append(&text)).unwrap();
+    }
+    // Text that only looks like a mention costs nothing beyond reading the update.
+    let lookalike = format!("member/{} shy://member/{}0", admin.my_id(), admin.my_id());
+    for _ in 0..200 {
+        bob.edit_page(&page, crate::pages::Edit::Append(&lookalike))
+            .unwrap();
+    }
+    sync_all(&[&admin, &bob]).await;
+
+    let mut alerts = 0;
+    while let Ok(change) = changes.try_recv() {
+        alerts += usize::from(matches!(change, crate::views::Change::PageAlert { .. }));
+    }
+    assert_eq!(alerts, 3);
+    let inbox = admin.inbox().unwrap();
+    assert_eq!(inbox.page_mentions.len(), 1);
+    assert!(
+        inbox.page_mentions[0].preview.starts_with("99 "),
+        "{:?}",
+        inbox.page_mentions[0].preview
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_member_gets_no_page_mentions_from_after_their_removal() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let page = bob.create_page("Plan", None).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    sync_all(&[&admin, &bob]).await;
+    bob.edit_page(&page, crate::pages::Edit::Append(&page_mention_of(&carol)))
+        .unwrap();
+    bob.sync().await;
+    let mut changes = carol.subscribe();
+    let _ = carol.sync().await;
+
+    while let Ok(change) = changes.try_recv() {
+        assert!(
+            !matches!(change, crate::views::Change::PageAlert { .. }),
+            "{change:?}"
+        );
+    }
+    assert!(carol.inbox().unwrap().page_mentions.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_insert_packed_with_mentions_is_read_in_linear_time() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let page = bob.create_page("Plan", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    // No `[` anywhere: a backward search for each mention's label would
+    // scan the whole insert again for every one of them.
+    let packed = format!("](shy://member/{}", admin.my_id()).repeat(20_000);
+    bob.edit_page(&page, crate::pages::Edit::Append(&packed)).unwrap();
+
+    let started = std::time::Instant::now();
+    sync_all(&[&admin, &bob]).await;
+
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    assert_eq!(admin.inbox().unwrap().page_mentions.len(), 1);
+}

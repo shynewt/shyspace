@@ -29,11 +29,12 @@ impl Workspace {
                 .any(|candidate| candidate.id == channel && candidate.kind == ChannelKind::Dm)
         };
         let outside_dms = self
-            .inbox()?
-            .attention
+            .chat_attention()?
+            .0
             .iter()
             .filter(|item| !is_dm(&item.message.channel))
             .count();
+        let page_mentions = self.state().store.unread_page_mention_count()?;
         let now = now_ms()?;
         let due = self
             .later()?
@@ -42,9 +43,10 @@ impl Workspace {
             .count();
         let mut badge = WorkspaceBadge {
             workspace_id: self.workspace_id().to_owned(),
-            unread: false,
-            mentions: 0,
-            attention: u32::try_from(outside_dms.saturating_add(due)).unwrap_or(u32::MAX),
+            unread: page_mentions > 0,
+            mentions: u32::try_from(page_mentions).unwrap_or(u32::MAX),
+            attention: u32::try_from(outside_dms.saturating_add(due).saturating_add(page_mentions))
+                .unwrap_or(u32::MAX),
         };
         for channel in channels {
             if channel.kind == ChannelKind::Dm && channel.notify != NotifyLevel::Nothing {

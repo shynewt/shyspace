@@ -13,8 +13,8 @@ use crate::{
     workspace::{State, Workspace, follows_by_default},
 };
 
-const ALERT_WINDOW_MS: i64 = 10 * 60 * 1000;
-const PREVIEW_CHARS: usize = 140;
+pub(super) const ALERT_WINDOW_MS: i64 = 10 * 60 * 1000;
+pub(crate) const PREVIEW_CHARS: usize = 140;
 
 impl Workspace {
     /// Call only after `verified` was applied.

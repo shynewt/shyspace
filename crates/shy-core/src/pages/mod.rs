@@ -6,9 +6,12 @@ mod update_check;
 
 use anyhow::{Context, Result, ensure};
 use iroh::PublicKey;
-use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update, updates::decoder::Decode};
+use yrs::{
+    Assoc, ClientID, Doc, GetString, ID, ReadTxn, StateVector, StickyIndex, Text, Transact, Update,
+    updates::{decoder::Decode, encoder::Encode},
+};
 
-use update_check::{ClientEnds, MAX_CLIENT_ID, check_update};
+use update_check::{ClientEnds, MAX_CLIENT_ID, check_update, inserted_texts};
 
 const CONTENT: &str = "content";
 
@@ -149,6 +152,50 @@ pub fn read(state: Option<&[u8]>) -> Result<String> {
     Ok(text(&load(state)?))
 }
 
+/// Text a page update inserts, with the Yjs id of its first character.
+pub struct InsertedText<'a> {
+    pub client: u64,
+    /// Counts UTF-16 units, as Yjs does.
+    pub clock: u32,
+    pub text: &'a str,
+}
+
+/// The pieces of text `update` inserts. It must be an update [`merge`]
+/// accepted.
+pub fn insertions(update: &[u8]) -> Result<Vec<InsertedText<'_>>> {
+    inserted_texts(update)
+}
+
+/// A spot in a page that stays with the character `byte` of `inserted`
+/// starts, as an encoded Yjs relative position.
+pub fn position_in(inserted: &InsertedText, byte: usize) -> Result<Vec<u8>> {
+    let before = inserted
+        .text
+        .get(..byte)
+        .context("a page position inside a character or past its text")?;
+    let offset = u32::try_from(before.encode_utf16().count()).context("text too long")?;
+    let clock = inserted
+        .clock
+        .checked_add(offset)
+        .context("clock past what yrs holds")?;
+    Ok(StickyIndex::from_id(ID::new(ClientID::new(inserted.client), clock), Assoc::After).encode_v1())
+}
+
+/// Which of `positions` (from [`position_in`]) name text the page holds,
+/// even if deleted since. One whose text never arrived, or was undone with
+/// a removed member's late edits, names nothing.
+pub fn positions_held(state: Option<&[u8]>, positions: &[&[u8]]) -> Result<Vec<bool>> {
+    let doc = load(state)?;
+    let txn = doc.transact();
+    positions
+        .iter()
+        .map(|position| {
+            let position = StickyIndex::decode_v1(position).context("reading a page position")?;
+            Ok(position.get_offset(&txn).is_some())
+        })
+        .collect()
+}
+
 /// Edits made on behalf of agents. Each returns the Yjs update to broadcast.
 pub enum Edit<'a> {
     Append(&'a str),
@@ -215,6 +262,37 @@ fn common_affixes(old: &str, new: &str) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_position_in_inserted_text_stays_held_after_its_text_is_deleted() {
+        let first = edit(None, Edit::Append("# Plan\n\nAsk 🚀 Ada today"), 1).unwrap();
+        let page = merge(None, &first, 1).unwrap();
+        let inserted = insertions(&first).unwrap();
+        assert_eq!(inserted.len(), 1);
+        let ada = inserted[0].text.find("Ada").unwrap();
+        let position = position_in(&inserted[0], ada).unwrap();
+        let removal = edit(
+            Some(&page),
+            Edit::Replace {
+                find: "Ask 🚀 Ada today",
+                with: "Done",
+            },
+            3,
+        )
+        .unwrap();
+        let page = merge(Some(&page), &removal, 3).unwrap();
+
+        assert_eq!(positions_held(Some(&page), &[&position]).unwrap(), [true]);
+        assert_eq!(positions_held(None, &[&position]).unwrap(), [false]);
+    }
+
+    #[test]
+    fn a_position_must_fall_between_characters() {
+        let update = edit(None, Edit::Append("é"), 1).unwrap();
+        let inserted = insertions(&update).unwrap();
+        assert!(position_in(&inserted[0], 1).is_err());
+        assert!(position_in(&inserted[0], 2).is_ok());
+    }
 
     #[test]
     fn concurrent_edits_converge() {

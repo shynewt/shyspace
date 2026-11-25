@@ -1,5 +1,6 @@
 //! The inbox: unread mentions and new replies in threads you follow, across
-//! every channel, plus the channels with unread messages.
+//! every channel, plus the channels with unread messages and mentions of
+//! you in pages.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -27,6 +28,16 @@ struct Wanted {
 
 impl Workspace {
     pub fn inbox(&self) -> Result<Inbox> {
+        let (attention, channels) = self.chat_attention()?;
+        Ok(Inbox {
+            attention,
+            channels,
+            page_mentions: self.unread_page_mentions(&self.state())?,
+        })
+    }
+
+    /// The inbox's mentions and followed replies, and its unread channels.
+    pub(super) fn chat_attention(&self) -> Result<(Vec<InboxItem>, Vec<Channel>)> {
         let channels = self.channels()?;
         let state = self.state();
         let mut wanted = Vec::new();
@@ -41,13 +52,11 @@ impl Workspace {
             .into_iter()
             .map(|wanted| self.inbox_item(&state, wanted))
             .collect::<Result<_>>()?;
-        Ok(Inbox {
-            attention,
-            channels: channels
-                .into_iter()
-                .filter(|channel| channel.unread > 0)
-                .collect(),
-        })
+        let unread = channels
+            .into_iter()
+            .filter(|channel| channel.unread > 0)
+            .collect();
+        Ok((attention, unread))
     }
 
     /// Moves every read position, in channels and threads, to the newest message.
@@ -65,9 +74,11 @@ impl Workspace {
                     }
                 }
             }
+            state.store.mark_all_page_mentions_read()?;
             channels
         };
         self.emit(Change::Channels);
+        self.emit(Change::PageMentions);
         for channel in channels {
             self.emit(Change::Messages { channel: channel.id });
         }

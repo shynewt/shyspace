@@ -141,7 +141,18 @@ export type LaterItem = {
 export type Draft = { target: string; channel: string; text: string; updated_ms: number };
 export type SavedMark = { remind_ms: number | null; is_done: boolean };
 export type LinkedMessage = { message: Message; thread_root: string | null };
-export type Inbox = { attention: InboxItem[]; channels: Channel[] };
+/** A mention of you in a page, the latest from its author there. */
+export type PageMention = {
+  page: string;
+  page_title: string;
+  author: string;
+  /** The page's line at the mention now, as plain text. */
+  preview: string;
+  /** Where the mention is, as an encoded Yjs relative position. */
+  position: number[];
+  mentioned_ms: number;
+};
+export type Inbox = { attention: InboxItem[]; channels: Channel[]; page_mentions: PageMention[] };
 export type MessageCursor = { lamport: number; author: string };
 export type Page = {
   id: string;
@@ -269,6 +280,18 @@ export type Change =
       author_name: string;
       preview: string;
     }
+  /** Someone mentioned you in a page just now, and your status allows alerts. */
+  | {
+      kind: "page_alert";
+      page: string;
+      page_title: string;
+      author: string;
+      author_name: string;
+      preview: string;
+      position: number[];
+    }
+  /** Unread mentions of you in pages changed. */
+  | { kind: "page_mentions" }
   | { kind: "channels" }
   | { kind: "drafts" }
   | { kind: "later" }
@@ -322,7 +345,10 @@ export type AppIcon = {
 };
 
 /** What a click on a desktop notification opens. */
-export type AlertTarget = { kind: "message" | "channel"; id: string };
+export type AlertTarget =
+  | { kind: "message" | "channel"; id: string }
+  /** A spot in a page, as an encoded Yjs relative position. */
+  | { kind: "page"; id: string; position: number[] };
 
 /** Who is in a channel's huddle; you first when you're in it. */
 export type Huddle = { channel: string; participants: HuddleParticipant[]; is_full: boolean };
@@ -468,6 +494,7 @@ export const api = {
   setDraft: (target: string, text: string) => invoke<void>("set_draft", { target, text }),
   linkedMessage: (id: string) => invoke<LinkedMessage | null>("linked_message", { id }),
   markAllRead: () => invoke<void>("mark_all_read"),
+  markPageMentionsRead: (page: string) => invoke<void>("mark_page_mentions_read", { page }),
   setFollowing: (root: string, following: boolean) => invoke<void>("set_following", { root, following }),
   markThreadRead: (root: string, message: string) => invoke<void>("mark_thread_read", { root, message }),
   setNotifyLevel: (channel: string, level: NotifyLevel) => invoke<void>("set_notify_level", { channel, level }),

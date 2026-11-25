@@ -2,13 +2,14 @@
 //! membership changes, pulls and pushes ops through the bucket, and applies
 //! ops arriving live over gossip.
 
-mod alerts;
+pub(crate) mod alerts;
 mod forks;
 mod gaps;
 mod heads;
 mod pacing;
 pub use pacing::Cadence;
 mod packing;
+pub(crate) mod page_mentions;
 mod peers;
 mod receive;
 pub(crate) mod relay;

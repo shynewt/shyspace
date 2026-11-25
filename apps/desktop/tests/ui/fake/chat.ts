@@ -485,7 +485,11 @@ export class FakeChat {
       }
     }
     items.sort((left, right) => compareMessages(right.message, left.message));
-    return { attention: items, channels: this.channelViews().filter((channel) => channel.unread > 0) };
+    return {
+      attention: items,
+      channels: this.channelViews().filter((channel) => channel.unread > 0),
+      page_mentions: [],
+    };
   }
 
   private markAllRead(): void {

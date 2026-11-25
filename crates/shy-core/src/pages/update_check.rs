@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result, bail, ensure};
 use yrs::encoding::read::{Cursor, Read};
 
-use super::CONTENT;
+use super::{CONTENT, InsertedText};
 
 const GC: u8 = 0;
 const SKIP: u8 = 10;
@@ -52,7 +52,7 @@ impl ClientEnds {
             let client = reader.client()?;
             let mut clock = reader.number()?;
             for _ in 0..blocks {
-                let (Piece::Gap(length) | Piece::Item(length)) = reader.piece()?;
+                let (Piece::Gap(length) | Piece::Item { length, .. }) = reader.piece()?;
                 clock = clock.checked_add(length).context("clock past what yrs holds")?;
             }
             ends.record(client, clock);
@@ -94,10 +94,41 @@ pub(super) fn check_update(update: &[u8], ends: &ClientEnds, client: u64) -> Res
     Ok(new_ends)
 }
 
+/// The text an update inserts, piece by piece, where each starts.
+/// `update` must have passed [`check_update`].
+pub(super) fn inserted_texts(update: &[u8]) -> Result<Vec<InsertedText<'_>>> {
+    let mut reader = UpdateReader::new(update);
+    let mut inserted = Vec::new();
+    for _ in 0..reader.count()? {
+        let blocks = reader.count()?;
+        let client = reader.client()?;
+        let mut clock = reader.number()?;
+        for _ in 0..blocks {
+            let length = match reader.piece()? {
+                Piece::Gap(length) => length,
+                Piece::Item { length, text } => {
+                    if let Some(range) = text {
+                        let text =
+                            std::str::from_utf8(&update[range]).context("page text that isn't UTF-8")?;
+                        inserted.push(InsertedText { client, clock, text });
+                    }
+                    length
+                }
+            };
+            clock = clock.checked_add(length).context("clock past what yrs holds")?;
+        }
+    }
+    Ok(inserted)
+}
+
 enum Piece {
     /// A GC or skip block: a run of clocks without content.
     Gap(u32),
-    Item(u32),
+    /// `text` is where the item's text sits in the update, if it has any.
+    Item {
+        length: u32,
+        text: Option<std::ops::Range<usize>>,
+    },
 }
 
 struct UpdateReader<'a> {
@@ -126,7 +157,7 @@ impl<'a> UpdateReader<'a> {
                 "pieces that don't continue their client's text"
             );
             for _ in 0..blocks {
-                let Piece::Item(length) = self.piece()? else {
+                let Piece::Item { length, .. } = self.piece()? else {
                     bail!("a gap in a client's pieces");
                 };
                 clock = clock.checked_add(length).context("clock past what yrs holds")?;
@@ -160,16 +191,19 @@ impl<'a> UpdateReader<'a> {
             );
             ensure!(info & HAS_PARENT_SUB == 0, "item under a key");
         }
-        let length = match info & CONTENT_KIND {
-            DELETED => self.number()?,
+        let (length, text) = match info & CONTENT_KIND {
+            DELETED => (self.number()?, None),
             STRING => {
                 let text = self.cursor.read_string()?;
-                u32::try_from(text.encode_utf16().count()).context("text too long")?
+                let length = u32::try_from(text.encode_utf16().count()).context("text too long")?;
+                let byte_length = text.len();
+                let end = self.cursor.next;
+                (length, Some(end - byte_length..end))
             }
             kind => bail!("content kind {kind} is not page text"),
         };
         ensure!(length > 0, "empty item");
-        Ok(Piece::Item(length))
+        Ok(Piece::Item { length, text })
     }
 
     fn delete_set(&mut self) -> Result<()> {

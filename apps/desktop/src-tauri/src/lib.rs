@@ -739,6 +739,14 @@ async fn mark_all_read(state: State<'_, AppState>) -> CommandResult<()> {
 }
 
 #[tauri::command]
+async fn mark_page_mentions_read(state: State<'_, AppState>, page: String) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .mark_page_mentions_read(&page)
+        .map_err(failed)
+}
+
+#[tauri::command]
 async fn linked_message(state: State<'_, AppState>, id: String) -> CommandResult<Option<LinkedMessage>> {
     current(&state).await?.linked_message(&id).map_err(failed)
 }
@@ -1245,6 +1253,7 @@ pub fn run() {
             linked_message,
             inbox,
             mark_all_read,
+            mark_page_mentions_read,
             thread,
             set_following,
             mark_thread_read,

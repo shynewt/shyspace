@@ -9,6 +9,7 @@ mod key_rotation;
 mod later;
 mod lifecycle;
 mod look;
+mod page_mentions;
 mod pages_live;
 mod presence;
 mod protection;
@@ -208,6 +209,7 @@ pub(crate) struct Inner {
     /// tasks from any thread.
     pub runtime: tokio::runtime::Handle,
     pub page_live: Mutex<pages_live::PageLive>,
+    pub page_alert_times: Mutex<crate::sync::page_mentions::PageAlertTimes>,
     #[cfg(test)]
     pub page_sent: Mutex<Vec<crate::transport::page_gossip::PageWire>>,
     pub own_presence: Mutex<presence::OwnPresence>,

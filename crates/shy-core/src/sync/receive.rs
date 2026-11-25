@@ -272,11 +272,19 @@ impl Workspace {
                 Ok(alert) => changes.extend(alert),
                 Err(error) => warn!("couldn't decide whether to alert: {error:#}"),
             }
+            match self.page_mention_for(state, readable) {
+                Ok(more) => changes.extend(more),
+                Err(error) => warn!("couldn't look for a page mention: {error:#}"),
+            }
         }
         if applied.needs_rebuild {
             match state.store.all_view_changes() {
                 Ok(more) => changes.extend(more),
                 Err(error) => warn!("couldn't list what a rebuild changed: {error:#}"),
+            }
+            match self.forget_undone_page_mentions(state) {
+                Ok(more) => changes.extend(more),
+                Err(error) => warn!("couldn't forget undone page mentions: {error:#}"),
             }
         }
         Ok(changes)
