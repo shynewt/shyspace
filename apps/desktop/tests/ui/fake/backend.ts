@@ -650,8 +650,32 @@ export class FakeBackend {
       case "set_draft":
         this.drafts.set(requireString(args, "target"), requireString(args, "text"));
         return this.notify({ kind: "drafts" });
+      case "set_edit_draft": {
+        const conversation = requireString(args, "conversation");
+        const message = requireString(args, "message");
+        const text = requireString(args, "text");
+        if (text.trim()) {
+          const edited = this.chat.linkedMessage(message)?.message;
+          if (!edited) throw new Error("no such message here");
+          if (edited.author !== this.me()) throw new Error("you can only edit your own messages");
+          if (edited.channel !== this.chat.channelOf(conversation))
+            throw new Error("the message isn't in that conversation");
+        }
+        this.drafts.setEdit(conversation, message, text);
+        return this.notify({ kind: "drafts" });
+      }
+      case "keep_edit_of_deleted_message": {
+        const message = requireString(args, "message");
+        if (this.chat.linkedMessage(message)) throw new Error("the message is still there to edit");
+        this.drafts.keepEditOfDeleted(requireString(args, "conversation"), message);
+        return this.notify({ kind: "drafts" });
+      }
       case "drafts": {
-        const list = () => this.drafts.list((target) => this.chat.channelOf(target));
+        const list = () =>
+          this.drafts.list(
+            (target) => this.chat.channelOf(target),
+            (id) => this.chat.linkedMessage(id) !== null,
+          );
         if (!this.holdDrafts) return list();
         return new Promise((resolve) => this.heldDraftLoads.push(() => resolve(list())));
       }

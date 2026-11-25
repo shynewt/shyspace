@@ -10,9 +10,10 @@ const SAVE_DELAY_MS = 400;
  * thread's first message): restores it on open, saves after a pause, and
  * saves at once when the composer closes. Only edits are saved. A draft
  * stored from elsewhere while it's open (a reply kept from a notification)
- * shows at once, after anything typed and not yet saved.
+ * shows at once, after anything typed and not yet saved. Returns whether
+ * the draft is back yet.
  */
-export function useDraft(target: string, text: string, onRestore: (text: string) => void) {
+export function useDraft(target: string, text: string, onRestore: (text: string) => void): boolean {
   const latest = useRef({ text, onRestore });
   const isDirty = useRef(false);
   const [isRestored, setRestored] = useState(false);
@@ -27,7 +28,7 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
     let isCurrent = true;
     api.drafts().then((drafts) => {
       if (!isCurrent) return;
-      const draft = drafts.find((candidate) => candidate.target === target);
+      const draft = drafts.find((candidate) => candidate.target === target && !candidate.editing);
       // Never replace what the user already started typing.
       if (draft && !latest.current.text) latest.current.onRestore(draft.text);
       // What's stored, not what's shown: text typed before this answer is an edit.
@@ -49,7 +50,7 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
       const read = ++reads;
       api.drafts().then((drafts) => {
         if (read !== reads) return;
-        const stored = drafts.find((candidate) => candidate.target === target)?.text ?? "";
+        const stored = drafts.find((candidate) => candidate.target === target && !candidate.editing)?.text ?? "";
         // Our own save, or nothing new.
         if (stored === saved.current) return;
         const typed = latest.current.text;
@@ -93,6 +94,7 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
       }),
     [target],
   );
+  return isRestored;
 }
 
 /**

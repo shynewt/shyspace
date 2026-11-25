@@ -4,7 +4,7 @@ import { type KeyboardEvent, useMemo } from "react";
 import { api, type Draft } from "../../lib/api";
 import { useMemberNames } from "../../lib/members";
 import { plainPreview } from "../../lib/plainPreview";
-import { reportError, showUndoToast } from "../../lib/toast";
+import { reportError, showToast, showUndoToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Badge, EmptyState, IconButton, instantAfterAKey, ListRow, RelativeTime, tweens } from "../../ui";
@@ -29,7 +29,7 @@ export function DraftList() {
         {/* A row discarded with a key leaves at once; the exit reads this when it starts. */}
         <AnimatePresence initial={false} custom={instantAfterAKey(tweens.base)}>
           {drafts.map((draft) => (
-            <DraftRow key={draft.target} draft={draft} />
+            <DraftRow key={`${draft.target}:${draft.editing?.message ?? ""}`} draft={draft} />
           ))}
         </AnimatePresence>
       </ul>
@@ -52,11 +52,7 @@ function DraftRow({ draft }: { draft: Draft }) {
   const isThread = draft.target !== draft.channel;
   const isOld = Date.now() - draft.updated_ms > OLD_AFTER_MS;
   const open = () => navigate({ kind: "channel", id: draft.channel, thread: isThread ? draft.target : undefined });
-  const discard = () =>
-    api
-      .setDraft(draft.target, "")
-      .then(() => showUndoToast("Draft discarded.", () => api.setDraft(draft.target, draft.text)))
-      .catch(reportError);
+  const discard = () => discardDraft(draft).catch(reportError);
 
   const discardWithKey = (event: KeyboardEvent<HTMLLIElement>) => {
     if (event.key !== "Delete" && event.key !== "Backspace") return;
@@ -73,7 +69,7 @@ function DraftRow({ draft }: { draft: Draft }) {
         leading={<Pencil size={15} className="mt-0.5 text-decorative" />}
         meta={
           <>
-            {isThread && <span className="shrink-0">Thread in</span>}
+            <DraftPlace draft={draft} isThread={isThread} />
             <ChannelName channelId={draft.channel} className="min-w-0 font-semibold text-ink" />
             {isOld && <Badge>Old</Badge>}
             <RelativeTime ms={draft.updated_ms} className="ml-auto shrink-0 text-faint" />
@@ -89,6 +85,33 @@ function DraftRow({ draft }: { draft: Draft }) {
       </ListRow>
     </motion.li>
   );
+}
+
+/** Where the draft is going, before its channel: an edit names what it changes. */
+function DraftPlace({ draft, isThread }: { draft: Draft; isThread: boolean }) {
+  const place = draft.editing
+    ? draft.editing.is_deleted
+      ? "Edit of a deleted message in"
+      : isThread
+        ? "Editing a thread message in"
+        : "Editing a message in"
+    : isThread
+      ? "Thread in"
+      : null;
+  return place && <span className="shrink-0">{place}</span>;
+}
+
+/** Removes a draft, with Undo while its text can still go back where it was. */
+async function discardDraft(draft: Draft) {
+  const { editing } = draft;
+  if (!editing) {
+    await api.setDraft(draft.target, "");
+    return showUndoToast("Draft discarded.", () => api.setDraft(draft.target, draft.text));
+  }
+  await api.setEditDraft(draft.target, editing.message, "");
+  // A deleted message can't be edited, so its edit has nowhere to go back to.
+  if (editing.is_deleted) return showToast("Draft discarded.");
+  showUndoToast("Draft discarded.", () => api.setEditDraft(draft.target, editing.message, draft.text));
 }
 
 /** Moves focus off a row that's going: to the next row, else the one before, else the chosen tab. */

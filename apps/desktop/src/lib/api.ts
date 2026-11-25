@@ -138,7 +138,16 @@ export type LaterItem = {
   message: LinkedMessage | null;
   page: Page | null;
 };
-export type Draft = { target: string; channel: string; text: string; updated_ms: number };
+export type Draft = {
+  target: string;
+  channel: string;
+  text: string;
+  updated_ms: number;
+  /** Set when this is an unsaved edit of one of your messages, kept for the conversation in `target`. */
+  editing: EditDraft | null;
+};
+/** The message an unsaved edit changes; `is_deleted` once it was deleted, its edit's text still kept. */
+export type EditDraft = { message: string; is_deleted: boolean };
 export type SavedMark = { remind_ms: number | null; is_done: boolean };
 export type LinkedMessage = { message: Message; thread_root: string | null };
 /** A mention of you in a page, the latest from its author there. */
@@ -511,6 +520,12 @@ export const api = {
   /** When the next reminder comes due, in any workspace. */
   nextReminderMs: () => invoke<number | null>("next_reminder_ms"),
   setDraft: (target: string, text: string) => invoke<void>("set_draft", { target, text }),
+  /** Keeps an unsaved edit of your `message`, made in `conversation`; blank text removes it. */
+  setEditDraft: (conversation: string, message: string, text: string) =>
+    invoke<void>("set_edit_draft", { conversation, message, text }),
+  /** Moves a deleted message's unsaved edit into `conversation`'s draft, after any draft there. */
+  keepEditOfDeletedMessage: (conversation: string, message: string) =>
+    invoke<void>("keep_edit_of_deleted_message", { conversation, message }),
   linkedMessage: (id: string) => invoke<LinkedMessage | null>("linked_message", { id }),
   markAllRead: () => invoke<void>("mark_all_read"),
   markPageMentionsRead: (page: string) => invoke<void>("mark_page_mentions_read", { page }),

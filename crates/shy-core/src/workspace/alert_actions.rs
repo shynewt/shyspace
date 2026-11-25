@@ -53,7 +53,11 @@ impl Workspace {
     pub fn keep_unsent_reply(&self, message: &str, text: &str) -> Result<()> {
         let conversation = self.conversation_of(message)?;
         let target = conversation.draft_target();
-        let kept = match self.drafts()?.into_iter().find(|draft| draft.target == target) {
+        let kept = match self
+            .drafts()?
+            .into_iter()
+            .find(|draft| draft.target == target && draft.editing.is_none())
+        {
             Some(draft) if !draft.text.trim().is_empty() => format!("{}\n\n{text}", draft.text),
             _ => text.to_owned(),
         };

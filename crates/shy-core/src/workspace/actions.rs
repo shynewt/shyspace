@@ -15,7 +15,7 @@ use crate::{
     private::ids::{new_private_message_id, private_channel_of, private_kind},
     profile::ProfileDetails,
     storage::{ItemKind, Store},
-    views::{Change, Draft, Message, NotifyLevel, PageEditorSession},
+    views::{Change, Message, NotifyLevel, PageEditorSession},
 };
 
 const MAX_MENTION_SCAN: u32 = 500;
@@ -250,41 +250,6 @@ impl Workspace {
         }
         self.emit(Change::Drafts);
         Ok(())
-    }
-
-    /// Keeps unsent text for a channel or a thread (its first message), on
-    /// this device only. Blank text removes the draft.
-    pub fn set_draft(&self, target: &str, text: &str) -> Result<()> {
-        let kind = self.state().store.item_kind(target)?;
-        if !matches!(kind, Some(ItemKind::Channel | ItemKind::Message)) {
-            bail!("drafts belong to a channel or a thread");
-        }
-        self.state().store.set_draft(target, text, now_ms()?)?;
-        self.emit(Change::Drafts);
-        Ok(())
-    }
-
-    /// Your drafts, newest first. Drafts for something since deleted are left out.
-    pub fn drafts(&self) -> Result<Vec<Draft>> {
-        let state = self.state();
-        let mut drafts = Vec::new();
-        for (target, text, updated_ms) in state.store.drafts()? {
-            let channel = match state.store.item_kind(&target)? {
-                Some(ItemKind::Channel) => target.clone(),
-                Some(ItemKind::Message) => match state.store.message(&target, &self.me())? {
-                    Some(message) => message.channel,
-                    None => continue,
-                },
-                _ => continue,
-            };
-            drafts.push(Draft {
-                target,
-                channel,
-                text,
-                updated_ms,
-            });
-        }
-        Ok(drafts)
     }
 
     /// Whether new replies in the thread starting at `root` alert you.

@@ -765,6 +765,17 @@ pub struct Draft {
     pub channel: EntityId,
     pub text: String,
     pub updated_ms: i64,
+    /// Set when this is an unsaved edit of one of your messages, kept for
+    /// the conversation in `target`.
+    pub editing: Option<EditDraft>,
+}
+
+/// The message an unsaved edit changes.
+#[derive(Debug, Clone, Serialize)]
+pub struct EditDraft {
+    pub message: EntityId,
+    /// The message was deleted since; the edit's text is still kept.
+    pub is_deleted: bool,
 }
 
 /// Something saved for later: a message or a page, never both.

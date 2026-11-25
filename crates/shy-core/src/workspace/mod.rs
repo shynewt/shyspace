@@ -2,6 +2,7 @@
 
 mod actions;
 mod alert_actions;
+mod drafts;
 mod files;
 mod huddle_ring;
 mod huddles;

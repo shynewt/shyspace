@@ -380,6 +380,7 @@ export function ChannelView({
             onSent={jumpToNewest}
             editing={editing}
             onEditDone={() => setEditing(null)}
+            onResumeEdit={setEditing}
             onEditLast={() => setEditing(messages?.findLast((message) => message.can_edit) ?? null)}
             mentionTarget={mentionTarget}
           />

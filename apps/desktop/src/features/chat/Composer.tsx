@@ -12,6 +12,7 @@ import { Button, cx, EmojiPicker, fade, IconButton, Kbd, Popover, tweens } from 
 import { AttachmentList, DropHint, UploadProgress } from "./Attachments";
 import { useAttachments } from "./useAttachments";
 import { useDraft } from "./useDraft";
+import { useEditDraft } from "./useEditDraft";
 import { type InsertMention, useSuggestions } from "./useSuggestions";
 
 const MAX_HEIGHT_PX = 200;
@@ -24,6 +25,7 @@ export function Composer({
   editing = null,
   onEditDone,
   onEditLast,
+  onResumeEdit,
   mentionTarget,
 }: {
   channelId: string;
@@ -37,6 +39,8 @@ export function Composer({
   onEditDone?: () => void;
   /** Up in an empty composer: edit your last message. */
   onEditLast?: () => void;
+  /** Opening the conversation again: carry on with an edit left unsaved there. */
+  onResumeEdit?: (message: Message) => void;
   /** Filled with this box's way to insert a mention, for things shown around it. */
   mentionTarget?: RefObject<InsertMention | null>;
 }) {
@@ -64,7 +68,24 @@ export function Composer({
   const updateText = useCallback((next: string) => setText(next), []);
   // While editing, the draft is set aside and comes back afterwards.
   const [setAside, setSetAside] = useState("");
-  useDraft(threadRoot ?? channelId, editing ? setAside : text, updateText);
+  const conversation = threadRoot ?? channelId;
+  const isDraftBack = useDraft(conversation, editing ? setAside : text, updateText);
+  // An edit left unsaved here comes back with its text, not the message's.
+  const resumed = useRef<{ messageId: string; text: string } | null>(null);
+  const resumeEdit = useCallback(
+    (message: Message, savedText: string) => {
+      if (!onResumeEdit) return;
+      resumed.current = { messageId: message.id, text: savedText };
+      onResumeEdit(message);
+    },
+    [onResumeEdit],
+  );
+  const editDraft = useEditDraft({
+    conversation,
+    text,
+    isReady: isDraftBack,
+    onResume: resumeEdit,
+  });
   // Editing starts once per message: later refreshes of it mustn't reset the text.
   const latest = useRef({ editing, text });
   useEffect(() => {
@@ -84,6 +105,7 @@ export function Composer({
     element.setSelectionRange(element.value.length, element.value.length);
   });
   const { adopt } = picker;
+  const { begin: beginEditDraft } = editDraft;
   // Only the draft from before any editing is set aside: going from one
   // edit straight to another keeps it, rather than the half-done edit.
   const wasEditing = useRef(false);
@@ -95,16 +117,20 @@ export function Composer({
     }
     if (!wasEditing.current) setSetAside(latest.current.text);
     wasEditing.current = true;
-    const next = adopt(message.text);
+    const resumedText = resumed.current?.messageId === editingId ? resumed.current.text : null;
+    resumed.current = null;
+    const next = resumedText ?? adopt(message.text);
+    beginEditDraft(editingId, next, resumedText !== null);
     const element = input.current;
     // The same text renders nothing new, so the cursor moves here rather than after rendering.
     if (element?.value === next) element.setSelectionRange(next.length, next.length);
     else shouldPutCursorAtEnd.current = true;
     updateText(next);
     element?.focus();
-  }, [editingId, adopt, updateText]);
+  }, [editingId, adopt, updateText, beginEditDraft]);
 
   const finishEditing = () => {
+    editDraft.forget();
     updateText(setAside);
     onEditDone?.();
   };

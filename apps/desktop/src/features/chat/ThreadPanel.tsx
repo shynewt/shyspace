@@ -153,6 +153,7 @@ export function ThreadPanel({
           }}
           editing={editing}
           onEditDone={() => setEditing(null)}
+          onResumeEdit={setEditing}
           onEditLast={() => setEditing(thread?.findLast((message) => message.can_edit) ?? null)}
           mentionTarget={mentionTarget}
         />

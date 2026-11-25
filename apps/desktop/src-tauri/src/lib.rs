@@ -785,6 +785,31 @@ async fn set_draft(state: State<'_, AppState>, target: String, text: String) -> 
 }
 
 #[tauri::command]
+async fn set_edit_draft(
+    state: State<'_, AppState>,
+    conversation: String,
+    message: String,
+    text: String,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .set_edit_draft(&conversation, &message, &text)
+        .map_err(failed)
+}
+
+#[tauri::command]
+async fn keep_edit_of_deleted_message(
+    state: State<'_, AppState>,
+    conversation: String,
+    message: String,
+) -> CommandResult<()> {
+    current(&state)
+        .await?
+        .keep_edit_of_deleted_message(&conversation, &message)
+        .map_err(failed)
+}
+
+#[tauri::command]
 async fn drafts(state: State<'_, AppState>) -> CommandResult<Vec<Draft>> {
     current(&state).await?.drafts().map_err(failed)
 }
@@ -1291,6 +1316,8 @@ pub fn run() {
             later,
             take_due_reminders,
             set_draft,
+            set_edit_draft,
+            keep_edit_of_deleted_message,
             drafts,
             sent_messages,
             linked_message,
