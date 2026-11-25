@@ -527,6 +527,8 @@ export const api = {
     target: AlertTarget | null,
     picture: { member: string; png: number[] } | null,
   ) => invoke<void>("show_alert", { alert: { kind, workspace_id: workspaceId, title, body, target, picture } }),
+  /** Says a reply typed in a notification is lost, even where alerts are muted or paused. */
+  sayReplyLost: (workspaceId: string, body: string) => invoke<void>("say_reply_lost", { workspaceId, body }),
   notificationPermission: () => invoke<NotificationPermission>("notification_permission"),
   /** Shows the system's prompt if it was never answered; resolves to the answer. */
   requestNotificationPermission: () => invoke<NotificationPermission>("request_notification_permission"),

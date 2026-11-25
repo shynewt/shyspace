@@ -76,5 +76,5 @@ function sayReplyIsLost(workspaceId: string, text: string) {
   const body = readPreferences().alertsShowText
     ? `It couldn't be kept as a draft either. You wrote: ${text}`
     : "It couldn't be kept as a draft either.";
-  return api.showAlert("notice", workspaceId, "Your reply wasn't sent", body, null, null);
+  return api.sayReplyLost(workspaceId, body);
 }

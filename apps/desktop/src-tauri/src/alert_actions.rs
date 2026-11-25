@@ -331,6 +331,23 @@ pub fn keep_unsent_reply(
     )
 }
 
+/// Says a reply typed in a notification is lost, even in a muted
+/// workspace or while notifications are paused: it isn't anywhere else.
+#[tauri::command]
+pub fn say_reply_lost(app: AppHandle, workspace_id: String, body: String) -> CommandResult<()> {
+    alerts::show(
+        &app,
+        Alert {
+            kind: AlertKind::Notice,
+            workspace_id: Some(workspace_id),
+            title: "Your reply wasn't sent".into(),
+            body,
+            target: None,
+            picture: None,
+        },
+    )
+}
+
 #[tauri::command]
 pub fn mark_alert_read(
     state: State<'_, AppState>,

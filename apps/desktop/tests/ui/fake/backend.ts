@@ -731,6 +731,15 @@ export class FakeBackend {
         this.alertTargets.push(alertTarget(argument(alert, "target")));
         return null;
       }
+      case "say_reply_lost":
+        // Shown whatever the mutes: the reply isn't anywhere else.
+        this.alertKinds.push("notice");
+        this.alertWorkspaces.push(requireString(args, "workspaceId"));
+        this.alertsShown.push({ title: "Your reply wasn't sent", body: requireString(args, "body") });
+        this.alertPictures.push(null);
+        this.alertPngs.push([]);
+        this.alertTargets.push(null);
+        return null;
       case "pages":
         return this.pages.map(({ doc: _doc, ...page }) => ({
           ...page,

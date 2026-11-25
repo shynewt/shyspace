@@ -1258,6 +1258,7 @@ pub fn run() {
             alert_actions::people_in,
             alert_actions::reply_to_alert,
             alert_actions::keep_unsent_reply,
+            alert_actions::say_reply_lost,
             alert_actions::mark_alert_read,
             notification_permission::notification_permission,
             notification_permission::request_notification_permission,

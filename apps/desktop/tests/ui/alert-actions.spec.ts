@@ -76,6 +76,17 @@ test("a reply that can't be sent is kept as a draft and a notification says so",
   await expect(page.getByLabel("Message #random")).toHaveValue("yes");
 });
 
+test("a lost reply is said even while notifications are paused", async ({ page }) => {
+  await graceWritesInRandom(page, "Lunch?");
+  await page.evaluate(() => window.fake.handle("set_notifications_paused", { untilMs: Date.now() + 3_600_000 }));
+
+  await replyFromAlert(page, "a-deleted-message", "yes");
+
+  await expect
+    .poll(() => page.evaluate(() => window.fake.alertsShown))
+    .toContainEqual({ title: "Your reply wasn't sent", body: "It couldn't be kept as a draft either. You wrote: yes" });
+});
+
 test("a reply that waited too long is kept as a draft, not sent", async ({ page }) => {
   const message = await graceWritesInRandom(page, "Lunch?");
 
