@@ -30,6 +30,9 @@ pub(super) struct Tones {
     speaker: Recorder,
     /// Every microphone fails to open, as a broken one would.
     is_microphone_broken: bool,
+    /// How many times faster than real time the tone is sent, as a hostile
+    /// peer could.
+    speed: u32,
     listings: Listings,
 }
 
@@ -76,7 +79,15 @@ impl Tones {
             frequency,
             speaker: Recorder::default(),
             is_microphone_broken: false,
+            speed: 1,
             listings: Listings::default(),
+        }
+    }
+
+    pub(super) fn sending_faster(frequency: f32, speed: u32) -> Self {
+        Self {
+            speed,
+            ..Self::new(frequency)
         }
     }
 
@@ -138,8 +149,9 @@ impl Backend for Tones {
     ) -> Result<Playing> {
         anyhow::ensure!(!self.is_microphone_broken, "the microphone is broken");
         let frequency = self.frequency;
+        let speed = self.speed;
         Ok(Playing(tokio::spawn(async move {
-            if let Err(error) = play_tone(outgoing, frequency, &reports).await {
+            if let Err(error) = play_tone(outgoing, frequency, speed, &reports).await {
                 panic!("the test tone stopped: {error:#}");
             }
         })))
@@ -155,7 +167,12 @@ impl Drop for Playing {
     }
 }
 
-async fn play_tone(outgoing: Outgoing, frequency: f32, reports: &mpsc::Sender<VoiceReport>) -> Result<()> {
+async fn play_tone(
+    outgoing: Outgoing,
+    frequency: f32,
+    speed: u32,
+    reports: &mpsc::Sender<VoiceReport>,
+) -> Result<()> {
     let mut broadcast = outgoing.broadcast;
     let clock = outgoing.catalog.clock();
     let mut options = encode::Options::default();
@@ -164,7 +181,7 @@ async fn play_tone(outgoing: Outgoing, frequency: f32, reports: &mpsc::Sender<Vo
     let mut producer = encode::Producer::new(&mut broadcast, outgoing.catalog, input, &options)?;
     let _ = reports.try_send(VoiceReport::Opened);
     let per_frame = (RATE as f32 * FRAME.as_secs_f32()) as usize;
-    let mut every = real_time(FRAME);
+    let mut every = real_time(FRAME / speed);
     for frame in 0.. {
         every.tick().await;
         let samples: Vec<f32> = (0..per_frame)

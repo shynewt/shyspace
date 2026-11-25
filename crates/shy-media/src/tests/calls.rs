@@ -170,6 +170,31 @@ async fn listed_peers_hear_each_others_voices() {
         .await;
 }
 
+/// A peer sending audio far faster than real time gets decoded at about
+/// real time, not all of it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peer_sending_faster_than_real_time_is_decoded_at_about_real_time() {
+    let lookup = MemoryLookup::new();
+    let fast = Device::with(&lookup, Tones::sending_faster(A, 10)).await;
+    let bob = Device::new(&lookup, E).await;
+    let _fast_call = fast.join("h-fast", &[(&bob, "h-bob")]);
+    let _bobs_call = bob.join("h-bob", &[(&fast, "h-fast")]);
+    assert!(hears(&bob.speaker, A).await, "Bob hears the fast peer at all");
+
+    let started = Instant::now();
+    let before = bob.speaker.total();
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let decoded = (bob.speaker.total() - before) as f64 / 48_000.0;
+
+    // At most a second ahead of the clock, a second saved up before, and
+    // half a second forgiven at each of the (at most two) restarts.
+    let elapsed = started.elapsed().as_secs_f64();
+    assert!(
+        decoded < elapsed + 3.5,
+        "decoded {decoded:.1} s of audio in {elapsed:.1} s"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn three_peers_hear_the_other_two_mixed() {
     let lookup = MemoryLookup::new();
