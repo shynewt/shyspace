@@ -65,19 +65,22 @@ impl Store {
 
     /// Items whose reminder is due and hasn't fired yet, marked as fired.
     pub fn take_due_reminders(&self, now_ms: i64) -> Result<Vec<String>> {
-        let mut statement = self.db.prepare(
-            "SELECT item FROM later
-             WHERE remind_ms IS NOT NULL AND remind_ms <= ? AND is_reminded = 0 AND is_done = 0
-             ORDER BY remind_ms",
-        )?;
-        let due: Vec<String> = statement
-            .query_map([now_ms], |row| row.get(0))?
-            .collect::<Result<_, _>>()?;
-        for item in &due {
-            self.db
-                .execute("UPDATE later SET is_reminded = 1 WHERE item = ?", [item])?;
-        }
-        Ok(due)
+        self.atomically(|store| {
+            let mut statement = store.db.prepare(
+                "SELECT item FROM later
+                 WHERE remind_ms IS NOT NULL AND remind_ms <= ? AND is_reminded = 0 AND is_done = 0
+                 ORDER BY remind_ms",
+            )?;
+            let due: Vec<String> = statement
+                .query_map([now_ms], |row| row.get(0))?
+                .collect::<Result<_, _>>()?;
+            for item in &due {
+                store
+                    .db
+                    .execute("UPDATE later SET is_reminded = 1 WHERE item = ?", [item])?;
+            }
+            Ok(due)
+        })
     }
 
     pub fn saved_mark(&self, item: &str) -> Result<Option<SavedMark>> {
@@ -94,5 +97,28 @@ impl Store {
                 },
             )
             .optional()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::TEST_DB_KEY;
+
+    #[test]
+    fn reminders_failing_halfway_all_stay_due() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db"), TEST_DB_KEY).unwrap();
+        store.save_for_later("first", Some(10), 0).unwrap();
+        store.save_for_later("second", Some(20), 0).unwrap();
+        store.execute_for_test(
+            "CREATE TRIGGER failing BEFORE UPDATE ON later WHEN NEW.item = 'second'
+             BEGIN SELECT RAISE(ABORT, 'the disk is full'); END;",
+        );
+
+        assert!(store.take_due_reminders(30).is_err());
+        store.execute_for_test("DROP TRIGGER failing;");
+
+        assert_eq!(store.take_due_reminders(30).unwrap(), ["first", "second"]);
     }
 }

@@ -79,18 +79,20 @@ impl Store {
     /// Former members stay listed (so their messages keep a name), but only
     /// current MLS members are active.
     pub fn set_current_members(&self, current: &[PublicKey]) -> Result<()> {
-        self.db.execute(
-            "INSERT OR IGNORE INTO members (member, active) SELECT DISTINCT member, 0 FROM epoch_members",
-            [],
-        )?;
-        self.db.execute("UPDATE members SET active = 0", [])?;
-        for member in current {
-            self.db.execute(
-                "INSERT INTO members (member, active) VALUES (?, 1) ON CONFLICT (member) DO UPDATE SET active = 1",
-                [member.as_bytes()],
+        self.atomically(|store| {
+            store.db.execute(
+                "INSERT OR IGNORE INTO members (member, active) SELECT DISTINCT member, 0 FROM epoch_members",
+                [],
             )?;
-        }
-        Ok(())
+            store.db.execute("UPDATE members SET active = 0", [])?;
+            for member in current {
+                store.db.execute(
+                    "INSERT INTO members (member, active) VALUES (?, 1) ON CONFLICT (member) DO UPDATE SET active = 1",
+                    [member.as_bytes()],
+                )?;
+            }
+            Ok(())
+        })
     }
 
     /// A removed member's log ends at `last_seq`; anything later is forged.
@@ -174,4 +176,42 @@ fn to_epoch_key(bytes: Vec<u8>) -> Result<EpochKey> {
     bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("stored epoch key has the wrong length"))
+}
+
+#[cfg(test)]
+mod tests {
+    use iroh::SecretKey;
+
+    use super::*;
+    use crate::storage::TEST_DB_KEY;
+
+    fn active_members(store: &Store) -> Vec<Vec<u8>> {
+        let mut statement = store
+            .db
+            .prepare("SELECT member FROM members WHERE active = 1 ORDER BY member")
+            .unwrap();
+        statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn current_members_failing_halfway_leave_the_old_ones_active() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db"), TEST_DB_KEY).unwrap();
+        let [ada, bob, cyd] = [(); 3].map(|()| SecretKey::generate().public());
+        store.set_current_members(&[ada, bob]).unwrap();
+        let before = active_members(&store);
+        store.execute_for_test(&format!(
+            "CREATE TRIGGER failing BEFORE INSERT ON members WHEN NEW.member = X'{}'
+             BEGIN SELECT RAISE(ABORT, 'the disk is full'); END",
+            hex::encode(cyd.as_bytes())
+        ));
+
+        assert!(store.set_current_members(&[ada, cyd]).is_err());
+
+        assert_eq!(active_members(&store), before);
+    }
 }
