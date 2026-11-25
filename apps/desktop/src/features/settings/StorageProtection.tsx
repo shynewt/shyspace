@@ -76,6 +76,16 @@ function ProtectionNotice({ protection }: { protection: ProtectionCheck }) {
           Couldn't check yet whether the bucket keeps deleted data.
         </p>
       );
+    case "old_versions_unreadable":
+      return (
+        <Notice tone="warning" title="Couldn't check old versions">
+          <p>
+            The bucket keeps versions, but the members' key can't read old versions, so shyspace can't check that they
+            hold the data. Add s3:GetObjectVersion to the key's permissions, then check again.
+          </p>
+          <WhoFixesIt />
+        </Notice>
+      );
     case "versioned":
       return (
         <Notice tone="warning" title="Partly protected">

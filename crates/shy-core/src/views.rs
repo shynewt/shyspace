@@ -496,6 +496,10 @@ pub enum StorageProtection {
     Unprotected,
     /// Never checked, or the last check failed.
     Unknown,
+    /// The bucket keeps versions, but the key may not read old ones, so
+    /// whether they hold the data can't be checked. Last, as checks are
+    /// stored by variant index.
+    OldVersionsUnreadable,
 }
 
 /// The last protection check.

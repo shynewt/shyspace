@@ -21,6 +21,10 @@ A correct setup at Scaleway, Backblaze, AWS or MinIO should show this. The bucke
 
 The bucket doesn't keep deleted or overwritten data, so anyone with its keys could destroy your history. Follow your [provider's page](storage/choose-a-provider.md) to turn on versioning or a lock, then choose **Check again**.
 
+## Storage says "Couldn't check old versions"
+
+The bucket keeps versions, but the members' key isn't allowed to read old ones, so the app can't check that they hold your data. Add `s3:GetObjectVersion` to the key's permissions (your [provider's page](storage/choose-a-provider.md) has the full list), then choose **Check again**.
+
 ## Storage says "Couldn't check yet"
 
 No check has finished yet, or the last one failed. The app tries again every hour; choose **Check again** to see the error now.

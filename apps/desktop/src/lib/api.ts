@@ -233,9 +233,10 @@ export type StorageSettings = {
 /**
  * Whether the bucket keeps deleted or overwritten data. "locked": deletes are refused, safe even from someone
  * with the keys. "versioned": accidents can be undone, but someone with the keys could delete old versions.
- * "unknown": never checked, or the last check failed.
+ * "unknown": never checked, or the last check failed. "old_versions_unreadable": versions are kept, but the key may
+ * not read old ones, so whether they hold the data can't be checked.
  */
-export type StorageProtection = "locked" | "versioned" | "unprotected" | "unknown";
+export type StorageProtection = "locked" | "versioned" | "unprotected" | "unknown" | "old_versions_unreadable";
 export type ProtectionCheck = { state: StorageProtection; checked_ms: number | null };
 /** The storage provider, told from the bucket's endpoint. */
 export type StorageProvider = "scaleway" | "r2" | "b2" | "s3" | "other";

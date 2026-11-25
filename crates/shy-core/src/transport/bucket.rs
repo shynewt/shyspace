@@ -740,10 +740,11 @@ impl Bucket {
         if self.refuses_deleting_ops(member).await? {
             return Ok(StorageProtection::Locked);
         }
-        if self.keeps_versions().await? {
-            return Ok(StorageProtection::Versioned);
-        }
-        Ok(StorageProtection::Unprotected)
+        Ok(match self.keeps_versions().await? {
+            OldVersions::Kept => StorageProtection::Versioned,
+            OldVersions::NotKept => StorageProtection::Unprotected,
+            OldVersions::Refused => StorageProtection::OldVersionsUnreadable,
+        })
     }
 
     async fn refuses_deleting_ops(&self, member: &PublicKey) -> Result<bool> {
@@ -767,7 +768,7 @@ impl Bucket {
         Ok(exists().await?.is_some())
     }
 
-    async fn keeps_versions(&self) -> Result<bool> {
+    async fn keeps_versions(&self) -> Result<OldVersions> {
         let path = Path::from(VERSIONING_PROBE);
         let first_bytes = rand::random::<[u8; 16]>();
         let first = self
@@ -779,17 +780,25 @@ impl Bucket {
             .await
             .context("can't write to the bucket")?;
         let Some(version) = first.version.filter(|version| version != "null") else {
-            return Ok(false);
+            return Ok(OldVersions::NotKept);
         };
         let options = GetOptions {
             version: Some(version),
             ..GetOptions::default()
         };
         match self.store.get_opts(&path, options).await {
-            Ok(earlier) => Ok(earlier.bytes().await?.as_ref() == first_bytes),
+            Ok(earlier) => match earlier.bytes().await?.as_ref() == first_bytes {
+                true => Ok(OldVersions::Kept),
+                false => Ok(OldVersions::NotKept),
+            },
             Err(object_store::Error::NotFound { .. } | object_store::Error::NotImplemented { .. }) => {
-                Ok(false)
+                Ok(OldVersions::NotKept)
             }
+            // Reading an old version needs its own permission
+            // (`s3:GetObjectVersion`), which a key can lack.
+            Err(
+                object_store::Error::PermissionDenied { .. } | object_store::Error::Unauthenticated { .. },
+            ) => Ok(OldVersions::Refused),
             Err(error) => Err(error).context("can't read from the bucket"),
         }
     }
@@ -814,6 +823,14 @@ impl Bucket {
         }
         Ok(announcements)
     }
+}
+
+/// What reading an overwritten object's first version found.
+enum OldVersions {
+    Kept,
+    NotKept,
+    /// The key may not read old versions.
+    Refused,
 }
 
 /// A member's gossip address hint, rewritten each time they start and every

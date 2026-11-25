@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { failWith } from "./support";
 
-type Protection = "locked" | "versioned" | "unprotected" | "unknown";
+type Protection = "locked" | "versioned" | "unprotected" | "unknown" | "old_versions_unreadable";
 
 async function setProtection(page: Page, state: Protection) {
   await page.evaluate((next) => window.fake.setStorageProtection(next), state);
@@ -44,6 +44,16 @@ test("a versioned bucket shows a notice that can't be dismissed", async ({ page 
   await expect(notice).toContainText("shyspace can't check that from here");
   await expect(notice.getByRole("button", { name: /dismiss|close/i })).toHaveCount(0);
   await expect(meButton(page).getByRole("img", { name: "Storage needs attention" })).toHaveCount(0);
+});
+
+test("a key that can't read old versions says which permission to add", async ({ page }) => {
+  await setProtection(page, "old_versions_unreadable");
+  const storage = await openStorage(page);
+
+  const notice = storage.getByRole("region", { name: "Storage protection" });
+  await expect(notice).toContainText("Couldn't check old versions");
+  await expect(notice).toContainText("Add s3:GetObjectVersion to the key's permissions");
+  await expect(notice).not.toContainText("Couldn't check yet");
 });
 
 test("an unprotected bucket warns, says what to turn on and marks the way there", async ({ page }) => {

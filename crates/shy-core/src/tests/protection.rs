@@ -29,6 +29,9 @@ enum Versions {
     /// Sends a version id but serves the current object for any version.
     IgnoredOnRead,
     Kept,
+    /// Keeps versions, but the key may not read old ones (no
+    /// `s3:GetObjectVersion`).
+    KeptUnreadable,
 }
 
 /// A bucket that behaves like one provider setup or another.
@@ -115,7 +118,7 @@ impl ObjectStore for FakeStore {
         result.version = match self.versions {
             Versions::None => None,
             Versions::Null => Some("null".to_owned()),
-            Versions::IgnoredOnRead | Versions::Kept => Some(version),
+            Versions::IgnoredOnRead | Versions::Kept | Versions::KeptUnreadable => Some(version),
         };
         Ok(result)
     }
@@ -136,6 +139,7 @@ impl ObjectStore for FakeStore {
             ..options
         };
         match (version, self.versions) {
+            (Some(_), Versions::KeptUnreadable) => Err(Self::refused(location)),
             (Some(version), Versions::Kept) => {
                 self.old_versions
                     .get_opts(&version_path(location, &version), options)
@@ -214,6 +218,17 @@ async fn kept_versions_count_as_versioned_not_locked() {
         checked(FakeStore::new(Versions::Kept, false)).await,
         StorageProtection::Versioned
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_that_cant_read_old_versions_is_reported_as_such() {
+    let store = Arc::new(FakeStore::new(Versions::KeptUnreadable, false));
+    let (_root, _bucket, admin) = admin_on(store).await;
+
+    let check = admin.check_storage_protection().await.unwrap();
+
+    assert_eq!(check.state, StorageProtection::OldVersionsUnreadable);
+    assert_eq!(admin.storage_protection().unwrap(), check, "kept like any result");
 }
 
 #[tokio::test(flavor = "multi_thread")]
