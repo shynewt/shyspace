@@ -137,3 +137,63 @@ test("a reply to a message that's gone says so, with what you wrote", async ({ p
     .poll(() => page.evaluate(() => window.fake.alertsShown))
     .toContainEqual({ title: "Your reply wasn't sent", body: "It couldn't be kept as a draft either. You wrote: yes" });
 });
+
+/** Opens #random, so its message box is on screen while a reply is kept. */
+async function openRandom(page: Page) {
+  await page.getByRole("button", { name: /^random/ }).click();
+  await expect(page.getByLabel("Message #random")).toBeVisible();
+}
+
+test("a reply kept as a draft shows in the message box already open there", async ({ page }) => {
+  const message = await graceWritesInRandom(page, "Lunch?");
+  await openRandom(page);
+  await page.evaluate(() => {
+    window.fake.notifications.failReplies = true;
+  });
+
+  await replyFromAlert(page, message, "yes");
+
+  await expect(page.getByLabel("Message #random")).toHaveValue("yes");
+});
+
+test("a reply kept as a draft joins what you're typing there, losing neither", async ({ page }) => {
+  const message = await graceWritesInRandom(page, "Lunch?");
+  await openRandom(page);
+  await page.evaluate(() => {
+    window.fake.notifications.failReplies = true;
+  });
+  await page.getByLabel("Message #random").fill("half a thought");
+
+  await replyFromAlert(page, message, "yes");
+
+  await expect(page.getByLabel("Message #random")).toHaveValue("half a thought\n\nyes");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const drafts = window.fake.handle("drafts", undefined) as { target: string; text: string }[];
+        return drafts.find((draft) => draft.target === window.fake.channelId("random"))?.text;
+      }),
+    )
+    .toBe("half a thought\n\nyes");
+});
+
+test("a reply from a notification leaves the draft open there as it was", async ({ page }) => {
+  const message = await graceWritesInRandom(page, "Lunch?");
+  await openRandom(page);
+  await page.getByLabel("Message #random").fill("a longer answer, half written");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window.fake.handle("drafts", undefined) as { target: string; text: string }[]).find(
+            (draft) => draft.target === window.fake.channelId("random"),
+          )?.text,
+      ),
+    )
+    .toBe("a longer answer, half written");
+
+  await replyFromAlert(page, message, "yes");
+
+  await expect.poll(() => latestIn(page, "random")).toBe("yes");
+  await expect(page.getByLabel("Message #random")).toHaveValue("a longer answer, half written");
+});

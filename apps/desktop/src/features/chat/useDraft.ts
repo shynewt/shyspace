@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../../lib/api";
+import { api, onChange } from "../../lib/api";
 import { saveBeforeSwitch } from "../../lib/beforeSwitch";
 import { reportError } from "../../lib/toast";
 
@@ -8,7 +8,9 @@ const SAVE_DELAY_MS = 400;
 /**
  * Keeps the composer's unsent text as a draft for `target` (a channel or a
  * thread's first message): restores it on open, saves after a pause, and
- * saves at once when the composer closes. Only edits are saved.
+ * saves at once when the composer closes. Only edits are saved. A draft
+ * stored from elsewhere while it's open (a reply kept from a notification)
+ * shows at once, after anything typed and not yet saved.
  */
 export function useDraft(target: string, text: string, onRestore: (text: string) => void) {
   const latest = useRef({ text, onRestore });
@@ -36,6 +38,29 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
       isCurrent = false;
     };
   }, [target]);
+
+  useEffect(() => {
+    if (!isRestored) return;
+    // Changes can come in quick succession (a send clears a draft, then
+    // it's put back); only the newest read counts.
+    let reads = 0;
+    return onChange((change) => {
+      if (change.kind !== "drafts") return;
+      const read = ++reads;
+      api.drafts().then((drafts) => {
+        if (read !== reads) return;
+        const stored = drafts.find((candidate) => candidate.target === target)?.text ?? "";
+        // Our own save, or nothing new.
+        if (stored === saved.current) return;
+        const typed = latest.current.text;
+        const shown = typed === saved.current ? stored : withAdded(typed, saved.current, stored);
+        saved.current = stored;
+        // At once, not on the next render, so a change right behind this one sees it.
+        latest.current.text = shown;
+        latest.current.onRestore(shown);
+      }, reportError);
+    });
+  }, [target, isRestored]);
 
   useEffect(() => {
     if (!isRestored) return;
@@ -68,4 +93,13 @@ export function useDraft(target: string, text: string, onRestore: (text: string)
       }),
     [target],
   );
+}
+
+/**
+ * What's typed but unsaved, with what was stored meanwhile: the part added
+ * after the draft the typing started from, or all of it if it was replaced.
+ */
+function withAdded(typed: string, before: string, stored: string): string {
+  const added = (stored.startsWith(before) ? stored.slice(before.length) : stored).replace(/^\n+/, "");
+  return [typed, added].filter(Boolean).join("\n\n");
 }
