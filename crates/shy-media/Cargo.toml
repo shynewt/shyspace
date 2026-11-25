@@ -1,6 +1,6 @@
 [package]
 name = "shy-media"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 license = "AGPL-3.0-only"
 description = "Huddle audio for shyspace: implements the core's HuddleMedia over the workspace's iroh endpoint."
