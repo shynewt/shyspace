@@ -1,6 +1,6 @@
 import { ArrowUp, Paperclip, Pencil, Smile, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { api, type Message } from "../../lib/api";
 import { clipboardImageFile, isEmptyPaste } from "../../lib/clipboardImage";
@@ -61,14 +61,7 @@ export function Composer({
   const canSend =
     (sentLength > 0 || hasFiles) && !isTooLong && !(hasFiles && attachments.problem) && !attachments.upload;
 
-  const updateText = useCallback((next: string) => {
-    setText(next);
-    // Grows with its content, up to a limit.
-    const element = input.current;
-    if (!element) return;
-    element.style.height = "0px";
-    element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT_PX)}px`;
-  }, []);
+  const updateText = useCallback((next: string) => setText(next), []);
   // While editing, the draft is set aside and comes back afterwards.
   const [setAside, setSetAside] = useState("");
   useDraft(threadRoot ?? channelId, editing ? setAside : text, updateText);
@@ -78,6 +71,18 @@ export function Composer({
     latest.current = { editing, text };
   }, [editing, text]);
   const editingId = editing?.id;
+  // Set when text is put in for editing: the cursor then goes to its end.
+  const shouldPutCursorAtEnd = useRef(false);
+  // Grows with its content, up to a limit: measured after every render, once new text is in the field.
+  useLayoutEffect(() => {
+    const element = input.current;
+    if (!element) return;
+    element.style.height = "0px";
+    element.style.height = `${Math.min(element.scrollHeight, MAX_HEIGHT_PX)}px`;
+    if (!shouldPutCursorAtEnd.current) return;
+    shouldPutCursorAtEnd.current = false;
+    element.setSelectionRange(element.value.length, element.value.length);
+  });
   const { adopt } = picker;
   // Only the draft from before any editing is set aside: going from one
   // edit straight to another keeps it, rather than the half-done edit.
@@ -90,8 +95,13 @@ export function Composer({
     }
     if (!wasEditing.current) setSetAside(latest.current.text);
     wasEditing.current = true;
-    updateText(adopt(message.text));
-    input.current?.focus();
+    const next = adopt(message.text);
+    const element = input.current;
+    // The same text renders nothing new, so the cursor moves here rather than after rendering.
+    if (element?.value === next) element.setSelectionRange(next.length, next.length);
+    else shouldPutCursorAtEnd.current = true;
+    updateText(next);
+    element?.focus();
   }, [editingId, adopt, updateText]);
 
   const finishEditing = () => {
@@ -113,7 +123,6 @@ export function Composer({
     if (editing) return saveEdit(editing);
     const draft = text;
     setText("");
-    if (input.current) input.current.style.height = "";
     try {
       if (hasFiles) await attachments.send(picker.toSend(draft), threadRoot);
       else await api.sendMessage(channelId, picker.toSend(draft), threadRoot);

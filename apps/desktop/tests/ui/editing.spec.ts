@@ -205,3 +205,26 @@ test("starting a second edit keeps your draft for when editing ends", async ({ p
   await composer.press("Escape");
   await expect(composer).toHaveValue("hello");
 });
+
+test("editing a long message opens the box at its full size, with the cursor at the end", async ({ page }) => {
+  await openGeneral(page);
+  const composer = page.getByLabel("Message #general");
+  const oneLine = (await composer.boundingBox())?.height ?? 0;
+  await composer.fill("one\ntwo\nthree\nfour");
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("");
+
+  await composer.press("ArrowUp");
+  await expect(composer).toHaveValue("one\ntwo\nthree\nfour");
+  await expect.poll(async () => (await composer.boundingBox())?.height ?? 0).toBeGreaterThan(oneLine * 2);
+  const opened = (await composer.boundingBox())?.height;
+  expect(await composer.evaluate((field: HTMLTextAreaElement) => field.selectionStart === field.value.length)).toBe(
+    true,
+  );
+
+  // Typing doesn't make it jump: it already had the size its text needs.
+  await composer.press("End");
+  await composer.press("Space");
+  await composer.press("Backspace");
+  expect((await composer.boundingBox())?.height).toBe(opened);
+});
