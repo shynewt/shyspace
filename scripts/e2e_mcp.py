@@ -127,7 +127,7 @@ def main() -> int:
 
     run_shy(*member_args("admin"), "create", "--workspace", "E2E", "--name", "Ada")
     invite = run_shy(*member_args("admin"), "invite", "create", "--label", "e2e agent").strip()
-    check(invite.startswith("shy2_") and "shysecret123" not in invite,
+    check(invite.startswith("shy3_") and "shysecret123" not in invite,
           "admin created a single-use invite that carries no bucket credentials")
 
     members: list[McpMember] = []

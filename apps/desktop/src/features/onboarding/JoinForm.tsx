@@ -8,6 +8,9 @@ import { useFocusOnMount } from "../../lib/useFocusOnMount";
 import { Button, Field, Input, TextArea } from "../../ui";
 import { SubmitButton } from "./SubmitButton";
 
+/** Any version's code, so an older one gets told why it no longer works. */
+const INVITE_CODE = /^shy\d+_/;
+
 export function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
   const [invite, setInvite] = useState("");
   const [name, setName] = useState("");
@@ -51,7 +54,7 @@ export function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
             ref={firstInput}
             value={invite}
             onChange={(event) => setInvite(event.target.value)}
-            placeholder="shy2_…"
+            placeholder="shy3_…"
             rows={4}
             className="font-mono text-xs"
           />
@@ -70,7 +73,7 @@ export function JoinForm({ onReady }: { onReady: (session: Session) => void }) {
       </Field>
       <SubmitButton
         isBusy={isAsking}
-        isDisabled={!invite.trim().startsWith("shy2_") || !name.trim()}
+        isDisabled={!INVITE_CODE.test(invite.trim()) || !name.trim()}
         icon={<Ticket size={15} />}
       >
         Ask to join

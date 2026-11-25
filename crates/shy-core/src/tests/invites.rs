@@ -566,3 +566,28 @@ async fn a_join_cut_short_between_cleaning_up_and_forgetting_its_key_can_join_ag
     admin.approve_invite(&token).await.unwrap();
     joining.await.unwrap().unwrap();
 }
+
+/// Request keys are derived from the admin's identity, so a restored admin
+/// opens a request made before the restore.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restored_admin_opens_a_join_request_made_before_the_restore() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let token = request_posted(&admin, root.path(), &bucket).await;
+    let kit = admin.recovery_kit().await.unwrap();
+    assert_eq!(
+        invite_state(&admin, &token),
+        InviteState::Open,
+        "not yet seen before the restore"
+    );
+    drop(admin);
+
+    let new_device = data_dir(&root.path().join("ada-new-laptop"));
+    let restored =
+        crate::Workspace::restore_with(&new_device, &kit, connector(&bucket), crate::Networking::Offline)
+            .await
+            .unwrap();
+
+    wait_for_request(&restored, &token).await;
+}

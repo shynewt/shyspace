@@ -20,6 +20,7 @@ use crate::{
     membership::{
         invite::{Answer, Grant, Invite, JoinMailbox, JoinRequest, declined_bytes, ensure_not_expired},
         mls::{Mls, binding_message},
+        request_seal::seal_request,
     },
     ops::{Op, new_owned_id, new_random_id, now_ms},
     pages::Edit,
@@ -325,7 +326,7 @@ impl Workspace {
             is_bot: profile.is_bot,
         };
         let asked = async {
-            mailbox.post_request(postcard::to_stdvec(&request)?).await?;
+            mailbox.post_request(seal_request(&invite, &request)?).await?;
             wait_for_answer(&invite, mailbox, cancel, &local.identity.public()).await
         }
         .await;
@@ -518,6 +519,7 @@ impl Workspace {
                 relays: Mutex::new(Default::default()),
                 key_round: Mutex::new(Default::default()),
                 key_answers: Mutex::new(std::collections::HashMap::new()),
+                refused_requests: Mutex::default(),
                 cadence: Mutex::new(Default::default()),
                 seen_fork_proofs: Mutex::new(std::collections::HashMap::new()),
                 last_dialed_ms: Mutex::new(std::collections::HashMap::new()),

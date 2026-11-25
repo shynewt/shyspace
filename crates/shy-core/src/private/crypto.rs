@@ -29,7 +29,7 @@ const CONTENT_KEY_CONTEXT: &str = "shyspace private content v1";
 const HINT_KEY_CONTEXT: &str = "shyspace private hint v1";
 const COMMITMENT_CONTEXT: &str = "shyspace channel key commitment v1";
 const GRANT_INFO_DOMAIN: &str = "shyspace key grant v1";
-const HPKE: HpkeConfig = HpkeConfig(
+pub(crate) const HPKE: HpkeConfig = HpkeConfig(
     HpkeKemType::DhKem25519,
     HpkeKdfType::HkdfSha256,
     HpkeAeadType::ChaCha20Poly1305,

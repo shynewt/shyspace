@@ -26,7 +26,7 @@ use object_store::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::{
     ops::Envelope,
@@ -43,6 +43,9 @@ const LOCK_PROBE_PREFIX: &str = "ops/lock-probe-";
 /// Objects larger than this are ignored, so a hostile writer can't make us
 /// load arbitrary amounts of data into memory.
 pub(crate) const MAX_OBJECT_SIZE: u64 = 32 * 1024 * 1024;
+/// Far more than a sealed join request needs (a key package, a signature
+/// and a name: about 1 KiB).
+const MAX_INVITE_REQUEST_BYTES: u64 = 64 * 1024;
 
 /// The largest recovery snapshot restore reads.
 pub const MAX_RECOVERY_SNAPSHOT_BYTES: u64 = MAX_OBJECT_SIZE;
@@ -647,8 +650,19 @@ impl Bucket {
         })
     }
 
+    /// A join request, unless it is larger than any genuine one. Such an
+    /// object is skipped quietly, as it is read at every check while the
+    /// invite is open.
     pub async fn invite_request(&self, token: &str) -> Result<Option<Bytes>> {
-        self.get(&invite_path(token, "request")).await
+        match self.store.get(&invite_path(token, "request")).await {
+            Ok(result) if result.meta.size > MAX_INVITE_REQUEST_BYTES => {
+                debug!("ignoring an oversized join request ({} bytes)", result.meta.size);
+                Ok(None)
+            }
+            Ok(result) => Ok(Some(result.bytes().await?)),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub async fn delete_invite_request(&self, token: &str) -> Result<()> {

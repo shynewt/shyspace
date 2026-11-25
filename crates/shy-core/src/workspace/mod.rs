@@ -207,6 +207,8 @@ pub(crate) struct Inner {
     pub key_round: Mutex<crate::sync::key_handoff::KeyRound>,
     /// When we last answered each member asking for the storage settings.
     pub key_answers: Mutex<std::collections::HashMap<PublicKey, tokio::time::Instant>>,
+    /// Hashes of join requests the admin refused, so each is logged once.
+    pub refused_requests: Mutex<std::collections::HashSet<[u8; 32]>>,
     /// Others' presence, from heartbeats; in memory only.
     pub presence: Mutex<presence::PresenceBook>,
     pub huddles: Mutex<huddles::HuddleState>,

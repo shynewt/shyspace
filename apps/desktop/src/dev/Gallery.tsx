@@ -246,7 +246,7 @@ export default function Gallery() {
           <div className="grid w-full grid-cols-2 gap-3">
             <Card>
               <SectionLabel>Plain card</SectionLabel>
-              <CopyField value="shy2_example-invite-code" />
+              <CopyField value="shy3_example-invite-code" />
               <div className="mt-2 flex items-center gap-2 text-sm">
                 ada@example.com
                 <CopyButton value="ada@example.com" label="Copy email address" />

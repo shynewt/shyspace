@@ -5080,3 +5080,144 @@ mod storage_key_handoff {
         assert!(printed.len() < 80, "only counts are printed: {printed}");
     }
 }
+
+mod sealed_join_requests {
+    //! Join requests wait in the bucket sealed to the admin (see
+    //! `membership/request_seal.rs`).
+
+    use std::time::Duration;
+
+    use super::*;
+    use crate::{
+        membership::{
+            invite::Invite,
+            request_seal::{RequestSlot, open_request},
+        },
+        views::{self, InviteState},
+    };
+
+    fn invite_view(admin: &Workspace, token: &str) -> views::Invite {
+        admin
+            .invites()
+            .unwrap()
+            .into_iter()
+            .find(|invite| invite.token == token)
+            .unwrap()
+    }
+
+    fn new_invite(admin: &Workspace) -> Invite {
+        admin.create_test_invite("", Duration::from_secs(600)).unwrap()
+    }
+
+    /// Starts Bob joining with `invite` and returns his request as it sits
+    /// in the bucket.
+    async fn posted_request(invite: Invite, root: &std::path::Path, bucket: &Bucket) -> Vec<u8> {
+        let token = invite.token.clone();
+        let _joining = start_join(invite, &root.join("bob"), bucket, "Bob Secretname", false);
+        for _ in 0..200 {
+            if let Some(bytes) = bucket.invite_request(&token).await.unwrap() {
+                return bytes.to_vec();
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the request never reached the bucket");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_join_request_in_the_bucket_doesnt_show_the_joiners_name() {
+        let root = tempfile::tempdir().unwrap();
+        let bucket = memory_bucket();
+        let admin = create_admin(&root.path().join("ada"), &bucket).await;
+        let invite = new_invite(&admin);
+        let token = invite.token.clone();
+
+        let in_the_bucket = posted_request(invite, root.path(), &bucket).await;
+
+        let name = b"Secretname";
+        assert!(!in_the_bucket.windows(name.len()).any(|window| window == name));
+        wait_for_request(&admin, &token).await;
+        assert_eq!(
+            invite_view(&admin, &token).requester_name.as_deref(),
+            Some("Bob Secretname")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_join_request_moved_to_another_invite_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let bucket = memory_bucket();
+        let admin = create_admin(&root.path().join("ada"), &bucket).await;
+        let first = new_invite(&admin);
+        let second = new_invite(&admin).token;
+        let first_token = first.token.clone();
+        let sealed = posted_request(first, root.path(), &bucket).await;
+
+        bucket.put_invite_request(&second, sealed).await.unwrap();
+        admin.sync().await;
+
+        assert_eq!(invite_view(&admin, &second).state, InviteState::Open);
+        assert_eq!(invite_view(&admin, &first_token).state, InviteState::Requested);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_join_request_in_the_clear_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let bucket = memory_bucket();
+        let admin = create_admin(&root.path().join("ada"), &bucket).await;
+        let first = new_invite(&admin);
+        let second = new_invite(&admin).token;
+        let slot = RequestSlot {
+            workspace_id: &first.workspace_id,
+            token: &first.token.clone(),
+            admin: &first.admin.clone(),
+        };
+        let sealed = posted_request(first.clone(), root.path(), &bucket).await;
+        let request = open_request(&admin.inner.identity, slot, &sealed).unwrap();
+
+        let in_the_clear = postcard::to_stdvec(&request).unwrap();
+        bucket.put_invite_request(&second, in_the_clear).await.unwrap();
+        admin.sync().await;
+
+        assert_eq!(invite_view(&admin, &second).state, InviteState::Open);
+    }
+
+    /// Deleting what doesn't open could delete a genuine request posted
+    /// meanwhile; the joiner's upload replaces it instead.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn junk_in_a_request_slot_is_left_for_the_joiner_to_replace() {
+        let root = tempfile::tempdir().unwrap();
+        let bucket = memory_bucket();
+        let admin = create_admin(&root.path().join("ada"), &bucket).await;
+        let invite = new_invite(&admin);
+        let token = invite.token.clone();
+        bucket.put_invite_request(&token, b"junk".to_vec()).await.unwrap();
+
+        admin.sync().await;
+
+        assert_eq!(
+            bucket.invite_request(&token).await.unwrap().as_deref(),
+            Some(b"junk".as_slice())
+        );
+        assert_eq!(invite_view(&admin, &token).state, InviteState::Open);
+        assert_eq!(admin.status().error, None);
+        posted_request(invite, root.path(), &bucket).await;
+        wait_for_request(&admin, &token).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_oversized_join_request_isnt_read() {
+        let root = tempfile::tempdir().unwrap();
+        let bucket = memory_bucket();
+        let admin = create_admin(&root.path().join("ada"), &bucket).await;
+        let token = new_invite(&admin).token;
+        bucket
+            .put_invite_request(&token, vec![0; 1024 * 1024])
+            .await
+            .unwrap();
+
+        admin.sync().await;
+
+        assert_eq!(invite_view(&admin, &token).state, InviteState::Open);
+        assert_eq!(admin.status().error, None);
+    }
+}

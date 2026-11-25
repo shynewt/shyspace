@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use super::keyring::KeyHistory;
 use crate::transport::bucket::BucketConfig;
 
-const PREFIX: &str = "shy2_";
+const PREFIX: &str = "shy3_";
+/// Invites from versions that posted join requests in the clear.
+const OLDER_PREFIX: &str = "shy2_";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Invite {
@@ -27,6 +29,8 @@ pub struct Invite {
     pub expires_ms: i64,
     pub request_url: String,
     pub answer_url: String,
+    /// The admin's key for this invite's join request (see `request_seal`).
+    pub request_key: Vec<u8>,
 }
 
 impl Invite {
@@ -38,10 +42,12 @@ impl Invite {
     }
 
     pub fn decode(code: &str) -> Result<Self> {
-        let payload = code
-            .trim()
-            .strip_prefix(PREFIX)
-            .context("not a shyspace invite code")?;
+        let code = code.trim();
+        ensure!(
+            !code.starts_with(OLDER_PREFIX),
+            "This invite was made by an older version of shyspace. Ask for a new one."
+        );
+        let payload = code.strip_prefix(PREFIX).context("not a shyspace invite code")?;
         let bytes = URL_SAFE_NO_PAD
             .decode(payload)
             .context("invite code is damaged")?;
@@ -120,10 +126,17 @@ mod tests {
             expires_ms: 10,
             request_url: "https://bucket.example/request?sig".into(),
             answer_url: "https://bucket.example/answer?sig".into(),
+            request_key: vec![2; 32],
         };
         assert_eq!(Invite::decode(&invite.encode().unwrap()).unwrap(), invite);
         assert!(Invite::decode("hello").is_err());
         assert!(ensure_not_expired(&invite, 9).is_ok());
         assert!(ensure_not_expired(&invite, 10).is_err());
+    }
+
+    #[test]
+    fn an_invite_from_an_older_version_says_to_ask_for_a_new_one() {
+        let error = Invite::decode("shy2_AAAA").unwrap_err().to_string();
+        assert!(error.contains("older version"), "{error}");
     }
 }

@@ -5,12 +5,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::{
     commit::{self, FrozenAuthor},
     invite::{Answer, Grant, Invite, JoinRequest, declined_bytes},
     keyring::KeyHistory,
+    request_seal::{NotForThisInvite, RequestSlot, open_request, request_key_pair},
 };
 use crate::{
     config,
@@ -24,6 +25,9 @@ use crate::{
 /// Presigned S3 links can't outlive seven days.
 const INVITE_LIFETIME: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const MAX_REQUESTER_NAME: usize = 80;
+/// Refused join requests remembered so each is logged once; one per open
+/// invite is the most anyone but an attacker leaves.
+const MAX_REMEMBERED_REFUSALS: usize = 1024;
 /// How often a pending join answer is put up again, in case someone removed it.
 const ANSWER_REFRESH: Duration = Duration::from_secs(10 * 60);
 
@@ -81,6 +85,7 @@ impl Workspace {
             expires_ms,
             request_url: links.request_url,
             answer_url: links.answer_url,
+            request_key: request_key_pair(&self.inner.identity, &token)?.public,
         };
         self.state()
             .store
@@ -229,23 +234,52 @@ impl Workspace {
             let Some(bytes) = self.bucket().invite_request(&token).await? else {
                 continue;
             };
+            // One refused stays: a joiner's upload replaces junk, and
+            // deleting could delete a genuine request posted meanwhile.
             match self.record_request(&token, &bytes) {
                 Ok(()) => {
                     has_recorded = true;
                     self.emit(Change::Invites);
                 }
-                Err(error) => {
-                    // Drop it so a genuine request can take the slot.
-                    warn!("ignoring an invalid join request: {error:#}");
-                    self.bucket().delete_invite_request(&token).await?;
+                Err(_) if !self.is_new_refused_request(&token, &bytes) => {}
+                Err(error) if error.downcast_ref::<NotForThisInvite>().is_some() => {
+                    debug!("ignoring a join request: {error:#}");
                 }
+                Err(error) => warn!("couldn't take a join request: {error:#}"),
             }
         }
         Ok(has_recorded)
     }
 
+    /// Whether this refused request is new in its slot, so each is logged
+    /// once rather than at every check while it sits there (each check
+    /// still tries it again).
+    fn is_new_refused_request(&self, token: &str, bytes: &[u8]) -> bool {
+        let mut refused = self
+            .inner
+            .refused_requests
+            .lock()
+            .expect("refused requests lock poisoned by an earlier panic");
+        if refused.len() >= MAX_REMEMBERED_REFUSALS {
+            refused.clear();
+        }
+        let seen = blake3::Hasher::new()
+            .update(&(token.len() as u64).to_le_bytes())
+            .update(token.as_bytes())
+            .update(bytes)
+            .finalize();
+        refused.insert(*seen.as_bytes())
+    }
+
     fn record_request(&self, token: &str, bytes: &[u8]) -> Result<()> {
-        let request: JoinRequest = postcard::from_bytes(bytes)?;
+        let config = &self.inner.config;
+        let slot = RequestSlot {
+            workspace_id: &config.workspace_id,
+            token,
+            admin: &config.admin,
+        };
+        let request = open_request(&self.inner.identity, slot, bytes)?;
+        let opened = postcard::to_stdvec(&request)?;
         let state = self.state();
         let (joiner, _) = state
             .mls
@@ -254,7 +288,7 @@ impl Workspace {
         ensure!(!name.is_empty(), "the request has no name");
         state
             .store
-            .record_join_request(token, &joiner, &name, request.is_bot, bytes)
+            .record_join_request(token, &joiner, &name, request.is_bot, &opened)
     }
 
     /// Uploads owed answers until each joiner posts their first op (or is

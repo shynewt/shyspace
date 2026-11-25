@@ -646,6 +646,9 @@ export class FakeBackend {
           argument(args, "bucket") as BucketConfig,
         );
       case "join_workspace":
+        if (requireString(args, "invite").startsWith("shy2_")) {
+          throw new Error("This invite was made by an older version of shyspace. Ask for a new one.");
+        }
         return this.requestToJoin(requireString(args, "name"));
       case "cancel_join":
         this.pendingJoin?.cancel();
@@ -731,7 +734,7 @@ export class FakeBackend {
       case "invites":
         return this.invites.list();
       case "create_invite":
-        return `shy2_${this.invites.create(requireString(args, "label")).token}`;
+        return `shy3_${this.invites.create(requireString(args, "label")).token}`;
       case "approve_invite":
         return this.approveInvite(requireString(args, "token"));
       case "reject_invite":

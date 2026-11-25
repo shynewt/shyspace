@@ -53,7 +53,7 @@ test("invite people opens the invites, where a code is made to copy", async ({ p
   await settings.getByRole("button", { name: "Create invite" }).click();
 
   await expect(settings.getByRole("button", { name: "Copy invite code" })).toBeVisible();
-  await expect(settings.getByText(/^shy2_/)).toBeVisible();
+  await expect(settings.getByText(/^shy3_/)).toBeVisible();
   await expect(settings.getByRole("listitem").filter({ hasText: "Grace" })).toContainText("Expires");
 });
 
@@ -137,10 +137,10 @@ test("agents are listed with what they can read and how to add one", async ({ pa
   await expect(settings.getByRole("button", { name: "Copy commands" })).toHaveCount(0);
   await settings.getByLabel("Agent name").fill("Claude");
   await settings.getByRole("button", { name: "Create agent invite" }).click();
-  await expect(settings.getByText(/shy join --bot --name 'Claude' shy2_/)).toBeVisible();
+  await expect(settings.getByText(/shy join --bot --name 'Claude' shy3_/)).toBeVisible();
 
   await settings.getByLabel("Agent name").fill("Someone else");
-  await expect(settings.getByText(/shy join --bot --name 'Claude' shy2_/)).toBeVisible();
+  await expect(settings.getByText(/shy join --bot --name 'Claude' shy3_/)).toBeVisible();
 });
 
 test.describe("as a member", () => {

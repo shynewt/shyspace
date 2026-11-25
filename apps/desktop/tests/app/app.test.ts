@@ -23,10 +23,10 @@ async function createWorkspace(app: Browser) {
  * not from the page's text, where it runs into the words beside it.
  */
 async function waitForInviteCode(app: Browser): Promise<string> {
-  const field = app.$("pre*=shy2_");
+  const field = app.$("pre*=shy3_");
   await field.waitForDisplayed(TIMEOUT);
   const code = (await field.getText()).replace(/\s+/g, "");
-  if (!/^shy2_[A-Za-z0-9_-]{40,}$/.test(code)) throw new Error(`not an invite code: ${code.slice(0, 20)}…`);
+  if (!/^shy3_[A-Za-z0-9_-]{40,}$/.test(code)) throw new Error(`not an invite code: ${code.slice(0, 20)}…`);
   return code;
 }
 
