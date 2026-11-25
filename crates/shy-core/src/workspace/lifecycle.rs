@@ -374,6 +374,7 @@ impl Workspace {
         };
         config.save_in_store(&local.store)?;
         config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
+        config::record_settings_op(&local.store, config::NO_SETTINGS_OP)?;
         let pending = PendingProfile {
             name,
             is_bot: profile.is_bot,

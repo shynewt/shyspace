@@ -209,7 +209,12 @@ impl Workspace {
         };
         let is_changed = self.state().store.atomically(|store| {
             config::check_settings_change(store, bucket)?;
-            config::update_bucket(store, bucket, verified.body.lamport)
+            let is_changed = config::update_bucket(store, bucket, verified.body.lamport)?;
+            // The op itself arrives through sync, and is recorded then.
+            if is_changed {
+                config::record_settings_op(store, config::NO_SETTINGS_OP)?;
+            }
+            Ok(is_changed)
         })?;
         if is_changed {
             self.emit(Change::Storage);
@@ -395,6 +400,63 @@ impl KeyRound {
     }
 }
 
+/// The admin's op that set the settings in use (the one with their
+/// `lamport`), if this device applied it; settings that came with an invite
+/// or from another member have none until the op itself arrives.
+fn settings_envelope(store: &Store, admin: &PublicKey, lamport: u64) -> Result<Option<Envelope>> {
+    let seq = match config::settings_op_seq(store)? {
+        Some(seq) => seq,
+        // Applied by a version that kept no record: found once, then recorded.
+        None => {
+            let found = find_settings_op(store, admin, lamport)?.unwrap_or(config::NO_SETTINGS_OP);
+            config::record_settings_op(store, found)?;
+            found
+        }
+    };
+    if seq == config::NO_SETTINGS_OP {
+        return Ok(None);
+    }
+    let Some(envelope) = store.envelopes_between(admin, seq, seq)?.pop() else {
+        return Ok(None);
+    };
+    let Some(key) = store.epoch_key(envelope.epoch)? else {
+        return Ok(None);
+    };
+    let verified = crypto::open(&envelope, &key).context("opening our copy of the storage settings")?;
+    let is_those_settings =
+        matches!(verified.body.op, Op::StorageSettings { .. }) && verified.body.lamport == lamport;
+    Ok(is_those_settings.then_some(envelope))
+}
+
+/// The admin's ops read at a time while looking for their settings op.
+const SEARCH_BATCH: u64 = 256;
+
+/// The seq of the admin's settings op with `lamport`, read newest first.
+/// An author's clock only rises along their log, so the search stops at
+/// the first op older than that.
+fn find_settings_op(store: &Store, admin: &PublicKey, lamport: u64) -> Result<Option<u64>> {
+    let mut last = store.last_seq(admin)?;
+    while last > 0 {
+        let first = last.saturating_sub(SEARCH_BATCH - 1).max(1);
+        for envelope in store.envelopes_between(admin, first, last)?.into_iter().rev() {
+            let Some(key) = store.epoch_key(envelope.epoch)? else {
+                continue;
+            };
+            let Ok(verified) = crypto::open(&envelope, &key) else {
+                continue;
+            };
+            if verified.body.lamport < lamport {
+                return Ok(None);
+            }
+            if verified.body.lamport == lamport && matches!(verified.body.op, Op::StorageSettings { .. }) {
+                return Ok(Some(envelope.seq));
+            }
+        }
+        last = first - 1;
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use iroh::SecretKey;
@@ -423,23 +485,4 @@ mod tests {
         round.answered.insert(carol);
         assert!(!round.says_too_far_behind(&[bob, carol]), "Carol disagreed");
     }
-}
-
-/// The admin's op that set the settings in use (the one with their
-/// `lamport`), if this device applied it; settings that came with an invite
-/// or from another member have none until the op itself arrives.
-fn settings_envelope(store: &Store, admin: &PublicKey, lamport: u64) -> Result<Option<Envelope>> {
-    let Some(seq) = config::settings_op_seq(store)? else {
-        return Ok(None);
-    };
-    let Some(envelope) = store.envelopes_between(admin, seq, seq)?.pop() else {
-        return Ok(None);
-    };
-    let Some(key) = store.epoch_key(envelope.epoch)? else {
-        return Ok(None);
-    };
-    let verified = crypto::open(&envelope, &key).context("opening our copy of the storage settings")?;
-    let is_those_settings =
-        matches!(verified.body.op, Op::StorageSettings { .. }) && verified.body.lamport == lamport;
-    Ok(is_those_settings.then_some(envelope))
 }

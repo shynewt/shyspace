@@ -333,3 +333,47 @@ async fn members_with_nothing_newer_say_so() {
         KeyAnswer::NothingNewer
     );
 }
+
+/// Bob applied the new settings with a version that didn't record which op
+/// set them; he still finds that op to hand it over.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_applied_before_the_record_existed_are_still_handed_over() {
+    let provider = Provider::new();
+    let (_root, admin, bob, carol) = admin_bob_carol(&provider).await;
+    change_key(&admin, "second").await;
+    sync_all(&[&admin, &bob]).await;
+    provider.delete_key(FIRST_KEY);
+    bob.state()
+        .store
+        .delete_meta(crate::config::SETTINGS_OP_META)
+        .unwrap();
+
+    let state = carol
+        .recover_storage_key(&Peers::new(&carol, &[&bob]))
+        .await
+        .unwrap();
+
+    assert_eq!(state, KeyState::Recovered);
+    assert_eq!(key_in_use(&carol), "second");
+    assert_eq!(
+        crate::config::settings_op_seq(&carol.state().store).unwrap(),
+        Some(crate::config::NO_SETTINGS_OP),
+        "handed over, so no search until the op itself arrives"
+    );
+    let recorded = crate::config::settings_op_seq(&bob.state().store).unwrap();
+    assert!(recorded.is_some_and(|seq| seq > 0), "found once, then recorded");
+}
+
+/// Settings that came with an invite have no op to hand over, and are
+/// recorded so: nobody searches the admin's log for one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_joiner_records_that_its_settings_came_with_the_invite() {
+    let provider = Provider::new();
+    let (root, admin, _bob, _carol) = admin_bob_carol(&provider).await;
+    let dave = dave(root.path(), &admin, &provider).await;
+
+    assert_eq!(
+        crate::config::settings_op_seq(&dave.state().store).unwrap(),
+        Some(crate::config::NO_SETTINGS_OP)
+    );
+}

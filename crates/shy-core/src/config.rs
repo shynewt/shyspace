@@ -15,7 +15,7 @@ const BUCKET_META: &str = "bucket_config";
 /// plain workspace.json, so an edited file can't name a new admin.
 const IDENTITY_META: &str = "workspace_identity";
 const BUCKET_LAMPORT_META: &str = "bucket_config_lamport";
-const SETTINGS_OP_META: &str = "bucket_config_op_seq";
+pub(crate) const SETTINGS_OP_META: &str = "bucket_config_op_seq";
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceConfig {
@@ -151,14 +151,19 @@ pub(crate) fn update_bucket(store: &Store, bucket: &BucketConfig, lamport: u64) 
     Ok(true)
 }
 
+/// Recorded when the settings in use came from no op of the admin's this
+/// device holds (with an invite, or handed over by a member) until the op
+/// arrives; sequence numbers start at 1.
+pub(crate) const NO_SETTINGS_OP: u64 = 0;
+
 /// Remembers which of the admin's ops set the bucket settings in use, so
 /// they can be handed to a member whose key stopped working.
 pub(crate) fn record_settings_op(store: &Store, seq: u64) -> Result<()> {
     store.set_meta(SETTINGS_OP_META, &seq.to_be_bytes())
 }
 
-/// The seq of the admin's op that set the settings in use, if they came
-/// from one this device applied (not with an invite, nor handed over).
+/// The seq of the admin's op that set the settings in use, or
+/// `NO_SETTINGS_OP`; `None` if no record was kept (by older versions).
 pub(crate) fn settings_op_seq(store: &Store) -> Result<Option<u64>> {
     let Some(bytes) = store.meta(SETTINGS_OP_META)? else {
         return Ok(None);
