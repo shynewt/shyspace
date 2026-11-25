@@ -75,7 +75,10 @@ test("the shortcuts list renders without warnings, even for a repeated key", asy
 });
 
 test("closing a dialog puts focus back on the button that opened it", async ({ page }) => {
+  // The message box takes focus just after the channel appears; a button
+  // focused before that loses it.
   await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeFocused();
   const opener = page.getByRole("button", { name: "Message someone privately" });
   await opener.focus();
   await page.keyboard.press("Enter");
