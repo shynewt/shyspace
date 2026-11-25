@@ -47,6 +47,14 @@ test("a search typed while the emoji are still loading applies once they're ther
   await expect(composer(page)).toHaveValue("🚀");
 });
 
+test("a search typed as soon as the picker opens applies", async ({ page }) => {
+  await page.getByRole("button", { name: "Insert emoji" }).first().click();
+  await page.getByLabel("Search emoji").fill("rocket");
+
+  await page.getByRole("gridcell", { name: "Rocket" }).click();
+  await expect(composer(page)).toHaveValue("🚀");
+});
+
 test("thread replies have the emoji button too", async ({ page }) => {
   await composer(page).fill("Release today?");
   await composer(page).press("Enter");
