@@ -13,7 +13,7 @@ import { clipboardImageFile, isEmptyPaste } from "../../lib/clipboardImage";
 import { misleadingLinkWarning, openExternalUrl } from "../../lib/contact";
 import { addDropTarget, dropTargetAt, markDropTargetUsed, removeDropTarget } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
-import { displayName } from "../../lib/people";
+import { displayName, distinctName } from "../../lib/people";
 import { usePreferences } from "../../lib/preferences";
 import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
@@ -32,7 +32,7 @@ import {
   selectedImage,
   setImageWidth,
 } from "./editor/images";
-import { livePreview, setKnownMembers, setPageFileNames, setPageTitles } from "./editor/livePreview";
+import { livePreview, setMemberNames, setPageFileNames, setPageTitles } from "./editor/livePreview";
 import type { CardAnchor } from "./editor/openLinks";
 import {
   type RemoteCursor,
@@ -471,7 +471,9 @@ function PageEditor({
   }, [view, filesById]);
 
   useEffect(() => {
-    if (members) view?.dispatch({ effects: setKnownMembers.of(new Set(members.map((member) => member.id))) });
+    if (!members) return;
+    const names = new Map(members.map((member) => [member.id, distinctName(member, members)]));
+    view?.dispatch({ effects: setMemberNames.of(names) });
   }, [view, members]);
 
   const viewedFile = viewingFile ? filesById.get(viewingFile) : undefined;

@@ -3,7 +3,7 @@ import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, type EditorState, type SelectionRange } from "@codemirror/state";
 import type { Command, EditorView, KeyBinding } from "@codemirror/view";
 import { linkAt, mentionAt } from "./links";
-import { knownMembers } from "./livePreview";
+import { memberNames } from "./livePreview";
 import { openLink, openMember } from "./openLinks";
 import { toggleTaskAt } from "./tasks";
 
@@ -106,7 +106,7 @@ export const openLinkOrToggleTask: Command = (view: EditorView) => {
   const { head } = view.state.selection.main;
   const memberId = mentionAt(view.state, head);
   const spot = view.coordsAtPos(head);
-  if (memberId && spot && view.state.field(knownMembers).has(memberId)) {
+  if (memberId && spot && view.state.field(memberNames).has(memberId)) {
     const cursorBox = new DOMRect(spot.left, spot.top, 0, spot.bottom - spot.top);
     openMember(view, memberId, { getBoundingClientRect: () => cursorBox }, "keyboard");
     return true;

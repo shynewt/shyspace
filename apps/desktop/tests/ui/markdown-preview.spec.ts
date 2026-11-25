@@ -45,13 +45,13 @@ function shownAs(item: PreviewItem): string | null {
     case "page":
       return `<page ${item.pageId}>`;
     case "message":
-      return `<message ${item.messageId}: ${item.label}>`;
+      return `<message ${item.messageId}>`;
     case "image":
       return `<image ${item.fileId} ${item.width ?? "auto"} "${item.caption}">`;
     case "file":
       return `<file ${item.fileId}: ${item.label}>`;
     case "mention":
-      return item.label;
+      return `<mention ${item.memberId}>`;
     case "elsewhere":
       return `<${item.link.kind} in ${item.link.workspace}>`;
     case "callout":
@@ -107,8 +107,8 @@ test("code is shown as written, between fences that hide until you edit them", (
 
 test("page links and mentions become chips, even on revealed lines", () => {
   const text = "[old](shy://page/ab12) shy://page/cd34 [@Ada](shy://member/ff00)";
-  expect(rendered(text)).toBe("<page ab12> <page cd34> @Ada");
-  expect(rendered(text, [1])).toBe("<page ab12> <page cd34> @Ada");
+  expect(rendered(text)).toBe("<page ab12> <page cd34> <mention ff00>");
+  expect(rendered(text, [1])).toBe("<page ab12> <page cd34> <mention ff00>");
 });
 
 test("a mention chip knows who it names; @channel and @here are plain text in a page", () => {
@@ -144,11 +144,11 @@ test("images from elsewhere, and in code, stay text", () => {
   expect(rendered("`![x](shy://file/ab12)`")).toBe("![x](shy://file/ab12)");
 });
 
-test("message links become chips, labeled or not; inside code they stay text", () => {
+test("message links become chips, whatever their label; inside code they stay text", () => {
   expect(rendered("see shy://message/ab12 or [the plan](shy://message/p:cd34/ef56)")).toBe(
-    "see <message ab12: a message> or <message p:cd34/ef56: the plan>",
+    "see <message ab12> or <message p:cd34/ef56>",
   );
-  expect(rendered("[](shy://message/ab12)")).toBe("<message ab12: a message>");
+  expect(rendered("[](shy://message/ab12)")).toBe("<message ab12>");
   expect(rendered("`shy://message/ab12`")).toBe("shy://message/ab12");
 });
 
@@ -213,7 +213,7 @@ test("a callout's marker shows as written on the line being edited, and unknown 
 test("links naming this workspace are chips like older ones, and another's are marked as elsewhere", () => {
   const elsewhere = "fedcba9876543210";
   expect(rendered(`See shy://${HERE}/page/ab12 and [it](shy://${HERE}/message/cd34)`)).toBe(
-    "See <page ab12> and <message cd34: it>",
+    "See <page ab12> and <message cd34>",
   );
   expect(rendered(`See shy://${elsewhere}/page/ab12 and [it](shy://${elsewhere}/message/cd34)`)).toBe(
     `See <page in ${elsewhere}> and <message in ${elsewhere}>`,

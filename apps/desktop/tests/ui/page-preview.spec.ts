@@ -179,9 +179,10 @@ test("a message link in a page shows as a chip that opens the message", async ({
   await openPage(page, "Notes");
 
   const content = page.locator(".cm-content");
-  await expect(lines(page).first()).toHaveText("See a message and the decision");
-  await expect(content.getByRole("link", { name: "a message" })).toHaveCount(1);
-  await content.getByRole("link", { name: "the decision" }).click();
+  // A chip never shows the label its author wrote.
+  await expect(lines(page).first()).toHaveText("See a message and a message");
+  await expect(content.getByRole("link", { name: "a message" })).toHaveCount(2);
+  await content.getByRole("link", { name: "a message" }).last().click();
   await expect(page.getByLabel("Message #general")).toBeVisible();
   await expect(page.locator(`#message-${message}`)).toBeVisible();
 });

@@ -27,18 +27,17 @@ export type PreviewItem =
   /** A callout's `[!KIND]` marker, drawn as its label. */
   | { kind: "callout"; from: number; to: number; callout: CalloutKind }
   | { kind: "page"; from: number; to: number; pageId: string }
-  /** `label` is the link's own text, or "a message" for a bare link, as in chat. */
-  | { kind: "message"; from: number; to: number; messageId: string; label: string }
+  /** Drawn as "a message", as in chat, never with the label its author wrote. */
+  | { kind: "message"; from: number; to: number; messageId: string }
   /** `memberId` is null for @channel and @here. */
-  | { kind: "mention"; from: number; to: number; label: string; memberId: string }
+  /** Drawn with the member's current name, never the label its author wrote. */
+  | { kind: "mention"; from: number; to: number; memberId: string }
   /** A link to one of the page's files, drawn as a chip; `label` is the link's text. */
   | { kind: "file"; from: number; to: number; fileId: string; label: string }
   /** An image of one of the page's files; `width` is a percent of the column, or null for its own size. */
   | { kind: "image"; from: number; to: number; fileId: string; width: number | null; caption: string }
   /** A page or message link into another workspace. */
   | { kind: "elsewhere"; from: number; to: number; link: AppLink };
-
-const BARE_MESSAGE_LABEL = "a message";
 
 /** Where a bare `shy://page/…` or `shy://message/…` link is plain text, not a link to draw as a chip. */
 const NOT_A_CHIP = new Set(["Link", "Image", "Autolink", "URL", "InlineCode", "FencedCode", "CodeBlock", "HTMLBlock"]);
@@ -164,7 +163,7 @@ class PreviewBuilder {
       const to = from + match[0].length;
       const elsewhere = elsewhereOf(match[0], this.workspaceId);
       if (elsewhere) this.add({ kind: "elsewhere", from, to, link: elsewhere });
-      else this.add({ kind: "message", from, to, messageId: match[2], label: BARE_MESSAGE_LABEL });
+      else this.add({ kind: "message", from, to, messageId: match[2] });
     }
   }
 
@@ -249,8 +248,7 @@ class PreviewBuilder {
     }
     const messageId = messageIdOf(href, this.workspaceId);
     if (messageId && isOneLine) {
-      const label = plainText(this.doc.sliceString(labelFrom, labelTo)).trim() || BARE_MESSAGE_LABEL;
-      this.add({ kind: "message", from: link.from, to: link.to, messageId, label });
+      this.add({ kind: "message", from: link.from, to: link.to, messageId });
       return false;
     }
     if (isMentionLink(href, this.workspaceId) && isOneLine) {
@@ -262,8 +260,7 @@ class PreviewBuilder {
         this.hide(labelTo, link.to);
         return false;
       }
-      const label = this.doc.sliceString(labelFrom, labelTo);
-      this.add({ kind: "mention", from: link.from, to: link.to, label, memberId });
+      this.add({ kind: "mention", from: link.from, to: link.to, memberId });
       return false;
     }
     this.add({ kind: "style", from: labelFrom, to: labelTo, className: "cm-md-link" });

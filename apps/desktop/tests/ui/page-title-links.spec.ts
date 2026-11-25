@@ -87,3 +87,23 @@ test("chips name their target, whatever label the author wrote", async ({ page }
   await expect(message).toContainText("@channel");
   await expect(message).not.toContainText("@here");
 });
+
+test("page chips name their target, whatever label the author wrote", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.addMember("Mallory");
+    const eve = window.fake.addMember("Eve");
+    const gone = "ab".repeat(32);
+    window.fake.seedPage(
+      "Notes",
+      `Ping [@Ada](shy://member/${eve}) and [@Ada](shy://member/${gone}), see [Approved by Ada](shy://message/abc) today`,
+    );
+  });
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Notes", exact: true }).click();
+  const editor = page.locator(".cm-content");
+
+  await expect(editor).toContainText("Ping @Eve and @member ababab");
+  await expect(editor).not.toContainText("@Ada");
+  await expect(editor).not.toContainText("Approved by Ada");
+  await expect(editor).toContainText("a message today");
+  await expect(editor.getByRole("button", { name: "Eve, open profile" })).toBeVisible();
+});

@@ -54,7 +54,7 @@ test("a card from a page can message them", async ({ page }) => {
 
 test("a mention of someone unknown in a page opens nothing", async ({ page }) => {
   await openPageMentioning(page, ` and [@Bob](shy://member/${"b".repeat(64)})`);
-  await page.locator(".cm-content").getByText("@Bob").click();
+  await page.locator(".cm-content").getByText("@member bbbbbb").click();
   await page.waitForTimeout(300);
 
   await expect(page.getByRole("dialog")).toHaveCount(0);

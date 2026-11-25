@@ -15,6 +15,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import type { AppLink, WorkspaceLinks } from "../../../lib/appLinks";
+import { displayName } from "../../../lib/people";
 import { MOD_LABEL } from "../../../lib/shortcuts";
 import { avatarBackground, initials } from "../../../ui";
 import { CalloutLabelWidget } from "./callouts";
@@ -66,14 +67,14 @@ const pageFileNames = StateField.define<ReadonlyMap<string, string>>({
   },
 });
 
-/** The ids of the workspace's members, so only mentions of someone known open a card. */
-export const setKnownMembers = StateEffect.define<ReadonlySet<string>>();
+/** Each member's name as mention chips show it, by id; only mentions of someone known open a card. */
+export const setMemberNames = StateEffect.define<ReadonlyMap<string, string>>();
 
-export const knownMembers = StateField.define<ReadonlySet<string>>({
-  create: () => new Set(),
-  update: (known, transaction) => {
-    let next = known;
-    for (const effect of transaction.effects) if (effect.is(setKnownMembers)) next = effect.value;
+export const memberNames = StateField.define<ReadonlyMap<string, string>>({
+  create: () => new Map(),
+  update: (names, transaction) => {
+    let next = names;
+    for (const effect of transaction.effects) if (effect.is(setMemberNames)) next = effect.value;
     return next;
   },
 });
@@ -100,7 +101,7 @@ export function livePreview({
   return [
     pageTitles,
     pageFileNames,
-    knownMembers,
+    memberNames,
     fileOpener.of(onOpenFile),
     imageHost.of(images),
     workspaceLinks.of(links),
@@ -162,7 +163,7 @@ const previewPlugin = ViewPlugin.fromClass(
         syntaxTree(update.startState) !== syntaxTree(update.state) ||
         update.startState.field(pageTitles) !== update.state.field(pageTitles) ||
         update.startState.field(pageFileNames) !== update.state.field(pageFileNames) ||
-        update.startState.field(knownMembers) !== update.state.field(knownMembers)
+        update.startState.field(memberNames) !== update.state.field(memberNames)
       ) {
         this.build();
       }
@@ -179,7 +180,7 @@ const previewPlugin = ViewPlugin.fromClass(
     private build() {
       const titles = this.view.state.field(pageTitles);
       const fileNames = this.view.state.field(pageFileNames);
-      const known = this.view.state.field(knownMembers);
+      const names = this.view.state.field(memberNames);
       const decorations: Range<Decoration>[] = [];
       const chips: Range<Decoration>[] = [];
       for (const item of previewItems(
@@ -222,7 +223,7 @@ const previewPlugin = ViewPlugin.fromClass(
             break;
           }
           case "message": {
-            const chip = Decoration.replace({ widget: new MessageChipWidget(item.messageId, item.label) });
+            const chip = Decoration.replace({ widget: new MessageChipWidget(item.messageId) });
             decorations.push(chip.range(item.from, item.to));
             chips.push(chip.range(item.from, item.to));
             break;
@@ -250,8 +251,10 @@ const previewPlugin = ViewPlugin.fromClass(
             break;
           }
           case "mention": {
-            const memberId = item.memberId !== null && known.has(item.memberId) ? item.memberId : null;
-            const chip = Decoration.replace({ widget: new MentionWidget(item.label, memberId) });
+            const name = names.get(item.memberId);
+            const chip = Decoration.replace({
+              widget: new MentionWidget(`@${name ?? displayName("", item.memberId)}`, name ? item.memberId : null),
+            });
             decorations.push(chip.range(item.from, item.to));
             chips.push(chip.range(item.from, item.to));
             break;
@@ -456,22 +459,19 @@ class ImageWidget extends WidgetType {
 }
 
 class MessageChipWidget extends WidgetType {
-  constructor(
-    readonly messageId: string,
-    readonly label: string,
-  ) {
+  constructor(readonly messageId: string) {
     super();
   }
 
   eq(other: MessageChipWidget) {
-    return other.messageId === this.messageId && other.label === this.label;
+    return other.messageId === this.messageId;
   }
 
   toDOM(view: EditorView) {
     const chip = document.createElement("span");
     chip.className = "cm-md-page";
     chip.setAttribute("role", "link");
-    chip.append(messageIcon(), this.label);
+    chip.append(messageIcon(), "a message");
     chip.addEventListener("mousedown", (event) => event.preventDefault());
     chip.addEventListener("click", (event) => {
       event.preventDefault();
@@ -543,7 +543,7 @@ function workspaceTile(workspaceId: string, name: string): HTMLElement {
 }
 
 class MentionWidget extends WidgetType {
-  /** `memberId` is null for @channel, @here and people who aren't members: those open nothing. */
+  /** `memberId` is null for people who aren't members: those open nothing. */
   constructor(
     readonly label: string,
     readonly memberId: string | null,
