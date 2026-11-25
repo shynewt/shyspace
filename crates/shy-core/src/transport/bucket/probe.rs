@@ -125,8 +125,11 @@ async fn run_checks(store: &dyn ObjectStore) -> Result<()> {
         Ok(_) => anyhow::bail!("a create-only write replaced an existing object"),
         Err(error) => anyhow::bail!("a create-only write over an existing object failed oddly: {error}"),
     }
-    let kept = store.get(&written_once).await?.bytes().await?;
-    ensure!(kept.as_ref() == b"first", "the existing object changed");
+    let kept = super::read_at_most(store.get(&written_once).await?, super::MAX_PROBE_BYTES).await?;
+    ensure!(
+        kept.as_deref() == Some(b"first".as_slice()),
+        "the existing object changed"
+    );
     println!("ok  a create-only write is refused over an existing object, which stays as it was");
     Ok(())
 }

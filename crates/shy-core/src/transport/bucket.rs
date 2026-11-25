@@ -392,6 +392,10 @@ pub fn listing_after(author: &PublicKey, held: u64) -> String {
     format!("ops/{}/{}-a", member_id(author), padded(held))
 }
 
+/// Far more than any probe holds (16 bytes); a store sending more is
+/// cut off rather than read.
+const MAX_PROBE_BYTES: u64 = 1024;
+
 /// An object's body, or `None` once it runs past `limit` bytes: the size a
 /// store reports is only what it says, so the limit holds while reading.
 async fn read_at_most(result: object_store::GetResult, limit: u64) -> Result<Option<Bytes>> {
@@ -808,9 +812,9 @@ impl Bucket {
             ..GetOptions::default()
         };
         match self.store.get_opts(&path, options).await {
-            Ok(earlier) => match earlier.bytes().await?.as_ref() == first_bytes {
-                true => Ok(OldVersions::Kept),
-                false => Ok(OldVersions::NotKept),
+            Ok(earlier) => match read_at_most(earlier, MAX_PROBE_BYTES).await? {
+                Some(bytes) if bytes.as_ref() == first_bytes => Ok(OldVersions::Kept),
+                _ => Ok(OldVersions::NotKept),
             },
             Err(object_store::Error::NotFound { .. } | object_store::Error::NotImplemented { .. }) => {
                 Ok(OldVersions::NotKept)
