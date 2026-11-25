@@ -19,8 +19,8 @@ pub fn was_started_at_login() -> bool {
     has_login_argument(std::env::args())
 }
 
-#[cfg(any(not(target_os = "macos"), test))]
-fn has_login_argument(arguments: impl IntoIterator<Item = String>) -> bool {
+/// Whether `arguments` (the program's name first) mark a launch at login.
+pub fn has_login_argument(arguments: impl IntoIterator<Item = String>) -> bool {
     arguments
         .into_iter()
         .skip(1)

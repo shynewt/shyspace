@@ -15,6 +15,7 @@ mod notification_permission;
 mod notify_macos;
 mod open_at_login;
 mod pages_live;
+mod single_instance;
 mod tray;
 mod updates;
 mod window;
@@ -1103,7 +1104,11 @@ pub fn run() {
                 .unwrap_or_else(|_| "warn,tauri_plugin_updater=off".into()),
         )
         .init();
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    if let Some(single_instance) = single_instance::plugin() {
+        builder = builder.plugin(single_instance);
+    }
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
