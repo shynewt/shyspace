@@ -100,9 +100,15 @@ impl Autostart {
         }
         let dir = self.file.parent().context("the autostart entry has no folder")?;
         std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
-        // Written beside it, then moved over it, so it's never half written.
+        // Written beside it and synced, then moved over it, so a crash
+        // leaves the old entry or the new one, never half of one.
         let written = self.file.with_extension("desktop.new");
-        std::fs::write(&written, wanted).with_context(|| format!("writing {}", written.display()))?;
+        let write_new = || -> std::io::Result<()> {
+            let mut file = std::fs::File::create(&written)?;
+            std::io::Write::write_all(&mut file, wanted.as_bytes())?;
+            file.sync_all()
+        };
+        write_new().with_context(|| format!("writing {}", written.display()))?;
         std::fs::rename(&written, &self.file).with_context(|| format!("writing {}", self.file.display()))
     }
 
