@@ -84,8 +84,8 @@ pub struct KeyRound {
     answered: HashSet<PublicKey>,
     last_tried: HashMap<PublicKey, tokio::time::Instant>,
     started: Option<tokio::time::Instant>,
-    /// Members who said we're too far behind; believed only if every
-    /// member who answered said so.
+    /// Members who said we're too far behind; believed only after a full
+    /// round, and if every member who answered said so.
     too_far_behind: HashSet<PublicKey>,
 }
 
@@ -266,9 +266,13 @@ impl Workspace {
                 return Ok(KeyState::Working);
             }
         }
-        let round = self.key_round();
-        let is_too_far_behind = !round.too_far_behind.is_empty() && round.too_far_behind == round.answered;
-        Ok(match is_too_far_behind {
+        let me = self.me();
+        let others: Vec<PublicKey> = self
+            .current_members()?
+            .into_iter()
+            .filter(|member| *member != me)
+            .collect();
+        Ok(match self.key_round().says_too_far_behind(&others) {
             true => KeyState::TooFarBehind,
             false => KeyState::Refused,
         })
@@ -380,6 +384,44 @@ impl KeyAsker for Net {
 impl KeyRound {
     fn take(&mut self) {
         *self = Self::default();
+    }
+
+    /// Whether to tell the person they need a new invite: only once every
+    /// other member was tried this round, and every one who answered said
+    /// we're too far behind, so no single member can make them give up.
+    fn says_too_far_behind(&self, others: &[PublicKey]) -> bool {
+        let is_full_round = others.iter().all(|member| self.last_tried.contains_key(member));
+        is_full_round && !self.too_far_behind.is_empty() && self.too_far_behind == self.answered
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iroh::SecretKey;
+
+    use super::*;
+
+    #[test]
+    fn one_answer_isnt_believed_before_everyone_was_tried() {
+        let [bob, carol] = [(); 2].map(|()| SecretKey::generate().public());
+        let mut round = KeyRound::default();
+        let now = tokio::time::Instant::now();
+        round.last_tried.insert(bob, now);
+        round.answered.insert(bob);
+        round.too_far_behind.insert(bob);
+        assert!(
+            !round.says_too_far_behind(&[bob, carol]),
+            "Carol wasn't tried yet"
+        );
+
+        round.last_tried.insert(carol, now);
+        assert!(
+            round.says_too_far_behind(&[bob, carol]),
+            "Carol was tried and didn't answer"
+        );
+
+        round.answered.insert(carol);
+        assert!(!round.says_too_far_behind(&[bob, carol]), "Carol disagreed");
     }
 }
 
