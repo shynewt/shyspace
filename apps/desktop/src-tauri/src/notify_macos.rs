@@ -27,6 +27,7 @@ use objc2_user_notifications::{
     UNNotificationResponse, UNNotificationSettings, UNNotificationSound, UNTextInputNotificationAction,
     UNTextInputNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
 };
+use tokio::sync::oneshot;
 
 use crate::alert_actions::{AlertCategory, MARK_READ_ACTION, OPEN_ACTION, Permission, REPLY_ACTION};
 
@@ -151,7 +152,17 @@ fn error_text(error: *mut NSError) -> Option<String> {
 }
 
 pub async fn permission() -> Result<Permission, String> {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let status = ask_for_settings()
+        .await
+        .map_err(|_| "macOS didn't say whether shyspace may notify".to_owned())?;
+    Ok(permission_of(status))
+}
+
+/// Asks for the notification settings; the answer comes on the receiver.
+/// Not async itself, so no Objective-C object is held across an `.await`
+/// (they aren't `Send`); Apple keeps its own copy of the block.
+fn ask_for_settings() -> oneshot::Receiver<UNAuthorizationStatus> {
+    let (sender, receiver) = oneshot::channel();
     let sender = Mutex::new(Some(sender));
     let on_settings = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
         // SAFETY: Apple passes a valid settings object that lives until the
@@ -164,10 +175,7 @@ pub async fn permission() -> Result<Permission, String> {
     });
     UNUserNotificationCenter::currentNotificationCenter()
         .getNotificationSettingsWithCompletionHandler(&on_settings);
-    let status = receiver
-        .await
-        .map_err(|_| "macOS didn't say whether shyspace may notify".to_owned())?;
-    Ok(permission_of(status))
+    receiver
 }
 
 fn permission_of(status: UNAuthorizationStatus) -> Permission {
@@ -180,7 +188,15 @@ fn permission_of(status: UNAuthorizationStatus) -> Permission {
 
 /// Shows macOS's prompt if it hasn't been answered, then reads the answer.
 pub async fn request_permission() -> Result<Permission, String> {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    ask_to_notify()
+        .await
+        .map_err(|_| "macOS didn't answer the request to notify".to_owned())?;
+    permission().await
+}
+
+/// Like `ask_for_settings`, for the permission prompt.
+fn ask_to_notify() -> oneshot::Receiver<()> {
+    let (sender, receiver) = oneshot::channel();
     let sender = Mutex::new(Some(sender));
     let on_answer = RcBlock::new(move |_granted: Bool, error: *mut NSError| {
         if let Some(error) = error_text(error) {
@@ -195,9 +211,6 @@ pub async fn request_permission() -> Result<Permission, String> {
         &on_answer,
     );
     receiver
-        .await
-        .map_err(|_| "macOS didn't answer the request to notify".to_owned())?;
-    permission().await
 }
 
 /// What a response asks for, as plain values; None for a dismissal.
