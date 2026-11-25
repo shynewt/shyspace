@@ -244,6 +244,13 @@ pub(crate) struct Inner {
     /// Makes the next join answer upload fail as an unreachable bucket would.
     #[cfg(test)]
     pub fail_next_answer_upload: std::sync::atomic::AtomicBool,
+    /// Held while a huddle's audience is worked out and published, so an
+    /// older result can never replace a newer one.
+    pub audience_lock: Mutex<()>,
+    /// Pauses the next audience refresh after it read who may hear the
+    /// call: it says so on the first channel, then waits on the second.
+    #[cfg(test)]
+    pub audience_pause: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
 }
 
 #[derive(Clone)]

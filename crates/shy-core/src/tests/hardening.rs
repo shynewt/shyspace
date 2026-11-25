@@ -5221,3 +5221,63 @@ mod sealed_join_requests {
         assert_eq!(admin.status().error, None);
     }
 }
+
+mod huddle_audience {
+    //! Who hears a huddle's audio follows removals at once.
+
+    use std::time::Duration;
+
+    use crate::{
+        tests::{
+            huddles::{carry, three_members},
+            support::sync_all,
+        },
+        workspace::Via,
+    };
+
+    /// An audience worked out before a removal mustn't be published after the
+    /// one worked out since, or the removed member is heard until the next tick.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_removal_during_an_audience_refresh_takes_effect_at_once() {
+        let (_root, [ada, bob, carol]) = three_members().await;
+        let plans = ada
+            .workspace
+            .create_private_channel("plans", &[bob.workspace.my_id()])
+            .unwrap();
+        sync_all(&[&ada.workspace, &bob.workspace, &carol.workspace]).await;
+        ada.workspace.join_huddle(&plans, false).unwrap();
+        bob.workspace.join_huddle(&plans, false).unwrap();
+        carry(&bob.workspace, &[&ada.workspace], Via::Direct(bob.workspace.me()));
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while ada.media.peers().len() != 1 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("Ada never heard Bob");
+
+        let (paused, is_paused) = std::sync::mpsc::channel();
+        let (resume, resumed) = std::sync::mpsc::channel();
+        *ada.workspace.inner.audience_pause.lock().unwrap() = Some((paused, resumed));
+        let stale = std::thread::spawn({
+            let ada = ada.workspace.clone();
+            move || ada.follow_membership()
+        });
+        is_paused.recv().unwrap();
+        ada.workspace
+            .remove_from_private_channel(&plans, &bob.workspace.my_id())
+            .unwrap();
+        // Time for the session to refresh on the removal, if nothing holds it back.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        resume.send(()).unwrap();
+        stale.join().unwrap().unwrap();
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !ada.media.peers().is_empty() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the removed member was still offered audio");
+    }
+}

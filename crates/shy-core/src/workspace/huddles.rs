@@ -660,9 +660,23 @@ impl Workspace {
         Ok(())
     }
 
+    #[cfg(test)]
+    fn pause_audience_refresh(&self) {
+        let pause = self
+            .inner
+            .audience_pause
+            .lock()
+            .expect("audience pause lock")
+            .take();
+        if let Some((paused, resume)) = pause {
+            let _ = paused.send(());
+            let _ = resume.recv();
+        }
+    }
+
     /// Updates whom this device exchanges audio with, and leaves if it may
     /// no longer be in the huddle.
-    fn follow_membership(&self) -> Result<()> {
+    pub(crate) fn follow_membership(&self) -> Result<()> {
         match self.refresh_audience()? {
             Audience::Updated => Ok(()),
             Audience::Lost(session) => self.leave_session(session),
@@ -672,6 +686,12 @@ impl Workspace {
     /// Recomputes whom this device exchanges audio with, from the roster
     /// and who may be in the huddle now. Someone removed drops out here.
     fn refresh_audience(&self) -> Result<Audience> {
+        let _one_at_a_time = self
+            .inner
+            .audience_lock
+            .lock()
+            // Guards no data, so a panic elsewhere can't leave anything half done.
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some((channel, session)) = self
             .huddles()
             .mine
@@ -685,6 +705,8 @@ impl Workspace {
             let state = self.state();
             huddle_members(&state.store, &channel, &members)?.map(|(allowed, _)| allowed)
         };
+        #[cfg(test)]
+        self.pause_audience_refresh();
         let me = self.me();
         let mut huddles = self.huddles();
         let now = huddles.now();

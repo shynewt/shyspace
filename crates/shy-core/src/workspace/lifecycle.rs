@@ -541,6 +541,9 @@ impl Workspace {
                 fail_next_park: Default::default(),
                 #[cfg(test)]
                 fail_segment_save: Default::default(),
+                audience_lock: Mutex::default(),
+                #[cfg(test)]
+                audience_pause: Mutex::default(),
                 #[cfg(test)]
                 drop_segment_transaction: Default::default(),
                 #[cfg(test)]
