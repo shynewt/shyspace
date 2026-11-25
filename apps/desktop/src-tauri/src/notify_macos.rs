@@ -72,10 +72,11 @@ fn categories() -> Retained<NSSet<UNNotificationCategory>> {
 }
 
 fn actions_of(category: AlertCategory) -> Vec<Retained<UNNotificationAction>> {
+    // Both act as the person, so a locked Mac asks for its password first.
     let mark_read = UNNotificationAction::actionWithIdentifier_title_options(
         &NSString::from_str(MARK_READ_ACTION),
         &NSString::from_str("Mark as read"),
-        UNNotificationActionOptions::empty(),
+        UNNotificationActionOptions::AuthenticationRequired,
     );
     match category {
         AlertCategory::Message => {
@@ -83,7 +84,7 @@ fn actions_of(category: AlertCategory) -> Vec<Retained<UNNotificationAction>> {
                 UNTextInputNotificationAction::actionWithIdentifier_title_options_textInputButtonTitle_textInputPlaceholder(
                     &NSString::from_str(REPLY_ACTION),
                     &NSString::from_str("Reply"),
-                    UNNotificationActionOptions::empty(),
+                    UNNotificationActionOptions::AuthenticationRequired,
                     &NSString::from_str("Send"),
                     &NSString::from_str("Reply"),
                 );
