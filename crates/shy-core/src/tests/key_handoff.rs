@@ -377,3 +377,26 @@ async fn a_joiner_records_that_its_settings_came_with_the_invite() {
         Some(crate::config::NO_SETTINGS_OP)
     );
 }
+
+/// A member who joined after the key change, with no record of which op
+/// set the settings, finds it once in the admin's log and hands it over.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_who_joined_after_the_change_finds_the_op_once() {
+    let provider = Provider::new();
+    let (root, admin, _bob, carol) = admin_bob_carol(&provider).await;
+    let request = request_of(&carol);
+    change_key(&admin, "second").await;
+    admin.sync().await;
+    let dave = dave(root.path(), &admin, &provider).await;
+    dave.state()
+        .store
+        .delete_meta(crate::config::SETTINGS_OP_META)
+        .unwrap();
+
+    assert!(matches!(
+        dave.key_answer_for(&carol.me(), &request).unwrap(),
+        KeyAnswer::Settings { .. }
+    ));
+    let recorded = crate::config::settings_op_seq(&dave.state().store).unwrap();
+    assert!(recorded.is_some_and(|seq| seq > 0), "found and recorded");
+}

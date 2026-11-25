@@ -123,10 +123,72 @@ impl Workspace {
         max_bytes: usize,
     ) -> Result<KeyAnswer> {
         self.ensure_answerable(asker)?;
+        self.note_settings_op_if_unknown()?;
         let answer = self.answer_from_store(request, max_commits, max_bytes)?;
         // Again: a commit removing the asker may have applied meanwhile.
         self.ensure_answerable(asker)?;
         Ok(answer)
+    }
+
+    /// For settings applied by a version that kept no record of their op:
+    /// finds it once and records it (or that there is none). The admin's
+    /// log is read a batch at a time, opened outside the store's lock.
+    fn note_settings_op_if_unknown(&self) -> Result<()> {
+        let admin = self.inner.config.admin;
+        let (lamport, last) = {
+            let state = self.state();
+            if config::settings_op_seq(&state.store)?.is_some() {
+                return Ok(());
+            }
+            (
+                config::bucket_lamport(&state.store)?,
+                state.store.last_seq(&admin)?,
+            )
+        };
+        let found = self.find_settings_op(&admin, lamport, last)?;
+        config::record_settings_op(&self.state().store, found.unwrap_or(config::NO_SETTINGS_OP))
+    }
+
+    /// The seq of the admin's settings op with `lamport`, read newest first
+    /// from `last`. An author's clock only rises along their log, and their
+    /// epochs never fall, so the search stops at the first op older than
+    /// that, at the first from an epoch this device has no key for (a
+    /// member who joined later), or after `MAX_SEARCHED_OPS`.
+    fn find_settings_op(&self, admin: &PublicKey, lamport: u64, mut last: u64) -> Result<Option<u64>> {
+        let mut checked = 0;
+        while last > 0 && checked < MAX_SEARCHED_OPS {
+            let first = last.saturating_sub(SEARCH_BATCH - 1).max(1);
+            let batch = {
+                let state = self.state();
+                state
+                    .store
+                    .envelopes_between(admin, first, last)?
+                    .into_iter()
+                    .map(|envelope| {
+                        let key = state.store.epoch_key(envelope.epoch)?;
+                        Ok((envelope, key))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            };
+            for (envelope, key) in batch.into_iter().rev() {
+                checked += 1;
+                let Some(key) = key else {
+                    return Ok(None);
+                };
+                let Ok(verified) = crypto::open(&envelope, &key) else {
+                    continue;
+                };
+                if verified.body.lamport < lamport {
+                    return Ok(None);
+                }
+                if verified.body.lamport == lamport && matches!(verified.body.op, Op::StorageSettings { .. })
+                {
+                    return Ok(Some(envelope.seq));
+                }
+            }
+            last = first - 1;
+        }
+        Ok(None)
     }
 
     fn ensure_answerable(&self, asker: &PublicKey) -> Result<()> {
@@ -404,14 +466,9 @@ impl KeyRound {
 /// `lamport`), if this device applied it; settings that came with an invite
 /// or from another member have none until the op itself arrives.
 fn settings_envelope(store: &Store, admin: &PublicKey, lamport: u64) -> Result<Option<Envelope>> {
-    let seq = match config::settings_op_seq(store)? {
-        Some(seq) => seq,
-        // Applied by a version that kept no record: found once, then recorded.
-        None => {
-            let found = find_settings_op(store, admin, lamport)?.unwrap_or(config::NO_SETTINGS_OP);
-            config::record_settings_op(store, found)?;
-            found
-        }
+    // Recorded before answering, also for versions that kept no record.
+    let Some(seq) = config::settings_op_seq(store)? else {
+        return Ok(None);
     };
     if seq == config::NO_SETTINGS_OP {
         return Ok(None);
@@ -430,32 +487,9 @@ fn settings_envelope(store: &Store, admin: &PublicKey, lamport: u64) -> Result<O
 
 /// The admin's ops read at a time while looking for their settings op.
 const SEARCH_BATCH: u64 = 256;
-
-/// The seq of the admin's settings op with `lamport`, read newest first.
-/// An author's clock only rises along their log, so the search stops at
-/// the first op older than that.
-fn find_settings_op(store: &Store, admin: &PublicKey, lamport: u64) -> Result<Option<u64>> {
-    let mut last = store.last_seq(admin)?;
-    while last > 0 {
-        let first = last.saturating_sub(SEARCH_BATCH - 1).max(1);
-        for envelope in store.envelopes_between(admin, first, last)?.into_iter().rev() {
-            let Some(key) = store.epoch_key(envelope.epoch)? else {
-                continue;
-            };
-            let Ok(verified) = crypto::open(&envelope, &key) else {
-                continue;
-            };
-            if verified.body.lamport < lamport {
-                return Ok(None);
-            }
-            if verified.body.lamport == lamport && matches!(verified.body.op, Op::StorageSettings { .. }) {
-                return Ok(Some(envelope.seq));
-            }
-        }
-        last = first - 1;
-    }
-    Ok(None)
-}
+/// The most ops one search opens; past them, the settings count as having
+/// no op this device can hand over, until the next change.
+const MAX_SEARCHED_OPS: u64 = 10_000;
 
 #[cfg(test)]
 mod tests {
