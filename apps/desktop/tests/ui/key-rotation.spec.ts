@@ -73,6 +73,19 @@ test("removing a member walks the admin through changing the storage key", async
   await expect(tab).not.toHaveAccessibleName(/Change the storage key/);
 });
 
+test("on Backblaze the new key is made without the right to delete old versions", async ({ page }) => {
+  await page.evaluate(() => {
+    window.fake.storageProvider = "b2";
+  });
+  await removeGrace(page);
+  const { panel } = await openStorage(page);
+  const rotation = card(panel);
+  // The console's Read and Write preset includes deleteFiles, which destroys history.
+  await expect(rotation).toContainText("b2 key create --bucket");
+  await expect(rotation).toContainText("listBuckets,listFiles,readFiles,writeFiles");
+  await expect(rotation).not.toContainText("Read and Write");
+});
+
 test("a check that can't reach the bucket says it will try again by itself", async ({ page }) => {
   await removeGrace(page);
   const { panel } = await openStorage(page);

@@ -39,7 +39,7 @@ const PROVIDER_STEPS: Record<StorageProvider, ProviderSteps> = {
   b2: {
     name: "Backblaze",
     create:
-      "In Backblaze: B2 Cloud Storage › Application Keys › Add a New Application Key, for this bucket only, with Read and Write.",
+      "With Backblaze's b2 command-line tool, run: b2 key create --bucket <bucket> <key name> listBuckets,listFiles,readFiles,writeFiles. The web console can only make keys that may delete old versions.",
     remove: "In Application Keys, use Delete Key on the old one.",
     guide: {
       label: "Backblaze's guide",
