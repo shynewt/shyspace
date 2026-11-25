@@ -117,9 +117,10 @@ function providerSteps(prefix: string): { provider: string; steps: ReactNode }[]
       steps: (
         <>
           Turn on versioning. Give the members' key a bucket policy that allows <code>s3:GetObject</code>,{" "}
-          <code>s3:PutObject</code>, <code>s3:DeleteObject</code> and <code>s3:ListBucket</code>, but not{" "}
-          <code>s3:DeleteObjectVersion</code>. Add lifecycle rules that delete old versions under {folder("files/")} and{" "}
-          {folder("recovery/")} after 30 days, and none for {folder("ops/")} or {folder("mls/")}.
+          <code>s3:GetObjectVersion</code>, <code>s3:PutObject</code>, <code>s3:DeleteObject</code> and{" "}
+          <code>s3:ListBucket</code>, but not <code>s3:DeleteObjectVersion</code>. Add lifecycle rules that delete old
+          versions under {folder("files/")} and {folder("recovery/")} after 30 days, and none for {folder("ops/")} or{" "}
+          {folder("mls/")}.
         </>
       ),
     },
@@ -137,9 +138,9 @@ function providerSteps(prefix: string): { provider: string; steps: ReactNode }[]
       provider: "AWS S3",
       steps: (
         <>
-          Turn on versioning, give the members' key no <code>s3:DeleteObjectVersion</code>, and expire old versions
-          under {folder("files/")} after 30 days. Don't set an Object Lock default retention: it covers the whole
-          bucket.
+          Turn on versioning, give the members' key <code>s3:GetObjectVersion</code> but no{" "}
+          <code>s3:DeleteObjectVersion</code>, and expire old versions under {folder("files/")} after 30 days. Don't set
+          an Object Lock default retention: it covers the whole bucket.
         </>
       ),
     },
@@ -147,8 +148,8 @@ function providerSteps(prefix: string): { provider: string; steps: ReactNode }[]
       provider: "MinIO",
       steps: (
         <>
-          Run <code>mc version enable</code>, and give the members' policy an explicit Deny on{" "}
-          <code>s3:DeleteObjectVersion</code> for {folder("*")}: in MinIO, leaving it out isn't enough. MinIO's
+          Run <code>mc version enable</code>. Give the members' policy <code>s3:GetObjectVersion</code>, and an explicit
+          Deny on <code>s3:DeleteObjectVersion</code> for {folder("*")}: in MinIO, leaving it out isn't enough. MinIO's
           open-source edition is no longer maintained.
         </>
       ),

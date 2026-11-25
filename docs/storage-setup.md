@@ -20,16 +20,16 @@ A French provider (EU jurisdiction), with no request fees.
 1. Create an account at scaleway.com and turn on two-factor login.
 2. **Object Storage › Create a bucket:** a private bucket in Paris, Amsterdam or Warsaw. Turn on **versioning**.
 3. **IAM › Applications:** create an application named `shyspace-members`, give it an IAM policy with Object Storage access in this project, and create an **API key** for it. Note the access key and secret.
-4. **The bucket's policy** narrows that: an action is allowed only if both the IAM policy and the bucket policy allow it. Allow the application `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on the bucket and its objects, and nothing else; Scaleway allows only what a policy lists, so leaving out `s3:DeleteObjectVersion` is enough. Include yourself (your user) as a principal too, or you lock yourself out of the bucket.
+4. **The bucket's policy** narrows that: an action is allowed only if both the IAM policy and the bucket policy allow it. Allow the application `s3:GetObject`, `s3:GetObjectVersion` (the protection check reads an old version back), `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on the bucket and its objects, and nothing else; Scaleway allows only what a policy lists, so leaving out `s3:DeleteObjectVersion` is enough. Include yourself (your user) as a principal too, or you lock yourself out of the bucket.
 5. **Lifecycle rules:** one rule with prefix `<workspace id>/files/` and one with `<workspace id>/recovery/`, each deleting noncurrent versions after 30 days. No rule for `ops/` or `mls/`, and never a rule with an empty prefix.
 6. In shyspace, create the workspace with endpoint `https://s3.<region>.scw.cloud` (for example `https://s3.fr-par.scw.cloud`), region `fr-par`, the bucket name, and the application's key. The workspace id appears in Settings once it exists, so add the lifecycle rules (step 5) right after.
 7. Check with the members' key: deleting an object works, and it still shows under versions; deleting a version is refused. These steps come from Scaleway's documentation and haven't been tried on a real account yet, so do this check.
 
 ## Others
 
-- **AWS S3:** the same with IAM: versioning on, a members' policy without `s3:DeleteObjectVersion`, and lifecycle expiry of noncurrent versions under `files/`. Don't set an Object Lock default retention: it covers the whole bucket. A US company, with request fees.
+- **AWS S3:** the same with IAM: versioning on, a members' policy with `s3:GetObjectVersion` but without `s3:DeleteObjectVersion`, and lifecycle expiry of noncurrent versions under `files/`. Don't set an Object Lock default retention: it covers the whole bucket. A US company, with request fees.
 - **Cloudflare R2:** no versioning. Add a bucket lock rule for `<workspace id>/ops/` only: an R2 lock refuses overwrites, and commits under `mls/` are repaired by overwriting, so locking `mls/` would let junk put at the next commit slot block membership changes for good. Deleted files are gone at once, so back up `files/` another way. A US company, with request fees.
-- **MinIO (self-hosted):** `mc version enable`, and a members' policy with an explicit `Deny` on `s3:DeleteObjectVersion` for `<workspace id>/*`. Leaving the action out isn't enough: MinIO only refuses a version delete that a statement denies. MinIO's open-source edition is no longer maintained, and `mc` is archived.
+- **MinIO (self-hosted):** `mc version enable`, and a members' policy that allows `s3:GetObjectVersion` and has an explicit `Deny` on `s3:DeleteObjectVersion` for `<workspace id>/*`. Leaving the action out isn't enough: MinIO only refuses a version delete that a statement denies. MinIO's open-source edition is no longer maintained, and `mc` is archived.
 
 Backblaze B2 can do this too, but its privacy notice describes sharing identifiers with advertising networks, so we don't recommend it for a privacy product.
 

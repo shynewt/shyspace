@@ -123,6 +123,17 @@ test("the provider steps open from the keyboard and warn against locking everyth
   await expect(storage).not.toContainText(/rule for \S*ops\/ and one for/);
 });
 
+test("the provider steps let the members' key read old versions, which the check reads back", async ({ page }) => {
+  await setProtection(page, "unprotected");
+  const storage = await openStorage(page);
+  await storage.getByText("How to protect your bucket").click();
+  for (const provider of ["Scaleway", "AWS S3", "MinIO"]) {
+    await expect(storage.locator("dl > div").filter({ hasText: new RegExp(`^${provider}`) })).toContainText(
+      "s3:GetObjectVersion",
+    );
+  }
+});
+
 test.describe("as a member", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("?start=member");
