@@ -1413,18 +1413,35 @@ mod tests {
     }
 
     /// `unsafe_code` is only denied in this crate, not forbidden, so that
-    /// `notify_macos.rs` can call Objective-C; no other file may allow it.
+    /// `notify_macos.rs` can call Objective-C; no other file, at any depth,
+    /// may allow or expect it.
     #[test]
     fn only_the_macos_notification_module_allows_unsafe_code() {
-        // Split, so this test doesn't find itself.
-        let allow = concat!("allow(", "unsafe_code)");
+        // Split, so this test doesn't find itself. A line counts when it
+        // allows or expects the lint, alone or among others.
+        let lint = concat!("unsafe", "_code");
+        let lifting = [concat!("allow", "("), concat!("expect", "(")];
+        let lifts = |text: &str| {
+            text.lines()
+                .any(|line| line.contains(lint) && lifting.iter().any(|lift| line.contains(lift)))
+        };
         let sources = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut allowing = Vec::new();
-        for entry in std::fs::read_dir(&sources).unwrap() {
-            let path = entry.unwrap().path();
-            let text = std::fs::read_to_string(&path).unwrap();
-            if text.contains(allow) {
-                allowing.push(path.file_name().unwrap().to_string_lossy().into_owned());
+        let mut folders = vec![sources.clone()];
+        while let Some(folder) = folders.pop() {
+            for entry in std::fs::read_dir(&folder).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    folders.push(path);
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                if lifts(&text) {
+                    let relative = path.strip_prefix(&sources).unwrap();
+                    allowing.push(relative.to_string_lossy().into_owned());
+                }
             }
         }
         assert_eq!(allowing, ["notify_macos.rs"]);
