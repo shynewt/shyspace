@@ -392,6 +392,21 @@ pub fn listing_after(author: &PublicKey, held: u64) -> String {
     format!("ops/{}/{}-a", member_id(author), padded(held))
 }
 
+/// An object's body, or `None` once it runs past `limit` bytes: the size a
+/// store reports is only what it says, so the limit holds while reading.
+async fn read_at_most(result: object_store::GetResult, limit: u64) -> Result<Option<Bytes>> {
+    let mut body = Vec::new();
+    let mut chunks = result.into_stream();
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk?;
+        if u64::try_from(body.len() + chunk.len())? > limit {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(Some(Bytes::from(body)))
+}
+
 /// Changes whenever the object is replaced: an overwrite always changes the
 /// ETag, and stores without one still change the size or time.
 pub(super) fn object_version(meta: &object_store::ObjectMeta) -> String {
@@ -438,7 +453,13 @@ impl Bucket {
             }
             Ok(result) => {
                 let version = object_version(&result.meta);
-                Ok(Some((result.bytes().await?, version)))
+                match read_at_most(result, limit).await? {
+                    Some(bytes) => Ok(Some((bytes, version))),
+                    None => {
+                        warn!("ignoring oversized object {path}: it ran past what its size said");
+                        Ok(None)
+                    }
+                }
             }
             Err(object_store::Error::NotFound { .. }) => Ok(None),
             Err(error) => Err(error.into()),
@@ -659,7 +680,7 @@ impl Bucket {
                 debug!("ignoring an oversized join request ({} bytes)", result.meta.size);
                 Ok(None)
             }
-            Ok(result) => Ok(Some(result.bytes().await?)),
+            Ok(result) => read_at_most(result, MAX_INVITE_REQUEST_BYTES).await,
             Err(object_store::Error::NotFound { .. }) => Ok(None),
             Err(error) => Err(error.into()),
         }

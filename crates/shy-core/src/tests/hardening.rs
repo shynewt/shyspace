@@ -2977,6 +2977,8 @@ struct FlakyStore {
     /// Keys whose next download fails, as a network blip would.
     unreadable_once: Mutex<std::collections::HashSet<String>>,
     refused_reads: std::sync::atomic::AtomicUsize,
+    /// Every download claims a size of one byte, whatever it holds.
+    understates_sizes: std::sync::atomic::AtomicBool,
 }
 
 impl fmt::Display for FlakyStore {
@@ -3076,7 +3078,11 @@ impl ObjectStore for FlakyStore {
                 source: "the object is archived".into(),
             });
         }
-        self.inner.get_opts(location, options).await
+        let mut result = self.inner.get_opts(location, options).await?;
+        if self.understates_sizes.load(std::sync::atomic::Ordering::SeqCst) {
+            result.meta.size = 1;
+        }
+        Ok(result)
     }
     fn delete_stream(
         &self,
@@ -5280,4 +5286,34 @@ mod huddle_audience {
         .await
         .expect("the removed member was still offered audio");
     }
+}
+
+/// A store that says an object is small doesn't get to send more than the
+/// limit: the cap holds while the body is read.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_object_larger_than_its_stated_size_is_cut_off_while_reading() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket, admin, _bob, _carol) = on_a_flaky_store(root.path()).await;
+    let token = admin
+        .create_test_invite("", std::time::Duration::from_secs(600))
+        .unwrap()
+        .token;
+    bucket
+        .put_invite_request(&token, vec![0; 1024 * 1024])
+        .await
+        .unwrap();
+    store
+        .understates_sizes
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    assert_eq!(bucket.invite_request(&token).await.unwrap(), None);
+    bucket
+        .put_invite_request(&token, b"small".to_vec())
+        .await
+        .unwrap();
+    assert_eq!(
+        bucket.invite_request(&token).await.unwrap().as_deref(),
+        Some(b"small".as_slice()),
+        "what fits still reads"
+    );
 }
