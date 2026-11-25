@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { avatarPng } from "./alertPicture";
-import { type AlertTarget, api, type Change, onAnyWorkspaceChange } from "./api";
+import { type AlertKind, type AlertTarget, api, type Change, onAnyWorkspaceChange } from "./api";
 import { alertTitle } from "./channels";
 import { displayName } from "./people";
 import { readPreferences } from "./preferences";
@@ -59,6 +59,7 @@ export function useAlerts(workspaces: AlertWorkspaces) {
         .then(() => prepared)
         .then(([title, png]) =>
           api.showAlert(
+            alertKindOf(change),
             workspaceId,
             workspaceName ? `${workspaceName} · ${title}` : title,
             bodyOf(change),
@@ -69,6 +70,17 @@ export function useAlerts(workspaces: AlertWorkspaces) {
         .catch(reportError);
     });
   }, []);
+}
+
+function alertKindOf(change: AlertChange): AlertKind {
+  switch (change.kind) {
+    case "alert":
+      return "message";
+    case "page_alert":
+      return "page_mention";
+    case "huddle_started":
+      return "huddle";
+  }
 }
 
 /** Opens what a notification is about: its message, its channel, or the spot in its page. */

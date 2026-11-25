@@ -91,17 +91,20 @@ async fn an_unsent_reply_is_kept_as_a_draft_after_any_already_there() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mark_as_read_reads_the_whole_channel() {
+async fn mark_as_read_reads_up_to_the_alerted_message() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");
     let first = bob.send_message(&general, "one", None).unwrap();
-    bob.send_message(&general, "two", None).unwrap();
+    let second = bob.send_message(&general, "two", None).unwrap();
     sync_all(&[&admin, &bob]).await;
     assert_eq!(unread(&admin, &general), 2);
 
     admin.mark_alert_read(&first).unwrap();
+    assert_eq!(unread(&admin, &general), 1, "the later one wasn't seen");
 
-    assert_eq!(unread(&admin, &general), 0);
+    admin.mark_alert_read(&second).unwrap();
+    admin.mark_alert_read(&first).unwrap();
+    assert_eq!(unread(&admin, &general), 0, "and never back");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -120,7 +123,7 @@ async fn mark_as_read_on_a_thread_reply_reads_that_thread() {
 
     admin.mark_alert_read(&first).unwrap();
 
-    assert_eq!(unread_replies(&admin, &general, &question), 0);
+    assert_eq!(unread_replies(&admin, &general, &question), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

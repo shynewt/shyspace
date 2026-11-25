@@ -50,21 +50,13 @@ impl Workspace {
         self.set_draft(target, &kept)
     }
 
-    /// Reads the conversation `message` is in, up to its newest message.
+    /// Reads the conversation `message` is in up to that message, never
+    /// past it, so nothing that came after it is marked read unseen.
     pub fn mark_alert_read(&self, message: &str) -> Result<()> {
         let conversation = self.conversation_of(message)?;
         match conversation.thread_root {
-            Some(root) => {
-                let latest = self.thread(&root)?.pop().context("no such thread")?;
-                self.mark_thread_read(&root, &latest.id)
-            }
-            None => {
-                let latest = self
-                    .messages(&conversation.channel, None, 1)?
-                    .pop()
-                    .context("the channel has no messages")?;
-                self.mark_read(&conversation.channel, &latest.id)
-            }
+            Some(root) => self.mark_thread_read(&root, message),
+            None => self.mark_read(&conversation.channel, message),
         }
     }
 }

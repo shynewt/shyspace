@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use shy_core::{Workspace, views::Member};
 use tauri::{AppHandle, State};
 
-use crate::alerts::{self, AlertTarget, OpenedAlert};
+use crate::alerts::{self, Alert, AlertKind, AlertTarget, OpenedAlert};
 use crate::{AppState, CommandResult, failed};
 
 /// The action ids an alert's buttons report.
@@ -45,6 +45,14 @@ impl AlertCategory {
         match self {
             AlertCategory::Message => "message",
             AlertCategory::Page => "page",
+        }
+    }
+
+    /// The buttons an alert of `kind` shows, if any.
+    pub fn shown_for(alert: &OpenedAlert, kind: AlertKind) -> Option<AlertCategory> {
+        match kind {
+            AlertKind::Message | AlertKind::PageMention => AlertCategory::of(alert),
+            AlertKind::Huddle | AlertKind::Reminder | AlertKind::Notice => None,
         }
     }
 
@@ -312,11 +320,14 @@ pub fn keep_unsent_reply(
         .map_err(failed)?;
     alerts::show(
         &app,
-        Some(workspace_id),
-        "Your reply wasn't sent".into(),
-        "It's saved as a draft.".into(),
-        Some(AlertTarget::Message { id: message }),
-        None,
+        Alert {
+            kind: AlertKind::Notice,
+            workspace_id: Some(workspace_id),
+            title: "Your reply wasn't sent".into(),
+            body: "It's saved as a draft.".into(),
+            target: Some(AlertTarget::Message { id: message }),
+            picture: None,
+        },
     )
 }
 
@@ -420,6 +431,18 @@ mod tests {
             response_to(&identifier(&about), REPLY_ACTION, Some("hi".into())),
             None
         );
+    }
+
+    #[test]
+    fn only_message_and_page_mention_alerts_get_buttons() {
+        let about_a_message = alert(Some("w1"), message("m1"));
+        assert_eq!(
+            AlertCategory::shown_for(&about_a_message, AlertKind::Message),
+            Some(AlertCategory::Message)
+        );
+        for kind in [AlertKind::Reminder, AlertKind::Notice, AlertKind::Huddle] {
+            assert_eq!(AlertCategory::shown_for(&about_a_message, kind), None, "{kind:?}");
+        }
     }
 
     #[test]

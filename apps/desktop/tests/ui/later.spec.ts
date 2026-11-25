@@ -63,6 +63,8 @@ test("a reminder fires when it comes due", async ({ page }) => {
   );
   await expect(page.getByText("Reminder: Read the spec")).toBeVisible({ timeout: 10_000 });
   expect(await page.evaluate(() => window.fake.alertsShown)).toEqual([{ title: "Reminder", body: "Read the spec" }]);
+  // A reminder isn't answered from the notification: no Reply or Mark as read.
+  expect(await page.evaluate(() => window.fake.alertKinds)).toEqual(["reminder"]);
 });
 
 test("Later stands out only when a reminder is due", async ({ page }) => {

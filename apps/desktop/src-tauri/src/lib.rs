@@ -707,16 +707,8 @@ async fn set_notify_level(
 /// Shows a desktop notification. The UI decides when one is wanted; a
 /// muted workspace, or a pause on all, holds it back.
 #[tauri::command]
-fn show_alert(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    workspace_id: Option<String>,
-    title: String,
-    body: String,
-    target: Option<alerts::AlertTarget>,
-    picture: Option<alerts::AlertPicture>,
-) -> CommandResult<()> {
-    let may_notify = match &workspace_id {
+fn show_alert(app: AppHandle, state: State<'_, AppState>, alert: alerts::Alert) -> CommandResult<()> {
+    let may_notify = match &alert.workspace_id {
         Some(workspace_id) => state.workspaces.may_notify(workspace_id),
         None => state
             .workspaces
@@ -727,7 +719,7 @@ fn show_alert(
     if !may_notify {
         return Ok(());
     }
-    alerts::show(&app, workspace_id, title, body, target, picture)
+    alerts::show(&app, alert)
 }
 
 #[tauri::command]

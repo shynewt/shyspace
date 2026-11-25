@@ -98,7 +98,7 @@ test("a reply that waited too long is kept as a draft, not sent", async ({ page 
   await expect(page.getByLabel("Message #random")).toHaveValue("yes");
 });
 
-test("mark as read from a notification reads the channel", async ({ page }) => {
+test("mark as read from a notification reads the channel up to that message", async ({ page }) => {
   const message = await graceWritesInRandom(page, "one");
   await page.evaluate(() => window.fake.receiveMessage(window.fake.memberNamed("Grace"), "random", "two"));
   await expect(page.getByRole("button", { name: "random, 2 unread" })).toBeVisible();
@@ -113,7 +113,8 @@ test("mark as read from a notification reads the channel", async ({ page }) => {
     message,
   );
 
-  await expect(page.getByRole("button", { name: "random", exact: true })).toBeVisible();
+  // "two" came after the alert, so it stays unread.
+  await expect(page.getByRole("button", { name: "random, 1 unread" })).toBeVisible();
 });
 
 test("a reply to a message that's gone says so, with what you wrote", async ({ page }) => {

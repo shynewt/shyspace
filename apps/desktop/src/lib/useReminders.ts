@@ -37,6 +37,7 @@ export function useReminders(onOpen: (workspaceId: string, item: LaterItem) => v
         showReminderToast(`Reminder: ${body}`, () => open.current(workspaceId, item));
         api
           .showAlert(
+            "reminder",
             workspaceId,
             "Reminder",
             body,

@@ -185,6 +185,7 @@ export class FakeBackend {
       this.notify({ kind: "drafts" });
     },
     showAlert: (title, body, target) => {
+      this.alertKinds.push("notice");
       this.alertWorkspaces.push(this.session?.workspace_id ?? "");
       this.alertsShown.push({ title, body });
       this.alertPictures.push(null);
@@ -340,6 +341,8 @@ export class FakeBackend {
   readonly alertPngs: number[][] = [];
   /** What each alert in `alertsShown` opens when clicked, if anything. */
   readonly alertTargets: (AlertTarget | null)[] = [];
+  /** What kind each alert in `alertsShown` is, which decides its buttons. */
+  readonly alertKinds: string[] = [];
   /** Which workspace each alert in `alertsShown` came from. */
   readonly alertWorkspaces: string[] = [];
 
@@ -713,18 +716,21 @@ export class FakeBackend {
         return null;
       case "update_storage":
         return this.updateStorage(requireString(args, "region"), requireString(args, "accessKeyId"));
-      case "show_alert":
+      case "show_alert": {
+        const alert = alertArguments(argument(args, "alert"));
         // As in the core: a muted workspace, or the pause, holds it back.
-        if (this.workspaces.isSilenced(requireString(args, "workspaceId"))) {
-          this.alertsHeld.push(requireString(args, "body"));
+        if (this.workspaces.isSilenced(requireString(alert, "workspace_id"))) {
+          this.alertsHeld.push(requireString(alert, "body"));
           return null;
         }
-        this.alertWorkspaces.push(requireString(args, "workspaceId"));
-        this.alertsShown.push({ title: requireString(args, "title"), body: requireString(args, "body") });
-        this.alertPictures.push(alertPicture(argument(args, "picture")));
-        this.alertPngs.push(alertPng(argument(args, "picture")));
-        this.alertTargets.push(alertTarget(argument(args, "target")));
+        this.alertKinds.push(requireAlertKind(alert));
+        this.alertWorkspaces.push(requireString(alert, "workspace_id"));
+        this.alertsShown.push({ title: requireString(alert, "title"), body: requireString(alert, "body") });
+        this.alertPictures.push(alertPicture(argument(alert, "picture")));
+        this.alertPngs.push(alertPng(argument(alert, "picture")));
+        this.alertTargets.push(alertTarget(argument(alert, "target")));
         return null;
+      }
       case "pages":
         return this.pages.map(({ doc: _doc, ...page }) => ({
           ...page,
@@ -1078,6 +1084,24 @@ export class FakeBackend {
   private notify(change: Change): void {
     void emit("change", { workspace_id: this.session?.workspace_id ?? null, change });
   }
+}
+
+/** The `alert` a `show_alert` call carries, checked to be an object. */
+function alertArguments(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("fake backend: show_alert takes { alert: { kind, workspace_id, title, body, target, picture } }");
+  }
+  return Object.fromEntries(Object.entries(value));
+}
+
+const ALERT_KINDS = ["message", "page_mention", "huddle", "reminder", "notice"] as const;
+
+function requireAlertKind(alert: Record<string, unknown>): string {
+  const kind = argument(alert, "kind");
+  if (typeof kind !== "string" || !ALERT_KINDS.some((known) => known === kind)) {
+    throw new Error(`fake backend: unknown alert kind ${String(kind)}`);
+  }
+  return kind;
 }
 
 /** A `show_alert` target, checked as the Tauri command's types would. */

@@ -35,6 +35,19 @@ pub enum AlertTarget {
     Page { id: String, position: Vec<u8> },
 }
 
+/// What an alert is, as the frontend says. Only message and page-mention
+/// alerts offer buttons: a reminder or a notice about the app isn't
+/// answered, and its target doesn't say which it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertKind {
+    Message,
+    PageMention,
+    Huddle,
+    Reminder,
+    Notice,
+}
+
 /// What an alert is about, and in which workspace. On macOS it rides in the
 /// notification's identifier as `{ "workspace_id": …, "kind": …, "id": … }`,
 /// so a response finds it after a restart; changing that form strands the
@@ -127,25 +140,45 @@ pub struct AlertPicture {
     png: Vec<u8>,
 }
 
-/// Shows an alert; a click on it opens `target` (in `workspace_id`'s
+/// An alert to show. A click on it opens `target` (in `workspace_id`'s
 /// workspace) if there is one.
-pub fn show(
-    app: &AppHandle,
-    workspace_id: Option<String>,
-    title: String,
-    body: String,
-    target: Option<AlertTarget>,
-    picture: Option<AlertPicture>,
-) -> Result<(), String> {
+#[derive(Deserialize)]
+pub struct Alert {
+    /// Decides its buttons, which only macOS offers (#270).
+    #[cfg_attr(
+        not(target_os = "macos"),
+        expect(dead_code, reason = "only macOS offers buttons")
+    )]
+    pub kind: AlertKind,
+    pub workspace_id: Option<String>,
+    pub title: String,
+    pub body: String,
+    pub target: Option<AlertTarget>,
+    pub picture: Option<AlertPicture>,
+}
+
+pub fn show(app: &AppHandle, alert: Alert) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let kind = alert.kind;
+    let Alert {
+        workspace_id,
+        title,
+        body,
+        target,
+        picture,
+        ..
+    } = alert;
     #[cfg(target_os = "macos")]
     if crate::notify_macos::is_available() {
         let id = app.state::<AlertTargets>().next_id();
-        let alert = target.map(|target| OpenedAlert { workspace_id, target });
-        let identifier = match &alert {
-            Some(alert) => crate::alert_actions::alert_identifier(id, alert)?,
+        let opened = target.map(|target| OpenedAlert { workspace_id, target });
+        let identifier = match &opened {
+            Some(opened) => crate::alert_actions::alert_identifier(id, opened)?,
             None => id.to_string(),
         };
-        let category = alert.as_ref().and_then(crate::alert_actions::AlertCategory::of);
+        let category = opened
+            .as_ref()
+            .and_then(|opened| crate::alert_actions::AlertCategory::shown_for(opened, kind));
         let picture = picture.map(|picture| save_picture(app, &picture)).transpose()?;
         return crate::notify_macos::show(&identifier, &title, &body, category, picture.as_deref());
     }

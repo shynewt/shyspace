@@ -1,13 +1,6 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import type {
-  AlertAction,
-  AlertTarget,
-  LinkedMessage,
-  Member,
-  Message,
-  NotificationPermission,
-} from "../../../src/lib/api";
+import type { AlertAction, AlertTarget, LinkedMessage, Member, NotificationPermission } from "../../../src/lib/api";
 import { argument, requireString } from "./helpers";
 
 export const NOT_NOTIFICATIONS = Symbol("not a notification command");
@@ -96,13 +89,11 @@ export class FakeNotifications {
   private markRead(target: AlertTarget): unknown {
     if (target.kind === "page") return this.context.answer("mark_page_mentions_read", { page: target.id });
     if (target.kind === "channel") throw new Error("a huddle has nothing to mark read");
+    // As in the core: up to the alerted message, never past it.
     const { message: alerted, thread_root } = this.linked(target.id);
     if (thread_root) {
-      const thread = this.context.answer("thread", { root: thread_root }) as Message[];
-      const latest = thread[thread.length - 1];
-      return this.context.answer("mark_thread_read", { root: thread_root, message: latest.id });
+      return this.context.answer("mark_thread_read", { root: thread_root, message: alerted.id });
     }
-    const [latest] = this.context.answer("messages", { channel: alerted.channel, before: null, limit: 1 }) as Message[];
-    return this.context.answer("mark_read", { channel: alerted.channel, message: latest.id });
+    return this.context.answer("mark_read", { channel: alerted.channel, message: alerted.id });
   }
 }

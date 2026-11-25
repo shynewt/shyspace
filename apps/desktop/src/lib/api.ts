@@ -357,6 +357,9 @@ export type AlertAction =
 /** Who can be mentioned in a workspace, for a reply typed outside the composer. */
 export type PeopleIn = { me: string; members: Member[] };
 
+/** What a desktop notification is: only message and page-mention alerts offer buttons (on macOS). */
+export type AlertKind = "message" | "page_mention" | "huddle" | "reminder" | "notice";
+
 /** What a click on a desktop notification opens. */
 export type AlertTarget =
   | { kind: "message" | "channel"; id: string }
@@ -517,12 +520,13 @@ export const api = {
   /** A desktop notification; a click on it opens `target` (taken back through `takeAlertActions`). */
   /** `picture` is PNG bytes shown with the notification, named for the member it shows. */
   showAlert: (
+    kind: AlertKind,
     workspaceId: string,
     title: string,
     body: string,
     target: AlertTarget | null,
     picture: { member: string; png: number[] } | null,
-  ) => invoke<void>("show_alert", { workspaceId, title, body, target, picture }),
+  ) => invoke<void>("show_alert", { alert: { kind, workspace_id: workspaceId, title, body, target, picture } }),
   notificationPermission: () => invoke<NotificationPermission>("notification_permission"),
   /** Shows the system's prompt if it was never answered; resolves to the answer. */
   requestNotificationPermission: () => invoke<NotificationPermission>("request_notification_permission"),
