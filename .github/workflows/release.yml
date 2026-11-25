@@ -276,7 +276,7 @@ jobs:
           while read -r ending fixed; do
             folder="$RUNNER_TEMP/fixed/$fixed"
             mkdir -p "$folder"
-            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "shyspace[_-][0-9]*$ending" --dir "$folder" \
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "shyspace?[0-9]*$ending" --dir "$folder" \
               || { echo "::error::the release has no installer ending in $ending"; exit 1; }
             found=("$folder"/*)
             [ "${#found[@]}" -eq 1 ] || { echo "::error::${#found[@]} installers end in $ending"; exit 1; }
