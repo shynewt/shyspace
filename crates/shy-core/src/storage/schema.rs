@@ -2,12 +2,16 @@
 //! is how many it has had. Stored data is kept from v0.1.0 on,
 //! so a change is a new migration at the end (additive), never an edit to
 //! one already released. A store from a newer app is refused ("update
-//! shyspace"): everyone moves to new versions together. One from a build
+//! shyspace"): everyone moves to new versions together. So is one whose
+//! views or log a newer app wrote under newer view rules or op format,
+//! which change without a migration. One from a build
 //! that never shipped can't be read by any release, so it is refused as
 //! such. Migrations run in one transaction, so they can't use `VACUUM` or `PRAGMA foreign_keys`.
 
 use anyhow::{Context, Result, ensure};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
+
+use crate::crypto::OP_FORMAT;
 
 /// Every migration in order; the first is the schema as of v0.1.0.
 const MIGRATIONS: &[&str] = &[FIRST_SCHEMA, WORKSPACE_LOOK, PAGE_MENTIONS];
@@ -145,6 +149,11 @@ INSERT INTO sidebar_sections (id, name, position) VALUES ('channels', 'Channels'
 /// 2 add the workspace icon and look.
 pub(crate) const VIEW_RULES: u8 = 2;
 pub(crate) const VIEW_RULES_META: &str = "view_rules";
+/// The newest op format any version that opened the store reads, as a
+/// little-endian `u32`: a store whose log may hold ops in a format we can't
+/// read is refused rather than half read.
+pub(crate) const OP_FORMAT_META: &str = "op_format";
+const NEWER_VERSION: &str = "this workspace was opened by a newer version of shyspace; update shyspace";
 
 /// What stores made before migrations recorded instead of a count: a hash
 /// of the first schema and the rules and op format of then. They hold
@@ -169,7 +178,52 @@ const LARGEST_COUNT: i32 = 1_000;
 
 /// Sets up a new store, or brings an existing one up to date.
 pub(super) fn create_or_migrate(db: &mut Connection) -> Result<()> {
-    migrate(db, MIGRATIONS)
+    migrate(db, MIGRATIONS)?;
+    refuse_newer_rules(db)?;
+    record_op_format(db)
+}
+
+/// View rules and op formats change without a migration, so a newer
+/// version leaves them in `meta` for an older one to refuse.
+fn refuse_newer_rules(db: &Connection) -> Result<()> {
+    if let Some(rules) = stored(db, VIEW_RULES_META)? {
+        let [rules] = rules.as_slice() else {
+            anyhow::bail!("the stored view rules are damaged");
+        };
+        ensure!(*rules <= VIEW_RULES, NEWER_VERSION);
+    }
+    if let Some(format) = stored_op_format(db)? {
+        ensure!(format <= OP_FORMAT, NEWER_VERSION);
+    }
+    Ok(())
+}
+
+fn record_op_format(db: &Connection) -> Result<()> {
+    if stored_op_format(db)? == Some(OP_FORMAT) {
+        return Ok(());
+    }
+    db.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2",
+        rusqlite::params![OP_FORMAT_META, OP_FORMAT.to_le_bytes().as_slice()],
+    )?;
+    Ok(())
+}
+
+fn stored_op_format(db: &Connection) -> Result<Option<u32>> {
+    stored(db, OP_FORMAT_META)?
+        .map(|bytes| {
+            let bytes: [u8; 4] = bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("the stored op format is damaged"))?;
+            Ok(u32::from_le_bytes(bytes))
+        })
+        .transpose()
+}
+
+fn stored(db: &Connection, key: &str) -> Result<Option<Vec<u8>>> {
+    Ok(db
+        .query_row("SELECT value FROM meta WHERE key = ?", [key], |row| row.get(0))
+        .optional()?)
 }
 
 fn migrate(db: &mut Connection, migrations: &[&str]) -> Result<()> {
@@ -182,10 +236,7 @@ fn migrate(db: &mut Connection, migrations: &[&str]) -> Result<()> {
         (0..=LARGEST_COUNT).contains(&applied),
         "this workspace was made by a different, unreleased build of shyspace; create it again"
     );
-    ensure!(
-        applied <= known,
-        "this workspace was opened by a newer version of shyspace; update shyspace"
-    );
+    ensure!(applied <= known, NEWER_VERSION);
     let tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| row.get(0))?;
     ensure!(
         applied > 0 || tables == 0,
@@ -276,6 +327,66 @@ mod tests {
             i32::try_from(newer.len()).unwrap(),
             "left as it was"
         );
+    }
+
+    fn meta(db: &Connection, key: &str) -> Option<Vec<u8>> {
+        db.query_row("SELECT value FROM meta WHERE key = ?", [key], |row| row.get(0))
+            .ok()
+    }
+
+    fn set_meta(db: &Connection, key: &str, value: &[u8]) {
+        db.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2",
+            rusqlite::params![key, value],
+        )
+        .unwrap();
+    }
+
+    /// Newer view rules or op formats come without a migration, so the
+    /// store records them and an older app refuses rather than rebuilding
+    /// its views from ops it can't read.
+    #[test]
+    fn a_store_with_newer_views_or_ops_is_refused_clearly() {
+        let newer_rules = [VIEW_RULES + 1];
+        let newer_format = (OP_FORMAT + 1).to_le_bytes();
+        for (key, value) in [
+            (VIEW_RULES_META, newer_rules.as_slice()),
+            (OP_FORMAT_META, newer_format.as_slice()),
+        ] {
+            let mut db = Connection::open_in_memory().unwrap();
+            create_or_migrate(&mut db).unwrap();
+            set_meta(&db, key, value);
+
+            let error = create_or_migrate(&mut db).unwrap_err();
+
+            assert!(error.to_string().contains("update shyspace"), "{key}: {error}");
+            assert_eq!(meta(&db, key).as_deref(), Some(value), "left as it was");
+        }
+    }
+
+    #[test]
+    fn damaged_view_rules_or_op_format_are_refused() {
+        for key in [VIEW_RULES_META, OP_FORMAT_META] {
+            let mut db = Connection::open_in_memory().unwrap();
+            create_or_migrate(&mut db).unwrap();
+            set_meta(&db, key, &[1, 2, 3]);
+
+            let error = create_or_migrate(&mut db).unwrap_err();
+
+            assert!(error.to_string().contains("damaged"), "{key}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_store_records_the_op_format_it_was_opened_with() {
+        let mut db = Connection::open_in_memory().unwrap();
+        create_or_migrate(&mut db).unwrap();
+        db.execute("DELETE FROM meta WHERE key = ?", [OP_FORMAT_META])
+            .unwrap();
+
+        create_or_migrate(&mut db).unwrap();
+
+        assert_eq!(meta(&db, OP_FORMAT_META), Some(OP_FORMAT.to_le_bytes().to_vec()));
     }
 
     #[test]
