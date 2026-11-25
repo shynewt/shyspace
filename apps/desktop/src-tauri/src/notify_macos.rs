@@ -122,6 +122,9 @@ pub fn show(
         None,
     );
     let on_added = RcBlock::new(|error: *mut NSError| {
+        // SAFETY: a completion handler's error is null or a valid NSError
+        // that lives until the handler returns.
+        let error = unsafe { error.as_ref() };
         if let Some(error) = error_text(error) {
             tracing::warn!("macOS didn't show an alert: {error}");
         }
@@ -145,11 +148,8 @@ fn attachment(path: &str) -> Result<Retained<UNNotificationAttachment>, String> 
 }
 
 /// The text of an error a completion handler got, if it got one.
-fn error_text(error: *mut NSError) -> Option<String> {
-    // SAFETY: a completion handler's error is null or a valid NSError that
-    // lives at least until the handler returns, which outlasts this call.
-    let error = unsafe { error.as_ref() }?;
-    Some(error.localizedDescription().to_string())
+fn error_text(error: Option<&NSError>) -> Option<String> {
+    Some(error?.localizedDescription().to_string())
 }
 
 pub async fn permission() -> Result<Permission, String> {
@@ -200,6 +200,9 @@ fn ask_to_notify() -> oneshot::Receiver<()> {
     let (sender, receiver) = oneshot::channel();
     let sender = Mutex::new(Some(sender));
     let on_answer = RcBlock::new(move |_granted: Bool, error: *mut NSError| {
+        // SAFETY: a completion handler's error is null or a valid NSError
+        // that lives until the handler returns.
+        let error = unsafe { error.as_ref() };
         if let Some(error) = error_text(error) {
             tracing::warn!("asking to notify failed: {error}");
         }
