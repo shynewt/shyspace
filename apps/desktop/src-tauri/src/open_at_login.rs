@@ -110,16 +110,28 @@ pub fn set_open_at_login(is_on: bool) -> CommandResult<()> {
     } else {
         system::turn_off()
     };
-    set.map_err(|error| format!("{error:#}"))?;
-    if system::is_on().map_err(|error| format!("{error:#}"))? != is_on {
-        return Err(if is_on {
-            system::REFUSED_HINT
-        } else {
-            "shyspace is still set to open at login; check your system's startup settings"
-        }
-        .into());
+    outcome(is_on, set, system::is_on(), system::REFUSED_HINT)
+}
+
+const STILL_ON: &str = "shyspace is still set to open at login; check your system's startup settings";
+
+/// What turning it on or off came to, by the system's record afterwards:
+/// a refusal to turn it on, whether it failed or came back off, shows the
+/// system's hint (and its reason, if it gave one).
+fn outcome(
+    wanted: bool,
+    set: anyhow::Result<()>,
+    now: anyhow::Result<bool>,
+    refused_hint: &str,
+) -> CommandResult<()> {
+    match (set, now) {
+        (_, Ok(now)) if now == wanted => Ok(()),
+        (Err(error), _) if wanted => Err(format!("{refused_hint} ({error:#})")),
+        (Err(error), _) => Err(format!("{error:#}")),
+        (Ok(()), Err(error)) => Err(format!("{error:#}")),
+        (Ok(()), Ok(_)) if wanted => Err(refused_hint.to_owned()),
+        (Ok(()), Ok(_)) => Err(STILL_ON.to_owned()),
     }
-    Ok(())
 }
 
 /// Keeps an entry that's on pointing at this AppImage, which may have moved
@@ -256,6 +268,33 @@ mod tests {
             "/usr/bin/shyspace",
             "--autostart=no"
         ])));
+    }
+
+    #[test]
+    fn a_refused_turn_on_shows_the_systems_hint_even_when_it_failed() {
+        let hint = "macOS needs your OK";
+        let failed = || Err(anyhow::anyhow!("Operation not permitted"));
+
+        let error = outcome(true, failed(), Ok(false), hint).unwrap_err();
+        assert!(
+            error.starts_with(hint) && error.contains("not permitted"),
+            "{error}"
+        );
+        assert_eq!(outcome(true, Ok(()), Ok(false), hint), Err(hint.to_owned()));
+        assert_eq!(outcome(false, Ok(()), Ok(true), hint), Err(STILL_ON.to_owned()));
+    }
+
+    #[test]
+    fn what_the_system_records_afterwards_decides() {
+        let hint = "hint";
+        assert_eq!(outcome(true, Ok(()), Ok(true), hint), Ok(()));
+        assert_eq!(
+            outcome(true, Err(anyhow::anyhow!("already registered")), Ok(true), hint),
+            Ok(()),
+            "an error that still left it on is no failure"
+        );
+        let error = outcome(false, Err(anyhow::anyhow!("disk full")), Ok(true), hint).unwrap_err();
+        assert_eq!(error, "disk full");
     }
 
     #[test]
