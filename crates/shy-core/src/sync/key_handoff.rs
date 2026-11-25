@@ -291,11 +291,10 @@ impl Workspace {
         }
     }
 
-    /// The next member to ask, and whether it is a retry of one who seems
-    /// offline: one who hasn't
-    /// answered this round nor been asked this pass, those online first,
-    /// then whoever was tried longest ago. A round ends after a while, and
-    /// then everyone may be asked again.
+    /// The next member to ask: one who hasn't answered this round nor been
+    /// asked this pass, those online first, then whoever was tried longest
+    /// ago. Also says whether it is a retry of one who seems offline. A
+    /// round ends after a while, and then everyone may be asked again.
     fn next_member_to_ask(&self, asked_this_pass: &HashSet<PublicKey>) -> Result<Option<(PublicKey, bool)>> {
         let me = self.me();
         let now = crate::ops::now_ms()?;
