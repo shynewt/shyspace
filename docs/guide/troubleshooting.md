@@ -33,6 +33,10 @@ No check has finished yet, or the last one failed. The app tries again every hou
 
 The admin lets people in from their own app, so it has to be open. Ask the admin to open the menu under the workspace's name and choose **Join requests**. If the invite is older than 7 days or was already used, make a new one.
 
+## "This workspace is already on this device" when joining again
+
+You were removed from the workspace and its history is still on this computer. Choose **Leave workspace** on the notice that says you were removed (or, after **Keep reading**, in the menu under the workspace's name), then join with the new invite.
+
 ## Someone can't sync after a key change
 
 If the old key was deleted before their app moved to the new one, their app can't reach the bucket. It gets the new key from another member as soon as one is online, without anyone doing anything; until then their app says the storage key on this device no longer works. If their app says it has been away too long to get the new key, they choose **Leave workspace…** on their computer, then join again with a new invite. Their old membership stays listed until you remove it, and removing it starts another key change. Next time, wait until everyone shows **Moved** before you delete the old key.

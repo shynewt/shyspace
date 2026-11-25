@@ -109,6 +109,45 @@ test("leaving asks first, and with one workspace left the rail goes", async ({ p
   await expect(page.getByLabel("Message #general")).toBeVisible();
 });
 
+test("a removed member can keep reading, then leave and join again with a new invite", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => window.fake.removeMeFromWorkspace());
+  const notice = page.getByRole("dialog", { name: "You were removed from this workspace" });
+  await expect(notice.getByRole("button", { name: "Leave workspace" })).toBeVisible();
+
+  await notice.getByRole("button", { name: "Keep reading" }).click();
+  await expect(notice).toBeHidden();
+  await expect(workspaceMenu(page, "Acme")).toBeVisible();
+
+  await workspaceMenu(page, "Acme").click();
+  await page.getByRole("menuitem", { name: "Leave workspace…" }).click();
+  await page.getByRole("dialog", { name: "Leave Acme?" }).getByRole("button", { name: "Leave workspace" }).click();
+  await page.getByRole("radio", { name: "Join" }).click();
+  await page.getByLabel("Invite code").fill("shy3_new-invite");
+  await page.getByLabel("Your name").fill("Ada");
+  await page.getByRole("button", { name: /Ask to join/ }).click();
+
+  await expect(workspaceMenu(page, "Team")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "You were removed from this workspace" })).toHaveCount(0);
+});
+
+test("a removed member can leave straight from the notice", async ({ page }) => {
+  await openApp(page);
+  await addTeam(page);
+  await page.evaluate(() => window.fake.removeMeFromWorkspace());
+
+  await page
+    .getByRole("dialog", { name: "You were removed from this workspace" })
+    .getByRole("button", { name: "Leave workspace" })
+    .click();
+  await page
+    .getByRole("dialog", { name: /^Leave / })
+    .getByRole("button", { name: "Leave workspace" })
+    .click();
+
+  await expect(rail(page)).toHaveCount(0);
+});
+
 test("leaving the shown workspace shows the next one", async ({ page }) => {
   await openApp(page);
   await addTeam(page);

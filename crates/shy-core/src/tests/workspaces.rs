@@ -361,6 +361,26 @@ async fn a_workspace_already_on_this_device_isnt_added_again() {
     assert_eq!(names(&workspaces), ["Acme"]);
 }
 
+/// Leaving frees the workspace's place on this device, so it can come back,
+/// as a removed member does with a new invite.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_left_can_be_added_again() {
+    let device = Device::new();
+    let workspaces = device.workspaces();
+    let admin = workspaces
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap();
+    let kit = admin.recovery_kit().await.unwrap();
+    let workspace_id = admin.workspace_id().to_owned();
+    drop(admin);
+
+    workspaces.leave(&workspace_id).await.unwrap();
+    workspaces.restore(&kit, Networking::Offline).await.unwrap();
+
+    assert_eq!(names(&workspaces), ["Acme"]);
+}
+
 /// Pointed at one workspace folder (as `shy --dir` is, to run several
 /// members side by side on one machine), the app holds just that one.
 #[tokio::test(flavor = "multi_thread")]

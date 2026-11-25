@@ -10,7 +10,7 @@ import { useLive } from "../../lib/useLive";
 import { useMouseBackAndForward } from "../../lib/useMouseBackAndForward";
 import { ScrollMemoryContext, useNavigation } from "../../lib/useNavigation";
 import { sameView, sidebarViews, type View, viewKey, WorkspaceContext } from "../../lib/workspace";
-import { Dialog, tweens } from "../../ui";
+import { Button, Dialog, DialogActions, tweens } from "../../ui";
 import { ChannelView } from "../chat/ChannelView";
 import { DraftsAndSentView } from "../drafts/DraftsAndSentView";
 import { DriveView } from "../drive/DriveView";
@@ -27,7 +27,7 @@ import { Sidebar } from "./Sidebar";
 import { StatusDialog } from "./StatusDialog";
 import { useSidebar } from "./useSidebar";
 import { ViewHeader } from "./ViewHeader";
-import { WorkspaceRail } from "./WorkspaceRail";
+import { LeaveWorkspaceDialog, WorkspaceRail } from "./WorkspaceRail";
 import { takePendingOpen, useWorkspaces } from "./Workspaces";
 
 export function Shell({ session }: { session: Session }) {
@@ -230,20 +230,36 @@ export function Shell({ session }: { session: Session }) {
   );
 }
 
+/** Says you were removed, and offers to leave (so a new invite can bring you back here) or keep reading. */
 function RemovedNotice({ isRemoved }: { isRemoved: boolean }) {
+  const [isDismissed, setDismissed] = useState(false);
+  const [isLeaving, setLeaving] = useState(false);
+  const { workspaces, shownId } = useWorkspaces();
+  const shown = workspaces.find((workspace) => workspace.workspace_id === shownId) ?? null;
   return (
-    <Dialog
-      open={isRemoved}
-      onOpenChange={() => {}}
-      title="You were removed from this workspace"
-      description="You can still read what you already had, but new messages and edits use keys you no longer receive."
-      width={380}
-    >
-      <div className="flex justify-center">
-        <div className="grid h-11 w-11 place-items-center rounded-xl bg-danger/12 text-danger">
-          <UserX size={20} />
+    <>
+      <Dialog
+        open={isRemoved && !isDismissed && !isLeaving}
+        onOpenChange={(open) => !open && setDismissed(true)}
+        title="You were removed from this workspace"
+        description="You can still read what you already had, but new messages and edits use keys you no longer receive. To come back with a new invite, leave it first."
+        width={380}
+      >
+        <div className="flex justify-center">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-danger/12 text-danger">
+            <UserX size={20} />
+          </div>
         </div>
-      </div>
-    </Dialog>
+        <DialogActions>
+          <Button variant="ghost" onClick={() => setDismissed(true)}>
+            Keep reading
+          </Button>
+          <Button variant="danger" onClick={() => setLeaving(true)}>
+            Leave workspace
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <LeaveWorkspaceDialog workspace={isLeaving ? shown : null} onClose={() => setLeaving(false)} />
+    </>
   );
 }

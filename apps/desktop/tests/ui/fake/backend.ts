@@ -373,6 +373,15 @@ export class FakeBackend {
   }
 
   /** The owner of the private channel `name` removed you from it. */
+  /** The workspace this device was removed from, as the core learns from a commit. */
+  private removedFrom: string | null = null;
+
+  /** Removes you from the shown workspace, as the admin's commit arriving would. */
+  removeMeFromWorkspace(): void {
+    this.removedFrom = this.session?.workspace_id ?? null;
+    this.notify({ kind: "removed" });
+  }
+
   removeMeFromPrivateChannel(name: string): void {
     this.private.receiveChange(this.chat.channelNamed(name).id, { removed: this.me() });
   }
@@ -789,7 +798,7 @@ export class FakeBackend {
           peers: 1,
           last_sync_ms: Date.now(),
           error: null,
-          removed: false,
+          removed: this.removedFrom !== null && this.removedFrom === this.session?.workspace_id,
           needs_update: false,
           needs_update_from: [],
         };

@@ -33,7 +33,7 @@ People who join later can read the workspace's history, including what was writt
 1. Open **Workspace settings › Members**.
 2. Next to the person, choose the remove button, then confirm.
 
-They keep what they had already synced, but can't read anything written after: new messages and pages use keys they never get. This can't be undone, and inviting them back on the same computer isn't possible yet ([#277](https://github.com/shynewt/shyspace/issues/277)).
+They keep what they had already synced, but can't read anything written after: new messages and pages use keys they never get. This can't be undone. To have them back, send them a new invite: their app tells them they were removed, and they choose **Leave workspace** there (or in the menu under the workspace's name) before joining with it.
 
 A removed person still holds the bucket's keys, so Shyspace then asks you to make new ones. Follow [Change the storage key](storage/change-the-key.md).
 
