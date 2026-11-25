@@ -89,7 +89,7 @@ pub async fn check_for_update(
     pending
         .check_once(|| async {
             let updater = app.updater().map_err(|error| error.to_string())?;
-            let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
+            let Some(update) = nothing_unless_published(updater.check().await)? else {
                 return Ok(None);
             };
             let bytes = update
@@ -99,6 +99,20 @@ pub async fn check_for_update(
             Ok(Some(Stage::Downloaded(Box::new(Downloaded { update, bytes }))))
         })
         .await
+        .inspect_err(|error| tracing::warn!("checking for an update failed: {error}"))
+}
+
+/// The feed answers with an error status (404) until the first release is
+/// published, and the updater reports any error status as `ReleaseNotFound`:
+/// there's nothing to update to. Network, format and signature failures
+/// stay errors.
+fn nothing_unless_published<Found>(
+    checked: Result<Option<Found>, tauri_plugin_updater::Error>,
+) -> CommandResult<Option<Found>> {
+    match checked {
+        Err(tauri_plugin_updater::Error::ReleaseNotFound) => Ok(None),
+        checked => checked.map_err(|error| error.to_string()),
+    }
 }
 
 /// Installs the downloaded update and restarts into it, after uploading what
@@ -195,6 +209,18 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+
+    #[test]
+    fn a_feed_that_isnt_published_yet_means_no_update() {
+        let checked: Result<Option<()>, _> = Err(tauri_plugin_updater::Error::ReleaseNotFound);
+        assert_eq!(nothing_unless_published(checked), Ok(None));
+    }
+
+    #[test]
+    fn other_failures_stay_errors() {
+        let checked: Result<Option<()>, _> = Err(tauri_plugin_updater::Error::UnsupportedOs);
+        assert!(nothing_unless_published(checked).is_err());
+    }
 
     #[tokio::test]
     async fn overlapping_checks_download_once() {

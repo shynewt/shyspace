@@ -1088,7 +1088,10 @@ fn workspaces_on_this_device(app: &AppHandle) -> tauri::Result<(Workspaces, Opti
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
+            // The updater logs every error status of the feed, a missing one
+            // included; `updates` reports the failures that matter.
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "warn,tauri_plugin_updater=off".into()),
         )
         .init();
     tauri::Builder::default()
