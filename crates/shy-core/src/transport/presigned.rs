@@ -68,9 +68,35 @@ async fn refusal(response: reqwest::Response) -> String {
     let body = read_up_to(response, MAX_ERROR_BODY).await.unwrap_or_default();
     let body = String::from_utf8_lossy(&body);
     match xml_tag(&body, "Message").or_else(|| xml_tag(&body, "Code")) {
-        Some(reason) => format!("{status}: {reason}"),
+        Some(reason) => format!("{status}: {}", printable(reason)),
         None => status.to_string(),
     }
+}
+
+/// The most of a provider's reason kept, for logs and errors.
+const MAX_REASON_CHARS: usize = 200;
+
+/// `text` from a server nobody vouches for, cut short and with control
+/// characters (newlines included) and invisible direction or formatting
+/// marks escaped, so it can't forge or disguise log lines.
+fn printable(text: &str) -> String {
+    let mut printable = String::new();
+    for (index, character) in text.chars().enumerate() {
+        if index == MAX_REASON_CHARS {
+            printable.push('…');
+            break;
+        }
+        match character.is_control() || is_invisible_mark(character) {
+            true => printable.extend(character.escape_unicode()),
+            false => printable.push(character),
+        }
+    }
+    printable
+}
+
+/// Zero-width and direction marks, which change how text around them reads.
+fn is_invisible_mark(character: char) -> bool {
+    matches!(character, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
 }
 
 /// Reads at most `limit` bytes of a body: the address came from an invite
@@ -220,6 +246,21 @@ mod tests {
                 .starts_with("the workspace's storage refused to send the answer: 500"),
             "{fetching}"
         );
+    }
+
+    #[test]
+    fn a_providers_reason_cant_forge_log_lines() {
+        let forged = "denied\n2026-11-25 INFO everything is fine\r\u{1b}[2J\u{202E}desrever";
+        let shown = printable(forged);
+        assert!(
+            !shown
+                .chars()
+                .any(|character| character.is_control() || is_invisible_mark(character)),
+            "{shown:?}"
+        );
+        assert!(shown.contains("\\u{a}2026"), "{shown:?}");
+        let long = "x".repeat(10_000);
+        assert_eq!(printable(&long).chars().count(), MAX_REASON_CHARS + 1);
     }
 
     #[test]
