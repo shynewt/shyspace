@@ -27,6 +27,34 @@ pub fn has_login_argument(arguments: impl IntoIterator<Item = String>) -> bool {
         .any(|argument| argument == AT_LOGIN_ARGUMENT)
 }
 
+/// Asks the next start to show the window even if it carries the login
+/// argument: a restart into an update keeps this run's arguments (on
+/// Windows through the installer), and would come back hidden.
+pub struct ShowNextStart {
+    file: std::path::PathBuf,
+}
+
+impl ShowNextStart {
+    pub fn in_dir(dir: &std::path::Path) -> ShowNextStart {
+        ShowNextStart {
+            file: dir.join("show-window-at-next-start"),
+        }
+    }
+
+    pub fn ask(&self) -> anyhow::Result<()> {
+        use anyhow::Context;
+        if let Some(dir) = self.file.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
+        }
+        std::fs::write(&self.file, b"").with_context(|| format!("writing {}", self.file.display()))
+    }
+
+    /// Whether the last run asked; asking holds for one start only.
+    pub fn take(&self) -> bool {
+        std::fs::remove_file(&self.file).is_ok()
+    }
+}
+
 /// Whether to start with the window hidden: only after a login, and only
 /// where the app can still be found, in the Dock (macOS) or a tray icon.
 pub fn starts_hidden(is_at_login: bool, is_macos: bool, has_tray: bool) -> bool {
@@ -203,6 +231,19 @@ mod tests {
             "/usr/bin/shyspace",
             "--autostart=no"
         ])));
+    }
+
+    #[test]
+    fn a_start_after_an_update_shows_the_window_once() {
+        let dir = std::env::temp_dir().join(format!("shyspace-show-next-start-{}", std::process::id()));
+        let marker = ShowNextStart::in_dir(&dir);
+        assert!(!marker.take(), "nothing asked yet");
+
+        marker.ask().unwrap();
+
+        assert!(marker.take());
+        assert!(!marker.take(), "only once");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

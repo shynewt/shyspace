@@ -6,12 +6,12 @@
 
 use serde::Serialize;
 use std::sync::{Mutex, MutexGuard};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use shy_core::Workspace;
 
-use crate::{AppState, CommandResult, open_workspaces, shut_down, tray};
+use crate::{AppState, CommandResult, open_at_login, open_workspaces, shut_down, tray};
 
 /// The update this run found, from download to restart.
 #[derive(Default)]
@@ -145,6 +145,7 @@ pub async fn restart_to_update(
             return Ok(RestartOutcome::InHuddle);
         };
         shut_down(workspaces).await;
+        show_window_after_restart(&app);
         if let Err(error) = install(&pending, downloaded).await {
             tracing::warn!("the update didn't install: {error}");
             tray::restore_after_cancelled_exit(&app);
@@ -182,8 +183,22 @@ async fn restart_unless_in_huddle(app: &AppHandle, state: &AppState) -> CommandR
         return Ok(RestartOutcome::InHuddle);
     };
     shut_down(workspaces).await;
+    show_window_after_restart(app);
     app.request_restart();
     Ok(RestartOutcome::Restarting)
+}
+
+/// The new version starts with this run's arguments, so after a start at
+/// login it would come back hidden; the person just asked for it.
+fn show_window_after_restart(app: &AppHandle) {
+    let asked = app
+        .path()
+        .app_data_dir()
+        .map_err(anyhow::Error::from)
+        .and_then(|dir| open_at_login::ShowNextStart::in_dir(&dir).ask());
+    if let Err(error) = asked {
+        tracing::warn!("the updated app may start hidden: {error:#}");
+    }
 }
 
 async fn is_in_huddle(state: &AppState) -> bool {

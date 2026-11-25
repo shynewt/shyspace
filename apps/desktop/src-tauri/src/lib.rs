@@ -1146,7 +1146,11 @@ pub fn run() {
                 app.state::<tray::HasTray>().get(),
                 &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
             );
-            let is_at_login = open_at_login::was_started_at_login();
+            let was_asked_to_show = app
+                .path()
+                .app_data_dir()
+                .is_ok_and(|dir| open_at_login::ShowNextStart::in_dir(&dir).take());
+            let is_at_login = open_at_login::was_started_at_login() && !was_asked_to_show;
             if !open_at_login::starts_hidden(is_at_login, cfg!(target_os = "macos"), has_tray) {
                 tray::show_main_window(app.handle());
             }
