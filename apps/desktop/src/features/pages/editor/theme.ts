@@ -27,6 +27,7 @@ const editorTheme = EditorView.theme({
     backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent) !important",
   },
   ".cm-placeholder": { color: "var(--text-muted)" },
+  ".cm-mention-target": { backgroundColor: "color-mix(in srgb, var(--accent) 12%, transparent)" },
 
   ".cm-md-h1": {
     fontSize: "1.75em",

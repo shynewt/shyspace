@@ -1,8 +1,8 @@
-import { AtSign, CheckCheck, Inbox as InboxIcon, MessageSquareReply } from "lucide-react";
+import { AtSign, CheckCheck, FileText, Inbox as InboxIcon, MessageSquareReply } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useMemo, useState } from "react";
-import { api, type Channel, type InboxItem } from "../../lib/api";
-import { useMemberNames } from "../../lib/members";
+import { api, type Change, type Channel, type InboxItem, type PageMention } from "../../lib/api";
+import { useMember, useMemberNames } from "../../lib/members";
 import { displayName } from "../../lib/people";
 import { plainPreview } from "../../lib/plainPreview";
 import { reportError } from "../../lib/toast";
@@ -17,12 +17,13 @@ import { MarkAllReadDialog } from "./MarkAllReadDialog";
 /** Everything that needs your attention, across channels and threads. */
 export function InboxView() {
   const loadInbox = useCallback(() => api.inbox(), []);
-  const inbox = useLive(loadInbox, (change) => change.kind === "messages" || change.kind === "channels");
+  const inbox = useLive(loadInbox, isInboxChange);
   const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
   // Like the sidebar: a muted channel needs you only when it mentions you.
   const unreadChannels =
     inbox?.channels.filter((channel) => channel.notify !== "nothing" || channel.unread_mentions > 0) ?? [];
-  const isEmpty = inbox && inbox.attention.length === 0 && unreadChannels.length === 0;
+  const entries = inbox ? attentionEntries(inbox.attention, inbox.page_mentions) : [];
+  const isEmpty = inbox && entries.length === 0 && unreadChannels.length === 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -43,17 +44,21 @@ export function InboxView() {
         <div className="mx-auto max-w-reading">
           {isEmpty && (
             <EmptyState icon={<CheckCheck size={22} />} title="You're all caught up">
-              Mentions of you and new replies in threads you follow show up here.
+              Mentions of you, in chat and in pages, and new replies in threads you follow show up here.
             </EmptyState>
           )}
-          {inbox && inbox.attention.length > 0 && (
+          {entries.length > 0 && (
             <section aria-label="Mentions and replies" className="mb-6">
               <SectionLabel>Mentions and replies</SectionLabel>
               <ul className="flex flex-col gap-1">
                 <AnimatePresence initial={false}>
-                  {inbox.attention.map((item) => (
-                    <AttentionRow key={item.message.id} item={item} />
-                  ))}
+                  {entries.map((entry) =>
+                    entry.kind === "message" ? (
+                      <AttentionRow key={entry.item.message.id} item={entry.item} />
+                    ) : (
+                      <PageMentionRow key={`${entry.mention.page}:${entry.mention.author}`} mention={entry.mention} />
+                    ),
+                  )}
                 </AnimatePresence>
               </ul>
             </section>
@@ -71,6 +76,54 @@ export function InboxView() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** What the inbox and its sidebar count reload on. */
+export function isInboxChange(change: Change): boolean {
+  return change.kind === "messages" || change.kind === "channels" || change.kind === "page_mentions";
+}
+
+type AttentionEntry =
+  | { kind: "message"; item: InboxItem; ms: number }
+  | { kind: "page"; mention: PageMention; ms: number };
+
+/** Chat items and page mentions together, newest first. */
+function attentionEntries(items: InboxItem[], mentions: PageMention[]): AttentionEntry[] {
+  return [
+    ...items.map((item): AttentionEntry => ({ kind: "message", item, ms: item.message.created_ms })),
+    ...mentions.map((mention): AttentionEntry => ({ kind: "page", mention, ms: mention.mentioned_ms })),
+  ].sort((left, right) => right.ms - left.ms);
+}
+
+function PageMentionRow({ mention }: { mention: PageMention }) {
+  const { navigate } = useWorkspace();
+  const author = useMember(mention.author);
+  const name = displayName(author?.name ?? "", mention.author);
+  return (
+    <motion.li
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, height: 0, transition: tweens.base }}
+    >
+      <ListRow
+        onClick={() => navigate({ kind: "page", id: mention.page, at: mention.position })}
+        leading={<MemberAvatar id={mention.author} name={name} isBot={author?.is_bot ?? false} size={32} />}
+        meta={
+          <>
+            <AtSign size={12} />
+            <b className="font-semibold text-ink">{name}</b> mentioned you in
+            <span className="flex min-w-0 items-center gap-1">
+              <FileText size={12} className="shrink-0" />
+              <span className="truncate">{mention.page_title || "Untitled"}</span>
+            </span>
+            <RelativeTime ms={mention.mentioned_ms} className="ml-auto shrink-0 text-faint" />
+          </>
+        }
+      >
+        {mention.preview}
+      </ListRow>
+    </motion.li>
   );
 }
 

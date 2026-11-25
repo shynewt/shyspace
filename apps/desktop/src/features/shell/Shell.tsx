@@ -198,7 +198,7 @@ export function Shell({ session }: { session: Session }) {
                   <ChannelView channelId={view.id} thread={view.thread} focus={view.focus} restore={restore} />
                 </ScrollMemoryContext.Provider>
               )}
-              {view.kind === "page" && <PageView pageId={view.id} />}
+              {view.kind === "page" && <PageView pageId={view.id} mentionAt={view.at} />}
               {view.kind === "inbox" && <InboxView />}
               {view.kind === "later" && <LaterView />}
               {view.kind === "files" && <DriveView />}

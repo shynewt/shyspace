@@ -64,6 +64,7 @@ function portalKey(element: HTMLElement): string {
   return key;
 }
 
+import { mentionTarget, showMentionTarget } from "./editor/mentionTarget";
 import { SuggestionMenu } from "./SuggestionMenu";
 
 type OpenMemberCard = { memberId: string; anchor: CardAnchor; openedBy: "pointer" | "keyboard" };
@@ -91,11 +92,14 @@ export function Editor({
   pageId,
   presence,
   jumpTo,
+  mentionAt,
 }: {
   pageId: string;
   /** Who else is on the page, and their cursors. */
   presence: PagePresence | undefined;
   jumpTo: CursorJump | null;
+  /** A spot to put the caret at and show, as an encoded Yjs relative position; a new array goes there again. */
+  mentionAt?: number[];
 }) {
   // A Yjs doc can't forget what it merged, so a rebuilt page gets a fresh one.
   const [resets, setResets] = useState(0);
@@ -112,6 +116,7 @@ export function Editor({
       pageId={pageId}
       presence={presence}
       jumpTo={jumpTo}
+      mentionAt={mentionAt}
       restart={() => setResets((count) => count + 1)}
     />
   );
@@ -122,11 +127,13 @@ function PageEditor({
   pageId,
   presence,
   jumpTo,
+  mentionAt,
   restart,
 }: {
   pageId: string;
   presence: PagePresence | undefined;
   jumpTo: CursorJump | null;
+  mentionAt: number[] | undefined;
   restart: () => void;
 }) {
   const [{ showCursorsInPages, shareCursorInPages }] = usePreferences();
@@ -336,6 +343,7 @@ function PageEditor({
             pageTheme,
             pageUploads,
             remoteCursors(text),
+            mentionTarget,
             remoteCursorTheme,
             EditorView.updateListener.of((update) => {
               if (update.selectionSet || update.focusChanged) sendCursor(update.view);
@@ -439,6 +447,24 @@ function PageEditor({
     });
     if (resolved) view.dispatch({ effects: EditorView.scrollIntoView(resolved.head, { y: "center" }) });
   }, [view, jumpTo, presence]);
+
+  const handledMention = useRef<number[] | null>(null);
+  useEffect(() => {
+    const text = textRef.current;
+    if (!mentionAt || handledMention.current === mentionAt || !view || !text?.doc) return;
+    handledMention.current = mentionAt;
+    const position = Y.createAbsolutePositionFromRelativePosition(
+      Y.decodeRelativePosition(Uint8Array.from(mentionAt)),
+      text.doc,
+    );
+    // Text that hasn't arrived yet has no place; the page's start is the nearest one known.
+    const at = position?.type === text ? Math.min(position.index, view.state.doc.length) : 0;
+    view.dispatch({
+      selection: { anchor: at },
+      effects: [EditorView.scrollIntoView(at, { y: "center" }), showMentionTarget.of(at)],
+    });
+    view.focus();
+  }, [view, mentionAt]);
 
   useEffect(() => {
     view?.dispatch({ effects: setPageFileNames.of(new Map([...filesById].map(([id, file]) => [id, file.name]))) });

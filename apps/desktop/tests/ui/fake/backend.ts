@@ -51,6 +51,7 @@ import { FakeHuddles, NOT_HUDDLES } from "./huddles";
 import { FakeInvites } from "./invites";
 import { FakeLater } from "./later";
 import { FakePageCursors, NOT_PAGE_CURSORS } from "./pageCursors";
+import { FakePageMentions, NOT_PAGE_MENTIONS } from "./pageMentions";
 import { FakePrivate, NOT_PRIVATE } from "./private";
 import { search } from "./search";
 import { FakeSections } from "./sections";
@@ -140,6 +141,15 @@ export class FakeBackend {
       if (!found) throw new Error(`fake backend: no page ${page}`);
       return found.doc;
     },
+  });
+  readonly pageMentions = new FakePageMentions({
+    notify: (change) => this.notify(change),
+    pageTitled: (title) => this.pageTitled(title),
+    pageExists: (page) => this.pages.some((candidate) => candidate.id === page),
+    me: () => this.me(),
+    myName: () => this.myMember().name,
+    workspaceId: () => this.session?.workspace_id ?? "",
+    nameOf: (member) => this.members.find((candidate) => candidate.id === member)?.name ?? "",
   });
   readonly huddles = new FakeHuddles({
     me: () => this.me(),
@@ -426,6 +436,11 @@ export class FakeBackend {
     this.notify({ kind: "doc", page: page.id, update: Array.from(update) });
   }
 
+  /** `author` adding a paragraph to a page that mentions you: `before`, the mention, then `after`. */
+  receivePageMention(title: string, author: string, before: string, after = "", isAlerting = true): void {
+    this.pageMentions.receive(title, author, before, after, isAlerting);
+  }
+
   /** Another member's edit written under your editor's client id, as a forged update would be. */
   receiveEditUnderMyEditorsId(title: string, insert: string): void {
     const page = this.pageTitled(title);
@@ -467,7 +482,11 @@ export class FakeBackend {
     if (workspacesAnswer !== NOT_WORKSPACES) return workspacesAnswer;
     const privateAnswer = this.private.answer(command, args);
     if (privateAnswer !== NOT_PRIVATE) return privateAnswer;
+    const mentionsAnswer = this.pageMentions.answer(command, args);
+    if (mentionsAnswer !== NOT_PAGE_MENTIONS) return mentionsAnswer;
+    if (command === "mark_all_read") this.pageMentions.markAllRead();
     const chatAnswer = this.chat.answer(command, args);
+    if (command === "inbox") return { ...(chatAnswer as Inbox), page_mentions: this.pageMentions.unread() };
     if (command === "send_message" && typeof chatAnswer === "string") {
       const target = this.chat.draftTargetOf(chatAnswer);
       if (target) this.drafts.set(target, "");
@@ -980,12 +999,13 @@ export class FakeBackend {
     this.notify({ kind: "pages" });
   }
 
-  /** As the core counts a workspace's badge: the Inbox outside DMs, unread unmuted DMs, and due reminders. */
+  /** As the core counts a workspace's badge: the Inbox outside DMs, mentions in pages, unread unmuted DMs, and due reminders. */
   private shownBadge(): Omit<WorkspaceBadge, "workspace_id"> {
     const channels = this.answer("channels", undefined) as Channel[];
     const inbox = this.answer("inbox", undefined) as Inbox;
     const dms = new Set(channels.filter((channel) => channel.kind === "dm").map((channel) => channel.id));
     const outsideDms = inbox.attention.filter((item) => !dms.has(item.message.channel)).length;
+    const inPages = inbox.page_mentions.length;
     const inDms = channels
       .filter((channel) => channel.kind === "dm" && channel.notify !== "nothing")
       .reduce((total, channel) => total + channel.unread, 0);
@@ -994,9 +1014,9 @@ export class FakeBackend {
       (item) => !item.is_done && item.remind_ms !== null && item.remind_ms <= now,
     ).length;
     return {
-      unread: channels.some((channel) => channel.unread > 0 && channel.notify !== "nothing"),
-      mentions: inDms + channels.reduce((total, channel) => total + channel.unread_mentions, 0),
-      attention: outsideDms + inDms + due,
+      unread: inPages > 0 || channels.some((channel) => channel.unread > 0 && channel.notify !== "nothing"),
+      mentions: inPages + inDms + channels.reduce((total, channel) => total + channel.unread_mentions, 0),
+      attention: outsideDms + inPages + inDms + due,
     };
   }
 
@@ -1021,6 +1041,12 @@ function alertTarget(value: unknown): AlertTarget | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "object" || !("kind" in value) || !("id" in value) || typeof value.id !== "string") {
     throw new Error("fake backend: an alert target is { kind, id }");
+  }
+  if (value.kind === "page") {
+    if (!("position" in value) || !Array.isArray(value.position)) {
+      throw new Error("fake backend: a page alert target is { kind, id, position }");
+    }
+    return { kind: "page", id: value.id, position: value.position.filter((byte) => typeof byte === "number") };
   }
   if (value.kind !== "message" && value.kind !== "channel") throw new Error("fake backend: unknown alert target");
   return { kind: value.kind, id: value.id };

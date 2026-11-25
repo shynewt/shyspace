@@ -5,7 +5,8 @@ import type { SettingsTarget } from "./settings";
 export type View =
   /** `thread` opens that thread beside the channel; `focus` scrolls to and highlights a message. */
   | { kind: "channel"; id: string; thread?: string; focus?: string }
-  | { kind: "page"; id: string }
+  /** `at` puts the caret at that spot (an encoded Yjs relative position) and shows it. */
+  | { kind: "page"; id: string; at?: number[] }
   | { kind: "inbox" }
   | { kind: "later" }
   | { kind: "files" }

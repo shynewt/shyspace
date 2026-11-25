@@ -10,6 +10,7 @@ import { HuddleBar } from "../huddles/HuddleBar";
 import { useMyHuddle } from "../huddles/HuddleContext";
 import { HuddleElsewhereBar } from "../huddles/HuddleElsewhere";
 import { IncomingHuddleCard } from "../huddles/IncomingHuddle";
+import { isInboxChange } from "../inbox/InboxView";
 import { ChannelSections } from "./ChannelSections";
 import { DirectMessages } from "./DirectMessages";
 import { MeMenu } from "./MeMenu";
@@ -77,16 +78,16 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
   );
 }
 
-/** The inbox, counting mentions and new replies in threads you follow. */
+/** The inbox, counting mentions (in pages too) and new replies in threads you follow. */
 function InboxLink() {
   const loadInbox = useCallback(() => api.inbox(), []);
-  const inbox = useLive(loadInbox, (change) => change.kind === "messages" || change.kind === "channels");
+  const inbox = useLive(loadInbox, isInboxChange);
   return (
     <NavItem
       view={{ kind: "inbox" }}
       icon={<InboxIcon size={15} />}
       label="Inbox"
-      unread={inbox?.attention.length ?? 0}
+      unread={(inbox?.attention.length ?? 0) + (inbox?.page_mentions.length ?? 0)}
     />
   );
 }

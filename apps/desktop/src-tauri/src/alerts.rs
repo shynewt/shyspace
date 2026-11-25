@@ -20,13 +20,15 @@ const OPENED_EVENT: &str = "alert-opened";
 /// Alerts older than this many can't be followed to their target any more.
 const REMEMBERED: usize = 100;
 
-/// What a click on an alert opens, as `{ "kind": "message" | "channel", "id": … }`.
-/// The frontend checks the id when it opens it; here it's only carried.
+/// What a click on an alert opens, as `{ "kind": "message" | "channel", "id": … }`,
+/// or `{ "kind": "page", "id": …, "position": [bytes] }` for a spot in a page.
+/// The frontend checks it when it opens it; here it's only carried.
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AlertTarget {
-    Message(String),
-    Channel(String),
+    Message { id: String },
+    Channel { id: String },
+    Page { id: String, position: Vec<u8> },
 }
 
 /// What a clicked alert was about, and in which workspace, as the

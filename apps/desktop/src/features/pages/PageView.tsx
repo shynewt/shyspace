@@ -1,6 +1,6 @@
 import { Bookmark, BookmarkCheck, ChevronRight, Ellipsis, FilePlus2, Link2, Trash2 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
-import { api, type Page, pageLink } from "../../lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, onChange, type Page, pageLink } from "../../lib/api";
 import { DROP_ZONE } from "../../lib/dropTargets";
 import { useMembers } from "../../lib/members";
 import { displayName } from "../../lib/people";
@@ -24,7 +24,8 @@ function ancestorsOf(page: Page | undefined, pages: Page[]): Page[] {
   return ancestors;
 }
 
-export function PageView({ pageId }: { pageId: string }) {
+/** `mentionAt` is a spot to show, as in the page view (see `View`). */
+export function PageView({ pageId, mentionAt }: { pageId: string; mentionAt?: number[] }) {
   const { pages, navigate, session } = useWorkspace();
   const page = pages.find((candidate) => candidate.id === pageId);
   const [isConfirmingDelete, setConfirmingDelete] = useState(false);
@@ -35,6 +36,7 @@ export function PageView({ pageId }: { pageId: string }) {
     (change) => (change.kind === "page_presence" && change.page === pageId) || change.kind === "members",
   );
   const [jumpTo, setJumpTo] = useState<CursorJump | null>(null);
+  useMentionsSeen(pageId);
 
   const copyLink = () =>
     navigator.clipboard
@@ -124,7 +126,7 @@ export function PageView({ pageId }: { pageId: string }) {
         <article className="mx-auto max-w-reading px-6 pt-8 @2xl/main:px-12 @2xl/main:pt-14">
           <PageTitle ref={title} pageId={pageId} title={page?.title ?? ""} />
           <div className="mt-5">
-            <Editor key={pageId} pageId={pageId} presence={presence} jumpTo={jumpTo} />
+            <Editor key={pageId} pageId={pageId} presence={presence} jumpTo={jumpTo} mentionAt={mentionAt} />
           </div>
         </article>
       </div>
@@ -156,4 +158,22 @@ function PageViewers({ viewers, onGoTo }: { viewers: string[]; onGoTo: (member: 
       })}
     </ul>
   );
+}
+
+/** While you're looking at a page, its mentions of you are seen: none waits in the inbox. */
+function useMentionsSeen(pageId: string) {
+  useEffect(() => {
+    const markSeen = () => {
+      if (document.hasFocus()) api.markPageMentionsRead(pageId).catch(reportError);
+    };
+    markSeen();
+    window.addEventListener("focus", markSeen);
+    const stop = onChange((change) => {
+      if (change.kind === "page_mentions") markSeen();
+    });
+    return () => {
+      window.removeEventListener("focus", markSeen);
+      stop();
+    };
+  }, [pageId]);
 }

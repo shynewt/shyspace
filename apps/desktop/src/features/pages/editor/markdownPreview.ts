@@ -30,7 +30,7 @@ export type PreviewItem =
   /** `label` is the link's own text, or "a message" for a bare link, as in chat. */
   | { kind: "message"; from: number; to: number; messageId: string; label: string }
   /** `memberId` is null for @channel and @here. */
-  | { kind: "mention"; from: number; to: number; label: string; memberId: string | null }
+  | { kind: "mention"; from: number; to: number; label: string; memberId: string }
   /** A link to one of the page's files, drawn as a chip; `label` is the link's text. */
   | { kind: "file"; from: number; to: number; fileId: string; label: string }
   /** An image of one of the page's files; `width` is a percent of the column, or null for its own size. */
@@ -254,8 +254,15 @@ class PreviewBuilder {
       return false;
     }
     if (isMentionLink(href, this.workspaceId) && isOneLine) {
-      const label = this.doc.sliceString(labelFrom, labelTo);
       const memberId = mentionedMemberId(href, this.workspaceId);
+      if (!memberId) {
+        // @channel and @here mean nothing in a page: their text, plain.
+        this.add({ kind: "style", from: labelFrom, to: labelTo, className: "cm-md-plain" });
+        this.hide(link.from, labelFrom);
+        this.hide(labelTo, link.to);
+        return false;
+      }
+      const label = this.doc.sliceString(labelFrom, labelTo);
       this.add({ kind: "mention", from: link.from, to: link.to, label, memberId });
       return false;
     }

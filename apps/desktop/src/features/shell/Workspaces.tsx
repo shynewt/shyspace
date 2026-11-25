@@ -57,7 +57,7 @@ export function takePendingOpen(): Opener | null {
 
 /** Changes that move a workspace's unread or mention counts. */
 function changesBadges(change: Change): boolean {
-  return ["channels", "messages", "alert", "later", "workspaces"].includes(change.kind);
+  return ["channels", "messages", "alert", "page_mentions", "later", "workspaces"].includes(change.kind);
 }
 
 /**
