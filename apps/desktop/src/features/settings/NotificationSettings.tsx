@@ -9,6 +9,7 @@ import { Button, FormError, SegmentedControl } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
 import { AppIconSettings } from "./AppIconSettings";
 import { Setting } from "./layout";
+import { NotificationPermissionSetting } from "./NotificationPermissionSetting";
 
 const DEFAULT_LEVEL: NotifyLevel = "all";
 
@@ -22,6 +23,7 @@ export function NotificationSettings() {
   const [preferences, update] = usePreferences();
   return (
     <>
+      <NotificationPermissionSetting />
       <Setting
         title="Message text in notifications"
         description="Notifications appear outside shyspace's encryption, in your system's notification center. Hide the text to show only who wrote and where."

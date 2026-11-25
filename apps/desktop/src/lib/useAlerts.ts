@@ -1,4 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { avatarPng } from "./alertPicture";
 import { type AlertTarget, api, type Change, onAnyWorkspaceChange } from "./api";
@@ -25,7 +24,7 @@ type ChannelAlertChange = Exclude<AlertChange, { kind: "page_alert" }>;
  * workspace (a message, a mention in a page, or someone starting a huddle in
  * a DM), unless you're already looking at that channel or page. Clicking one
  * opens its message, the page at the mention, or the DM, switching workspace
- * first if it's in another. Runs at the app's level, so
+ * first if it's in another (see `useAlertActions`). Runs at the app's level, so
  * it keeps going while no workspace is shown, as while adding one.
  */
 export function useAlerts(workspaces: AlertWorkspaces) {
@@ -69,17 +68,6 @@ export function useAlerts(workspaces: AlertWorkspaces) {
         )
         .catch(reportError);
     });
-  }, []);
-
-  useEffect(() => {
-    const opening = listen<{ workspace_id: string | null } & AlertTarget>("alert-opened", (event) => {
-      const { workspace_id: workspaceId, ...target } = event.payload;
-      const into = workspaceId ?? shownView()?.workspaceId;
-      if (into) currentWorkspaces.current.openIn(into, (navigate) => openAlertTarget(target, navigate));
-    });
-    return () => {
-      opening.then((stop) => stop()).catch(reportError);
-    };
   }, []);
 }
 

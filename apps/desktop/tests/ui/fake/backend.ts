@@ -50,6 +50,7 @@ import {
 import { FakeHuddles, NOT_HUDDLES } from "./huddles";
 import { FakeInvites } from "./invites";
 import { FakeLater } from "./later";
+import { FakeNotifications, NOT_NOTIFICATIONS } from "./notifications";
 import { FakePageCursors, NOT_PAGE_CURSORS } from "./pageCursors";
 import { FakePageMentions, NOT_PAGE_MENTIONS } from "./pageMentions";
 import { FakePrivate, NOT_PRIVATE } from "./private";
@@ -170,6 +171,23 @@ export class FakeBackend {
   private later = new FakeLater();
   private sections = new FakeSections();
   private drafts = new FakeDrafts();
+  readonly notifications = new FakeNotifications({
+    answer: (command, args) => this.answer(command, args),
+    me: () => this.me(),
+    members: () => this.members,
+    draftOf: (target) => this.drafts.get(target),
+    setDraft: (target, text) => {
+      this.drafts.set(target, text);
+      this.notify({ kind: "drafts" });
+    },
+    showAlert: (title, body, target) => {
+      this.alertWorkspaces.push(this.session?.workspace_id ?? "");
+      this.alertsShown.push({ title, body });
+      this.alertPictures.push(null);
+      this.alertPngs.push([]);
+      this.alertTargets.push(target);
+    },
+  });
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
   private storage: StorageSettings | null = null;
   private lamport = 0;
@@ -331,7 +349,7 @@ export class FakeBackend {
   clickAlert(index: number): void {
     const target = this.alertTargets[index];
     if (!target) throw new Error(`fake backend: alert ${index} opens nothing`);
-    void emit("alert-opened", { workspace_id: this.alertWorkspaces[index] ?? null, ...target });
+    this.notifications.respond({ action: "open", workspace_id: this.alertWorkspaces[index] ?? null, target });
   }
 
   /** Someone else made a private channel with you (and `others`) in it. */
@@ -482,6 +500,8 @@ export class FakeBackend {
     if (workspacesAnswer !== NOT_WORKSPACES) return workspacesAnswer;
     const privateAnswer = this.private.answer(command, args);
     if (privateAnswer !== NOT_PRIVATE) return privateAnswer;
+    const notificationsAnswer = this.notifications.answer(command, args);
+    if (notificationsAnswer !== NOT_NOTIFICATIONS) return notificationsAnswer;
     const mentionsAnswer = this.pageMentions.answer(command, args);
     if (mentionsAnswer !== NOT_PAGE_MENTIONS) return mentionsAnswer;
     if (command === "mark_all_read") this.pageMentions.markAllRead();

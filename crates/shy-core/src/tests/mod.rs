@@ -1,3 +1,4 @@
+mod alert_actions;
 mod capacity;
 mod collaboration;
 mod drafts;

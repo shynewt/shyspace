@@ -31,8 +31,38 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-clipboard-manager = "2"
 
-[lints]
-workspace = true
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSBundle", "NSError", "NSObject", "NSSet", "NSString", "NSURL"] }
+block2 = "0.6"
+objc2-user-notifications = { version = "0.3", default-features = false, features = [
+    "std",
+    "bitflags",
+    "block2",
+    "UNNotification",
+    "UNNotificationAction",
+    "UNNotificationAttachment",
+    "UNNotificationCategory",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationResponse",
+    "UNNotificationSettings",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+] }
+
+# The workspace's lints, except that `unsafe_code` is denied rather than
+# forbidden here, so `notify_macos.rs` alone can allow it to call Apple's
+# notification API. A test checks no other file does.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time"] }

@@ -1,6 +1,7 @@
 //! The public entry point: one workspace, stored in one data directory.
 
 mod actions;
+mod alert_actions;
 mod files;
 mod huddle_ring;
 mod huddles;

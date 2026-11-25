@@ -343,6 +343,16 @@ export type AppIcon = {
   /** The tray icon as a one-colour planet instead of the app icon (Linux, Windows). */
   is_tray_monochrome: boolean;
 };
+/** Whether the system lets shyspace notify; only macOS ever says anything but "allowed". */
+export type NotificationPermission = "not_asked" | "allowed" | "denied";
+/** What was done with a desktop notification, waiting to be carried out: a click, or a button (macOS). */
+export type AlertAction =
+  /** No workspace means the one shown. */
+  | { action: "open"; workspace_id: string | null; target: AlertTarget }
+  | { action: "reply"; workspace_id: string; message: string; text: string }
+  | { action: "mark_read"; workspace_id: string; target: AlertTarget };
+/** Who can be mentioned in a workspace, for a reply typed outside the composer. */
+export type PeopleIn = { me: string; members: Member[] };
 
 /** What a click on a desktop notification opens. */
 export type AlertTarget =
@@ -498,7 +508,7 @@ export const api = {
   setFollowing: (root: string, following: boolean) => invoke<void>("set_following", { root, following }),
   markThreadRead: (root: string, message: string) => invoke<void>("mark_thread_read", { root, message }),
   setNotifyLevel: (channel: string, level: NotifyLevel) => invoke<void>("set_notify_level", { channel, level }),
-  /** A desktop notification; a click on it opens `target` (sent back as an "alert-opened" event). */
+  /** A desktop notification; a click on it opens `target` (taken back through `takeAlertActions`). */
   /** `picture` is PNG bytes shown with the notification, named for the member it shows. */
   showAlert: (
     workspaceId: string,
@@ -507,6 +517,20 @@ export const api = {
     target: AlertTarget | null,
     picture: { member: string; png: number[] } | null,
   ) => invoke<void>("show_alert", { workspaceId, title, body, target, picture }),
+  notificationPermission: () => invoke<NotificationPermission>("notification_permission"),
+  /** Shows the system's prompt if it was never answered; resolves to the answer. */
+  requestNotificationPermission: () => invoke<NotificationPermission>("request_notification_permission"),
+  openNotificationSettings: () => invoke<void>("open_notification_settings"),
+  /** The notification buttons used whose workspace is open; each is returned once. */
+  takeAlertActions: () => invoke<AlertAction[]>("take_alert_actions"),
+  peopleIn: (workspaceId: string) => invoke<PeopleIn>("people_in", { workspaceId }),
+  /** Sends `text` (mentions already written) where the alerted message is: its thread, or its channel. */
+  replyToAlert: (workspaceId: string, message: string, text: string) =>
+    invoke<void>("reply_to_alert", { workspaceId, message, text }),
+  /** Keeps an unsent reply as a draft there, and says so in a notification. */
+  keepUnsentReply: (workspaceId: string, message: string, text: string) =>
+    invoke<void>("keep_unsent_reply", { workspaceId, message, text }),
+  markAlertRead: (workspaceId: string, target: AlertTarget) => invoke<void>("mark_alert_read", { workspaceId, target }),
   messages: (channel: string, before: MessageCursor | null = null, limit = 100) =>
     invoke<Message[]>("messages", { channel, before, limit }),
   sendMessage: (channel: string, text: string, replyTo: string | null) =>

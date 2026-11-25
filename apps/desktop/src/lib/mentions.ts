@@ -6,7 +6,9 @@
  * `crates/shy-core/src/mentions.rs`.
  */
 
+import type { Member } from "./api";
 import { appLink, appLinkPattern, isInWorkspace, parseAppLink } from "./appLinks";
+import { mentionName } from "./people";
 
 const EVERYONE = ["channel", "here"] as const;
 const ANY_MEMBER_LINK = appLinkPattern("member");
@@ -115,4 +117,22 @@ export function withTypedMentions(
     return `@${person.name}`;
   });
   return { text: replaced, named };
+}
+
+/** Who `@` can mention: active people other than you, by the name a mention of them shows. */
+export function mentionablePeople(members: readonly Member[], me: string): { name: string; member: Member }[] {
+  return members
+    .filter((member) => member.active && member.id !== me && member.name)
+    .map((member) => ({ name: mentionName(member, members), member }));
+}
+
+/**
+ * Text typed outside the composer, as in a notification's reply, written as
+ * the composer would send it: `@Name` for exactly one person's whole name,
+ * `@channel` and `@here` become mentions.
+ */
+export function typedTextToSend(text: string, workspaceId: string, members: readonly Member[], me: string): string {
+  const people = mentionablePeople(members, me).map(({ name, member }) => ({ name, id: member.id }));
+  const typed = withTypedMentions(text, people);
+  return withMentionLinks(typed.text, workspaceId, typed.named);
 }

@@ -1,10 +1,14 @@
 //! Thin bridge from the UI to shy-core: every command maps to one Workspace
 //! call, and every core change is forwarded to the UI as a "change" event.
 
+mod alert_actions;
 mod alerts;
 mod clipboard;
 mod files;
 mod huddles;
+mod notification_permission;
+#[cfg(target_os = "macos")]
+mod notify_macos;
 mod pages_live;
 mod tray;
 mod updates;
@@ -1225,6 +1229,14 @@ pub fn run() {
             set_in_menu_bar,
             set_shows_unread_count,
             set_tray_monochrome,
+            alert_actions::take_alert_actions,
+            alert_actions::people_in,
+            alert_actions::reply_to_alert,
+            alert_actions::keep_unsent_reply,
+            alert_actions::mark_alert_read,
+            notification_permission::notification_permission,
+            notification_permission::request_notification_permission,
+            notification_permission::open_notification_settings,
             private_members,
             add_to_private_channel,
             remove_from_private_channel,
@@ -1336,5 +1348,26 @@ pub(crate) async fn shut_down(workspaces: Vec<Workspace>) {
         for workspace in &workspaces {
             workspace.stop_background();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// `unsafe_code` is only denied in this crate, not forbidden, so that
+    /// `notify_macos.rs` can call Objective-C; no other file may allow it.
+    #[test]
+    fn only_the_macos_notification_module_allows_unsafe_code() {
+        // Split, so this test doesn't find itself.
+        let allow = concat!("allow(", "unsafe_code)");
+        let sources = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut allowing = Vec::new();
+        for entry in std::fs::read_dir(&sources).unwrap() {
+            let path = entry.unwrap().path();
+            let text = std::fs::read_to_string(&path).unwrap();
+            if text.contains(allow) {
+                allowing.push(path.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+        assert_eq!(allowing, ["notify_macos.rs"]);
     }
 }

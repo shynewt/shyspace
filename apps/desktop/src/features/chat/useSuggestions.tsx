@@ -5,8 +5,13 @@ import { flushSync } from "react-dom";
 import { type Member, type Page, pageLink } from "../../lib/api";
 import { emojiQueryAt } from "../../lib/emojiQuery";
 import { useMembers } from "../../lib/members";
-import { exactlyNamed, mentionQueryAt, withMentionLinks, withTypedMentions } from "../../lib/mentions";
-import { mentionName } from "../../lib/people";
+import {
+  exactlyNamed,
+  mentionablePeople,
+  mentionQueryAt,
+  withMentionLinks,
+  withTypedMentions,
+} from "../../lib/mentions";
 import { usePreferences, validRecentEmoji, withRecentEmoji } from "../../lib/preferences";
 import { hasCommandModifier } from "../../lib/shortcuts";
 import { reportError } from "../../lib/toast";
@@ -64,14 +69,11 @@ export function useSuggestions(input: React.RefObject<HTMLTextAreaElement | null
 
   const people = useMemo(
     (): PersonWithMember[] =>
-      members
-        .filter((member) => member.active && member.id !== session.me && member.name)
-        .map((member) => {
-          const name = mentionName(member, members);
-          // Someone who shares a name shows the start of their safety code, to tell them apart.
-          const detail = name === member.name ? "" : `Safety code ${member.safety_code.slice(0, 9)}`;
-          return { kind: "person", name, member, detail };
-        }),
+      mentionablePeople(members, session.me).map(({ name, member }) => {
+        // Someone who shares a name shows the start of their safety code, to tell them apart.
+        const detail = name === member.name ? "" : `Safety code ${member.safety_code.slice(0, 9)}`;
+        return { kind: "person", name, member, detail };
+      }),
     [members, session.me],
   );
   const recentEmoji = validRecentEmoji(preferences.recentEmoji);

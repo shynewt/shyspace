@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useAlertActions } from "../../lib/alertActions";
 import {
   api,
   type Change,
@@ -10,6 +11,7 @@ import {
   type WorkspaceLook,
 } from "../../lib/api";
 import { saveEverythingBeforeSwitch } from "../../lib/beforeSwitch";
+import { useAskToNotifyOnce } from "../../lib/notificationPermission";
 import { shownView } from "../../lib/shownView";
 import { dismissUndoToasts, reportError, showToast } from "../../lib/toast";
 import { useAlerts } from "../../lib/useAlerts";
@@ -152,6 +154,11 @@ export function WorkspacesProvider({
     [workspaces, openIn],
   );
   useAlerts(alertWorkspaces);
+  useAlertActions(
+    useMemo(() => workspaces.map((workspace) => workspace.workspace_id).join(" "), [workspaces]),
+    openIn,
+  );
+  useAskToNotifyOnce();
   usePresence();
   useReminders(
     useCallback(

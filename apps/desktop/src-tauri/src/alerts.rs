@@ -1,5 +1,8 @@
 //! Desktop alerts. A click on one brings the window forward and tells the
 //! frontend to open what it was about: a message, or a channel (a huddle).
+//! On macOS, in the installed app, they go through Apple's notification
+//! center (`notify_macos`), which also offers quick actions
+//! (`alert_actions`); elsewhere through Tauri's notification plugin.
 
 use std::{
     collections::VecDeque,
@@ -13,17 +16,18 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
+use crate::alert_actions::{AlertAction, PendingActions};
 use crate::tray;
 
-/// Sent to the frontend with the target of a clicked alert.
-const OPENED_EVENT: &str = "alert-opened";
+/// Tells the frontend a click or button on an alert waits for it (`take_alert_actions`).
+const ACTION_EVENT: &str = "alert-action";
 /// Alerts older than this many can't be followed to their target any more.
 const REMEMBERED: usize = 100;
 
 /// What a click on an alert opens, as `{ "kind": "message" | "channel", "id": … }`,
 /// or `{ "kind": "page", "id": …, "position": [bytes] }` for a spot in a page.
 /// The frontend checks it when it opens it; here it's only carried.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AlertTarget {
     Message { id: String },
@@ -31,13 +35,15 @@ pub enum AlertTarget {
     Page { id: String, position: Vec<u8> },
 }
 
-/// What a clicked alert was about, and in which workspace, as the
-/// frontend gets it: `{ "workspace_id": …, "kind": …, "id": … }`.
-#[derive(Clone, Serialize)]
-struct OpenedAlert {
-    workspace_id: Option<String>,
+/// What an alert is about, and in which workspace. On macOS it rides in the
+/// notification's identifier as `{ "workspace_id": …, "kind": …, "id": … }`,
+/// so a response finds it after a restart; changing that form strands the
+/// notifications already shown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenedAlert {
+    pub workspace_id: Option<String>,
     #[serde(flatten)]
-    target: AlertTarget,
+    pub target: AlertTarget,
 }
 
 /// What each recent alert was about, by the alert's id.
@@ -48,8 +54,12 @@ pub struct AlertTargets {
 }
 
 impl AlertTargets {
+    fn next_id(&self) -> i32 {
+        self.next_id.fetch_add(1, Ordering::Relaxed)
+    }
+
     fn remember(&self, target: OpenedAlert) -> i32 {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let id = self.next_id();
         // The list only ever holds whole entries, so a panic elsewhere can't leave it broken.
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         if recent.len() == REMEMBERED {
@@ -68,9 +78,22 @@ impl AlertTargets {
     }
 }
 
-/// Listens for clicks on alerts for the life of the app.
+/// Listens for clicks on alerts, and on macOS for their quick actions, for
+/// the life of the app. On the main thread, before the event loop runs, so
+/// a response that launched the app isn't missed.
 pub fn follow_clicks(app: &AppHandle) -> tauri::Result<()> {
     app.manage(AlertTargets::default());
+    app.manage(PendingActions::default());
+    #[cfg(target_os = "macos")]
+    if crate::notify_macos::is_available() {
+        let handle = app.clone();
+        crate::notify_macos::start(move |identifier, action, typed| {
+            if let Some(response) = crate::alert_actions::response_to(&identifier, &action, typed) {
+                respond(&handle, response);
+            }
+        });
+        return Ok(());
+    }
     let handle = app.clone();
     app.notification()
         .on_action(move |performed| {
@@ -80,15 +103,21 @@ pub fn follow_clicks(app: &AppHandle) -> tauri::Result<()> {
             let Some(id) = performed.notification().map(|notification| notification.id()) else {
                 return;
             };
-            let Some(target) = handle.state::<AlertTargets>().target_of(id) else {
-                return;
-            };
-            tray::show_main_window(&handle);
-            if let Err(error) = handle.emit(OPENED_EVENT, target) {
-                tracing::warn!("could not open what the alert was about: {error}");
+            if let Some(alert) = handle.state::<AlertTargets>().target_of(id) {
+                respond(&handle, AlertAction::opening(alert));
             }
         })
         .map_err(|error| tauri::Error::Anyhow(error.into()))
+}
+
+fn respond(app: &AppHandle, action: AlertAction) {
+    if matches!(action, AlertAction::Open { .. }) {
+        tray::show_main_window(app);
+    }
+    app.state::<PendingActions>().push(action);
+    if let Err(error) = app.emit(ACTION_EVENT, ()) {
+        tracing::warn!("could not pass on what was done with an alert: {error}");
+    }
 }
 
 /// The picture shown with an alert: PNG bytes of a member's avatar.
@@ -108,6 +137,18 @@ pub fn show(
     target: Option<AlertTarget>,
     picture: Option<AlertPicture>,
 ) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if crate::notify_macos::is_available() {
+        let id = app.state::<AlertTargets>().next_id();
+        let alert = target.map(|target| OpenedAlert { workspace_id, target });
+        let identifier = match &alert {
+            Some(alert) => crate::alert_actions::alert_identifier(id, alert)?,
+            None => id.to_string(),
+        };
+        let category = alert.as_ref().and_then(crate::alert_actions::AlertCategory::of);
+        let picture = picture.map(|picture| save_picture(app, &picture)).transpose()?;
+        return crate::notify_macos::show(&identifier, &title, &body, category, picture.as_deref());
+    }
     let mut builder = app.notification().builder().title(title).body(body);
     if let Some(target) = target {
         let opened = OpenedAlert { workspace_id, target };

@@ -9,6 +9,11 @@ export class FakeDrafts {
     else this.drafts.delete(target);
   }
 
+  /** The draft for `target`; empty if there is none. */
+  get(target: string): string {
+    return this.drafts.get(target)?.text ?? "";
+  }
+
   list(channelOf: (target: string) => string | null): Draft[] {
     return [...this.drafts]
       .flatMap(([target, draft]) => {
