@@ -5,6 +5,7 @@
 use anyhow::{Context, Result};
 
 use super::Workspace;
+use crate::views::Change;
 
 /// Where a message is read and answered: its thread if it's a reply in
 /// one, otherwise its channel.
@@ -31,10 +32,19 @@ impl Workspace {
     }
 
     /// Sends `text` where `message` is: into its thread if it's a reply,
-    /// otherwise into its channel, as the composer there would.
+    /// otherwise into its channel, as the composer there would. A draft
+    /// there stays, in its place: it isn't what was sent.
     pub fn reply_to_alert(&self, message: &str, text: &str) -> Result<()> {
         let conversation = self.conversation_of(message)?;
+        let target = conversation.draft_target().to_owned();
+        let draft = self.drafts()?.into_iter().find(|draft| draft.target == target);
         self.send_message(&conversation.channel, text, conversation.thread_root)?;
+        if let Some(draft) = draft {
+            self.state()
+                .store
+                .set_draft(&target, &draft.text, draft.updated_ms)?;
+            self.emit(Change::Drafts);
+        }
         Ok(())
     }
 

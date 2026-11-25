@@ -150,3 +150,22 @@ async fn a_reply_to_a_message_deleted_since_its_alert_isnt_sent() {
     assert!(error.to_string().contains("no longer there"), "{error}");
     assert!(admin.keep_unsent_reply(&question, "yes").is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_from_a_notification_keeps_the_draft_there() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let question = bob.send_message(&general, "lunch?", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    admin
+        .set_draft(&general, "a longer answer, half written")
+        .unwrap();
+
+    admin.reply_to_alert(&question, "yes").unwrap();
+
+    assert_eq!(
+        draft(&admin, &general).as_deref(),
+        Some("a longer answer, half written"),
+        "the draft wasn't what was sent"
+    );
+}

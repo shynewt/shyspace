@@ -73,7 +73,11 @@ export class FakeNotifications {
   private reply(message: string, text: string): unknown {
     if (this.failReplies) throw new Error("couldn't reach the workspace's storage");
     const { message: alerted, thread_root } = this.linked(message);
+    // As in the core: a draft there isn't what was sent, so it stays.
+    const target = thread_root ?? alerted.channel;
+    const draft = this.context.draftOf(target);
     this.context.answer("send_message", { channel: alerted.channel, text, replyTo: thread_root });
+    if (draft) this.context.setDraft(target, draft);
     return null;
   }
 
