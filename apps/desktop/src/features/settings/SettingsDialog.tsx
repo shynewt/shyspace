@@ -1,4 +1,15 @@
-import { Bell, Bot, HardDrive, Headphones, LifeBuoy, Palette, ShieldCheck, UserRound, Users } from "lucide-react";
+import {
+  Bell,
+  Bot,
+  HardDrive,
+  Headphones,
+  LifeBuoy,
+  Monitor,
+  Palette,
+  ShieldCheck,
+  UserRound,
+  Users,
+} from "lucide-react";
 import { motion } from "motion/react";
 import { Tabs } from "radix-ui";
 import { Fragment, type ReactNode } from "react";
@@ -10,6 +21,7 @@ import { cx, Dialog, instantAfterAKey, springs } from "../../ui";
 import { WaitingRequestsBadge } from "../members/JoinRequests";
 import { AgentsSettings } from "./AgentsSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { GeneralSettings } from "./GeneralSettings";
 import { HuddleSettings } from "./HuddleSettings";
 import { MembersSettings } from "./MembersSettings";
 import { NotificationSettings } from "./NotificationSettings";
@@ -22,6 +34,11 @@ import { WorkspaceSettings } from "./WorkspaceSettings";
 
 /** Profile and Members take a field or tab from the target, so they're rendered apart from these. */
 const SECTION_VIEWS: Record<SettingsSection, { icon: ReactNode; description: string; content: ReactNode }> = {
+  general: {
+    icon: <Monitor size={15} />,
+    description: "How shyspace runs on this device.",
+    content: <GeneralSettings />,
+  },
   profile: {
     icon: <UserRound size={15} />,
     description: "How you appear to everyone in the workspace.",

@@ -8,6 +8,8 @@ use tauri::{AppHandle, Url, WebviewWindowBuilder, webview::NewWindowResponse};
 
 use crate::tray::MAIN_WINDOW;
 
+/// Builds the main window hidden; `show_main_window` shows it, unless the
+/// app opened at login (`open_at_login`).
 pub fn create_main_window(app: &AppHandle) -> anyhow::Result<()> {
     let config = app
         .config()
@@ -21,6 +23,7 @@ pub fn create_main_window(app: &AppHandle) -> anyhow::Result<()> {
         .then(|| app.config().build.dev_url.clone())
         .flatten();
     WebviewWindowBuilder::from_config(app, &config)?
+        .visible(false)
         .on_navigation(move |url| {
             let is_allowed = is_app_page(url, dev_url.as_ref());
             if !is_allowed {

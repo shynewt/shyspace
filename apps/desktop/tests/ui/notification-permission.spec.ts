@@ -69,7 +69,7 @@ test("where notifications are always allowed, Settings shows nothing about permi
   await openWith(page, "allowed", "allowed");
   const settings = await openNotificationSettings(page);
 
-  await expect(settings.getByText("Tray icon", { exact: true })).toBeVisible();
+  await expect(settings.getByText("Message text in notifications")).toBeVisible();
   await expect(settings.getByText("Notifications are off")).toHaveCount(0);
   await expect(settings.getByText("macOS is blocking shyspace's notifications")).toHaveCount(0);
 });

@@ -7,7 +7,6 @@ import { errorMessage } from "../../lib/toast";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, FormError, SegmentedControl } from "../../ui";
 import { ChannelName } from "../private/ChannelName";
-import { AppIconSettings } from "./AppIconSettings";
 import { Setting } from "./layout";
 import { NotificationPermissionSetting } from "./NotificationPermissionSetting";
 
@@ -43,7 +42,6 @@ export function NotificationSettings() {
         title="Your status"
         description="Your status can make alerts quieter for a while, from the menu under your name. While it's set, the quieter of the status and a channel's own setting wins."
       />
-      <AppIconSettings />
     </>
   );
 }

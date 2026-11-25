@@ -440,6 +440,9 @@ export const api = {
   /** Holds every workspace's notifications until then; null lets them show again. */
   setNotificationsPaused: (untilMs: number | null) => invoke<void>("set_notifications_paused", { untilMs }),
   notificationsPaused: () => invoke<number | null>("notifications_paused"),
+  /** Whether the system opens shyspace at login on this device, as it says now. */
+  openAtLogin: () => invoke<boolean>("open_at_login"),
+  setOpenAtLogin: (isOn: boolean) => invoke<void>("set_open_at_login", { isOn }),
   appIcon: () => invoke<AppIcon>("app_icon"),
   setInMenuBar: (isShown: boolean) => invoke<void>("set_in_menu_bar", { isShown }),
   setShowsUnreadCount: (isShown: boolean) => invoke<void>("set_shows_unread_count", { isShown }),

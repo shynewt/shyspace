@@ -1,5 +1,6 @@
 /** The sections of the Settings window, so any screen can open it at one. */
 export type SettingsSection =
+  | "general"
   | "profile"
   | "workspace"
   | "appearance"
@@ -33,6 +34,7 @@ type SectionInfo = {
 };
 
 const SETTINGS_SECTIONS: SectionInfo[] = [
+  { id: "general", label: "General", group: "you" },
   { id: "profile", label: "Profile", group: "you" },
   { id: "appearance", label: "Appearance", group: "you" },
   { id: "notifications", label: "Notifications", group: "you" },

@@ -6,9 +6,14 @@ mod alerts;
 mod clipboard;
 mod files;
 mod huddles;
+#[cfg(target_os = "linux")]
+mod linux_autostart;
+#[cfg(target_os = "macos")]
+mod macos_launch;
 mod notification_permission;
 #[cfg(target_os = "macos")]
 mod notify_macos;
+mod open_at_login;
 mod pages_live;
 mod tray;
 mod updates;
@@ -1118,6 +1123,15 @@ pub fn run() {
             app.manage(tray::HasTray::default());
             app.manage(tray::Attention::default());
             tray::install_at_start(app.handle());
+            open_at_login::refresh_at_start();
+            let has_tray = open_at_login::is_tray_seen(
+                app.state::<tray::HasTray>().get(),
+                &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+            );
+            let is_at_login = open_at_login::was_started_at_login();
+            if !open_at_login::starts_hidden(is_at_login, cfg!(target_os = "macos"), has_tray) {
+                tray::show_main_window(app.handle());
+            }
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             app.manage(updates::PendingUpdate::default());
@@ -1237,6 +1251,8 @@ pub fn run() {
             notification_permission::notification_permission,
             notification_permission::request_notification_permission,
             notification_permission::open_notification_settings,
+            open_at_login::open_at_login,
+            open_at_login::set_open_at_login,
             private_members,
             add_to_private_channel,
             remove_from_private_channel,

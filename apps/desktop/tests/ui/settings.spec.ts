@@ -60,7 +60,7 @@ test("on macOS the app sits in the Dock, with the menu bar item off until turned
   });
   await page.keyboard.press("Control+,");
   const settings = page.getByRole("dialog", { name: "Settings" });
-  await settings.getByRole("tab", { name: "Notifications" }).click();
+  await settings.getByRole("tab", { name: "General" }).click();
   const menuBar = settings.getByRole("switch", { name: "Show shyspace in the menu bar" });
   const dockCount = settings.getByRole("switch", { name: "Show the unread count on the Dock icon" });
   await expect(menuBar).not.toBeChecked();
@@ -80,7 +80,7 @@ test("on macOS the app sits in the Dock, with the menu bar item off until turned
 
 test("on Linux and Windows the tray icon can be a one-colour planet", async ({ page }) => {
   const settings = await openSettings(page);
-  await settings.getByRole("tab", { name: "Notifications" }).click();
+  await settings.getByRole("tab", { name: "General" }).click();
   const monochrome = settings.getByRole("switch", { name: "Monochrome tray icon" });
   await expect(monochrome).not.toBeChecked();
   await expect(settings.getByRole("switch", { name: "Show shyspace in the menu bar" })).toHaveCount(0);
@@ -89,6 +89,21 @@ test("on Linux and Windows the tray icon can be a one-colour planet", async ({ p
 
   await expect(monochrome).toBeChecked();
   expect(await page.evaluate(() => window.fake.appIcon.is_tray_monochrome)).toBe(true);
+});
+
+test("how shyspace runs on this device is under General, first in You, not under Notifications", async ({ page }) => {
+  const settings = await openSettings(page);
+  const you = settings.getByRole("tablist", { name: "Settings sections" }).getByRole("tab");
+  await expect(you.first()).toHaveText("General");
+
+  await settings.getByRole("tab", { name: "Notifications" }).click();
+  await expect(settings.getByRole("switch", { name: "Monochrome tray icon" })).toHaveCount(0);
+  await expect(settings.getByRole("switch", { name: "Open shyspace when you log in" })).toHaveCount(0);
+
+  await settings.getByRole("tab", { name: "General" }).click();
+  await expect(settings.getByText("How shyspace runs on this device.")).toBeVisible();
+  await expect(settings.getByRole("switch", { name: "Open shyspace when you log in" })).toBeVisible();
+  await expect(settings.getByRole("switch", { name: "Monochrome tray icon" })).toBeVisible();
 });
 
 test("the accent colour can be chosen, kept and set back", async ({ page }) => {
@@ -179,6 +194,7 @@ test("settings group your sections and the workspace's", async ({ page }) => {
   const settings = await openSettings(page);
   const sections = settings.getByRole("tablist", { name: "Settings sections" });
   await expect(sections.getByRole("tab")).toHaveText([
+    "General",
     "Profile",
     "Appearance",
     "Notifications",
@@ -336,6 +352,7 @@ test("members see their own sections and the member list, not the admin's", asyn
   await page.keyboard.press("Control+,");
   const sections = page.getByRole("dialog", { name: "Settings" }).getByRole("tablist", { name: "Settings sections" });
   await expect(sections.getByRole("tab")).toHaveText([
+    "General",
     "Profile",
     "Appearance",
     "Notifications",

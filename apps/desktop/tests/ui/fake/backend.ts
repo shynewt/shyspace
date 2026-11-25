@@ -75,6 +75,8 @@ export class FakeBackend {
   /** What the window title, taskbar and tray last showed as needing you. */
   attentionCount = 0;
   /** How the app shows itself outside its window; tests set `platform` to see another system's settings. */
+  /** The system's record of opening at login; `refusal` makes turning it on or off fail with that reason. */
+  openAtLogin: { isOn: boolean; refusal: string | null } = { isOn: false, refusal: null };
   appIcon: AppIcon = { platform: "linux", is_in_menu_bar: false, shows_unread_count: true, is_tray_monochrome: false };
   private pendingJoin: { approve: () => void; cancel: () => void } | null = null;
   /** The update the app has downloaded and could restart into, as `check_for_update` reports it. */
@@ -655,6 +657,12 @@ export class FakeBackend {
         return null;
       case "set_attention_count":
         this.attentionCount = argument(args, "count") as number;
+        return null;
+      case "open_at_login":
+        return this.openAtLogin.isOn;
+      case "set_open_at_login":
+        if (this.openAtLogin.refusal) throw new Error(this.openAtLogin.refusal);
+        this.openAtLogin.isOn = argument(args, "isOn") === true;
         return null;
       case "app_icon":
         return { ...this.appIcon };
