@@ -1142,10 +1142,7 @@ pub fn run() {
             app.manage(tray::Attention::default());
             tray::install_at_start(app.handle());
             open_at_login::refresh_at_start();
-            let has_tray = open_at_login::is_tray_seen(
-                app.state::<tray::HasTray>().get(),
-                &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
-            );
+            let has_tray = open_at_login::is_tray_seen(app.state::<tray::HasTray>().get());
             let was_asked_to_show = app
                 .path()
                 .app_data_dir()

@@ -61,14 +61,38 @@ pub fn starts_hidden(is_at_login: bool, is_macos: bool, has_tray: bool) -> bool 
     is_at_login && (is_macos || has_tray)
 }
 
-/// Whether a tray icon will be seen on the desktop `XDG_CURRENT_DESKTOP`
-/// names. Stock GNOME loads the tray library but shows no icons without an
-/// extension, which Ubuntu's GNOME ships; elsewhere the panel shows them.
-pub fn is_tray_seen(has_tray: bool, desktop: &str) -> bool {
-    let names: Vec<String> = desktop.split(':').map(str::to_ascii_lowercase).collect();
-    let is_plain_gnome =
-        names.iter().any(|name| name == "gnome") && !names.iter().any(|name| name == "ubuntu");
-    has_tray && !is_plain_gnome
+/// Whether the tray icon will be seen. Windows always shows it. On Linux
+/// the library loads even where nothing shows its icon (stock GNOME, a
+/// sway or niri bar without a tray), so it counts only when a panel says it
+/// hosts tray icons; when that can't be told, the window shows.
+pub fn is_tray_seen(has_tray: bool) -> bool {
+    #[cfg(target_os = "linux")]
+    return has_tray && is_seen_by(tray_host::is_registered());
+    #[cfg(not(target_os = "linux"))]
+    has_tray
+}
+
+/// A tray host's answer, None when there was no answer.
+#[cfg(any(target_os = "linux", test))]
+fn is_seen_by(host_registered: Option<bool>) -> bool {
+    host_registered == Some(true)
+}
+
+/// The StatusNotifierItem watcher on the session bus, which the panel or
+/// bar showing tray icons registers with.
+#[cfg(target_os = "linux")]
+mod tray_host {
+    pub fn is_registered() -> Option<bool> {
+        let connection = zbus::blocking::Connection::session().ok()?;
+        let watcher = zbus::blocking::Proxy::new(
+            &connection,
+            "org.kde.StatusNotifierWatcher",
+            "/StatusNotifierWatcher",
+            "org.kde.StatusNotifierWatcher",
+        )
+        .ok()?;
+        watcher.get_property("IsStatusNotifierHostRegistered").ok()
+    }
 }
 
 #[tauri::command]
@@ -255,16 +279,9 @@ mod tests {
     }
 
     #[test]
-    fn a_tray_counts_only_where_the_desktop_shows_it() {
-        assert!(is_tray_seen(true, "KDE"));
-        assert!(is_tray_seen(true, "X-Cinnamon"));
-        assert!(is_tray_seen(true, "ubuntu:GNOME"));
-        assert!(!is_tray_seen(true, "GNOME"));
-        assert!(!is_tray_seen(true, "gnome"));
-        assert!(!is_tray_seen(false, "KDE"));
-        assert!(
-            is_tray_seen(true, ""),
-            "Windows says nothing, and always shows it"
-        );
+    fn a_tray_counts_only_when_a_panel_says_it_hosts_it() {
+        assert!(is_seen_by(Some(true)));
+        assert!(!is_seen_by(Some(false)), "a watcher with no panel");
+        assert!(!is_seen_by(None), "no watcher, or no answer: show the window");
     }
 }
