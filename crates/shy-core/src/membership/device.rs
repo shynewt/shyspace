@@ -27,6 +27,20 @@ pub struct DeviceCertificate {
     pub device_signature: Vec<u8>,
 }
 
+/// A certificate that counted, and the epoch its commit moved to: from then
+/// on the device is its person's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceRecord {
+    pub certificate: DeviceCertificate,
+    pub added_epoch: u64,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many certificates this thread has verified, to show which never are.
+    pub(crate) static VERIFIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The new device's consent to belong to `person`, sent with its request.
 pub fn accept(device_key: &SecretKey, workspace_id: &str, person: &PublicKey) -> Result<Vec<u8>> {
     let bytes = acceptance_bytes(workspace_id, person, &device_key.public())?;
@@ -108,6 +122,8 @@ impl DeviceCertificate {
     /// neither its voucher nor the person. Whether the voucher may vouch is
     /// for the caller, who knows the members.
     pub fn verify(&self, workspace_id: &str) -> Result<()> {
+        #[cfg(test)]
+        VERIFIED.with(|verified| verified.set(verified.get() + 1));
         self.check_roles()?;
         verify_signature(
             &self.voucher,
@@ -133,6 +149,11 @@ impl DeviceCertificate {
     /// The one encoding of this certificate, built from its fields.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         Ok(postcard::to_stdvec(self)?)
+    }
+
+    /// The one hash of this certificate, whichever way it arrived.
+    pub fn hash(&self) -> Result<[u8; 32]> {
+        Ok(*blake3::hash(&self.to_bytes()?).as_bytes())
     }
 
     /// Decodes a certificate, refusing any bytes but its one encoding.

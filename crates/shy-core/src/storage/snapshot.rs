@@ -72,6 +72,7 @@ mod tests {
     const TABLES_KEPT: &[&str] = &[
         "commits",
         "deliveries",
+        "devices",
         "epoch_keys",
         "epoch_members",
         "frozen_authors",

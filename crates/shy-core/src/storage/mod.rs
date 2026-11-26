@@ -2,6 +2,7 @@
 //! views (channels, messages, pages, search) that ops are folded into.
 
 mod apply;
+mod devices;
 mod epochs;
 mod files;
 mod forks;
@@ -30,6 +31,7 @@ mod test_channel;
 mod threads;
 
 pub use apply::{Applied, ApplyContext};
+pub use devices::DeviceSource;
 pub use files::{BlobRemoval, StoredFile};
 pub(crate) use forks::CheckedFork;
 pub use invites::PendingRequest;

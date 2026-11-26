@@ -14,7 +14,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::crypto::OP_FORMAT;
 
 /// Every migration in order; the first is the schema as of v0.1.0.
-const MIGRATIONS: &[&str] = &[FIRST_SCHEMA, WORKSPACE_LOOK, PAGE_MENTIONS];
+const MIGRATIONS: &[&str] = &[FIRST_SCHEMA, WORKSPACE_LOOK, PAGE_MENTIONS, DEVICES];
 
 /// The workspace's icon and default look, set by the admin.
 const WORKSPACE_LOOK: &str = r#"
@@ -28,6 +28,20 @@ CREATE TABLE page_mentions (
     page TEXT NOT NULL, author BLOB NOT NULL, position BLOB NOT NULL, preview TEXT NOT NULL,
     mentioned_ms INTEGER NOT NULL, is_read INTEGER NOT NULL,
     PRIMARY KEY (page, author));
+"#;
+
+/// Devices linked to a person, and what the views will need to tell a
+/// person's devices apart. `frozen_epoch` is set only by commits that bind
+/// the device map.
+const DEVICES: &str = r#"
+CREATE TABLE devices (
+    device BLOB PRIMARY KEY, person BLOB NOT NULL, voucher BLOB NOT NULL,
+    certificate BLOB NOT NULL, added_epoch INTEGER NOT NULL,
+    from_grant INTEGER NOT NULL, added_ms INTEGER NOT NULL);
+CREATE INDEX devices_by_person ON devices (person);
+ALTER TABLE message_edits ADD COLUMN device BLOB;
+ALTER TABLE file_names ADD COLUMN device BLOB;
+ALTER TABLE frozen_authors ADD COLUMN frozen_epoch INTEGER;
 "#;
 
 const FIRST_SCHEMA: &str = r#"
@@ -473,6 +487,36 @@ mod tests {
             [],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_store_from_before_devices_gains_their_table_and_columns() {
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate(&mut db, &[FIRST_SCHEMA, WORKSPACE_LOOK, PAGE_MENTIONS]).unwrap();
+        db.execute(
+            "INSERT INTO frozen_authors (member, last_seq) VALUES (x'01', 4)",
+            [],
+        )
+        .unwrap();
+
+        create_or_migrate(&mut db).unwrap();
+
+        db.execute(
+            "INSERT INTO devices (device, person, voucher, certificate, added_epoch, from_grant, added_ms) \
+             VALUES (x'02', x'03', x'03', x'00', 5, 0, 1)",
+            [],
+        )
+        .unwrap();
+        let frozen_epoch: Option<u64> = db
+            .query_row(
+                "SELECT frozen_epoch FROM frozen_authors WHERE member = x'01'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(frozen_epoch, None, "older freezes keep no epoch");
+        db.execute("UPDATE message_edits SET device = x'02'", []).unwrap();
+        db.execute("UPDATE file_names SET device = x'02'", []).unwrap();
     }
 
     #[test]
