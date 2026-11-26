@@ -236,22 +236,42 @@ async fn only_small_png_jpeg_or_webp_pictures_are_shared() {
     assert!(admin.set_profile_picture(Some(huge)).await.is_err());
 }
 
+fn typed_file(name: &str, media_type: &str) -> NewFile {
+    NewFile {
+        media_type: media_type.into(),
+        ..bytes_file(name, name.as_bytes())
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn a_file_sent_without_a_caption_alerts_with_its_name() {
+async fn a_message_with_files_alerts_with_an_icon_for_their_kind() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     let general = channel_id(&admin, "general");
     let mut changes = admin.subscribe();
-    bob.send_files(&general, "", None, vec![bytes_file("q3.pdf", b"numbers")])
-        .await
-        .unwrap();
-    bob.send_files(
-        &general,
-        "",
-        None,
-        vec![bytes_file("a", b"1"), bytes_file("b", b"2")],
-    )
-    .await
-    .unwrap();
+    let sent: [(&str, Vec<NewFile>); 7] = [
+        ("", vec![bytes_file("q3.pdf", b"numbers")]),
+        ("", vec![typed_file("beach.jpg", "image/jpeg")]),
+        ("", vec![typed_file("clip.mp4", "video/mp4")]),
+        ("", vec![typed_file("memo.m4a", "audio/mp4")]),
+        ("", vec![bytes_file("a", b"1"), bytes_file("b", b"2")]),
+        (
+            "from the trip",
+            vec![
+                typed_file("1.jpg", "image/jpeg"),
+                typed_file("2.png", "image/png"),
+            ],
+        ),
+        (
+            "both",
+            vec![
+                typed_file("1.jpg", "image/jpeg"),
+                typed_file("memo.m4a", "audio/mp4"),
+            ],
+        ),
+    ];
+    for (caption, files) in sent {
+        bob.send_files(&general, caption, None, files).await.unwrap();
+    }
     sync_all(&[&admin, &bob]).await;
     let mut previews = Vec::new();
     while let Ok(change) = changes.try_recv() {
@@ -259,7 +279,18 @@ async fn a_file_sent_without_a_caption_alerts_with_its_name() {
             previews.push(preview);
         }
     }
-    assert_eq!(previews, ["Shared q3.pdf", "Shared 2 files"]);
+    assert_eq!(
+        previews,
+        [
+            "📎 q3.pdf",
+            "📷 beach.jpg",
+            "🎥 clip.mp4",
+            "🎵 memo.m4a",
+            "📎 2 files",
+            "📷 from the trip",
+            "📎 both",
+        ]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

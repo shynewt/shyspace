@@ -53,7 +53,8 @@ pub fn clean_file_name(name: &str) -> String {
 }
 
 /// A media type from someone else, kept only if it looks like one. The app
-/// decides how to show a file from its first bytes, never from this.
+/// decides how to show or open a file from its first bytes, never from this;
+/// it only picks the icon a notification shows.
 pub fn clean_media_type(media_type: &str) -> String {
     let is_token = |part: &str| {
         !part.is_empty()
