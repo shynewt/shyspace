@@ -92,7 +92,7 @@ impl Workspace {
                 for make_op in makers {
                     let seq = store.next_seq(&author)?;
                     let op = make_op(store, seq)?;
-                    if !self.may(&op) {
+                    if !store.is_permitted(&op, &author, epoch, &self.inner.config.admin)? {
                         bail!("only its owner or the admin can do that");
                     }
                     let is_sealed = matches!(op, Op::Sealed { .. });

@@ -170,6 +170,127 @@ async fn members_cannot_hijack_each_others_messages() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn another_persons_device_cannot_edit_or_delete_my_message() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let carols_phone = link_device(&admin, &carol, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = bob.send_message(&general, "Bob's words", None).unwrap();
+    sync_all(&[&admin, &bob, &carol, &carols_phone]).await;
+
+    assert!(carols_phone.edit_message(&message, "Carol's now").is_err());
+    assert!(carols_phone.delete_message(&message).is_err());
+    let mut forger = Forger::new(&carols_phone);
+    for op in [
+        Op::MessageEdit {
+            id: message.clone(),
+            text: "Carol's now".into(),
+        },
+        Op::Delete { id: message.clone() },
+    ] {
+        admin.receive(forger.seal(op)).unwrap();
+    }
+
+    let shown: Vec<_> = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|shown| shown.text)
+        .collect();
+    assert!(shown.contains(&"Bob's words".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backdated_edit_from_before_the_device_was_linked_counts_nowhere() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let general = channel_id(&admin, "general");
+    let message = bob.send_message(&general, "Bob's words", None).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    let (old_epoch, old_key) = current_key(&admin);
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    // An edit sealed in the epoch before the phone was linked.
+    let body = OpBody {
+        lamport: 9_000,
+        timestamp_ms: 0,
+        op: Op::MessageEdit {
+            id: message.clone(),
+            text: "backdated".into(),
+        },
+    };
+    let seq = phone.state().store.next_seq(&phone.me()).unwrap();
+    let backdated = crypto::seal(&phone.inner.identity, &old_key, old_epoch, seq, &body).unwrap();
+
+    // Carol hears it before and after she learns of the link; the phone
+    // wasn't a member then, so it is refused either way.
+    assert!(carol.receive(backdated.clone()).is_err());
+    sync_all(&[&admin, &bob, &carol]).await;
+    assert!(carol.receive(backdated.clone()).is_err());
+    assert!(admin.receive(backdated).is_err());
+
+    for member in [&admin, &carol] {
+        let shown: Vec<_> = member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|shown| shown.text)
+            .collect();
+        assert!(shown.contains(&"Bob's words".to_string()), "{shown:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admins_second_device_cannot_use_admin_powers() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let admins_phone = link_device(&admin, &admin, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = bob.send_message(&general, "Bob's words", None).unwrap();
+    sync_all(&[&admin, &bob, &admins_phone]).await;
+
+    assert!(admins_phone.set_workspace_look(Some("dusk"), None).is_err());
+    assert!(admins_phone.delete_message(&message).is_err());
+    let mut forger = Forger::new(&admins_phone);
+    for op in [
+        Op::Delete { id: message.clone() },
+        Op::WorkspaceLook {
+            theme: Some("dusk".into()),
+            accent: None,
+        },
+    ] {
+        bob.receive(forger.seal(op)).unwrap();
+    }
+
+    assert!(texts_in(&bob, &general).contains(&"Bob's words".to_string()));
+    assert_eq!(bob.workspace_look().unwrap(), admin.workspace_look().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_device_cannot_create_an_id_with_its_siblings_prefix() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let general = channel_id(&admin, "general");
+    let in_bobs_name = crate::ops::new_owned_id(&bob.me());
+
+    admin
+        .receive(Forger::new(&phone).seal(Op::Message {
+            id: in_bobs_name.clone(),
+            channel: general.clone(),
+            text: "one id, two logs".into(),
+            reply_to: None,
+        }))
+        .unwrap();
+
+    assert!(
+        admin
+            .messages(&general, None, 50)
+            .unwrap()
+            .iter()
+            .all(|shown| shown.id != in_bobs_name)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn parked_junk_cannot_break_our_own_sequence() {
     let (_root, _bucket, _admin, bob) = admin_and_bob().await;
     let general = channel_id(&bob, "general");

@@ -60,10 +60,10 @@ impl Workspace {
 
     /// Whether you may delete `id`: in a private channel, your own messages,
     /// or anything if you own it; elsewhere, what you own or (as admin) all.
-    pub(crate) fn may_delete(&self, store: &Store, id: &str) -> Result<bool> {
+    pub(crate) fn may_delete(&self, store: &Store, epoch: u64, id: &str) -> Result<bool> {
         let me = self.me();
         let Some(channel) = private_channel_of(id) else {
-            return Ok(self.may(&Op::Delete { id: id.to_owned() }));
+            return self.may(store, epoch, &Op::Delete { id: id.to_owned() });
         };
         let is_owner =
             private_kind(channel) == Some(PrivateKind::Channel) && store.current_owner(channel)? == Some(me);

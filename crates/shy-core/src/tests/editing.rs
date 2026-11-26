@@ -155,3 +155,32 @@ async fn views_say_what_each_member_may_change() {
     assert_eq!(deletable(&bob), vec![false, true]);
     assert_eq!(deletable(&admin), vec![true, true]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn my_second_device_can_edit_and_delete_my_message() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let message = bob.send_message(&general, "from the laptop", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    assert!(
+        phone
+            .messages(&general, None, 50)
+            .unwrap()
+            .iter()
+            .any(|shown| shown.id == message && shown.can_edit && shown.can_delete)
+    );
+
+    phone.edit_message(&message, "fixed on the phone").unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    for device in [&admin, &bob, &phone] {
+        assert!(texts(device, &general).contains(&"fixed on the phone".to_string()));
+    }
+
+    phone.delete_message(&message).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    for device in [&admin, &bob, &phone] {
+        assert!(!texts(device, &general).contains(&"fixed on the phone".to_string()));
+    }
+}

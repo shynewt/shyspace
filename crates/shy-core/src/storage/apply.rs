@@ -67,8 +67,13 @@ impl Store {
         if self.is_forked(&verified.author, verified.seq)? {
             return Ok(Applied::default());
         }
-        if !verified.body.op.is_permitted(&verified.author, &context.admin) {
-            return Err(rule_violation("only the admin may make this change"));
+        if !self.is_permitted(
+            &verified.body.op,
+            &verified.author,
+            verified.epoch,
+            &context.admin,
+        )? {
+            return Err(rule_violation("this author may not make this change"));
         }
         // Private content only travels sealed, checked by its channel's rules.
         if verified.body.op.named_ids().into_iter().any(is_private_id) {
@@ -247,8 +252,8 @@ impl Store {
                 }
                 Change::Storage
             }
-            Op::MessageEdit { id, text } => return self.apply_message_edit(id, text, lamport),
-            Op::FileRename { id, name } => return self.apply_file_rename(id, name, lamport),
+            Op::MessageEdit { id, text } => return self.apply_message_edit(id, text, lamport, author),
+            Op::FileRename { id, name } => return self.apply_file_rename(id, name, lamport, author),
             Op::ChannelRename { id, name } => self.apply_channel_rename(id, name, lamport, author)?,
             Op::Delete { id } => return self.apply_delete(id, author),
             Op::Status {

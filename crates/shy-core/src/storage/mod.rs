@@ -19,6 +19,7 @@ mod queries;
 mod reading;
 mod rebuild;
 mod revisions;
+mod rights;
 mod schema;
 mod sealed;
 mod sealing;

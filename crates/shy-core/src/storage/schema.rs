@@ -160,8 +160,9 @@ INSERT INTO sidebar_sections (id, name, position) VALUES ('channels', 'Channels'
 /// its tables), or a new kind of op is added: a store whose views were built
 /// under other rules has them rebuilt from its log on opening, which also
 /// applies ops of new kinds that an older version kept as unreadable. Rules
-/// 2 add the workspace icon and look.
-pub(crate) const VIEW_RULES: u8 = 2;
+/// 2 add the workspace icon and look; rules 3 let any device of a person
+/// edit their content, with equal clocks settled by device key.
+pub(crate) const VIEW_RULES: u8 = 3;
 pub(crate) const VIEW_RULES_META: &str = "view_rules";
 /// The newest op format any version that opened the store reads, as a
 /// little-endian `u32`: a store whose log may hold ops in a format we can't

@@ -392,9 +392,10 @@ impl Workspace {
         }
     }
 
-    /// Whether this member may make `op`, by the rule every member enforces.
-    pub(crate) fn may(&self, op: &crate::ops::Op) -> bool {
-        op.is_permitted(&self.me(), &self.inner.config.admin)
+    /// Whether this device may make `op` in `epoch` (the newest one it
+    /// holds, for what it may do now), by the rule every member enforces.
+    pub(crate) fn may(&self, store: &crate::storage::Store, epoch: u64, op: &crate::ops::Op) -> Result<bool> {
+        store.is_permitted(op, &self.me(), epoch, &self.inner.config.admin)
     }
 
     pub(crate) fn bucket(&self) -> Bucket {

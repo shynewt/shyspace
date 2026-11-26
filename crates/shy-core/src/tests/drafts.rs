@@ -173,3 +173,17 @@ async fn an_edit_in_a_private_channels_thread_is_kept_for_that_thread() {
     assert_eq!((edit.target, edit.channel), (root, plans));
     assert_eq!(edit.editing.unwrap().message, reply);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn my_second_device_can_draft_an_edit_of_my_message() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    let mine = bob.send_message(&general, "from the laptop", None).unwrap();
+    let admins = admin.send_message(&general, "from the admin", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    phone.set_edit_draft(&general, &mine, "fixed on the").unwrap();
+    assert!(phone.set_edit_draft(&general, &admins, "not mine").is_err());
+}

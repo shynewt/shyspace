@@ -500,3 +500,24 @@ async fn a_page_file_tells_others_the_page_changed_not_a_channel() {
     }
     assert_eq!(page_changes, 3, "shared, renamed, deleted");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn my_second_device_can_rename_my_file() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_files(&general, "", None, vec![bytes_file("IMG_4821.png", b"pixels")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let file = phone.files().unwrap()[0].clone();
+    assert!(file.can_rename);
+
+    phone.rename_file(&file.id, "Whiteboard.png").unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    for device in [&admin, &bob, &phone] {
+        assert_eq!(device.files().unwrap()[0].name, "Whiteboard.png");
+    }
+}

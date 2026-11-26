@@ -54,8 +54,12 @@ impl Workspace {
                 .store
                 .message(message, &self.me())?
                 .context("no such message here")?;
+            let edit = crate::ops::Op::MessageEdit {
+                id: message.to_owned(),
+                text: String::new(),
+            };
             ensure!(
-                edited.author == self.my_id(),
+                self.may(&state.store, state.store.newest_epoch()?, &edit)?,
                 "you can only edit your own messages"
             );
             ensure!(

@@ -124,15 +124,25 @@ impl Store {
         self.is_deleted(target)
     }
 
-    /// A message author's edits replace one another in their own order.
-    pub(super) fn apply_message_edit(&self, id: &str, text: &str, lamport: u64) -> Result<Option<Change>> {
+    /// A message author's edits replace one another in clock order; two of
+    /// their devices on the same clock tie-break by device key, as channel
+    /// names do, so every device keeps the same one.
+    pub(super) fn apply_message_edit(
+        &self,
+        id: &str,
+        text: &str,
+        lamport: u64,
+        device: &[u8],
+    ) -> Result<Option<Change>> {
         let changed = self.db.execute(
-            "INSERT INTO message_edits (message, text, lamport) VALUES (?1, ?2, ?3)
-             ON CONFLICT (message) DO UPDATE SET text = ?2, lamport = ?3 WHERE lamport < ?3",
+            "INSERT INTO message_edits (message, text, lamport, device) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (message) DO UPDATE SET text = ?2, lamport = ?3, device = ?4
+             WHERE lamport < ?3 OR (lamport = ?3 AND device < ?4)",
             params![
                 id,
                 crate::ops::cut_to(text, crate::ops::MAX_MESSAGE_CHARS),
-                lamport
+                lamport,
+                device
             ],
         )?;
         if changed == 0 {
@@ -709,6 +719,59 @@ mod tests {
             },
         );
         assert_eq!(scenario.assert_files_converge(), [(file, "final.png".to_owned())]);
+    }
+
+    #[test]
+    fn two_devices_editing_one_message_with_equal_clocks_end_the_same_in_any_order() {
+        let [ada, laptop, phone] = people();
+        let mut scenario = Scenario::new();
+        let channel = new_owned_id(&ada);
+        let bobs = new_owned_id(&laptop);
+        scenario.add(
+            &ada,
+            1,
+            Op::ChannelCreate {
+                id: channel.clone(),
+                name: "general".into(),
+            },
+        );
+        scenario.add(&laptop, 2, message(&bobs, &channel, "hello"));
+        let file = new_owned_id(&laptop);
+        scenario.add(&laptop, 3, shared_file(&file, &channel, "IMG_1.png"));
+        for (device, text, name) in [
+            (&laptop, "from the laptop", "laptop.png"),
+            (&phone, "from the phone", "phone.png"),
+        ] {
+            scenario.add(
+                device,
+                5,
+                Op::MessageEdit {
+                    id: bobs.clone(),
+                    text: text.into(),
+                },
+            );
+            scenario.add(
+                device,
+                6,
+                Op::FileRename {
+                    id: file.clone(),
+                    name: name.into(),
+                },
+            );
+        }
+
+        let (_, messages, _, _) = scenario.assert_converges();
+        let files = scenario.assert_files_converge();
+
+        let (higher_text, higher_name) = match laptop.as_bytes() > phone.as_bytes() {
+            true => ("from the laptop", "laptop.png"),
+            false => ("from the phone", "phone.png"),
+        };
+        assert!(
+            messages.iter().any(|(_, text, _, _)| text == higher_text),
+            "{messages:?}"
+        );
+        assert_eq!(files, [(file, higher_name.to_owned())]);
     }
 
     #[test]

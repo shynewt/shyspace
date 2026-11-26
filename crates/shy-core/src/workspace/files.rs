@@ -330,11 +330,12 @@ impl Workspace {
     /// The files shared into `page`, oldest first.
     pub fn page_files(&self, page: &str) -> Result<Vec<FileInfo>> {
         let state = self.state();
+        let epoch = state.store.newest_epoch()?;
         state
             .store
             .files_of_page(page)?
             .into_iter()
-            .map(|file| self.file_info(&state.store, file))
+            .map(|file| self.file_info(&state.store, epoch, file))
             .collect()
     }
 
@@ -393,10 +394,11 @@ impl Workspace {
             id: file.to_owned(),
             name: cleaned,
         };
-        ensure!(
-            self.may(&rename),
-            "only the person who shared a file can rename it"
-        );
+        let may_rename = {
+            let store = &self.state().store;
+            self.may(store, store.newest_epoch()?, &rename)?
+        };
+        ensure!(may_rename, "only the person who shared a file can rename it");
         self.write(rename)
     }
 
@@ -404,19 +406,29 @@ impl Workspace {
     pub fn files(&self) -> Result<Vec<FileInfo>> {
         let state = self.state();
         let stored = state.store.all_files()?;
+        let epoch = state.store.newest_epoch()?;
         stored
             .into_iter()
-            .map(|file| self.file_info(&state.store, file))
+            .map(|file| self.file_info(&state.store, epoch, file))
             .collect()
     }
 
-    pub(crate) fn file_info(&self, store: &crate::storage::Store, file: StoredFile) -> Result<FileInfo> {
+    pub(crate) fn file_info(
+        &self,
+        store: &crate::storage::Store,
+        epoch: u64,
+        file: StoredFile,
+    ) -> Result<FileInfo> {
         Ok(FileInfo {
-            can_delete: self.may_delete(store, &file.id)?,
-            can_rename: self.may(&Op::FileRename {
-                id: file.id.clone(),
-                name: String::new(),
-            }),
+            can_delete: self.may_delete(store, epoch, &file.id)?,
+            can_rename: self.may(
+                store,
+                epoch,
+                &Op::FileRename {
+                    id: file.id.clone(),
+                    name: String::new(),
+                },
+            )?,
             author: PublicKey::try_from(file.author.as_slice())
                 .map(|author| member_id(&author))
                 .context("reading a file's author")?,

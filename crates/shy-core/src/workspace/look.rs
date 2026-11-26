@@ -51,8 +51,12 @@ impl Workspace {
     }
 
     fn ensure_may_set_look(&self, op: &Op) -> Result<()> {
+        let may_set = {
+            let store = &self.state().store;
+            self.may(store, store.newest_epoch()?, op)?
+        };
         ensure!(
-            self.may(op),
+            may_set,
             "only the workspace admin can change the workspace's icon and look"
         );
         Ok(())

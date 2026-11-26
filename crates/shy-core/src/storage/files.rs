@@ -108,12 +108,20 @@ impl Store {
         Ok(changes)
     }
     /// Keeps a rename from the file's sharer, cleaned, unless a later one
-    /// is kept. The file may not have arrived yet; it shows the name when it does.
-    pub(super) fn apply_file_rename(&self, id: &str, name: &str, lamport: u64) -> Result<Option<Change>> {
+    /// is kept (on the same clock, the higher device key's). The file may
+    /// not have arrived yet; it shows the name when it does.
+    pub(super) fn apply_file_rename(
+        &self,
+        id: &str,
+        name: &str,
+        lamport: u64,
+        device: &[u8],
+    ) -> Result<Option<Change>> {
         let changed = self.db.execute(
-            "INSERT INTO file_names (file, name, lamport) VALUES (?1, ?2, ?3)
-             ON CONFLICT (file) DO UPDATE SET name = ?2, lamport = ?3 WHERE lamport < ?3",
-            params![id, clean_file_name(name), lamport],
+            "INSERT INTO file_names (file, name, lamport, device) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (file) DO UPDATE SET name = ?2, lamport = ?3, device = ?4
+             WHERE lamport < ?3 OR (lamport = ?3 AND device < ?4)",
+            params![id, clean_file_name(name), lamport, device],
         )?;
         if changed == 0 {
             return Ok(None);

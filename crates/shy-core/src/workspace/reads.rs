@@ -92,6 +92,7 @@ impl Workspace {
     pub fn channels(&self) -> Result<Vec<Channel>> {
         let state = self.state();
         let mut channels = state.store.channels()?;
+        let epoch = state.store.newest_epoch()?;
         for channel in &mut channels {
             // Thread replies count in their thread, but a mention counts anywhere.
             let unread = state.store.unread_count(&channel.id, &self.me())?;
@@ -104,9 +105,13 @@ impl Workspace {
             );
             channel.last_read = state.store.read_marker(&channel.id)?;
             channel.notify = state.store.notify_level(&channel.id)?;
-            channel.can_delete = self.may(&Op::Delete {
-                id: channel.id.clone(),
-            });
+            channel.can_delete = self.may(
+                &state.store,
+                epoch,
+                &Op::Delete {
+                    id: channel.id.clone(),
+                },
+            )?;
             self.describe_private(&state.store, channel)?;
         }
         Ok(channels)
@@ -189,20 +194,25 @@ impl Workspace {
                     .link_names(&self.inner.config.admin, &self.inner.config.workspace_id)?,
             ),
         };
+        let epoch = state.store.newest_epoch()?;
         for message in &mut messages {
             message.mentions_me =
                 message.author != my_id && mentions(&message.text, &self.inner.config.workspace_id, &my_id);
             message.saved = state.store.saved_mark(&message.id)?;
-            message.can_edit = self.may(&Op::MessageEdit {
-                id: message.id.clone(),
-                text: String::new(),
-            });
-            message.can_delete = self.may_delete(&state.store, &message.id)?;
+            message.can_edit = self.may(
+                &state.store,
+                epoch,
+                &Op::MessageEdit {
+                    id: message.id.clone(),
+                    text: String::new(),
+                },
+            )?;
+            message.can_delete = self.may_delete(&state.store, epoch, &message.id)?;
             message.files = state
                 .store
                 .files_of_message(&message.id, &message.channel)?
                 .into_iter()
-                .map(|file| self.file_info(&state.store, file))
+                .map(|file| self.file_info(&state.store, epoch, file))
                 .collect::<Result<_>>()?;
             let thread = replies_by_root.remove(message.id.as_str()).unwrap_or_default();
             message.reply_count = count(thread.len());
@@ -247,8 +257,9 @@ impl Workspace {
         let state = self.state();
         let saved = state.store.saved_items()?;
         let mut pages = state.store.pages()?;
+        let epoch = state.store.newest_epoch()?;
         for page in &mut pages {
-            page.can_delete = self.may(&Op::Delete { id: page.id.clone() });
+            page.can_delete = self.may(&state.store, epoch, &Op::Delete { id: page.id.clone() })?;
             page.is_saved = saved.contains(&page.id);
         }
         Ok(pages)

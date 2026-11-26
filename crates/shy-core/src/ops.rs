@@ -16,7 +16,7 @@ pub fn now_ms() -> Result<i64> {
     Ok(i64::try_from(elapsed.as_millis())?)
 }
 
-const OWNER_PREFIX_BYTES: usize = 16;
+pub(crate) const OWNER_PREFIX_BYTES: usize = 16;
 
 pub fn new_random_id() -> String {
     hex::encode(rand::random::<[u8; 8]>())
@@ -30,11 +30,21 @@ pub fn new_owned_id(author: &PublicKey) -> EntityId {
 
 /// A private message's id names its channel first; the owned part is last.
 pub fn is_owned_by(id: &str, author: &PublicKey) -> bool {
+    owned_part(id).is_some_and(|owned| owned.starts_with(&owner_prefix(author)))
+}
+
+/// The start of the creating device's key that an owned id carries.
+pub fn owner_prefix_of(id: &str) -> Option<[u8; OWNER_PREFIX_BYTES]> {
+    let prefix = hex::decode(owned_part(id)?.get(..2 * OWNER_PREFIX_BYTES)?).ok()?;
+    prefix.try_into().ok()
+}
+
+fn owned_part(id: &str) -> Option<&str> {
     let owned = match crate::private::ids::is_private_id(id) {
         true => id.rsplit(['/', ':']).next().unwrap_or(id),
         false => id,
     };
-    owned.len() == 2 * OWNER_PREFIX_BYTES + 16 && owned.starts_with(&owner_prefix(author))
+    (owned.len() == 2 * OWNER_PREFIX_BYTES + 16).then_some(owned)
 }
 
 fn owner_prefix(author: &PublicKey) -> String {
@@ -231,18 +241,6 @@ impl Op {
             | Op::ProfilePicture { .. }
             | Op::WorkspaceIcon { .. }
             | Op::WorkspaceLook { .. } => Vec::new(),
-        }
-    }
-
-    /// Whether `author` may make this change in a workspace run by `admin`.
-    pub fn is_permitted(&self, author: &PublicKey, admin: &PublicKey) -> bool {
-        match self {
-            Op::StorageSettings { .. } | Op::WorkspaceIcon { .. } | Op::WorkspaceLook { .. } => {
-                author == admin
-            }
-            Op::MessageEdit { id, .. } | Op::FileRename { id, .. } => is_owned_by(id, author),
-            Op::Delete { id } => author == admin || is_owned_by(id, author),
-            _ => true,
         }
     }
 }
