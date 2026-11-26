@@ -1,0 +1,3 @@
+# Kotlin for Android: Android's own cleaner from API 33, the JNA one before, behind checks lint understands.
+[bindings.kotlin]
+android = true

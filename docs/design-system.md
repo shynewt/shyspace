@@ -16,6 +16,8 @@ Calm and warm: soft neutral surfaces, one accent (violet unless you or the works
 - **Type:** the system UI font, in one scale (`@theme` in `styles.css`): `text-2xs` 11 px (badges, keys, tiny labels), `text-xs` 12 px (hints, timestamps, section labels), `text-sm` 13 px (most interface text), `text-base` 14 px (message and preview text, the body default), `text-lg` 15 px (dialog and view titles), `text-xl` 20 px (emoji in pickers and buttons), `text-2xl` 26 px and `text-3xl` 38 px (onboarding and page titles). They replace Tailwind's sizes of the same names (font size only; line height stays as set), and `tests/ui/design-rules.spec.ts` fails on a hand-picked size like `text-[13px]`.
 - **Shape:** `rounded-lg` (8 px) for controls, `rounded-xl` (12 px) for cards, `rounded-2xl` (16 px) for dialogs.
 
+The phone apps use the same colours, accents and motion: `tools/design-tokens/export.mjs` writes them from `styles.css` (`ShyTokens.kt` on Android), so edit them here only. Type sizes aren't shared; phones use their platform's text styles, so the system's text size setting works.
+
 ## Motion
 
 Motion should feel quick and never get in the way of work. The app runs in WebKitGTK, where layout on every frame, blur and filters are expensive.

@@ -39,6 +39,7 @@ Keep the diff to what the task needs. If you notice an unrelated problem, open a
 | `apps/desktop/src-tauri` | one Tauri command per `Workspace` call, event forwarding | contain business logic |
 | `apps/desktop/src/lib` | the `invoke` bridge (`api.ts`), hooks, pure helpers | render UI |
 | `apps/desktop/src/ui` | the design system: tokens, motion presets, shared components | know about workspaces, chat or pages |
+| `apps/android` | the Android app: Compose screens over the generated bindings, one ViewModel per screen, the Keystore-backed `DeviceKeyStore` | contain business logic, call the core from `Dispatchers.Unconfined` |
 | `apps/desktop/src/features/<feature>` | one folder per feature (`shell`, `chat`, `inbox`, `pages`, `members`, `private`, `search`, `onboarding`, …) | call `invoke` directly (go through `api.ts`), restyle `ui` components |
 
 Inside `shy-core`, each file has one job (see the file map in `docs/architecture.md`). A new concern gets a new module. Past ~400 lines, split the file by responsibility.
@@ -99,7 +100,8 @@ We have already fixed each of these once. Read Motion in `docs/design-system.md`
   - multi-member scenarios in `crates/shy-core/src/tests/collaboration.rs`, using an in-memory bucket;
   - attacks in `crates/shy-core/src/tests/hardening.rs`: every security rule has a test that tries to break it;
   - screens in `apps/desktop/tests/ui/*.spec.ts` (Playwright, against the in-memory fake in `tests/ui/fake/`). A UI behavior change comes with a test there; a new `invoke` command needs a matching case in the fake;
-  - real processes, network and bucket in `scripts/e2e_mcp.py`.
+  - real processes, network and bucket in `scripts/e2e_mcp.py`;
+  - the Android app's ViewModels and screens in `apps/android/app/src/test` (JVM and Robolectric, against the real core on an in-memory bucket).
 
 ## Checks
 
@@ -110,6 +112,7 @@ cargo fmt --check
 cargo clippy --workspace --all-targets
 cargo test --workspace
 (cd apps/desktop && pnpm typecheck && pnpm lint && pnpm test:ui)
+(cd apps/android && make check)   # when the core, crates/shy-ffi or the app changed
 ```
 
 For changes to sync, networking or the CLI, also run `python3 scripts/e2e_mcp.py` (needs the local bucket; see `docs/development.md`). For UI changes, also run `pnpm test:ui:webkit` (WebKit, the app's engine, in a Podman container; see `docs/development.md`) and run the app and check the change by hand.

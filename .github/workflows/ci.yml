@@ -197,3 +197,28 @@ jobs:
       - name: Disk left
         if: always()
         run: df -h /
+
+  android:
+    name: Android (tests, lint, build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Room on the disk
+        # The build image brings its own SDK and NDK; the runner's copies only take space.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+      # Gradle, Maven, crates and Robolectric's Android runtimes, as on a developer's machine.
+      - uses: actions/cache@v6.1.0
+        with:
+          path: /var/tmp/shyspace-android-cache
+          key: android-${{ hashFiles('apps/android/gradle/libs.versions.toml', 'apps/android/gradle/wrapper/gradle-wrapper.properties', 'Cargo.lock') }}
+          restore-keys: android-
+      - name: Tests, lint and the debug build, in the build image
+        run: make -C apps/android check CONTAINER=docker
+      - name: Disk left
+        if: always()
+        run: df -h /

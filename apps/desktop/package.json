@@ -9,7 +9,7 @@
     "dev:demo": "scripts/dev-demo.sh",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests/app",
-    "lint": "biome check .",
+    "lint": "biome check . && node ../../tools/design-tokens/export.mjs --check",
     "test:ui": "playwright test",
     "test:ui:webkit": "scripts/test-ui-webkit.sh",
     "test:app": "node --test --test-concurrency=1 --test-timeout=120000 --test-force-exit 'tests/app/*.test.ts'",

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">shyspace</string>
+    <string name="back">Back</string>
+    <string name="send">Send</string>
+    <string name="message_placeholder">Message %1$s</string>
+    <string name="no_messages">No messages yet. Say hello.</string>
+    <string name="no_workspace">No workspaces on this phone yet.</string>
+    <string name="open_failed">Some workspaces couldn\'t open</string>
+    <string name="notes">Notes</string>
+    <string name="create_test_workspace">Create a test workspace</string>
+    <string name="workspace_name">Workspace name</string>
+    <string name="your_name">Your name</string>
+    <string name="bucket_endpoint">Bucket address</string>
+    <string name="bucket_region">Region</string>
+    <string name="bucket_name">Bucket</string>
+    <string name="bucket_access_key">Access key</string>
+    <string name="bucket_secret_key">Secret key</string>
+    <plurals name="unread_mentions">
+        <item quantity="one">%1$d mention</item>
+        <item quantity="other">%1$d mentions</item>
+    </plurals>
+</resources>

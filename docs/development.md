@@ -48,6 +48,20 @@ The CLI reads bucket settings from `SHY_S3_ENDPOINT`, `SHY_S3_BUCKET`, `SHY_S3_A
 
 Note: one identity can only be online once. Don't run the CLI and the app on the same data directory at the same time.
 
+## The Android app
+
+Everything builds in a container (`apps/android/Dockerfile`: JDK, Android SDK and NDK, Rust with the Android targets, cargo-ndk), so the host needs only Podman or Docker. From `apps/android`:
+
+- `make debug` builds the debug APK (`app/build/outputs/apk/debug/`); `make check` runs the unit tests, lint and the debug build; `make unit TESTS='*Channel*'` runs some tests; `make gradle ARGS='…'` runs any Gradle task.
+- Every artifact Gradle downloads is checked against its SHA-256 in `gradle/verification-metadata.xml`; after adding or updating a dependency, `make dependency-checksums` writes the file afresh from an empty cache of its own (read its diff; Gradle fetches some metadata only on an empty cache, so the file must never be generated from a warm one). Gradle tries Google's mirror of Maven Central before Maven Central, which rate-limits large downloads; Robolectric's Android runtime comes through Gradle too, so it's cached and checked, and Robolectric runs offline. The base image, the command-line tools and rustup-init are pinned by digest or checksum in the `Dockerfile`.
+- Downloads are shared by every worktree in `/var/tmp/shyspace-android-cache`; build output stays in the worktree (`target/android`, `app/build`).
+- Debug builds can create a test workspace, filled in with the local bucket as the emulator sees it (`http://10.0.2.2:9000`); on a phone, use the computer's address on the network. Phones are meant to join as another device of their person, so release builds can't create one.
+- The tests run the real core (built for the machine) on an in-memory bucket, through the same generated bindings as the app. There's no emulator in the container: screens are tested with Robolectric.
+- `make wrapper` regenerates the Gradle wrapper from a checked distribution; `debug.keystore` is a public key on purpose, so every build installs as an update. Because anyone can sign with it, anyone could install an "update" over a debug build and read its data: never keep a real workspace in a debug build.
+- `make device-test` runs the instrumented tests (`app/src/androidTest`, the Keystore and Android's file rules) on a phone adb can see: plugged in by USB with USB debugging on, or paired for wireless debugging. It waits up to two minutes for a phone offering adb (unlock it; a locked GrapheneOS phone drops USB data), updates the debug app and leaves it installed, with its data, and removes only the test app afterwards. The adb key is kept in the cache folder, so the phone asks once.
+
+The phone apps' colours and motion come from `apps/desktop/src/styles.css` through `tools/design-tokens/export.mjs`, which writes `ShyTokens.kt`. `pnpm lint` fails if it's out of date; run `node tools/design-tokens/export.mjs` after changing a colour token.
+
 ## A demo workspace
 
 `pnpm dev:demo` (in `apps/desktop`) builds a fresh workspace on the local bucket and opens the app in it as Ada, the admin. It has five more members (one an agent), public channels with threads, reactions, mentions, tables, callouts and code, a private channel, DMs, notes, pages, statuses, a sidebar section, unread messages and two reminders (one due). Building it takes about a minute. Each run replaces the last; it refuses to delete a folder that isn't an earlier demo.
