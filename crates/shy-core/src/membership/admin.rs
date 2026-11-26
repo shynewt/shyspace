@@ -143,7 +143,8 @@ impl Workspace {
             }
 
             let from_epoch = state.mls.epoch()?;
-            let (commit, welcome) = state.mls.add_member(key_package)?;
+            let binding = commit::lists_hash(&state.mls.epoch_key()?, from_epoch, &[], &[])?;
+            let (commit, welcome) = state.mls.add_member(key_package, &binding)?;
             let delivery = Delivery {
                 welcome,
                 sealed_grant: None,
@@ -393,7 +394,8 @@ impl Workspace {
                 last_seq: state.store.last_seq(&member)?,
             };
             let from_epoch = state.mls.epoch()?;
-            let commit = state.mls.remove_member(&member)?;
+            let binding = commit::lists_hash(&state.mls.epoch_key()?, from_epoch, &[frozen], &[])?;
+            let commit = state.mls.remove_member(&member, &binding)?;
             let views_changed =
                 state
                     .store

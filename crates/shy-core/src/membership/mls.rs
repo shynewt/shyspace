@@ -252,9 +252,13 @@ impl Mls {
 
     /// Stages adding a verified joiner. Returns `(commit, welcome)`; the
     /// caller saves the commit durably, then calls `merge_pending_commit`.
-    pub fn add_member(&mut self, key_package: KeyPackage) -> Result<(Vec<u8>, Vec<u8>)> {
+    /// `binding` goes in the commit's authenticated data (see
+    /// [`super::commit::lists_hash`]).
+    pub fn add_member(&mut self, key_package: KeyPackage, binding: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let group = self.group.as_mut().context("no group")?;
-        let (commit, welcome, _) = group.add_members(&self.provider, &self.signer, &[key_package])?;
+        group.set_aad(binding.to_vec());
+        let added = group.add_members(&self.provider, &self.signer, &[key_package]);
+        let (commit, welcome, _) = added.inspect_err(|_| group.set_aad(Vec::new()))?;
         Ok((commit.to_bytes()?, welcome.to_bytes()?))
     }
 
@@ -283,7 +287,8 @@ impl Mls {
         Ok(self.members()?.contains(identity))
     }
 
-    pub fn remove_member(&mut self, member: &PublicKey) -> Result<Vec<u8>> {
+    /// `binding` goes in the commit's authenticated data, as for [`Self::add_member`].
+    pub fn remove_member(&mut self, member: &PublicKey, binding: &[u8]) -> Result<Vec<u8>> {
         let group = self.group.as_ref().context("no group")?;
         let leaf = group
             .members()
@@ -291,8 +296,20 @@ impl Mls {
             .context("not a member")?
             .index;
         let group = self.group.as_mut().context("no group")?;
-        let (commit, _, _) = group.remove_members(&self.provider, &self.signer, &[leaf])?;
+        group.set_aad(binding.to_vec());
+        let removed = group.remove_members(&self.provider, &self.signer, &[leaf]);
+        let (commit, _, _) = removed.inspect_err(|_| group.set_aad(Vec::new()))?;
         Ok(commit.to_bytes()?)
+    }
+
+    /// A commit's authenticated data, read without decrypting or staging it:
+    /// staging a commit uses it up, so this is checked first. It is in clear
+    /// on the encrypted commit, and MLS refuses the commit if it was changed.
+    pub fn commit_binding(commit_bytes: &[u8]) -> Result<Vec<u8>> {
+        let ProtocolMessage::PrivateMessage(message) = decode_protocol_message(commit_bytes)? else {
+            bail!("commits are always encrypted");
+        };
+        Ok(message.aad().to_vec())
     }
 
     /// Applies a commit published by the admin. Commits from anyone else are
@@ -376,7 +393,7 @@ mod tests {
         let (key_package, binding) = joiner.join_request();
         let (claimed, key_package) = admin.mls.verify_key_package(&key_package, &binding).unwrap();
         assert_eq!(claimed, joiner.id());
-        let (commit, welcome) = admin.mls.add_member(key_package).unwrap();
+        let (commit, welcome) = admin.mls.add_member(key_package, &[]).unwrap();
         admin.mls.merge_pending_commit().unwrap();
         let admin_key = admin.mls.signer_public().to_vec();
         joiner.mls.join(&welcome, GROUP, &admin.id(), &admin_key).unwrap();
@@ -396,12 +413,31 @@ mod tests {
         let sealed = admin.mls.seal_for_members(b"history").unwrap();
         assert_eq!(bob.mls.open_from_admin(&sealed, &admin.id()).unwrap(), b"history");
 
-        let removal = admin.mls.remove_member(&bob.id()).unwrap();
+        let removal = admin.mls.remove_member(&bob.id(), &[]).unwrap();
         admin.mls.merge_pending_commit().unwrap();
         let outcome = bob.mls.process_commit(&removal, &admin.id()).unwrap();
         assert!(outcome.removed_self);
         assert!(!bob.mls.is_active());
         assert_eq!(admin.mls.members().unwrap(), vec![admin.id()]);
+    }
+
+    #[test]
+    fn a_commits_binding_reads_back_without_using_the_commit_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut admin = TestMember::new(dir.path(), "admin");
+        let mut bob = TestMember::new(dir.path(), "bob");
+        let carol = TestMember::new(dir.path(), "carol");
+        admin.mls.create_group(GROUP).unwrap();
+        add(&mut admin, &mut bob);
+        let (key_package, binding) = carol.join_request();
+        let (_, key_package) = admin.mls.verify_key_package(&key_package, &binding).unwrap();
+        let (commit, _) = admin.mls.add_member(key_package, b"the lists").unwrap();
+        admin.mls.merge_pending_commit().unwrap();
+
+        assert_eq!(Mls::commit_binding(&commit).unwrap(), b"the lists");
+        bob.mls.process_commit(&commit, &admin.id()).unwrap();
+        assert_eq!(bob.mls.epoch().unwrap(), 2);
+        assert!(Mls::commit_binding(b"junk").is_err());
     }
 
     #[test]
@@ -433,7 +469,7 @@ mod tests {
 
         let (key_package, binding) = carol.join_request();
         let (_, key_package) = bob.mls.verify_key_package(&key_package, &binding).unwrap();
-        let (rogue_commit, _) = bob.mls.add_member(key_package).unwrap();
+        let (rogue_commit, _) = bob.mls.add_member(key_package, &[]).unwrap();
         let error = dave.mls.process_commit(&rogue_commit, &admin.id()).err().unwrap();
         assert!(error.to_string().contains("admin"), "{error}");
     }
@@ -473,7 +509,7 @@ mod tests {
         impostor.mls.create_group(GROUP).unwrap();
         let (key_package, binding) = joiner.join_request();
         let (_, key_package) = impostor.mls.verify_key_package(&key_package, &binding).unwrap();
-        let (_, welcome) = impostor.mls.add_member(key_package).unwrap();
+        let (_, welcome) = impostor.mls.add_member(key_package, &[]).unwrap();
         impostor.mls.merge_pending_commit().unwrap();
         let pinned_key = real_admin.mls.signer_public().to_vec();
         assert!(

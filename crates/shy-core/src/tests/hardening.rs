@@ -19,7 +19,7 @@ use object_store::{
 use super::support::*;
 use crate::{
     DataDir, KeyStorage, Networking, Workspace, crypto,
-    membership::commit::{self, FrozenAuthor},
+    membership::commit::FrozenAuthor,
     ops::{Envelope, Op, OpBody, now_ms},
     transport::bucket::{Bucket, parse_segment_name, segment_name_for},
     views::PresenceState,
@@ -206,7 +206,7 @@ async fn restart_forgets_a_staged_commit_that_was_never_recorded() {
             .mls
             .verify_key_package(&joiner.key_package().unwrap(), &binding.to_bytes())
             .unwrap();
-        state.mls.add_member(key_package).unwrap(); // staged, then "crash"
+        state.mls.add_member(key_package, &[]).unwrap(); // staged, then "crash"
     }
     drop(admin);
     let reopened = Workspace::open_with(&data_dir(&dir), connector(&bucket), Networking::Offline)
@@ -2079,25 +2079,17 @@ async fn a_commit_freezing_a_log_past_any_stored_number_is_still_followed() {
     let (root, bucket, admin, bob) = admin_and_bob().await;
     let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
     sync_all(&[&admin, &bob, &carol]).await;
-    let from_epoch = carol.state().mls.epoch().unwrap();
-    admin.remove_member(&bob.my_id()).await.unwrap();
-    let signed = bucket.commit(from_epoch).await.unwrap().unwrap();
-    let removal = commit::verify(&signed, from_epoch, &admin.me()).unwrap();
     let frozen_past_any_number = vec![FrozenAuthor {
         member: bob.me(),
         last_seq: u64::MAX,
     }];
-    let resigned = commit::sign(
-        &admin.inner.identity,
-        from_epoch,
-        removal.commit,
-        frozen_past_any_number,
-    )
-    .unwrap();
-    bucket.put_commit(from_epoch, resigned).await.unwrap();
+    let from_epoch = carol.state().mls.epoch().unwrap();
+    let binding = lists_binding(&admin, from_epoch, &frozen_past_any_number);
+    let (_, removal) = stage_removal_unchecked(&admin, &bob.me(), &binding);
+    let signed = wrap_as_admin(&admin, from_epoch, removal, frozen_past_any_number);
+    bucket.put_commit(from_epoch, signed).await.unwrap();
     let general = channel_id(&admin, "general");
     admin.send_message(&general, "after the removal", None).unwrap();
-    // Not a full sync, which would put the original commit back.
     admin.push().await.unwrap();
 
     carol.sync().await;
@@ -5362,4 +5354,125 @@ async fn a_member_mentioning_you_in_many_pages_cant_fill_the_inbox() {
     };
     assert_eq!(from(&bob), 50, "only Bob's newest");
     assert_eq!(from(&carol), 1, "Carol's stays");
+}
+
+/// Admin, Bob, Carol and Dave, in sync.
+async fn four_members() -> (
+    tempfile::TempDir,
+    Bucket,
+    Workspace,
+    Workspace,
+    Workspace,
+    Workspace,
+) {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    (root, bucket, admin, bob, carol, dave)
+}
+
+fn epoch_of(member: &Workspace) -> u64 {
+    member.state().mls.epoch().unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_wrappers_around_one_commit_cannot_split_members() {
+    let (_root, bucket, admin, bob, carol, dave) = four_members().await;
+    let freeze = frozen_at_last_seq(&admin, &carol.me());
+    let from_epoch = epoch_of(&admin);
+    let binding = lists_binding(&admin, from_epoch, &[freeze]);
+    let (_, removal) = stage_removal_unchecked(&admin, &carol.me(), &binding);
+    let hiding_the_freeze = wrap_as_admin(&admin, from_epoch, removal.clone(), Vec::new());
+    let genuine = wrap_as_admin(&admin, from_epoch, removal, vec![freeze]);
+
+    // Bob meets the wrapper that hides the freeze: it is junk to him.
+    bucket.put_commit(from_epoch, hiding_the_freeze).await.unwrap();
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), from_epoch);
+    assert!(bob.status().error.unwrap().contains("invalid commit"));
+
+    // The genuine one replaces it. Dave meets only it; Bob meets it second
+    // and still follows, as the junk one used nothing up.
+    bucket.put_commit(from_epoch, genuine).await.unwrap();
+    dave.sync().await;
+    bob.sync().await;
+    for member in [&bob, &dave] {
+        assert_eq!(epoch_of(member), from_epoch + 1);
+        assert_eq!(
+            member.state().store.frozen_last_seq(&carol.me()).unwrap(),
+            Some(freeze.last_seq)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wrapper_with_a_changed_frozen_list_is_ignored() {
+    let (_root, bucket, admin, bob, carol, dave) = four_members().await;
+    let freeze = frozen_at_last_seq(&admin, &carol.me());
+    let from_epoch = epoch_of(&admin);
+    let binding = lists_binding(&admin, from_epoch, &[freeze]);
+    let (_, removal) = stage_removal_unchecked(&admin, &carol.me(), &binding);
+    // Also freezing Bob, who stays, would void everything he writes next.
+    let freezing_bob_too = vec![
+        freeze,
+        FrozenAuthor {
+            member: bob.me(),
+            last_seq: 0,
+        },
+    ];
+    bucket
+        .put_commit(
+            from_epoch,
+            wrap_as_admin(&admin, from_epoch, removal, freezing_bob_too),
+        )
+        .await
+        .unwrap();
+
+    bob.sync().await;
+    dave.sync().await;
+
+    for member in [&bob, &dave] {
+        assert_eq!(epoch_of(member), from_epoch);
+        assert!(member.status().error.unwrap().contains("invalid commit"));
+        assert_eq!(member.state().store.frozen_last_seq(&bob.me()).unwrap(), None);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unbound_commit_is_followed_only_until_a_bound_one() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = create_admin(&root.path().join("ada"), &bucket).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    // Bob joins last, so he has followed no commit yet.
+    let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    // A commit from an admin's app that binds nothing (0.1.4) is followed.
+    let carol_freeze = frozen_at_last_seq(&admin, &carol.me());
+    let (first, removal) = stage_removal_unchecked(&admin, &carol.me(), &[]);
+    bucket
+        .put_commit(first, wrap_as_admin(&admin, first, removal, vec![carol_freeze]))
+        .await
+        .unwrap();
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), first + 1);
+
+    // Once Bob has followed a bound commit, an unbound one is junk.
+    let erin = join(&admin, &root.path().join("erin"), &bucket, "Erin", false).await;
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), epoch_of(&admin));
+    let dave_freeze = frozen_at_last_seq(&admin, &dave.me());
+    let (unbound, removal) = stage_removal_unchecked(&admin, &dave.me(), &[]);
+    bucket
+        .put_commit(
+            unbound,
+            wrap_as_admin(&admin, unbound, removal, vec![dave_freeze]),
+        )
+        .await
+        .unwrap();
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), unbound);
+    drop(erin);
 }

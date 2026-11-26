@@ -1,9 +1,12 @@
 //! Members apply the admin's commits, in epoch order, as they appear.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 
-use super::commit;
+use super::{commit, mls::Mls};
 use crate::{views::Change, workspace::Workspace};
+
+/// Set once this device has followed a commit that binds its lists.
+const BOUND_COMMIT_FOLLOWED_META: &str = "bound_commit_followed";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommitOutcome {
@@ -39,6 +42,9 @@ impl Workspace {
         let admin = self.inner.config.admin;
         let verified = commit::verify(bytes, epoch, &admin)
             .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
+        let is_bound = self
+            .check_binding(epoch, &verified)
+            .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
         // Frozen logs first: if undoing a removed member's late ops fails,
         // nothing has moved on and the whole commit is retried.
         let is_rebuilt = {
@@ -59,6 +65,9 @@ impl Workspace {
             let mut state = self.state();
             let outcome = state.mls.process_commit(&verified.commit, &admin)?;
             state.store.put_commit_record(epoch, bytes)?;
+            if is_bound {
+                state.store.set_meta(BOUND_COMMIT_FOLLOWED_META, &[1])?;
+            }
             state.record_epoch()?;
             outcome
         };
@@ -70,6 +79,26 @@ impl Workspace {
         }
         self.emit(Change::Members);
         Ok(CommitOutcome::MovedOn)
+    }
+
+    /// Checks the commit's authenticated data against the wrapper's lists,
+    /// before MLS sees the commit: staging it would use it up, and the right
+    /// wrapper may come later. Returns whether the commit was bound. One that
+    /// isn't is only taken from an admin's app that never binds (0.1.4),
+    /// until a bound one has been followed.
+    fn check_binding(&self, epoch: u64, verified: &commit::VerifiedCommit) -> Result<bool> {
+        let binding = Mls::commit_binding(&verified.commit)?;
+        let state = self.state();
+        if binding.is_empty() {
+            ensure!(
+                state.store.meta(BOUND_COMMIT_FOLLOWED_META)?.is_none(),
+                "the commit doesn't bind its lists, as the admin's commits now do"
+            );
+            return Ok(false);
+        }
+        let expected = commit::lists_hash(&state.mls.epoch_key()?, epoch, &verified.frozen, &[])?;
+        ensure!(binding == expected, "the commit's lists don't match the commit");
+        Ok(true)
     }
 
     /// Re-uploads any admin commit we know of that is missing or altered in

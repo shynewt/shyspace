@@ -8,7 +8,10 @@ use tokio::task::JoinHandle;
 
 use crate::{
     BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace, WorkspaceOptions, crypto,
-    membership::invite::{Invite, JoinMailbox},
+    membership::{
+        commit::{self, FrozenAuthor},
+        invite::{Invite, JoinMailbox},
+    },
     ops::{Envelope, Op, OpBody, now_ms},
     pages::{self, CLIENT_ID_NONCE_BYTES, Edit},
     private::{
@@ -405,5 +408,46 @@ pub fn page_update(author: &Workspace, page: &str, state: Option<&[u8]>, edit: E
         page: page.to_owned(),
         nonce: NONCE,
         update: page_update_bytes(author, page, state, edit),
+    }
+}
+
+/// What a dishonest admin's app could do, skipping its own checks: stage a
+/// removal with any authenticated data, then sign any wrapper around it.
+/// The admin merges the staged commit, as it would after saving it.
+pub fn stage_removal_unchecked(
+    admin: &Workspace,
+    member: &iroh::PublicKey,
+    binding: &[u8],
+) -> (u64, Vec<u8>) {
+    let mut state = admin.state();
+    let from_epoch = state.mls.epoch().unwrap();
+    let commit = state.mls.remove_member(member, binding).unwrap();
+    state.mls.merge_pending_commit().unwrap();
+    state.record_epoch().unwrap();
+    (from_epoch, commit)
+}
+
+/// The authenticated data an honest admin's app gives a commit with these lists.
+pub fn lists_binding(admin: &Workspace, from_epoch: u64, frozen: &[FrozenAuthor]) -> Vec<u8> {
+    let key = admin.state().store.epoch_key(from_epoch).unwrap().unwrap();
+    commit::lists_hash(&key, from_epoch, frozen, &[])
+        .unwrap()
+        .to_vec()
+}
+
+/// The admin's signature around any MLS commit and frozen list.
+pub fn wrap_as_admin(
+    admin: &Workspace,
+    from_epoch: u64,
+    commit: Vec<u8>,
+    frozen: Vec<FrozenAuthor>,
+) -> Vec<u8> {
+    commit::sign(&admin.inner.identity, from_epoch, commit, frozen).unwrap()
+}
+
+pub fn frozen_at_last_seq(admin: &Workspace, member: &iroh::PublicKey) -> FrozenAuthor {
+    FrozenAuthor {
+        member: *member,
+        last_seq: admin.state().store.last_seq(member).unwrap(),
     }
 }
