@@ -22,7 +22,7 @@ use crate::{
     BucketConfig, DataDir, JoinCancel, Profile, Workspace, WorkspaceOptions,
     config::WorkspaceConfig,
     device_settings::{DeviceSettings, DeviceSettingsFile},
-    keys::KeyStorage,
+    keys::{HostKeyStore, KeyStorage},
     membership::{invite::Invite, recovery::kit_workspace_id},
     ops::{new_random_id, now_ms},
     sync::Cadence,
@@ -42,13 +42,28 @@ const CLOSING_WAIT: Duration = Duration::from_secs(10);
 const CLOSING_WAIT: Duration = Duration::from_millis(500);
 
 /// Where device keys live.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum DeviceKeys {
     /// The OS keychain, one entry per workspace folder.
     Keychain,
     /// One file per workspace in this folder, for servers without a
     /// keychain. Keep it outside the data folder, or it protects nothing.
     Files(PathBuf),
+    /// The hosting app's keystore, one account per workspace
+    /// (`device-key-<workspace id>`). A store serves one data folder only:
+    /// two folders on one store would share each workspace's key.
+    Host(Arc<dyn HostKeyStore>),
+}
+
+/// Never shows what a store holds.
+impl std::fmt::Debug for DeviceKeys {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Keychain => formatter.write_str("Keychain"),
+            Self::Files(folder) => formatter.debug_tuple("Files").field(folder).finish(),
+            Self::Host(_) => formatter.write_str("Host"),
+        }
+    }
 }
 
 /// What `open_all` opened, and what failed to open, with why.
@@ -193,6 +208,10 @@ impl Workspaces {
         let keys = match &self.keys {
             DeviceKeys::Keychain => KeyStorage::Keychain,
             DeviceKeys::Files(folder) => KeyStorage::File(folder.join(format!("{workspace_id}.key"))),
+            DeviceKeys::Host(store) => KeyStorage::Host {
+                store: store.clone(),
+                account: format!("device-key-{workspace_id}"),
+            },
         };
         Ok(DataDir::new(self.layout.folder_of(workspace_id), keys))
     }

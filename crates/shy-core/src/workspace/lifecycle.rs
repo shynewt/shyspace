@@ -141,7 +141,22 @@ impl DataDir {
 
     async fn open_local(&self) -> Result<Local> {
         let lock = self.lock()?;
-        let device_key = self.keys.load_or_create(&self.path).await?;
+        // A new key for a folder that already has its database would make
+        // that data unreadable for good, so only a new folder gets one.
+        let has_data = self
+            .store_path()
+            .try_exists()
+            .with_context(|| format!("checking {} for a workspace's data", self.path.display()))?;
+        let device_key = if has_data {
+            self.keys.load(&self.path).await.with_context(|| {
+                format!(
+                    "this workspace's data is in {}, but its key is missing",
+                    self.path.display()
+                )
+            })?
+        } else {
+            self.keys.load_or_create(&self.path).await?
+        };
         let store = Store::open(&self.store_path(), &device_key.database_key(STORE_FILE))?;
         let identity = identity::load_or_create(&store)?;
         Ok(Local {

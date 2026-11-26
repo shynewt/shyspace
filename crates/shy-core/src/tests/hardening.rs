@@ -552,12 +552,26 @@ async fn the_data_directory_alone_reveals_nothing() {
             .is_err()
     );
 
-    let wrong_key = DataDir::new(&dir, KeyStorage::File(root.path().join("other.key")));
+    let other_key = root.path().join("other.key");
+    std::fs::write(&other_key, [9u8; 32]).unwrap();
+    let wrong_key = DataDir::new(&dir, KeyStorage::File(other_key));
     let error = Workspace::open_with(&wrong_key, connector(&memory_bucket()), Networking::Offline)
         .await
         .err()
         .unwrap();
     assert!(format!("{error:#}").contains("can't be decrypted"), "{error:#}");
+
+    let missing_key = root.path().join("missing.key");
+    let no_key = DataDir::new(&dir, KeyStorage::File(missing_key.clone()));
+    let error = Workspace::open_with(&no_key, connector(&memory_bucket()), Networking::Offline)
+        .await
+        .err()
+        .unwrap();
+    assert!(format!("{error:#}").contains("no device key"), "{error:#}");
+    assert!(
+        !missing_key.exists(),
+        "no new key is made for data that's already there"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

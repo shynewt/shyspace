@@ -7,6 +7,7 @@ use super::support::*;
 use crate::{
     Networking, Profile, Workspace, WorkspaceOptions,
     huddle::media::{DeviceChoice, fake::FakeMedia},
+    keys::HostKeyStore,
     workspaces::{AppIcon, DeviceKeys, MoveStep, Workspaces},
 };
 
@@ -200,6 +201,135 @@ async fn leaving_closes_the_workspace_and_deletes_its_folder_and_key() {
     assert!(!device.root.path().join(format!("keys/{second_id}.key")).exists());
     assert!(folder.path.exists(), "the first is untouched");
     assert_eq!(names(&workspaces), ["Acme"]);
+}
+
+#[derive(Default)]
+struct AppKeystore {
+    secrets: std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+    /// Answers "no such key" for keys it holds, breaking the contract, as a
+    /// store that can't read before the phone is first unlocked might.
+    hides_keys: std::sync::atomic::AtomicBool,
+}
+
+impl AppKeystore {
+    fn accounts(&self) -> Vec<String> {
+        self.secrets.lock().unwrap().keys().cloned().collect()
+    }
+
+    fn secret(&self, account: &str) -> Option<Vec<u8>> {
+        self.secrets.lock().unwrap().get(account).cloned()
+    }
+}
+
+impl HostKeyStore for AppKeystore {
+    fn read(&self, account: &str) -> anyhow::Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        if self.hides_keys.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(None);
+        }
+        Ok(self.secret(account).map(zeroize::Zeroizing::new))
+    }
+
+    /// Breaks the contract too: it overwrites, so only the core's own
+    /// care keeps a key from being replaced.
+    fn create(&self, account: &str, secret: &[u8]) -> anyhow::Result<()> {
+        self.secrets
+            .lock()
+            .unwrap()
+            .insert(account.to_owned(), secret.to_vec());
+        Ok(())
+    }
+
+    fn delete(&self, account: &str) -> anyhow::Result<()> {
+        self.secrets.lock().unwrap().remove(account);
+        Ok(())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_keystore_that_loses_sight_of_a_key_never_gets_a_new_one_for_existing_data() {
+    let device = Device::new();
+    let store = Arc::new(AppKeystore::default());
+    let workspaces_in_app = || {
+        Workspaces::with_connector(
+            device.root.path().join("app"),
+            DeviceKeys::Host(store.clone()),
+            connector(&device.bucket),
+        )
+    };
+    let workspaces = workspaces_in_app();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap();
+    let account = format!("device-key-{}", acme.workspace_id());
+    drop(acme);
+    for workspace in workspaces.close_all() {
+        workspace.shutdown().await.unwrap();
+    }
+    drop(workspaces);
+    let real_key = store.secret(&account).unwrap();
+
+    store.hides_keys.store(true, std::sync::atomic::Ordering::SeqCst);
+    let opened = workspaces_in_app()
+        .open_all(|| Networking::Offline.into())
+        .await
+        .unwrap();
+
+    assert!(opened.workspaces.is_empty());
+    assert_eq!(opened.failed.len(), 1);
+    assert!(
+        format!("{:#}", opened.failed[0].1).contains("no device key"),
+        "{:#}",
+        opened.failed[0].1
+    );
+    assert_eq!(
+        store.secret(&account).unwrap(),
+        real_key,
+        "the real key is untouched"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_app_keystore_holds_one_key_per_workspace_until_it_is_left() {
+    let device = Device::new();
+    let store = Arc::new(AppKeystore::default());
+    let workspaces_in_app = || {
+        Workspaces::with_connector(
+            device.root.path().join("app"),
+            DeviceKeys::Host(store.clone()),
+            connector(&device.bucket),
+        )
+    };
+    let workspaces = workspaces_in_app();
+    let acme = workspaces
+        .create("Acme", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap();
+    let beta = workspaces
+        .create("Beta", profile(), test_bucket_config(), Networking::Offline)
+        .await
+        .unwrap();
+    let (acme_id, beta_id) = (acme.workspace_id().to_owned(), beta.workspace_id().to_owned());
+    drop((acme, beta));
+    let mut expected = vec![format!("device-key-{acme_id}"), format!("device-key-{beta_id}")];
+    expected.sort();
+    assert_eq!(store.accounts(), expected);
+    for workspace in workspaces.close_all() {
+        workspace.shutdown().await.unwrap();
+    }
+    drop(workspaces);
+
+    let reopened = workspaces_in_app();
+    let opened = reopened.open_all(|| Networking::Offline.into()).await.unwrap();
+    assert!(opened.failed.is_empty(), "{:?}", opened.failed);
+    assert_eq!(opened.workspaces.len(), 2);
+    drop(opened);
+    for workspace in reopened.close_all() {
+        workspace.shutdown().await.unwrap();
+    }
+    reopened.leave(&acme_id).await.unwrap();
+
+    assert_eq!(store.accounts(), [format!("device-key-{beta_id}")]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

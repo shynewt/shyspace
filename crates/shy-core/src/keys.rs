@@ -1,11 +1,14 @@
 //! The device key: one random secret per data directory, kept outside it, in
-//! the OS keychain or a key file the user chooses. Every local database is
-//! encrypted with a key derived from it, so the data directory alone reveals
-//! nothing.
+//! the OS keychain, a key file the user chooses, or a store the hosting app
+//! provides. Every local database is encrypted with a key derived from it, so
+//! the data directory alone reveals nothing.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use zeroize::Zeroizing;
 
 use crate::config::write_private_file;
@@ -13,14 +16,51 @@ use crate::config::write_private_file;
 const KEYCHAIN_SERVICE: &str = "shyspace";
 const KEY_LEN: usize = 32;
 
+/// A secret store run by the app hosting the core, such as the iOS Keychain
+/// or a file sealed with an Android Keystore key. Calls may block.
+///
+/// The core relies on this contract; breaking it can make a workspace's data
+/// unreadable for good:
+/// - `read` answers `None` only when the account has no secret. Anything else
+///   (locked before first unlock, access denied, can't decrypt) is an error.
+/// - `create` refuses an account that already has a secret, atomically, and
+///   returns only once the secret is stored durably.
+/// - Secrets are never logged, cached outside the store, or put in error
+///   text; errors are logged.
+pub trait HostKeyStore: Send + Sync {
+    /// The secret saved under `account`, or `None` if there is none.
+    fn read(&self, account: &str) -> Result<Option<Zeroizing<Vec<u8>>>>;
+    /// Saves a secret under an `account` that has none.
+    fn create(&self, account: &str, secret: &[u8]) -> Result<()>;
+    /// Deletes the secret under `account`; succeeds if there was none.
+    fn delete(&self, account: &str) -> Result<()>;
+}
+
 /// Where the device key lives.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum KeyStorage {
     /// The OS keychain (Secret Service, macOS Keychain, Windows Credential Manager).
     Keychain,
     /// A file only its owner can read. For servers without a keychain; keep it
     /// outside the data directory, or it protects nothing.
     File(PathBuf),
+    /// The hosting app's store, under one account per data directory.
+    Host {
+        store: Arc<dyn HostKeyStore>,
+        account: String,
+    },
+}
+
+/// Shows no more than where the key lives, so a `{:?}` never reaches a
+/// store that might print what it holds.
+impl std::fmt::Debug for KeyStorage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Keychain => formatter.write_str("Keychain"),
+            Self::File(path) => formatter.debug_tuple("File").field(path).finish(),
+            Self::Host { account, .. } => formatter.debug_struct("Host").field("account", account).finish(),
+        }
+    }
 }
 
 pub struct DeviceKey(Zeroizing<[u8; KEY_LEN]>);
@@ -63,6 +103,13 @@ impl KeyStorage {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(MissingKey.into()),
                 Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
             },
+            Self::Host { store, account } => {
+                let (store, account) = (store.clone(), account.clone());
+                tokio::task::spawn_blocking(move || store.read(&account))
+                    .await?
+                    .context("reading the device key from the app's keystore")?
+                    .ok_or(MissingKey)?
+            }
         };
         let key: [u8; KEY_LEN] = bytes
             .as_slice()
@@ -87,6 +134,12 @@ impl KeyStorage {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(error) => Err(error).with_context(|| format!("deleting {}", path.display())),
             },
+            Self::Host { store, account } => {
+                let (store, account) = (store.clone(), account.clone());
+                tokio::task::spawn_blocking(move || store.delete(&account))
+                    .await?
+                    .context("deleting the device key from the app's keystore")
+            }
         }
     }
 
@@ -110,6 +163,25 @@ impl KeyStorage {
                     bail!("{} already exists; choose a new key file", path.display());
                 }
                 write_private_file(path, key.as_slice())?;
+            }
+            Self::Host { store, account } => {
+                let (store, account) = (store.clone(), account.clone());
+                tokio::task::spawn_blocking(move || {
+                    if store.read(&account)?.is_some() {
+                        bail!("a device key for this data directory already exists in the app's keystore");
+                    }
+                    store.create(&account, key.as_slice())?;
+                    // A store that reports success without storing would lose
+                    // the key at the next start, with the data written under it.
+                    let stored = store.read(&account)?;
+                    ensure!(
+                        stored.as_deref().map(Vec::as_slice) == Some(key.as_slice()),
+                        "the app's keystore didn't keep the device key it was given"
+                    );
+                    Ok(())
+                })
+                .await?
+                .context("saving the device key to the app's keystore")?;
             }
         }
         Ok(())
@@ -188,6 +260,164 @@ mod tests {
         let loaded = storage.load_or_create(dir.path()).await.unwrap();
         assert_eq!(*created.database_key("shy"), *loaded.database_key("shy"));
         assert_ne!(*created.database_key("shy"), *created.database_key("mls"));
+    }
+
+    #[derive(Default, Clone, Copy, PartialEq)]
+    enum Behaviour {
+        #[default]
+        Honest,
+        Locked,
+        /// Reports a save as done without keeping it.
+        Forgetful,
+        Panicking,
+    }
+
+    #[derive(Default)]
+    struct MemoryStore {
+        secrets: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+        behaviour: Behaviour,
+    }
+
+    impl MemoryStore {
+        fn behaving(behaviour: Behaviour) -> Self {
+            Self {
+                behaviour,
+                ..Self::default()
+            }
+        }
+
+        fn put(&self, account: &str, secret: &[u8]) {
+            self.secrets
+                .lock()
+                .unwrap()
+                .insert(account.to_owned(), secret.to_vec());
+        }
+    }
+
+    impl HostKeyStore for MemoryStore {
+        fn read(&self, account: &str) -> Result<Option<Zeroizing<Vec<u8>>>> {
+            match self.behaviour {
+                Behaviour::Locked => bail!("the keystore is locked"),
+                Behaviour::Panicking => panic!("the keystore crashed"),
+                Behaviour::Honest | Behaviour::Forgetful => Ok(self
+                    .secrets
+                    .lock()
+                    .unwrap()
+                    .get(account)
+                    .cloned()
+                    .map(Zeroizing::new)),
+            }
+        }
+
+        fn create(&self, account: &str, secret: &[u8]) -> Result<()> {
+            if self.behaviour == Behaviour::Forgetful {
+                return Ok(());
+            }
+            let mut secrets = self.secrets.lock().unwrap();
+            ensure!(!secrets.contains_key(account), "{account} already has a secret");
+            secrets.insert(account.to_owned(), secret.to_vec());
+            Ok(())
+        }
+
+        fn delete(&self, account: &str) -> Result<()> {
+            self.secrets.lock().unwrap().remove(account);
+            Ok(())
+        }
+    }
+
+    fn host_storage(store: &Arc<MemoryStore>) -> KeyStorage {
+        KeyStorage::Host {
+            store: store.clone(),
+            account: "device-key-abc".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn host_keys_are_created_once_then_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::default());
+        let storage = host_storage(&store);
+        assert!(storage.load(dir.path()).await.is_err());
+        let created = storage.load_or_create(dir.path()).await.unwrap();
+        let loaded = storage.load_or_create(dir.path()).await.unwrap();
+        assert_eq!(*created.database_key("shy"), *loaded.database_key("shy"));
+        assert_eq!(store.secrets.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_host_key_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::default());
+        let storage = host_storage(&store);
+        let first = storage.load_or_create(dir.path()).await.unwrap();
+        let other = DeviceKey::from_bytes([7; KEY_LEN]);
+        assert!(storage.save(dir.path(), &other).await.is_err());
+        let loaded = storage.load(dir.path()).await.unwrap();
+        assert_eq!(*first.database_key("shy"), *loaded.database_key("shy"));
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_host_key_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::default());
+        let storage = host_storage(&store);
+        storage.load_or_create(dir.path()).await.unwrap();
+        storage.forget(dir.path()).await.unwrap();
+        assert!(store.secrets.lock().unwrap().is_empty());
+        storage.forget(dir.path()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_host_key_is_refused_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::default());
+        store.put("device-key-abc", b"too short");
+        let storage = host_storage(&store);
+        assert!(storage.load_or_create(dir.path()).await.is_err());
+        assert_eq!(
+            store.secrets.lock().unwrap().get("device-key-abc").unwrap(),
+            b"too short"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_host_store_is_an_error_not_a_new_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::behaving(Behaviour::Locked));
+        let error = host_storage(&store)
+            .load_or_create(dir.path())
+            .await
+            .err()
+            .unwrap();
+        assert!(format!("{error:#}").contains("the keystore is locked"));
+        assert!(store.secrets.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_host_store_that_doesnt_keep_the_key_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::behaving(Behaviour::Forgetful));
+        let error = host_storage(&store)
+            .load_or_create(dir.path())
+            .await
+            .err()
+            .unwrap();
+        assert!(format!("{error:#}").contains("didn't keep the device key"));
+    }
+
+    #[tokio::test]
+    async fn a_crashing_host_store_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::behaving(Behaviour::Panicking));
+        assert!(host_storage(&store).load_or_create(dir.path()).await.is_err());
+    }
+
+    #[test]
+    fn debug_output_names_the_account_and_nothing_the_store_holds() {
+        let store = Arc::new(MemoryStore::default());
+        store.put("device-key-abc", b"top secret bytes");
+        let shown = format!("{:?}", host_storage(&store));
+        assert_eq!(shown, r#"Host { account: "device-key-abc" }"#);
     }
 
     #[test]

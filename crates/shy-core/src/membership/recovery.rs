@@ -427,7 +427,10 @@ impl Workspace {
 
     /// The key goes first: its keychain slot is named after the folder.
     async fn forget_restored_files(data: &DataDir) {
-        let _ = data.keys.forget(&data.path).await;
+        // A key left behind stops the next restore here at "already exists".
+        if let Err(error) = data.keys.forget(&data.path).await {
+            warn!("couldn't delete a failed restore's device key: {error:#}");
+        }
         let _ = std::fs::remove_dir_all(&data.path);
     }
 }
