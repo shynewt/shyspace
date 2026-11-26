@@ -239,17 +239,54 @@ fn read_keychain(account: &str) -> Result<Zeroizing<Vec<u8>>> {
 
 fn write_keychain(account: &str, secret: &[u8]) -> Result<()> {
     let entry = keychain_entry(account)?;
-    if entry.get_secret().is_ok() {
-        bail!("a device key for this data directory already exists in the keychain");
+    write_if_absent(|| entry.get_secret(), || entry.set_secret(secret))
+}
+
+/// Writes only when the keychain says there's no entry: any other answer to
+/// the read (locked, denied) might hide a key that writing would replace.
+fn write_if_absent(
+    read: impl FnOnce() -> keyring::Result<Vec<u8>>,
+    write: impl FnOnce() -> keyring::Result<()>,
+) -> Result<()> {
+    match read() {
+        Ok(_) => bail!("a device key for this data directory already exists in the keychain"),
+        Err(keyring::Error::NoEntry) => write().context("saving the device key to the keychain"),
+        Err(error) => Err(anyhow::Error::new(error).context("checking the keychain for a device key")),
     }
-    entry
-        .set_secret(secret)
-        .context("saving the device key to the keychain")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keychain_is_written_only_when_it_has_no_entry() {
+        let mut written = false;
+        write_if_absent(
+            || Err(keyring::Error::NoEntry),
+            || {
+                written = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(written);
+    }
+
+    #[test]
+    fn an_existing_keychain_entry_is_never_replaced() {
+        let result = write_if_absent(|| Ok(vec![1; KEY_LEN]), || panic!("must not write"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_keychain_that_fails_to_answer_is_an_error_and_is_not_written() {
+        let result = write_if_absent(
+            || Err(keyring::Error::Invalid("keychain".into(), "locked".into())),
+            || panic!("must not write"),
+        );
+        assert!(format!("{:#}", result.err().unwrap()).contains("checking the keychain"));
+    }
 
     #[tokio::test]
     async fn file_keys_are_created_once_then_reused() {
