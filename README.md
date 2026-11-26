@@ -45,13 +45,15 @@ It runs on macOS (Apple silicon), Windows and Linux. Apps for iOS and Android ar
 
 ## Download
 
-Get the latest version from the [releases page](https://github.com/shynewt/shyspace/releases/latest).
+These links always get the latest version:
 
-| System | File |
+| System | Download |
 |---|---|
-| macOS (Apple silicon) | `.dmg`: open it and drag shyspace to Applications |
-| Windows | `x64-setup.exe` (or `.msi`) |
-| Linux | `.AppImage` (updates itself), `.deb` or `.rpm`. Needs glibc 2.39 or newer: Ubuntu 24.04, Debian 13, Fedora 40 or later |
+| macOS (Apple silicon) | [.dmg](https://github.com/shynewt/shyspace/releases/latest/download/shyspace-macos-arm64.dmg): open it and drag shyspace to Applications |
+| Windows | [Installer (.exe)](https://github.com/shynewt/shyspace/releases/latest/download/shyspace-windows-x64-setup.exe) or [.msi](https://github.com/shynewt/shyspace/releases/latest/download/shyspace-windows-x64.msi) |
+| Linux | [.AppImage](https://github.com/shynewt/shyspace/releases/latest/download/shyspace-linux-x86_64.AppImage) (updates itself), [.deb](https://github.com/shynewt/shyspace/releases/latest/download/shyspace-linux-x86_64.deb) or [.rpm](https://github.com/shynewt/shyspace/releases/latest/download/shyspace-linux-x86_64.rpm). Needs glibc 2.39 or newer: Ubuntu 24.04, Debian 13, Fedora 40 or later |
+
+Release notes and older versions are on the [releases page](https://github.com/shynewt/shyspace/releases).
 
 The macOS app is signed and notarized by Apple. The Windows installer isn't signed yet, so Windows may warn you the first time: choose **More info**, then **Run anyway**.
 
@@ -76,7 +78,7 @@ The bucket provider can still see some metadata: who writes, how much and when. 
 
 ## Add an AI agent
 
-An agent is a member like anyone else, with a name and a badge so people know who they're talking to. It joins through `shy`, the command-line version of shyspace. Download it from the [releases page](https://github.com/shynewt/shyspace/releases/latest) (`shy-linux`, `shy-macos-apple-silicon` or `shy-windows.exe`) and put it on your `PATH` as `shy`, or build it with `cargo install --path crates/shy-cli`. Then, to add Claude Code (Settings › Agents in the app shows the same commands):
+An agent is a member like anyone else, with a name and a badge so people know who they're talking to. It joins through `shy`, the command-line version of shyspace. Download it for [Linux](https://github.com/shynewt/shyspace/releases/latest/download/shy-linux), [macOS (Apple silicon)](https://github.com/shynewt/shyspace/releases/latest/download/shy-macos-apple-silicon) or [Windows](https://github.com/shynewt/shyspace/releases/latest/download/shy-windows.exe) and put it on your `PATH` as `shy`, or build it with `cargo install --path crates/shy-cli`. Then, to add Claude Code (the admin sees the same commands in Settings › Agents):
 
 ```sh
 shy join --bot --name "Claude"   # paste the invite code when asked; add --key-file <path> on servers without a keychain
