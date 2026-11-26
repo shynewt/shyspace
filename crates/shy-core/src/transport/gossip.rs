@@ -684,6 +684,20 @@ mod tests {
         assert!(asks.try_recv().is_err(), "the workspace never saw the request");
     }
 
+    /// The answering side reset the stream or closed the connection as refused.
+    fn is_refusal(error: &anyhow::Error) -> bool {
+        use iroh::endpoint::{ConnectionError, ReadError, ReadToEndError};
+        match error.downcast_ref::<ReadToEndError>() {
+            Some(ReadToEndError::Read(ReadError::Reset(code))) => {
+                *code == crate::transport::key_handoff::REFUSED
+            }
+            Some(ReadToEndError::Read(ReadError::ConnectionLost(ConnectionError::ApplicationClosed(
+                close,
+            )))) => close.error_code == crate::transport::key_handoff::REFUSED,
+            _ => false,
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn an_oversized_request_for_the_storage_settings_is_refused_unread() {
         let lookup = MemoryLookup::new();
@@ -704,7 +718,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(answered.is_err());
+        let error = answered.expect_err("an oversized request gets no answer");
+        assert!(is_refusal(&error), "expected a refusal, got: {error:#}");
         assert!(asks.try_recv().is_err(), "the workspace never saw the request");
     }
 

@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result};
 use iroh::{
     Endpoint, PublicKey,
-    endpoint::{Connection, VarInt},
+    endpoint::{Connection, RecvStream, SendStream, VarInt},
     protocol::{AcceptError, ProtocolHandler},
 };
 use tokio::sync::{mpsc, oneshot};
@@ -37,7 +37,7 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 /// Requests come only from members whose key stopped working, rarely; a
 /// few at once is plenty, and one per device.
 const MAX_OPEN: usize = 8;
-const REFUSED: VarInt = VarInt::from_u32(2);
+pub(super) const REFUSED: VarInt = VarInt::from_u32(2);
 const ANSWERED: VarInt = VarInt::from_u32(1);
 
 /// A request for the workspace, with where its answer goes; `None` means
@@ -96,9 +96,13 @@ impl KeyHandoff {
         })
     }
 
-    async fn answer(&self, connection: &Connection) -> Result<Option<KeyAnswer>> {
-        let from = connection.remote_id();
-        let (mut send, mut receive) = connection.accept_bi().await?;
+    /// Reads the request, has the workspace decide, and sends its answer.
+    async fn answer(
+        &self,
+        from: PublicKey,
+        send: &mut SendStream,
+        receive: &mut RecvStream,
+    ) -> Result<Option<KeyAnswer>> {
         let bytes = receive.read_to_end(MAX_REQUEST_BYTES).await?;
         let request: KeyRequest = postcard::from_bytes(&bytes)?;
         let (reply, answer) = oneshot::channel();
@@ -120,19 +124,31 @@ impl ProtocolHandler for KeyHandoff {
             connection.close(REFUSED, b"busy");
             return Ok(());
         };
-        match tokio::time::timeout(ANSWER_TIMEOUT, self.answer(&connection)).await {
+        let deadline = tokio::time::Instant::now() + ANSWER_TIMEOUT;
+        let Ok(Ok((mut send, mut receive))) = tokio::time::timeout_at(deadline, connection.accept_bi()).await
+        else {
+            connection.close(REFUSED, b"no request");
+            return Ok(());
+        };
+        let answering = self.answer(connection.remote_id(), &mut send, &mut receive);
+        let reason: &[u8] = match tokio::time::timeout_at(deadline, answering).await {
             Ok(Ok(Some(_))) => {
                 // Let the answer reach the asker before closing.
                 let _ = tokio::time::timeout(ANSWER_TIMEOUT, connection.closed()).await;
                 connection.close(ANSWERED, b"answered");
+                return Ok(());
             }
-            Ok(Ok(None)) => connection.close(REFUSED, b"not answered"),
+            Ok(Ok(None)) => b"not answered",
             Ok(Err(error)) => {
                 warn!("couldn't answer a request for the storage settings: {error:#}");
-                connection.close(REFUSED, b"failed");
+                b"failed"
             }
-            Err(_) => connection.close(REFUSED, b"too slow"),
-        }
+            Err(_) => b"too slow",
+        };
+        // Dropping an unfinished stream ends it cleanly, which can reach the
+        // asker before the close and read as an empty answer.
+        let _ = send.reset(REFUSED);
+        connection.close(REFUSED, reason);
         Ok(())
     }
 }
