@@ -8,6 +8,12 @@ use serde::{Deserialize, Serialize};
 
 const ACCEPTANCE_LABEL: &str = "shyspace device acceptance v1";
 const CERTIFICATE_LABEL: &str = "shyspace device certificate v1";
+const CERTIFICATE_HASH_CONTEXT: &str = "shyspace device certificate hash v1";
+const MAP_DIGEST_CONTEXT: &str = "shyspace device map v1";
+
+/// The rules that decide which certificates count. A commit made under
+/// higher rules asks for an update, as every device must count alike.
+pub const DEVICE_RULES: u32 = 1;
 
 /// Says that `device` belongs to `person`, vouched for by `voucher` (one of
 /// the person's devices at `epoch`) and accepted by `device` itself.
@@ -39,6 +45,43 @@ pub struct DeviceRecord {
 thread_local! {
     /// How many certificates this thread has verified, to show which never are.
     pub(crate) static VERIFIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Where a removed device's log ends, as a commit that binds the device map
+/// froze it: in that map's digest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoundFreeze {
+    pub member: PublicKey,
+    pub last_seq: u64,
+    /// The epoch the freezing commit moved to.
+    pub epoch: u64,
+}
+
+/// What every member hands MLS as the pre-shared key of a commit that binds
+/// the device map, so only devices holding the same map share the next
+/// epoch's keys. `records` is the map before the commit; `frozen` holds the
+/// freezes bound so far, the commit's own included. Both are sorted here.
+pub fn map_digest(workspace_id: &str, records: &[DeviceRecord], frozen: &[BoundFreeze]) -> Result<[u8; 32]> {
+    let mut devices = records
+        .iter()
+        .map(|record| {
+            let certificate = &record.certificate;
+            Ok((
+                *certificate.device.as_bytes(),
+                *certificate.person.as_bytes(),
+                record.added_epoch,
+                certificate.hash()?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    devices.sort();
+    let mut freezes: Vec<_> = frozen
+        .iter()
+        .map(|freeze| (*freeze.member.as_bytes(), freeze.last_seq, freeze.epoch))
+        .collect();
+    freezes.sort();
+    let bytes = postcard::to_stdvec(&(DEVICE_RULES, workspace_id, devices, freezes))?;
+    Ok(blake3::derive_key(MAP_DIGEST_CONTEXT, &bytes))
 }
 
 /// The new device's consent to belong to `person`, sent with its request.
@@ -153,7 +196,7 @@ impl DeviceCertificate {
 
     /// The one hash of this certificate, whichever way it arrived.
     pub fn hash(&self) -> Result<[u8; 32]> {
-        Ok(*blake3::hash(&self.to_bytes()?).as_bytes())
+        Ok(blake3::derive_key(CERTIFICATE_HASH_CONTEXT, &self.to_bytes()?))
     }
 
     /// Decodes a certificate, refusing any bytes but its one encoding.
@@ -435,6 +478,48 @@ mod tests {
             device_signature: acceptance_for_other,
         };
         assert!(forged.verify(WORKSPACE).is_err());
+    }
+
+    #[test]
+    fn the_map_digest_ignores_order_and_changes_with_every_part() {
+        let record = DeviceRecord {
+            certificate: certificate(&keys()),
+            added_epoch: 8,
+        };
+        let other = DeviceRecord {
+            certificate: certificate(&Keys {
+                device: SecretKey::generate(),
+                ..keys()
+            }),
+            added_epoch: 9,
+        };
+        let freeze = BoundFreeze {
+            member: SecretKey::generate().public(),
+            last_seq: 4,
+            epoch: 9,
+        };
+        let digest = map_digest(WORKSPACE, &[record.clone(), other.clone()], &[freeze]).unwrap();
+        assert_eq!(
+            map_digest(WORKSPACE, &[other.clone(), record.clone()], &[freeze]).unwrap(),
+            digest
+        );
+        let later_epoch = DeviceRecord {
+            added_epoch: 9,
+            ..record.clone()
+        };
+        let later_freeze = BoundFreeze {
+            last_seq: 5,
+            ..freeze
+        };
+        for changed in [
+            map_digest("workspace-2", &[record.clone(), other.clone()], &[freeze]),
+            map_digest(WORKSPACE, std::slice::from_ref(&record), &[freeze]),
+            map_digest(WORKSPACE, &[later_epoch, other.clone()], &[freeze]),
+            map_digest(WORKSPACE, &[record.clone(), other.clone()], &[]),
+            map_digest(WORKSPACE, &[record, other], &[later_freeze]),
+        ] {
+            assert_ne!(changed.unwrap(), digest);
+        }
     }
 
     #[test]

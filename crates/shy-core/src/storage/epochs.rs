@@ -6,7 +6,7 @@ use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
 use super::{Store, to_public_key};
-use crate::crypto::EpochKey;
+use crate::{crypto::EpochKey, membership::device::BoundFreeze};
 
 impl Store {
     /// Remembers an epoch's key and who was a member during it. An op is only
@@ -96,12 +96,42 @@ impl Store {
     }
 
     /// A removed member's log ends at `last_seq`; anything later is forged.
-    pub(super) fn record_frozen_author(&self, member: &PublicKey, last_seq: u64) -> Result<()> {
+    /// `frozen_epoch` is the epoch a commit binding the device map froze it
+    /// in, and goes in that map's digest; older freezes have none.
+    pub(super) fn record_frozen_author(
+        &self,
+        member: &PublicKey,
+        last_seq: u64,
+        frozen_epoch: Option<u64>,
+    ) -> Result<()> {
         self.db.execute(
-            "INSERT OR IGNORE INTO frozen_authors (member, last_seq) VALUES (?, ?)",
-            params![member.as_bytes(), last_seq],
+            "INSERT OR IGNORE INTO frozen_authors (member, last_seq, frozen_epoch) VALUES (?, ?, ?)",
+            params![member.as_bytes(), last_seq, frozen_epoch],
         )?;
         Ok(())
+    }
+
+    /// The freezes made by commits that bind the device map.
+    pub fn bound_freezes(&self) -> Result<Vec<BoundFreeze>> {
+        let mut statement = self.db.prepare(
+            "SELECT member, last_seq, frozen_epoch FROM frozen_authors WHERE frozen_epoch IS NOT NULL",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, u64>(2)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (member, last_seq, epoch) = row?;
+            Ok(BoundFreeze {
+                member: to_public_key(member)?,
+                last_seq,
+                epoch,
+            })
+        })
+        .collect()
     }
 
     pub fn frozen_authors(&self) -> Result<Vec<(PublicKey, u64)>> {

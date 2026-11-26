@@ -43,8 +43,15 @@ use crate::{
     device_settings::DeviceSettingsFile,
     huddle::media::HuddleMedia,
     keys::DeviceKey,
-    membership::{admin::drop_unsealed_deliveries, commit, follow::BOUND_COMMIT_FOLLOWED_META, mls::Mls},
-    storage::Store,
+    membership::{
+        admin::drop_unsealed_deliveries,
+        commit::{self, FrozenAuthor, Wrapper},
+        device::{BoundFreeze, map_digest},
+        follow::BOUND_COMMIT_FOLLOWED_META,
+        mls::Mls,
+    },
+    ops::{MAX_STORED_NUMBER, now_ms},
+    storage::{DeviceSource, Store},
     sync::SyncStatus,
     transport::{
         bucket::{Bucket, Connector},
@@ -149,35 +156,76 @@ impl State {
     }
 
     /// Settles the current epoch, once, after any epoch change: what the
-    /// commit froze, the epoch's key and its members, in one transaction.
-    /// It runs at start and before every commit is followed, also when this
-    /// device was removed by the commit. The views' share of the freezing is
-    /// left for [`Store::finish_view_work`].
-    pub fn record_epoch(&self, admin: &PublicKey) -> Result<()> {
-        if let Some(from_epoch) = self.unsettled_commit()? {
-            if !self.has_unsettled_epoch()? {
-                // MLS refused the commit, or we stopped before it applied.
-                return self.store.delete_meta(UNSETTLED_COMMIT_META);
-            }
-            let signed = self
-                .store
-                .commit_record(from_epoch)?
-                .context("the commit being settled was not saved")?;
-            let verified = commit::verify(&signed, from_epoch, admin)?;
-            return self.store.atomically(|store| {
-                let mut frozen = Vec::new();
-                for author in &verified.frozen {
-                    frozen.push((author.member, store.freeze_log(&author.member, author.last_seq)?));
-                }
-                store.add_view_work(&frozen)?;
-                if !Mls::commit_binding(&verified.commit)?.is_empty() {
-                    store.set_meta(BOUND_COMMIT_FOLLOWED_META, &[1])?;
-                }
-                self.record_members()?;
-                store.delete_meta(UNSETTLED_COMMIT_META)
-            });
+    /// commit froze, which of its devices count, the epoch's key and its
+    /// members, in one transaction, so a device's person is known before
+    /// any op it writes under that key applies. It runs at start and before
+    /// every commit is followed, also when this device was removed by the
+    /// commit. The views' share of the freezing is left for
+    /// [`Store::finish_view_work`].
+    pub fn record_epoch(&self, config: &WorkspaceConfig) -> Result<()> {
+        let Some(from_epoch) = self.unsettled_commit()? else {
+            return self.record_members();
+        };
+        if !self.has_unsettled_epoch()? {
+            // MLS refused the commit, or we stopped before it applied.
+            return self.store.delete_meta(UNSETTLED_COMMIT_META);
         }
-        self.record_members()
+        let signed = self
+            .store
+            .commit_record(from_epoch)?
+            .context("the commit being settled was not saved")?;
+        let verified = commit::verify(&signed, from_epoch, &config.admin)?;
+        let to_epoch = from_epoch.checked_add(1).context("no epoch after the last one")?;
+        let binds_map = matches!(verified.wrapper, Wrapper::V3 { .. });
+        let from_epoch_key = self
+            .store
+            .epoch_key(from_epoch)?
+            .context("the key of the epoch the commit left isn't stored")?;
+        let certificates = verified.certificates(from_epoch, &from_epoch_key)?;
+        self.store.atomically(|store| {
+            let mut frozen = Vec::new();
+            for author in &verified.frozen {
+                let was_dropped =
+                    store.freeze_log(&author.member, author.last_seq, binds_map.then_some(to_epoch))?;
+                frozen.push((author.member, was_dropped));
+            }
+            store.add_view_work(&frozen)?;
+            if !Mls::commit_binding(&verified.commit)?.is_empty() {
+                store.set_meta(BOUND_COMMIT_FOLLOWED_META, &[1])?;
+            }
+            if self.mls.is_active() {
+                let members = self.mls.members()?;
+                let counted =
+                    store.count_certificates(&config.workspace_id, from_epoch, &members, &certificates)?;
+                for record in counted {
+                    store.put_device(&record, DeviceSource::Commit, now_ms()?)?;
+                }
+            }
+            self.record_members()?;
+            store.delete_meta(UNSETTLED_COMMIT_META)
+        })
+    }
+
+    /// The device map's digest for a commit leaving `from_epoch` that binds
+    /// it: the map before the commit, and the freezes bound so far with the
+    /// commit's own, as recording them will leave them.
+    pub fn map_key(&self, workspace_id: &str, from_epoch: u64, frozen: &[FrozenAuthor]) -> Result<[u8; 32]> {
+        let to_epoch = from_epoch.checked_add(1).context("no epoch after the last one")?;
+        let records = self.store.device_records()?;
+        let mut freezes = self.store.bound_freezes()?;
+        let already_frozen = self.store.frozen_authors()?;
+        for author in frozen {
+            if !already_frozen.iter().any(|(member, _)| *member == author.member)
+                && !freezes.iter().any(|freeze| freeze.member == author.member)
+            {
+                freezes.push(BoundFreeze {
+                    member: author.member,
+                    last_seq: author.last_seq.min(MAX_STORED_NUMBER),
+                    epoch: to_epoch,
+                });
+            }
+        }
+        map_digest(workspace_id, &records, &freezes)
     }
 
     fn record_members(&self) -> Result<()> {

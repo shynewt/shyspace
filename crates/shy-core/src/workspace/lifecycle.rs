@@ -483,7 +483,7 @@ impl Workspace {
         } = local;
         let mut state = State { store, mls };
         state.recover_staged_commit()?;
-        state.record_epoch(&config.admin)?;
+        state.record_epoch(&config)?;
         let (incoming_sender, incoming) = mpsc::channel(1024);
         let options: WorkspaceOptions = options.into();
         let net = match options.networking {
@@ -571,6 +571,10 @@ impl Workspace {
             }),
         };
         workspace.rebuild_views_if_rules_changed()?;
+        // A removal settled before a crash may still owe the views their share.
+        if let Err(error) = workspace.finish_view_work() {
+            warn!("the views will catch up with a removal at the next pass: {error:#}");
+        }
         if let Some(net) = &workspace.inner.net {
             net.set_members(&workspace.current_members()?);
             workspace.spawn_background(incoming);

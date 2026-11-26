@@ -68,7 +68,7 @@ impl Store {
         context: ApplyContext<'_>,
     ) -> Result<bool> {
         self.atomically(|store| {
-            if store.freeze_log(member, last_seq)? {
+            if store.freeze_log(member, last_seq, None)? {
                 store.rebuild_views(context)?;
                 return Ok(true);
             }
@@ -79,11 +79,16 @@ impl Store {
     /// Records where a removed member's log ends and takes their later ops
     /// out of the log, leaving the views for [`Self::finish_view_work`].
     /// Returns whether any op was taken out.
-    pub(crate) fn freeze_log(&self, member: &PublicKey, last_seq: u64) -> Result<bool> {
+    pub(crate) fn freeze_log(
+        &self,
+        member: &PublicKey,
+        last_seq: u64,
+        frozen_epoch: Option<u64>,
+    ) -> Result<bool> {
         // No op has a seq past what the store holds (receiving refuses
         // them), so freezing past it means the same as freezing there.
         let last_seq = last_seq.min(MAX_STORED_NUMBER);
-        self.record_frozen_author(member, last_seq)?;
+        self.record_frozen_author(member, last_seq, frozen_epoch)?;
         let dropped = self.db.execute(
             "DELETE FROM ops WHERE author = ? AND seq > ?",
             params![member.as_bytes(), last_seq],
@@ -125,6 +130,12 @@ impl Store {
             store.delete_meta(VIEW_WORK_META)?;
             Ok(changed)
         })
+    }
+
+    /// Whether ops a removed member should never have had are out of the
+    /// log but still in the views.
+    pub(crate) fn has_view_rebuild_pending(&self) -> Result<bool> {
+        Ok(self.view_work()?.rebuild)
     }
 
     fn view_work(&self) -> Result<ViewWork> {

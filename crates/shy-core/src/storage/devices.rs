@@ -7,7 +7,10 @@ use iroh::PublicKey;
 use rusqlite::{OptionalExtension, params};
 
 use super::{Store, to_public_key};
-use crate::membership::device::{DeviceCertificate, DeviceRecord};
+use crate::membership::{
+    commit,
+    device::{DeviceCertificate, DeviceRecord},
+};
 
 /// Where a device row came from: a commit this device followed, or the
 /// admin's grant when this device joined.
@@ -98,6 +101,58 @@ impl Store {
         Ok(())
     }
 
+    pub fn has_devices(&self) -> Result<bool> {
+        self.exists("SELECT 1 FROM devices LIMIT 1", [])
+    }
+
+    /// Counts again, oldest first, the certificates of every commit this
+    /// device followed, keeping the rows it got from the grant: the map is a
+    /// function of those two, so this repairs a damaged one.
+    pub fn recompute_device_map(&self, workspace_id: &str, admin: &PublicKey) -> Result<()> {
+        self.atomically(|store| {
+            let mut added_ms = std::collections::HashMap::new();
+            {
+                let mut statement = store
+                    .db
+                    .prepare("SELECT device, added_ms FROM devices WHERE from_grant = 0")?;
+                let rows =
+                    statement.query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?)))?;
+                for row in rows {
+                    let (device, ms) = row?;
+                    added_ms.insert(device, ms);
+                }
+            }
+            store.db.execute("DELETE FROM devices WHERE from_grant = 0", [])?;
+            for (from_epoch, signed) in store.commit_records()? {
+                let Some(to_epoch) = from_epoch.checked_add(1) else {
+                    continue;
+                };
+                let members_after = store.epoch_members(to_epoch)?;
+                let Some(from_epoch_key) = store.epoch_key(from_epoch)? else {
+                    continue;
+                };
+                // Only commits this device followed: it knows both epochs.
+                if members_after.is_empty() || store.epoch_members(from_epoch)?.is_empty() {
+                    continue;
+                }
+                let verified = commit::verify(&signed, from_epoch, admin)?;
+                let certificates = verified.certificates(from_epoch, &from_epoch_key)?;
+                for record in
+                    store.count_certificates(workspace_id, from_epoch, &members_after, &certificates)?
+                {
+                    // A row that was missing keeps no link time; it only
+                    // feeds the admin's rate limit.
+                    let ms = added_ms
+                        .get(record.certificate.device.as_bytes().as_slice())
+                        .copied()
+                        .unwrap_or_default();
+                    store.put_device(&record, DeviceSource::Commit, ms)?;
+                }
+            }
+            Ok(())
+        })
+    }
+
     /// Every device row, oldest link first.
     pub fn device_records(&self) -> Result<Vec<DeviceRecord>> {
         let mut statement = self
@@ -168,7 +223,7 @@ impl Store {
         Ok(if counts {
             vec![DeviceRecord {
                 certificate: certificate.clone(),
-                added_epoch: from_epoch + 1,
+                added_epoch: from_epoch.checked_add(1).context("no epoch after the last one")?,
             }]
         } else {
             Vec::new()

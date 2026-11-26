@@ -10,7 +10,9 @@ use crate::{
     BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace, WorkspaceOptions, crypto,
     membership::{
         commit::{self, FrozenAuthor},
+        device::{self, DeviceCertificate},
         invite::{Invite, JoinMailbox},
+        mls::{Mls, binding_message},
     },
     ops::{Envelope, Op, OpBody, now_ms},
     pages::{self, CLIENT_ID_NONCE_BYTES, Edit},
@@ -19,7 +21,7 @@ use crate::{
         crypto::Slot,
         ops::{PrivateBody, PrivateOp},
     },
-    storage::StoredKey,
+    storage::{StoredKey, TEST_DB_KEY},
     transport::bucket::{Bucket, Connector},
     views::InviteState,
 };
@@ -421,9 +423,9 @@ pub fn stage_removal_unchecked(
 ) -> (u64, Vec<u8>) {
     let mut state = admin.state();
     let from_epoch = state.mls.epoch().unwrap();
-    let commit = state.mls.remove_member(member, binding).unwrap();
+    let commit = state.mls.remove_member(member, binding, None).unwrap();
     state.mls.merge_pending_commit().unwrap();
-    state.record_epoch(&admin.inner.config.admin).unwrap();
+    state.record_epoch(&admin.inner.config).unwrap();
     (from_epoch, commit)
 }
 
@@ -450,4 +452,83 @@ pub fn frozen_at_last_seq(admin: &Workspace, member: &iroh::PublicKey) -> Frozen
         member: *member,
         last_seq: admin.state().store.last_seq(member).unwrap(),
     }
+}
+
+/// The device map key a dishonest admin commits with.
+pub enum MapKeyChoice {
+    /// The admin's own digest of the map.
+    Admins,
+    Other([u8; 32]),
+    /// No pre-shared key at all.
+    Missing,
+}
+
+/// A device a dishonest admin's app adds with any certificates and any
+/// device-map key, skipping its own checks. The admin signs a v3 wrapper,
+/// saves it and settles, as its app would. Returns the epoch the commit
+/// leaves and the wrapper, for the caller to put in the bucket.
+pub fn stage_device_add_unchecked(
+    admin: &Workspace,
+    device: &iroh::SecretKey,
+    dir: &Path,
+    certificates: &[DeviceCertificate],
+    map_key: MapKeyChoice,
+) -> (u64, Vec<u8>) {
+    std::fs::create_dir_all(dir).unwrap();
+    let device_mls = Mls::open(&dir.join("device-mls.db"), TEST_DB_KEY, device, None, None).unwrap();
+    let binding = device.sign(&binding_message(device_mls.signer_public()));
+    let key_package = device_mls.key_package().unwrap();
+    let mut state = admin.state();
+    let (_, key_package) = state
+        .mls
+        .verify_key_package(&key_package, &binding.to_bytes())
+        .unwrap();
+    let from_epoch = state.mls.epoch().unwrap();
+    let from_epoch_key = state.mls.epoch_key().unwrap();
+    let lists = commit::lists_hash(&from_epoch_key, from_epoch, &[], certificates).unwrap();
+    let map_key = match map_key {
+        MapKeyChoice::Admins => Some(
+            state
+                .map_key(&admin.inner.config.workspace_id, from_epoch, &[])
+                .unwrap(),
+        ),
+        MapKeyChoice::Other(key) => Some(key),
+        MapKeyChoice::Missing => None,
+    };
+    let (mls_commit, _) = state
+        .mls
+        .add_member(key_package, &lists, map_key.as_ref())
+        .unwrap();
+    let signed = commit::sign_v3(
+        &admin.inner.identity,
+        &from_epoch_key,
+        from_epoch,
+        mls_commit,
+        Vec::new(),
+        certificates,
+    )
+    .unwrap();
+    state.save_commit(from_epoch, &signed).unwrap();
+    state.mls.merge_pending_commit().unwrap();
+    state.record_epoch(&admin.inner.config).unwrap();
+    (from_epoch, signed)
+}
+
+/// `device` vouched for by `voucher` as one of `person`'s, at `epoch`.
+pub fn device_certificate(
+    voucher: &iroh::SecretKey,
+    person: &iroh::PublicKey,
+    device: &iroh::SecretKey,
+    epoch: u64,
+) -> DeviceCertificate {
+    let acceptance = device::accept(device, TEST_WORKSPACE_ID, person).unwrap();
+    DeviceCertificate::vouch(
+        voucher,
+        TEST_WORKSPACE_ID,
+        *person,
+        device.public(),
+        epoch,
+        acceptance,
+    )
+    .unwrap()
 }

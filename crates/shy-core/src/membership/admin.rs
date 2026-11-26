@@ -9,6 +9,7 @@ use tracing::{debug, warn};
 
 use super::{
     commit::{self, FrozenAuthor},
+    device::DeviceCertificate,
     invite::{Answer, Grant, Invite, JoinRequest, declined_bytes},
     keyring::KeyHistory,
     request_seal::{NotForThisInvite, RequestSlot, is_unsealed_request, open_request, request_key_pair},
@@ -39,6 +40,14 @@ struct Delivery {
     welcome: Vec<u8>,
     /// Sealed right after the commit is applied; empty until then.
     sealed_grant: Option<Vec<u8>>,
+}
+
+/// What goes into the next commit besides its proposals.
+struct CommitBinding {
+    /// The commit's authenticated data: its lists' hash.
+    lists: [u8; 32],
+    /// The device map's digest, for a commit that binds the map.
+    map_key: Option<[u8; 32]>,
 }
 
 /// After a crash before a join commit was recorded, its Welcome is useless.
@@ -143,8 +152,11 @@ impl Workspace {
             }
 
             let from_epoch = state.mls.epoch()?;
-            let binding = commit::lists_hash(&state.mls.epoch_key()?, from_epoch, &[], &[])?;
-            let (commit, welcome) = state.mls.add_member(key_package, &binding)?;
+            let binding = self.bind_next_commit(&state, from_epoch, &[], &[])?;
+            let (commit, welcome) =
+                state
+                    .mls
+                    .add_member(key_package, &binding.lists, binding.map_key.as_ref())?;
             let delivery = Delivery {
                 welcome,
                 sealed_grant: None,
@@ -152,9 +164,9 @@ impl Workspace {
             state
                 .store
                 .put_delivery(&claimed, token, &postcard::to_stdvec(&delivery)?)?;
-            let signed = self.record_commit(&state, from_epoch, commit, Vec::new())?;
+            let signed = self.record_commit(&state, from_epoch, commit, Vec::new(), &[], &binding)?;
             state.mls.merge_pending_commit()?;
-            state.record_epoch(&self.inner.config.admin)?;
+            state.record_epoch(&self.inner.config)?;
             let grant = Grant {
                 history: KeyHistory::collect(&state.store)?,
                 bucket: config::current_bucket(&state.store)?,
@@ -394,12 +406,14 @@ impl Workspace {
                 last_seq: state.store.last_seq(&member)?,
             };
             let from_epoch = state.mls.epoch()?;
-            let binding = commit::lists_hash(&state.mls.epoch_key()?, from_epoch, &[frozen], &[])?;
-            let commit = state.mls.remove_member(&member, &binding)?;
-            let signed = self.record_commit(&state, from_epoch, commit, vec![frozen])?;
+            let binding = self.bind_next_commit(&state, from_epoch, &[frozen], &[])?;
+            let commit = state
+                .mls
+                .remove_member(&member, &binding.lists, binding.map_key.as_ref())?;
+            let signed = self.record_commit(&state, from_epoch, commit, vec![frozen], &[], &binding)?;
             state.mls.merge_pending_commit()?;
             // Freezing comes after the merge, as on every member's device.
-            state.record_epoch(&self.inner.config.admin)?;
+            state.record_epoch(&self.inner.config)?;
             Workspace::mark_recovery_snapshot_stale(&state.store)?;
             Workspace::start_storage_rotation(&state.store)?;
             (from_epoch, signed)
@@ -413,6 +427,25 @@ impl Workspace {
         self.upload_commit(from_epoch, signed).await
     }
 
+    /// How the next commit binds its lists, and, once the workspace has a
+    /// device or the commit adds one, the device map.
+    fn bind_next_commit(
+        &self,
+        state: &State,
+        from_epoch: u64,
+        frozen: &[FrozenAuthor],
+        certificates: &[DeviceCertificate],
+    ) -> Result<CommitBinding> {
+        let from_epoch_key = state.mls.epoch_key()?;
+        let binds_map = !certificates.is_empty() || state.store.has_devices()?;
+        Ok(CommitBinding {
+            lists: commit::lists_hash(&from_epoch_key, from_epoch, frozen, certificates)?,
+            map_key: binds_map
+                .then(|| state.map_key(&self.inner.config.workspace_id, from_epoch, frozen))
+                .transpose()?,
+        })
+    }
+
     /// Signs a staged commit and saves it before it is applied, so a crash
     /// can't leave us in an epoch the bucket never hears about.
     fn record_commit(
@@ -421,8 +454,20 @@ impl Workspace {
         from_epoch: u64,
         commit: Vec<u8>,
         frozen: Vec<FrozenAuthor>,
+        certificates: &[DeviceCertificate],
+        binding: &CommitBinding,
     ) -> Result<Vec<u8>> {
-        let signed = commit::sign(&self.inner.identity, from_epoch, commit, frozen)?;
+        let signed = match binding.map_key {
+            Some(_) => commit::sign_v3(
+                &self.inner.identity,
+                &state.mls.epoch_key()?,
+                from_epoch,
+                commit,
+                frozen,
+                certificates,
+            )?,
+            None => commit::sign(&self.inner.identity, from_epoch, commit, frozen)?,
+        };
         state.save_commit(from_epoch, &signed)?;
         Ok(signed)
     }

@@ -33,6 +33,7 @@ pub(crate) use pacing::has_slept;
 use pacing::{Pacing, SHORT_WAIT};
 
 use crate::{
+    membership::commit::NewerCommit,
     ops::now_ms,
     transport::{
         direct::DirectMessage,
@@ -74,7 +75,8 @@ pub struct SyncStatus {
     pub error: Option<String>,
     pub removed: bool,
     /// A teammate's newer version sent a change this one can't read, and
-    /// their later changes wait for it until this app is updated.
+    /// their later changes wait for it until this app is updated; or the
+    /// admin's newer version made a commit this one can't follow.
     pub needs_update: bool,
     /// Whose apps sent those changes (member ids), so a false alarm (junk
     /// signed on purpose) points at its source.
@@ -380,7 +382,9 @@ impl Workspace {
         }
         let mut errors = Vec::new();
         let mut has_found_new = false;
+        let mut is_admin_newer = false;
         if let Err(error) = self.follow_admin_commits().await {
+            is_admin_newer = error.downcast_ref::<NewerCommit>().is_some();
             errors.push(error);
         }
         if let Err(error) = self.finish_view_work() {
@@ -392,8 +396,11 @@ impl Workspace {
         match self.apply_pending() {
             Ok(pending) => {
                 let mut status = self.status_lock();
-                status.needs_update = !pending.waiting_for_update.is_empty();
+                status.needs_update = !pending.waiting_for_update.is_empty() || is_admin_newer;
                 status.needs_update_from = pending.waiting_for_update.iter().map(member_id).collect();
+                if is_admin_newer {
+                    status.needs_update_from.push(member_id(&self.inner.config.admin));
+                }
                 drop(status);
                 errors.extend(pending.local_failure);
             }
@@ -413,6 +420,9 @@ impl Workspace {
                 if is_slow_due && let Err(error) = self.recheck_old_key_if_unknown().await {
                     errors.push(error);
                 }
+            }
+            if is_slow_due && let Err(error) = self.note_a_bound_join_if_unchecked().await {
+                warn!("can't tell yet whether the admin's app binds its commits: {error:#}");
             }
             // Commit repair only once the admin's recovery snapshot is up (a
             // commit must never be in the bucket before the snapshot that
@@ -434,7 +444,13 @@ impl Workspace {
                 PassKind::Check => self.check_heads().await,
             }
             .map(|found| has_found_new = found);
-            let tended = self.tend_private_channels();
+            // Not while private state may still hold a removed member's late ops.
+            let is_rebuild_pending = self.state().store.has_view_rebuild_pending();
+            let tended = match is_rebuild_pending {
+                Ok(true) => Ok(()),
+                Ok(false) => self.tend_private_channels(),
+                Err(error) => Err(error),
+            };
             for result in [
                 shared_forks,
                 pulled,

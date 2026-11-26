@@ -96,6 +96,13 @@ impl Workspace {
                         bail!("only its owner or the admin can do that");
                     }
                     let is_sealed = matches!(op, Op::Sealed { .. });
+                    let is_private = is_sealed || matches!(op, Op::KeyGrant { .. });
+                    // Private state may still hold what a removed member's
+                    // late ops did, like a key their rotation brought.
+                    ensure!(
+                        !is_private || !store.has_view_rebuild_pending()?,
+                        "private channels wait until this device has caught up with a removal; try again in a moment"
+                    );
                     let body = OpBody {
                         lamport: store.next_lamport()?,
                         timestamp_ms: now_ms()?,

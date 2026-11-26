@@ -1,9 +1,16 @@
 //! Members apply the admin's commits, in epoch order, as they appear.
 
 use anyhow::{Context, Result, ensure};
+use tracing::warn;
 
-use super::{commit, mls::Mls};
+use super::{
+    commit::{self, Wrapper},
+    mls::{CommitKeys, MapKeyMismatch, Mls},
+};
 use crate::{views::Change, workspace::Workspace};
+
+/// Set once this device has looked at the commit that added it, bound or not.
+const JOIN_COMMIT_CHECKED_META: &str = "join_commit_checked";
 
 /// Set once this device has followed a commit that binds its lists, or
 /// joined through one.
@@ -40,34 +47,65 @@ impl Workspace {
     /// Applies the admin's commit that moves us on from `epoch`, wherever
     /// its bytes came from: they're checked against the admin's signature.
     ///
-    /// MLS can process a commit only once, so everything that could reject
-    /// it comes first, and nothing sits between MLS processing it and
-    /// merging it. What the commit froze is settled after the merge, by
+    /// MLS can process a commit only once, so everything that can be checked
+    /// before MLS processes it is; only what MLS itself reveals (who signed
+    /// it, which pre-shared keys it carries) is checked after, and a commit
+    /// refused there is used up. Nothing else sits between MLS processing it
+    /// and merging it. What the commit froze is settled after the merge, by
     /// [`State::record_epoch`](crate::workspace::State::record_epoch).
     pub(crate) fn apply_admin_commit(&self, epoch: u64, bytes: &[u8]) -> Result<CommitOutcome> {
         let admin = self.inner.config.admin;
         // An epoch left half settled (a crash, a full disk) is finished first.
-        self.state().record_epoch(&admin)?;
+        self.state().record_epoch(&self.inner.config)?;
         let verified = commit::verify(bytes, epoch, &admin)
             .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
-        self.check_binding(epoch, &verified)
+        let map_key = self
+            .check_binding(epoch, &verified)
             .with_context(|| format!("ignoring invalid commit for epoch {epoch}"))?;
+        let keys = match map_key {
+            Some(_) => CommitKeys::DeviceMap,
+            None => CommitKeys::None,
+        };
         let outcome = {
             let mut state = self.state();
+            ensure!(state.mls.epoch()? == epoch, "the commit is for another epoch");
+            if let Some(map_key) = &map_key {
+                state.mls.store_map_key(map_key)?;
+            }
             state.save_commit(epoch, bytes)?;
-            let outcome = match state.mls.process_commit(&verified.commit, &admin) {
+            let mut processed = state.mls.process_commit(&verified.commit, &admin, keys);
+            if let Some(map_key) = map_key
+                && processed
+                    .as_ref()
+                    .is_err_and(|error| error.downcast_ref::<MapKeyMismatch>().is_some())
+            {
+                // Our map may be damaged. It is a function of the grant and
+                // the commits followed, so recompute it and try once more.
+                let workspace_id = &self.inner.config.workspace_id;
+                state.store.recompute_device_map(workspace_id, &admin)?;
+                let recomputed = state.map_key(workspace_id, epoch, &verified.frozen)?;
+                if recomputed != map_key {
+                    state.mls.store_map_key(&recomputed)?;
+                    processed = state.mls.process_commit(&verified.commit, &admin, keys);
+                }
+            }
+            let outcome = match processed {
                 Ok(outcome) => outcome,
                 Err(error) => {
                     // Nothing was used up; the saved record is never
                     // republished (see `republish_commits`), and the
                     // admin's repair replaces it.
-                    state.record_epoch(&admin)?;
+                    state.record_epoch(&self.inner.config)?;
                     return Err(error.context(format!("ignoring invalid commit for epoch {epoch}")));
                 }
             };
-            state.record_epoch(&admin)?;
+            state.record_epoch(&self.inner.config)?;
             outcome
         };
+        // At once, so the views don't lag; a failure is retried every pass.
+        if let Err(error) = self.finish_view_work() {
+            warn!("the views will catch up with the removal at the next pass: {error:#}");
+        }
         self.forget_skipped_segments();
         if outcome.removed_self {
             self.mark_removed();
@@ -93,20 +131,48 @@ impl Workspace {
     /// wrapper may come later. A commit that binds nothing is only taken from
     /// an admin's app that never binds (0.1.4), until this device has
     /// followed, or joined through, a bound one.
-    fn check_binding(&self, epoch: u64, verified: &commit::VerifiedCommit) -> Result<()> {
+    ///
+    /// For a commit that binds the device map, it also returns this device's
+    /// digest of the map, the key MLS needs to follow it.
+    fn check_binding(&self, epoch: u64, verified: &commit::VerifiedCommit) -> Result<Option<[u8; 32]>> {
         let binding = Mls::commit_binding(&verified.commit)?;
         let state = self.state();
         ensure!(state.mls.epoch()? == epoch, "the commit is for another epoch");
+        let binds_map = matches!(verified.wrapper, Wrapper::V3 { .. });
+        ensure!(
+            binds_map || !state.store.has_devices()?,
+            "the commit is in the old format, which the admin's commits no longer use once a device is linked"
+        );
         if binding.is_empty() {
             ensure!(
-                state.store.meta(BOUND_COMMIT_FOLLOWED_META)?.is_none(),
+                !binds_map && state.store.meta(BOUND_COMMIT_FOLLOWED_META)?.is_none(),
                 "the commit doesn't bind its lists, as the admin's commits now do"
             );
+            return Ok(None);
+        }
+        let from_epoch_key = state.mls.epoch_key()?;
+        let certificates = verified.certificates(epoch, &from_epoch_key)?;
+        let expected = commit::lists_hash(&from_epoch_key, epoch, &verified.frozen, &certificates)?;
+        ensure!(binding == expected, "the commit's lists don't match the commit");
+        if !binds_map {
+            return Ok(None);
+        }
+        let map_key = state.map_key(&self.inner.config.workspace_id, epoch, &verified.frozen)?;
+        Ok(Some(map_key))
+    }
+
+    /// Tries [`Self::note_a_bound_join`] again if it never got to look at
+    /// the commit that added this device (its slot couldn't be read).
+    pub(crate) async fn note_a_bound_join_if_unchecked(&self) -> Result<()> {
+        let is_checked = {
+            let state = self.state();
+            state.store.meta(JOIN_COMMIT_CHECKED_META)?.is_some()
+                || state.store.meta(BOUND_COMMIT_FOLLOWED_META)?.is_some()
+        };
+        if is_checked {
             return Ok(());
         }
-        let expected = commit::lists_hash(&state.mls.epoch_key()?, epoch, &verified.frozen, &[])?;
-        ensure!(binding == expected, "the commit's lists don't match the commit");
-        Ok(())
+        self.note_a_bound_join().await
     }
 
     /// After joining: if the commit that added this device binds its lists,
@@ -124,18 +190,20 @@ impl Workspace {
         let verified = commit::verify(&bytes, from_epoch, &admin)?;
         let binding = Mls::commit_binding(&verified.commit)?;
         if binding.is_empty() {
-            return Ok(());
+            return self.state().store.set_meta(JOIN_COMMIT_CHECKED_META, &[1]);
         }
         let state = self.state();
         let key = state
             .store
             .epoch_key(from_epoch)?
             .context("the grant has no key for the epoch before joining")?;
-        let expected = commit::lists_hash(&key, from_epoch, &verified.frozen, &[])?;
+        let certificates = verified.certificates(from_epoch, &key)?;
+        let expected = commit::lists_hash(&key, from_epoch, &verified.frozen, &certificates)?;
         ensure!(
             binding == expected,
             "the commit that added this device doesn't match its lists"
         );
+        state.store.set_meta(JOIN_COMMIT_CHECKED_META, &[1])?;
         state.store.set_meta(BOUND_COMMIT_FOLLOWED_META, &[1])
     }
 

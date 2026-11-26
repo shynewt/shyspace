@@ -8,11 +8,15 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
 use iroh::{PublicKey, SecretKey, Signature};
-use openmls::prelude::{tls_codec::Deserialize as _, *};
+use openmls::prelude::{
+    tls_codec::{Deserialize as _, Serialize as _},
+    *,
+};
+use openmls::schedule::{PreSharedKeyId, Psk};
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::RustCrypto;
 use openmls_sqlite_storage::{Codec, SqliteStorageProvider};
-use openmls_traits::{OpenMlsProvider, types::SignatureScheme};
+use openmls_traits::{OpenMlsProvider, random::OpenMlsRand, types::SignatureScheme};
 use rusqlite::Connection;
 
 use crate::{
@@ -78,6 +82,47 @@ pub struct Mls {
 
 pub struct CommitOutcome {
     pub removed_self: bool,
+}
+
+/// The id of the device map's pre-shared key; its value changes each commit.
+const MAP_KEY_ID: &[u8] = b"shyspace device map";
+
+/// The pre-shared keys an admin's commit must carry: the device map's when
+/// its wrapper binds the map, none otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommitKeys {
+    None,
+    DeviceMap,
+}
+
+/// MLS refused a commit that binds the device map because this device's
+/// key for the map isn't the one the admin committed with.
+#[derive(Debug)]
+pub struct MapKeyMismatch;
+
+impl std::fmt::Display for MapKeyMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("this device's list of devices doesn't match the workspace's")
+    }
+}
+
+impl std::error::Error for MapKeyMismatch {}
+
+fn keys_carried(staged: &StagedCommit) -> Result<CommitKeys> {
+    let ids = staged
+        .psk_proposals()
+        .map(|queued| {
+            let bytes = queued.psk_proposal().tls_serialize_detached()?;
+            Ok(PreSharedKeyId::tls_deserialize_exact(bytes)?)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    match ids.as_slice() {
+        [] => Ok(CommitKeys::None),
+        [id] if matches!(id.psk(), Psk::External(external) if external.psk_id() == MAP_KEY_ID) => {
+            Ok(CommitKeys::DeviceMap)
+        }
+        _ => bail!("the commit carries pre-shared keys shyspace doesn't use"),
+    }
 }
 
 fn group_config() -> MlsGroupJoinConfig {
@@ -253,13 +298,73 @@ impl Mls {
     /// Stages adding a verified joiner. Returns `(commit, welcome)`; the
     /// caller saves the commit durably, then calls `merge_pending_commit`.
     /// `binding` goes in the commit's authenticated data (see
-    /// [`super::commit::lists_hash`]).
-    pub fn add_member(&mut self, key_package: KeyPackage, binding: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+    /// [`super::commit::lists_hash`]); `map_key`, for a commit that binds the
+    /// device map, is that map's digest as a pre-shared key.
+    pub fn add_member(
+        &mut self,
+        key_package: KeyPackage,
+        binding: &[u8],
+        map_key: Option<&[u8; 32]>,
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        if let Some(map_key) = map_key {
+            let (commit, welcome) =
+                self.commit_with_map_key(vec![key_package], Vec::new(), binding, map_key)?;
+            return Ok((commit, welcome.context("an add without a Welcome")?));
+        }
         let group = self.group.as_mut().context("no group")?;
         group.set_aad(binding.to_vec());
         let added = group.add_members(&self.provider, &self.signer, &[key_package]);
         let (commit, welcome, _) = added.inspect_err(|_| group.set_aad(Vec::new()))?;
         Ok((commit.to_bytes()?, welcome.to_bytes()?))
+    }
+
+    /// Stages a commit as `add_members` and `remove_members` do, plus the
+    /// device map's pre-shared key. Returns the commit and any Welcome.
+    fn commit_with_map_key(
+        &mut self,
+        adds: Vec<KeyPackage>,
+        removals: Vec<LeafNodeIndex>,
+        binding: &[u8],
+        map_key: &[u8; 32],
+    ) -> Result<(Vec<u8>, Option<Vec<u8>>)> {
+        self.store_map_key(map_key)?;
+        let nonce = self.provider.rand().random_vec(CIPHERSUITE.hash_length())?;
+        let psk = PreSharedKeyId::external(MAP_KEY_ID.to_vec(), nonce);
+        let is_adding = !adds.is_empty();
+        let group = self.group.as_mut().context("no group")?;
+        group.set_aad(binding.to_vec());
+        let staged = group
+            .commit_builder()
+            .propose_adds(adds)
+            .propose_removals(removals)
+            .force_self_update(is_adding)
+            .add_proposal(Proposal::PreSharedKey(Box::new(PreSharedKeyProposal::new(psk))))
+            .load_psks(self.provider.storage())
+            .map_err(anyhow::Error::from)
+            .and_then(|builder| {
+                Ok(
+                    builder.build(self.provider.rand(), self.provider.crypto(), &self.signer, |_| {
+                        true
+                    })?,
+                )
+            })
+            .and_then(|built| Ok(built.stage_commit(&self.provider)?));
+        group.set_aad(Vec::new());
+        let bundle = staged?;
+        let welcome = bundle
+            .to_welcome_msg()
+            .map(|welcome| welcome.to_bytes())
+            .transpose()?;
+        Ok((bundle.into_commit().to_bytes()?, welcome))
+    }
+
+    /// Hands MLS the device map's digest this device computed, before it
+    /// processes a commit that binds the map: a commit made with another
+    /// value is refused, using nothing up.
+    pub fn store_map_key(&self, map_key: &[u8; 32]) -> Result<()> {
+        // The nonce is chosen per commit and isn't stored; the id is.
+        PreSharedKeyId::external(MAP_KEY_ID.to_vec(), Vec::new()).store(&self.provider, map_key)?;
+        Ok(())
     }
 
     pub fn has_pending_commit(&self) -> bool {
@@ -287,14 +392,24 @@ impl Mls {
         Ok(self.members()?.contains(identity))
     }
 
-    /// `binding` goes in the commit's authenticated data, as for [`Self::add_member`].
-    pub fn remove_member(&mut self, member: &PublicKey, binding: &[u8]) -> Result<Vec<u8>> {
+    /// `binding` and `map_key` as for [`Self::add_member`].
+    pub fn remove_member(
+        &mut self,
+        member: &PublicKey,
+        binding: &[u8],
+        map_key: Option<&[u8; 32]>,
+    ) -> Result<Vec<u8>> {
         let group = self.group.as_ref().context("no group")?;
         let leaf = group
             .members()
             .find(|candidate| identity_of(&candidate.credential).is_ok_and(|id| id == *member))
             .context("not a member")?
             .index;
+        if let Some(map_key) = map_key {
+            return Ok(self
+                .commit_with_map_key(Vec::new(), vec![leaf], binding, map_key)?
+                .0);
+        }
         let group = self.group.as_mut().context("no group")?;
         group.set_aad(binding.to_vec());
         let removed = group.remove_members(&self.provider, &self.signer, &[leaf]);
@@ -313,12 +428,23 @@ impl Mls {
     }
 
     /// Applies a commit published by the admin. Commits from anyone else are
-    /// rejected, which keeps the epoch chain linear.
-    pub fn process_commit(&mut self, commit_bytes: &[u8], admin: &PublicKey) -> Result<CommitOutcome> {
+    /// rejected, which keeps the epoch chain linear, and so is one that
+    /// doesn't carry exactly the pre-shared keys its wrapper calls for.
+    pub fn process_commit(
+        &mut self,
+        commit_bytes: &[u8],
+        admin: &PublicKey,
+        keys: CommitKeys,
+    ) -> Result<CommitOutcome> {
         let message = decode_protocol_message(commit_bytes)?;
         let provider = &self.provider;
         let group = self.group.as_mut().context("no group")?;
-        let processed = group.process_message(provider, message)?;
+        let processed = match group.process_message(provider, message) {
+            Err(ProcessMessageError::InvalidCommit(
+                StageCommitError::ConfirmationTagMismatch | StageCommitError::PskError(_),
+            )) if keys == CommitKeys::DeviceMap => bail!(MapKeyMismatch),
+            processed => processed?,
+        };
         ensure!(
             identity_of(processed.credential())? == *admin,
             "commit not signed by the workspace admin"
@@ -326,6 +452,10 @@ impl Mls {
         let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() else {
             bail!("expected a commit");
         };
+        ensure!(
+            keys_carried(&staged)? == keys,
+            "the commit's pre-shared keys don't match its wrapper"
+        );
         let removed_self = staged.self_removed();
         group.merge_staged_commit(provider, *staged)?;
         Ok(CommitOutcome { removed_self })
@@ -393,7 +523,7 @@ mod tests {
         let (key_package, binding) = joiner.join_request();
         let (claimed, key_package) = admin.mls.verify_key_package(&key_package, &binding).unwrap();
         assert_eq!(claimed, joiner.id());
-        let (commit, welcome) = admin.mls.add_member(key_package, &[]).unwrap();
+        let (commit, welcome) = admin.mls.add_member(key_package, &[], None).unwrap();
         admin.mls.merge_pending_commit().unwrap();
         let admin_key = admin.mls.signer_public().to_vec();
         joiner.mls.join(&welcome, GROUP, &admin.id(), &admin_key).unwrap();
@@ -413,9 +543,12 @@ mod tests {
         let sealed = admin.mls.seal_for_members(b"history").unwrap();
         assert_eq!(bob.mls.open_from_admin(&sealed, &admin.id()).unwrap(), b"history");
 
-        let removal = admin.mls.remove_member(&bob.id(), &[]).unwrap();
+        let removal = admin.mls.remove_member(&bob.id(), &[], None).unwrap();
         admin.mls.merge_pending_commit().unwrap();
-        let outcome = bob.mls.process_commit(&removal, &admin.id()).unwrap();
+        let outcome = bob
+            .mls
+            .process_commit(&removal, &admin.id(), CommitKeys::None)
+            .unwrap();
         assert!(outcome.removed_self);
         assert!(!bob.mls.is_active());
         assert_eq!(admin.mls.members().unwrap(), vec![admin.id()]);
@@ -431,11 +564,13 @@ mod tests {
         add(&mut admin, &mut bob);
         let (key_package, binding) = carol.join_request();
         let (_, key_package) = admin.mls.verify_key_package(&key_package, &binding).unwrap();
-        let (commit, _) = admin.mls.add_member(key_package, b"the lists").unwrap();
+        let (commit, _) = admin.mls.add_member(key_package, b"the lists", None).unwrap();
         admin.mls.merge_pending_commit().unwrap();
 
         assert_eq!(Mls::commit_binding(&commit).unwrap(), b"the lists");
-        bob.mls.process_commit(&commit, &admin.id()).unwrap();
+        bob.mls
+            .process_commit(&commit, &admin.id(), CommitKeys::None)
+            .unwrap();
         assert_eq!(bob.mls.epoch().unwrap(), 2);
         assert!(Mls::commit_binding(b"junk").is_err());
     }
@@ -465,12 +600,18 @@ mod tests {
         admin.mls.create_group(GROUP).unwrap();
         add(&mut admin, &mut bob);
         let dave_commit = add(&mut admin, &mut dave);
-        bob.mls.process_commit(&dave_commit, &admin.id()).unwrap();
+        bob.mls
+            .process_commit(&dave_commit, &admin.id(), CommitKeys::None)
+            .unwrap();
 
         let (key_package, binding) = carol.join_request();
         let (_, key_package) = bob.mls.verify_key_package(&key_package, &binding).unwrap();
-        let (rogue_commit, _) = bob.mls.add_member(key_package, &[]).unwrap();
-        let error = dave.mls.process_commit(&rogue_commit, &admin.id()).err().unwrap();
+        let (rogue_commit, _) = bob.mls.add_member(key_package, &[], None).unwrap();
+        let error = dave
+            .mls
+            .process_commit(&rogue_commit, &admin.id(), CommitKeys::None)
+            .err()
+            .unwrap();
         assert!(error.to_string().contains("admin"), "{error}");
     }
 
@@ -509,7 +650,7 @@ mod tests {
         impostor.mls.create_group(GROUP).unwrap();
         let (key_package, binding) = joiner.join_request();
         let (_, key_package) = impostor.mls.verify_key_package(&key_package, &binding).unwrap();
-        let (_, welcome) = impostor.mls.add_member(key_package, &[]).unwrap();
+        let (_, welcome) = impostor.mls.add_member(key_package, &[], None).unwrap();
         impostor.mls.merge_pending_commit().unwrap();
         let pinned_key = real_admin.mls.signer_public().to_vec();
         assert!(
