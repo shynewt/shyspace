@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use iroh::PublicKey;
 use rusqlite::params;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use super::{ApplyContext, Settling, Store};
@@ -16,6 +17,15 @@ use crate::{
     private::ids::is_private_id,
     views::Change,
 };
+
+/// What freezing logs left for the views, until it is done.
+const VIEW_WORK_META: &str = "view_work_after_freeze";
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ViewWork {
+    rebuild: bool,
+    settle: Vec<PublicKey>,
+}
 
 /// Tables that hold only what ops produce.
 pub(super) const SHARED_VIEW_TABLES: &[&str] = &[
@@ -57,20 +67,70 @@ impl Store {
         last_seq: u64,
         context: ApplyContext<'_>,
     ) -> Result<bool> {
+        self.atomically(|store| {
+            if store.freeze_log(member, last_seq)? {
+                store.rebuild_views(context)?;
+                return Ok(true);
+            }
+            store.settle_after_removal(member, context)
+        })
+    }
+
+    /// Records where a removed member's log ends and takes their later ops
+    /// out of the log, leaving the views for [`Self::finish_view_work`].
+    /// Returns whether any op was taken out.
+    pub(crate) fn freeze_log(&self, member: &PublicKey, last_seq: u64) -> Result<bool> {
         // No op has a seq past what the store holds (receiving refuses
         // them), so freezing past it means the same as freezing there.
         let last_seq = last_seq.min(MAX_STORED_NUMBER);
-        self.atomically(|store| {
-            store.record_frozen_author(member, last_seq)?;
-            let dropped = store.db.execute(
-                "DELETE FROM ops WHERE author = ? AND seq > ?",
-                params![member.as_bytes(), last_seq],
-            )?;
-            if dropped == 0 {
-                return store.settle_after_removal(member, context);
+        self.record_frozen_author(member, last_seq)?;
+        let dropped = self.db.execute(
+            "DELETE FROM ops WHERE author = ? AND seq > ?",
+            params![member.as_bytes(), last_seq],
+        )?;
+        Ok(dropped > 0)
+    }
+
+    /// Notes what the views still need after freezing these logs: a rebuild
+    /// if ops were taken out, else settling each removal.
+    pub(crate) fn add_view_work(&self, frozen: &[(PublicKey, bool)]) -> Result<()> {
+        let mut work = self.view_work()?;
+        for (member, was_dropped) in frozen {
+            match was_dropped {
+                true => work.rebuild = true,
+                false => work.settle.push(*member),
             }
-            store.rebuild_views(context)?;
-            Ok(true)
+        }
+        self.set_meta(VIEW_WORK_META, &postcard::to_stdvec(&work)?)
+    }
+
+    /// Does what freezing left for the views. It can be slow or fail (a full
+    /// disk), so it runs apart from following commits and is retried at
+    /// every pass. Returns whether the views changed.
+    pub(crate) fn finish_view_work(&self, context: ApplyContext<'_>) -> Result<bool> {
+        let work = self.view_work()?;
+        if !work.rebuild && work.settle.is_empty() {
+            return Ok(false);
+        }
+        self.atomically(|store| {
+            let mut changed = false;
+            if work.rebuild {
+                store.rebuild_views(context)?;
+                changed = true;
+            } else {
+                for member in &work.settle {
+                    changed |= store.settle_after_removal(member, context)?;
+                }
+            }
+            store.delete_meta(VIEW_WORK_META)?;
+            Ok(changed)
+        })
+    }
+
+    fn view_work(&self) -> Result<ViewWork> {
+        Ok(match self.meta(VIEW_WORK_META)? {
+            Some(bytes) => postcard::from_bytes(&bytes)?,
+            None => ViewWork::default(),
         })
     }
 

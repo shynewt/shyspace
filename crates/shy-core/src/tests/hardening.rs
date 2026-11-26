@@ -19,7 +19,7 @@ use object_store::{
 use super::support::*;
 use crate::{
     DataDir, KeyStorage, Networking, Workspace, crypto,
-    membership::commit::FrozenAuthor,
+    membership::commit::{self, FrozenAuthor},
     ops::{Envelope, Op, OpBody, now_ms},
     transport::bucket::{Bucket, parse_segment_name, segment_name_for},
     views::PresenceState,
@@ -5446,10 +5446,13 @@ async fn an_unbound_commit_is_followed_only_until_a_bound_one() {
     let admin = create_admin(&root.path().join("ada"), &bucket).await;
     let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
     let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
-    // Bob joins last, so he has followed no commit yet.
+    // Bob joins last, so he has followed no commit yet; as if an admin on
+    // 0.1.4 had added him, he hasn't seen a bound one either.
     let bob = join(&admin, &root.path().join("bob"), &bucket, "Bob", false).await;
+    forget_seeing_bound_commits(&bob);
     sync_all(&[&admin, &bob, &carol, &dave]).await;
-    // A commit from an admin's app that binds nothing (0.1.4) is followed.
+    // Known limit: a commit from an admin's app that binds nothing (0.1.4)
+    // is followed.
     let carol_freeze = frozen_at_last_seq(&admin, &carol.me());
     let (first, removal) = stage_removal_unchecked(&admin, &carol.me(), &[]);
     bucket
@@ -5475,4 +5478,308 @@ async fn an_unbound_commit_is_followed_only_until_a_bound_one() {
     bob.sync().await;
     assert_eq!(epoch_of(&bob), unbound);
     drop(erin);
+}
+
+/// Admin and Bob, with Carol joined; Bob hasn't followed Carol's removal.
+async fn carol_removed_while_bob_is_away() -> (tempfile::TempDir, Bucket, Workspace, Workspace, Workspace, u64)
+{
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let from_epoch = epoch_of(&admin);
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    (root, bucket, admin, bob, carol, from_epoch)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_crash_between_saving_and_merging_is_followed_again() {
+    let (_root, bucket, admin, bob, _carol, from_epoch) = carol_removed_while_bob_is_away().await;
+    let signed = bucket.commit(from_epoch).await.unwrap().unwrap();
+    bob.state().save_commit(from_epoch, &signed).unwrap();
+
+    // What opening does after a crash before MLS saw the commit.
+    bob.state().record_epoch(&admin.me()).unwrap();
+    assert!(!bob.state().has_unsettled_epoch().unwrap());
+    bob.sync().await;
+
+    assert_eq!(bob.status().error, None);
+    assert_eq!(epoch_of(&bob), epoch_of(&admin));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_crash_after_merging_finishes_the_freeze_at_start() {
+    let (_root, bucket, admin, bob, carol, from_epoch) = carol_removed_while_bob_is_away().await;
+    let signed = bucket.commit(from_epoch).await.unwrap().unwrap();
+    let removal = commit::verify(&signed, from_epoch, &admin.me()).unwrap();
+    {
+        let mut state = bob.state();
+        state.save_commit(from_epoch, &signed).unwrap();
+        state.mls.process_commit(&removal.commit, &admin.me()).unwrap();
+    }
+    // Stopped before settling: nothing is written meanwhile.
+    let general = channel_id(&bob, "general");
+    assert!(bob.send_message(&general, "too early", None).is_err());
+    assert_eq!(bob.state().store.frozen_last_seq(&carol.me()).unwrap(), None);
+
+    bob.state().record_epoch(&admin.me()).unwrap();
+
+    assert_eq!(
+        bob.state().store.frozen_last_seq(&carol.me()).unwrap(),
+        Some(removal.frozen[0].last_seq)
+    );
+    assert!(bob.state().store.epoch_key(from_epoch + 1).unwrap().is_some());
+    bob.send_message(&general, "settled", None).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_admin_crash_after_merging_finishes_the_freeze_at_start() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let freeze = frozen_at_last_seq(&admin, &carol.me());
+    {
+        let mut state = admin.state();
+        let from_epoch = state.mls.epoch().unwrap();
+        let key = state.mls.epoch_key().unwrap();
+        let binding = commit::lists_hash(&key, from_epoch, &[freeze], &[]).unwrap();
+        let removal = state.mls.remove_member(&carol.me(), &binding).unwrap();
+        let signed = commit::sign(&admin.inner.identity, from_epoch, removal, vec![freeze]).unwrap();
+        state.save_commit(from_epoch, &signed).unwrap();
+        state.mls.merge_pending_commit().unwrap();
+    }
+    assert_eq!(admin.state().store.frozen_last_seq(&carol.me()).unwrap(), None);
+
+    admin.state().record_epoch(&admin.me()).unwrap();
+
+    assert_eq!(
+        admin.state().store.frozen_last_seq(&carol.me()).unwrap(),
+        Some(freeze.last_seq)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_freeze_is_finished_before_the_next_commit_or_write() {
+    let (root, bucket, admin, bob, carol, from_epoch) = carol_removed_while_bob_is_away().await;
+    bob.state().store.execute_for_test(
+        "CREATE TRIGGER failing BEFORE INSERT ON frozen_authors BEGIN SELECT RAISE(ABORT, 'the disk is full'); END",
+    );
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), from_epoch + 1, "MLS moved on");
+    assert!(bob.status().error.unwrap().contains("the disk is full"));
+    let general = channel_id(&bob, "general");
+    assert!(bob.send_message(&general, "not yet", None).is_err());
+
+    // Another commit waits too.
+    let _dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), from_epoch + 1);
+
+    bob.state().store.execute_for_test("DROP TRIGGER failing");
+    bob.sync().await;
+
+    assert_eq!(bob.status().error, None);
+    assert_eq!(epoch_of(&bob), epoch_of(&admin));
+    assert!(bob.state().store.frozen_last_seq(&carol.me()).unwrap().is_some());
+    bob.send_message(&general, "now", None).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_removed_by_a_commit_still_undoes_what_the_commit_froze() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let general = channel_id(&carol, "general");
+    // Written but never uploaded: the admin's freeze ends Carol's log before it.
+    carol.send_message(&general, "unsent", None).unwrap();
+    let last_uploaded = admin.state().store.last_seq(&carol.me()).unwrap();
+    admin.remove_member(&carol.my_id()).await.unwrap();
+
+    carol.sync().await;
+
+    assert!(carol.status().removed);
+    assert_eq!(
+        carol.state().store.frozen_last_seq(&carol.me()).unwrap(),
+        Some(last_uploaded)
+    );
+    assert!(!texts_in(&carol, &general).contains(&"unsent".to_string()));
+    drop(bucket);
+    drop(root);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_view_rebuild_is_retried_and_holds_nothing_else_up() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let general = channel_id(&admin, "general");
+    carol.send_message(&general, "kept", None).unwrap();
+    carol
+        .send_message(&general, "sent just before the removal", None)
+        .unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    // Carol's last op reached Bob, but her log is frozen just before it.
+    let mut freeze = frozen_at_last_seq(&admin, &carol.me());
+    freeze.last_seq -= 1;
+    let from_epoch = epoch_of(&admin);
+    let binding = lists_binding(&admin, from_epoch, &[freeze]);
+    let (_, removal) = stage_removal_unchecked(&admin, &carol.me(), &binding);
+    bucket
+        .put_commit(
+            from_epoch,
+            wrap_as_admin(&admin, from_epoch, removal, vec![freeze]),
+        )
+        .await
+        .unwrap();
+    bob.state().store.execute_for_test(
+        "CREATE TRIGGER failing BEFORE DELETE ON messages BEGIN SELECT RAISE(ABORT, 'the disk is full'); END",
+    );
+
+    bob.sync().await;
+
+    assert_eq!(epoch_of(&bob), from_epoch + 1);
+    assert!(bob.status().error.unwrap().contains("the disk is full"));
+    bob.send_message(&general, "still writing", None).unwrap();
+    let _dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), epoch_of(&admin), "later commits are followed");
+
+    bob.state().store.execute_for_test("DROP TRIGGER failing");
+    bob.sync().await;
+
+    assert_eq!(bob.status().error, None);
+    let texts = texts_in(&bob, &general);
+    assert!(texts.contains(&"kept".to_string()));
+    assert!(!texts.contains(&"sent just before the removal".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wrapper_mls_refuses_is_never_republished_and_the_admins_repair_is_followed() {
+    let (_root, bucket, admin, bob, _carol, from_epoch) = carol_removed_while_bob_is_away().await;
+    let genuine = bucket.commit(from_epoch).await.unwrap().unwrap();
+    let removal = commit::verify(&genuine, from_epoch, &admin.me()).unwrap();
+    // The authenticated data still matches; the encrypted part doesn't open.
+    let mut broken = removal.commit.clone();
+    *broken.last_mut().unwrap() ^= 1;
+    let broken = wrap_as_admin(&admin, from_epoch, broken, removal.frozen.clone());
+    bucket.put_commit(from_epoch, broken).await.unwrap();
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), from_epoch);
+    assert!(bob.status().error.unwrap().contains("invalid commit"));
+
+    // The admin repairs the slot; Bob must not write his saved copy back.
+    bucket.put_commit(from_epoch, genuine.to_vec()).await.unwrap();
+    bob.republish_commits().await.unwrap();
+    assert_eq!(bucket.commit(from_epoch).await.unwrap().unwrap(), genuine);
+
+    bob.sync().await;
+    assert_eq!(epoch_of(&bob), epoch_of(&admin));
+
+    // A commit Bob has left behind is put back when it goes missing.
+    bucket.put_commit(from_epoch, b"junk".to_vec()).await.unwrap();
+    bob.republish_commits().await.unwrap();
+    assert_eq!(bucket.commit(from_epoch).await.unwrap().unwrap(), genuine);
+}
+
+/// As a device that joined through, and has only followed, commits from an
+/// admin's app that binds nothing.
+fn forget_seeing_bound_commits(member: &Workspace) {
+    member
+        .state()
+        .store
+        .execute_for_test("DELETE FROM meta WHERE key = 'bound_commit_followed'");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn known_limit_two_unbound_wrappers_split_members_that_never_followed_a_bound_commit() {
+    let (_root, bucket, admin, bob, carol, dave) = four_members().await;
+    forget_seeing_bound_commits(&bob);
+    forget_seeing_bound_commits(&dave);
+    let freeze = frozen_at_last_seq(&admin, &carol.me());
+    let (from_epoch, removal) = stage_removal_unchecked(&admin, &carol.me(), &[]);
+
+    bucket
+        .put_commit(
+            from_epoch,
+            wrap_as_admin(&admin, from_epoch, removal.clone(), Vec::new()),
+        )
+        .await
+        .unwrap();
+    bob.sync().await;
+    bucket
+        .put_commit(
+            from_epoch,
+            wrap_as_admin(&admin, from_epoch, removal, vec![freeze]),
+        )
+        .await
+        .unwrap();
+    dave.sync().await;
+
+    assert_eq!(epoch_of(&bob), from_epoch + 1);
+    assert_eq!(epoch_of(&dave), from_epoch + 1);
+    assert_eq!(bob.state().store.frozen_last_seq(&carol.me()).unwrap(), None);
+    assert_eq!(
+        dave.state().store.frozen_last_seq(&carol.me()).unwrap(),
+        Some(freeze.last_seq)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_added_by_a_bound_commit_ignores_unbound_ones() {
+    let (root, bucket, admin, _bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    let freeze = frozen_at_last_seq(&admin, &carol.me());
+    let (from_epoch, removal) = stage_removal_unchecked(&admin, &carol.me(), &[]);
+    bucket
+        .put_commit(
+            from_epoch,
+            wrap_as_admin(&admin, from_epoch, removal, vec![freeze]),
+        )
+        .await
+        .unwrap();
+
+    dave.sync().await;
+
+    assert_eq!(epoch_of(&dave), from_epoch);
+    assert!(dave.status().error.unwrap().contains("doesn't bind its lists"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commit_with_junk_authenticated_data_is_ignored() {
+    let (_root, bucket, admin, bob, carol, _dave) = four_members().await;
+    let freeze = frozen_at_last_seq(&admin, &carol.me());
+    let (from_epoch, removal) = stage_removal_unchecked(&admin, &carol.me(), b"junk!");
+    bucket
+        .put_commit(
+            from_epoch,
+            wrap_as_admin(&admin, from_epoch, removal, vec![freeze]),
+        )
+        .await
+        .unwrap();
+
+    bob.sync().await;
+
+    assert_eq!(epoch_of(&bob), from_epoch);
+    assert!(bob.status().error.unwrap().contains("don't match"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mismatched_wrapper_handed_over_by_a_member_is_ignored_too() {
+    let (_root, _bucket, admin, bob, carol, _dave) = four_members().await;
+    let freeze = frozen_at_last_seq(&admin, &carol.me());
+    let from_epoch = epoch_of(&admin);
+    let binding = lists_binding(&admin, from_epoch, &[freeze]);
+    let (_, removal) = stage_removal_unchecked(&admin, &carol.me(), &binding);
+    let hiding_the_freeze = wrap_as_admin(&admin, from_epoch, removal, Vec::new());
+    let settings = Forger::new(&admin).seal(Op::StorageSettings {
+        bucket: test_bucket_config(),
+    });
+    let answer = crate::sync::key_handoff::KeyAnswer::Settings {
+        commits: vec![(from_epoch, hiding_the_freeze)],
+        settings,
+    };
+
+    let error = bob.take_key_answer(answer).unwrap_err();
+
+    assert!(format!("{error:#}").contains("don't match"), "{error:#}");
+    assert_eq!(epoch_of(&bob), from_epoch);
 }

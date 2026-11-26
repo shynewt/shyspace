@@ -75,6 +75,10 @@ impl Workspace {
                 !state.store.is_catching_up()?,
                 "this device is still reading its changes back after a restore; try again in a moment"
             );
+            ensure!(
+                !state.has_unsettled_epoch()?,
+                "this device is still finishing a membership change; try again in a moment"
+            );
             let epoch = state.mls.epoch()?;
             let key = state
                 .store

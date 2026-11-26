@@ -150,6 +150,17 @@ impl Store {
         Ok(())
     }
 
+    pub fn commit_record(&self, from_epoch: u64) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT signed FROM commits WHERE from_epoch = ?",
+                [from_epoch],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     pub fn has_commit_record(&self, from_epoch: u64) -> Result<bool> {
         self.exists("SELECT 1 FROM commits WHERE from_epoch = ?", [from_epoch])
     }

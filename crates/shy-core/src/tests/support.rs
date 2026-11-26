@@ -423,7 +423,7 @@ pub fn stage_removal_unchecked(
     let from_epoch = state.mls.epoch().unwrap();
     let commit = state.mls.remove_member(member, binding).unwrap();
     state.mls.merge_pending_commit().unwrap();
-    state.record_epoch().unwrap();
+    state.record_epoch(&admin.inner.config.admin).unwrap();
     (from_epoch, commit)
 }
 

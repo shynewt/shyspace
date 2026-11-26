@@ -399,6 +399,10 @@ impl Workspace {
             .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
         config.mark_complete(&data.path)?;
         let workspace = Self::start(data, local, mls, config, connect, options).await?;
+        // Without it, unbound commits are taken until the next bound one.
+        if let Err(error) = workspace.note_a_bound_join().await {
+            warn!("can't tell whether the admin's app binds its commits yet: {error:#}");
+        }
         workspace.finish_writes_left_over()?;
         Ok(workspace)
     }
@@ -479,7 +483,7 @@ impl Workspace {
         } = local;
         let mut state = State { store, mls };
         state.recover_staged_commit()?;
-        state.record_epoch()?;
+        state.record_epoch(&config.admin)?;
         let (incoming_sender, incoming) = mpsc::channel(1024);
         let options: WorkspaceOptions = options.into();
         let net = match options.networking {

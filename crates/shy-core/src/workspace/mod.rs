@@ -43,7 +43,7 @@ use crate::{
     device_settings::DeviceSettingsFile,
     huddle::media::HuddleMedia,
     keys::DeviceKey,
-    membership::{admin::drop_unsealed_deliveries, mls::Mls},
+    membership::{admin::drop_unsealed_deliveries, commit, follow::BOUND_COMMIT_FOLLOWED_META, mls::Mls},
     storage::Store,
     sync::SyncStatus,
     transport::{
@@ -103,6 +103,10 @@ pub struct Profile<'a> {
     pub is_bot: bool,
 }
 
+/// The epoch a saved commit leaves, from saving it until its new epoch is
+/// settled (see [`State::record_epoch`]).
+const UNSETTLED_COMMIT_META: &str = "unsettled_commit";
+
 /// Everything that changes together under one lock: the database and the
 /// MLS group must never disagree about the current epoch.
 pub(crate) struct State {
@@ -126,8 +130,57 @@ impl State {
         Ok(())
     }
 
-    /// Stores the current epoch's key and member list after any epoch change.
-    pub fn record_epoch(&self) -> Result<()> {
+    /// Saves a commit just before MLS applies it, and marks its epoch as not
+    /// yet settled, so a crash after the merge still finds its lists.
+    pub fn save_commit(&self, from_epoch: u64, signed: &[u8]) -> Result<()> {
+        self.store.atomically(|store| {
+            store.put_commit_record(from_epoch, signed)?;
+            store.set_meta(UNSETTLED_COMMIT_META, &from_epoch.to_le_bytes())
+        })
+    }
+
+    /// Whether MLS applied a saved commit whose epoch isn't settled yet:
+    /// until it is, nothing is followed or written.
+    pub fn has_unsettled_epoch(&self) -> Result<bool> {
+        let Some(from_epoch) = self.unsettled_commit()? else {
+            return Ok(false);
+        };
+        Ok(!self.mls.is_active() || self.mls.epoch()? > from_epoch)
+    }
+
+    /// Settles the current epoch, once, after any epoch change: what the
+    /// commit froze, the epoch's key and its members, in one transaction.
+    /// It runs at start and before every commit is followed, also when this
+    /// device was removed by the commit. The views' share of the freezing is
+    /// left for [`Store::finish_view_work`].
+    pub fn record_epoch(&self, admin: &PublicKey) -> Result<()> {
+        if let Some(from_epoch) = self.unsettled_commit()? {
+            if !self.has_unsettled_epoch()? {
+                // MLS refused the commit, or we stopped before it applied.
+                return self.store.delete_meta(UNSETTLED_COMMIT_META);
+            }
+            let signed = self
+                .store
+                .commit_record(from_epoch)?
+                .context("the commit being settled was not saved")?;
+            let verified = commit::verify(&signed, from_epoch, admin)?;
+            return self.store.atomically(|store| {
+                let mut frozen = Vec::new();
+                for author in &verified.frozen {
+                    frozen.push((author.member, store.freeze_log(&author.member, author.last_seq)?));
+                }
+                store.add_view_work(&frozen)?;
+                if !Mls::commit_binding(&verified.commit)?.is_empty() {
+                    store.set_meta(BOUND_COMMIT_FOLLOWED_META, &[1])?;
+                }
+                self.record_members()?;
+                store.delete_meta(UNSETTLED_COMMIT_META)
+            });
+        }
+        self.record_members()
+    }
+
+    fn record_members(&self) -> Result<()> {
         if self.mls.is_active() {
             let members = self.mls.members()?;
             self.store
@@ -135,6 +188,20 @@ impl State {
             self.store.set_current_members(&members)?;
         }
         Ok(())
+    }
+
+    fn unsettled_commit(&self) -> Result<Option<u64>> {
+        self.store
+            .meta(UNSETTLED_COMMIT_META)?
+            .map(|bytes| {
+                Ok(u64::from_le_bytes(
+                    bytes
+                        .as_slice()
+                        .try_into()
+                        .context("damaged unsettled commit mark")?,
+                ))
+            })
+            .transpose()
     }
 }
 

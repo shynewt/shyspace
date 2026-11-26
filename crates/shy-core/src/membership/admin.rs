@@ -154,7 +154,7 @@ impl Workspace {
                 .put_delivery(&claimed, token, &postcard::to_stdvec(&delivery)?)?;
             let signed = self.record_commit(&state, from_epoch, commit, Vec::new())?;
             state.mls.merge_pending_commit()?;
-            state.record_epoch()?;
+            state.record_epoch(&self.inner.config.admin)?;
             let grant = Grant {
                 history: KeyHistory::collect(&state.store)?,
                 bucket: config::current_bucket(&state.store)?,
@@ -387,7 +387,7 @@ impl Workspace {
         self.collect_removed_log(&member)
             .await
             .context("can't collect the member's last messages")?;
-        let (from_epoch, signed, view_changes) = {
+        let (from_epoch, signed) = {
             let mut state = self.state();
             let frozen = FrozenAuthor {
                 member,
@@ -396,25 +396,19 @@ impl Workspace {
             let from_epoch = state.mls.epoch()?;
             let binding = commit::lists_hash(&state.mls.epoch_key()?, from_epoch, &[frozen], &[])?;
             let commit = state.mls.remove_member(&member, &binding)?;
-            let views_changed =
-                state
-                    .store
-                    .freeze_author(&frozen.member, frozen.last_seq, self.apply_context())?;
             let signed = self.record_commit(&state, from_epoch, commit, vec![frozen])?;
             state.mls.merge_pending_commit()?;
-            state.record_epoch()?;
+            // Freezing comes after the merge, as on every member's device.
+            state.record_epoch(&self.inner.config.admin)?;
             Workspace::mark_recovery_snapshot_stale(&state.store)?;
             Workspace::start_storage_rotation(&state.store)?;
-            let view_changes = match views_changed {
-                true => state.store.all_view_changes()?,
-                false => Vec::new(),
-            };
-            (from_epoch, signed, view_changes)
+            (from_epoch, signed)
         };
-        for change in view_changes {
-            self.emit(change);
-        }
         self.emit(Change::Members);
+        // The removal is made; views catch up here or at the next pass.
+        if let Err(error) = self.finish_view_work() {
+            warn!("the views will catch up with the removal at the next pass: {error:#}");
+        }
         self.refresh_recovery_snapshot().await?;
         self.upload_commit(from_epoch, signed).await
     }
@@ -429,7 +423,7 @@ impl Workspace {
         frozen: Vec<FrozenAuthor>,
     ) -> Result<Vec<u8>> {
         let signed = commit::sign(&self.inner.identity, from_epoch, commit, frozen)?;
-        state.store.put_commit_record(from_epoch, &signed)?;
+        state.save_commit(from_epoch, &signed)?;
         Ok(signed)
     }
 
