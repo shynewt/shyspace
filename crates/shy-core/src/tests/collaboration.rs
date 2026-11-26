@@ -267,6 +267,38 @@ async fn a_shut_down_workspace_lets_go_of_everything_and_reopens() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_online_workspace_sends_from_a_thread_outside_its_runtime() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let admin = Workspace::create_with(
+        &data_dir(&root.path().join("ada")),
+        TEST_WORKSPACE_ID.into(),
+        "Acme",
+        crate::Profile {
+            name: "Ada",
+            is_bot: false,
+        },
+        test_bucket_config(),
+        connector(&bucket),
+        Networking::Online,
+    )
+    .await
+    .unwrap();
+    let general = channel_id(&admin, "general");
+
+    // As a window's synchronous command does, on the app's main thread.
+    let sender = admin.clone();
+    let channel = general.clone();
+    let sent = std::thread::spawn(move || sender.send_message(&channel, "sent from the main thread", None))
+        .join()
+        .expect("sending outside the runtime must not panic");
+
+    sent.unwrap();
+    assert_eq!(texts_in(&admin, &general), ["sent from the main thread"]);
+    admin.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn many_large_pastes_made_offline_all_reach_others() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;
     // Each near the page update limit; together well past the bucket's

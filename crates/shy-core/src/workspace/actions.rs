@@ -134,12 +134,14 @@ impl Workspace {
         Ok(())
     }
 
+    /// Writes come from any thread, such as the app's main thread, which
+    /// has no runtime of its own, so this starts its task on the workspace's.
     fn send_live(&self, envelope: Envelope) {
         if self.inner.net.is_none() {
             return;
         }
         let workspace = self.clone();
-        tokio::spawn(async move {
+        self.inner.runtime.spawn(async move {
             if let Some(net) = &workspace.inner.net
                 && let Err(error) = net.broadcast(envelope).await
             {
