@@ -4,7 +4,9 @@
 use std::{
     collections::HashMap,
     fmt,
+    path::PathBuf,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -6042,6 +6044,260 @@ async fn a_member_whose_bound_freezes_differ_cannot_follow_the_next_v3_commit() 
         error.contains("list of devices doesn't match the workspace's"),
         "{error}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_learns_whose_devices_are_whose() {
+    let (root, bucket, admin, bob, carol, erin, phone) = bob_with_a_phone().await;
+
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+
+    assert_eq!(dave.state().store.person_of(&phone.public()).unwrap(), bob.me());
+    assert_eq!(
+        dave.state().store.device_records().unwrap(),
+        admin.state().store.device_records().unwrap()
+    );
+    admin.remove_member(&erin.my_id()).await.unwrap();
+    sync_all(&[&admin, &bob, &carol, &dave]).await;
+    assert_eq!(epoch_of(&dave), epoch_of(&admin));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_stores_the_records_as_given_without_judging_them_again() {
+    let (root, bucket, admin, bob, _carol, _erin, phone) = bob_with_a_phone().await;
+    // Enough membership changes that the phone's certificate would now be
+    // stale, if the newcomer ran the checks again at its own epoch.
+    for name in ["Fay", "Gus", "Hal", "Ivy"] {
+        join(&admin, &root.path().join(name), &bucket, name, false).await;
+    }
+
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+
+    assert_eq!(dave.state().store.person_of(&phone.public()).unwrap(), bob.me());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_given_a_trimmed_device_map_cannot_join() {
+    let (root, bucket, admin, ..) = bob_with_a_phone().await;
+    let (dir, joined) =
+        join_with_tampered_grant(&admin, root.path(), &bucket, |grant| grant.devices.clear()).await;
+    assert_join_refused_and_cleared(&dir, joined);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_given_a_false_added_epoch_cannot_join() {
+    let (root, bucket, admin, ..) = bob_with_a_phone().await;
+    let (dir, joined) = join_with_tampered_grant(&admin, root.path(), &bucket, |grant| {
+        grant.devices[0].added_epoch -= 1;
+    })
+    .await;
+    assert_join_refused_and_cleared(&dir, joined);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_not_told_of_a_stolen_devices_freeze_cannot_join() {
+    let (root, bucket, admin, bob, carol, erin, _phone) = bob_with_a_phone().await;
+    admin.remove_member(&erin.my_id()).await.unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    assert_eq!(admin.state().store.bound_freezes().unwrap().len(), 1);
+    let (dir, joined) =
+        join_with_tampered_grant(&admin, root.path(), &bucket, |grant| grant.bound_frozen.clear()).await;
+    assert_join_refused_and_cleared(&dir, joined);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_whose_map_does_not_match_writes_uploads_and_announces_nothing() {
+    let (root, bucket, admin, bob, carol, erin, phone) = bob_with_a_phone().await;
+    let known = [admin.me(), bob.me(), carol.me(), erin.me(), phone.public()];
+    let (dir, joined) =
+        join_with_tampered_grant(&admin, root.path(), &bucket, |grant| grant.devices.clear()).await;
+    assert_join_refused_and_cleared(&dir, joined);
+
+    let dave = admin
+        .state()
+        .mls
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| !known.contains(member))
+        .unwrap();
+    assert!(bucket.list_segments(&dave, None).await.unwrap().is_empty());
+    assert!(bucket.peers().await.unwrap().iter().all(|peer| peer.peer != dave));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_swapped_digest_in_the_answer_is_refused_before_the_welcome_is_touched_and_the_real_answer_still_works()
+ {
+    let (root, bucket, admin, bob, ..) = bob_with_a_phone().await;
+    let invite = admin
+        .create_test_invite("Dave", Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &root.path().join("dave"), &bucket, "Dave", false);
+    wait_for_request(&admin, &token).await;
+    admin
+        .inner
+        .fail_next_answer_upload
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        admin.approve_invite(&token).await.is_err(),
+        "the answer didn't go up"
+    );
+
+    // Someone with the bucket keys copies the real answer, changing one
+    // part, or strips it down to an unsigned acceptance.
+    let (dave, _, payload) = admin.state().store.deliveries().unwrap().remove(0);
+    let delivery = crate::membership::admin::Delivery::decode(&payload).unwrap();
+    let sealed_grant = delivery.sealed_grant.unwrap();
+    let real_digest = delivery.map_digest.unwrap();
+    let bytes = crate::membership::invite::accepted_bytes(
+        &admin.inner.config.workspace_id,
+        &token,
+        &dave,
+        Some(&real_digest),
+        &delivery.welcome,
+        &sealed_grant,
+    )
+    .unwrap();
+    let signature = admin.inner.identity.sign(&bytes).to_bytes().to_vec();
+    let signed =
+        |map_digest: [u8; 32], sealed_grant: Vec<u8>| crate::membership::invite::Answer::AcceptedSigned {
+            welcome: delivery.welcome.clone(),
+            sealed_grant,
+            map_digest: Some(map_digest),
+            signature: signature.clone(),
+        };
+    let forgeries = [
+        signed([9; 32], sealed_grant.clone()),
+        signed(real_digest, b"junk".to_vec()),
+        crate::membership::invite::Answer::Accepted {
+            welcome: delivery.welcome.clone(),
+            sealed_grant: sealed_grant.clone(),
+        },
+    ];
+    for forged in forgeries {
+        bucket
+            .put_invite_answer(&token, postcard::to_stdvec(&forged).unwrap())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(!joining.is_finished(), "the forged answer is ignored");
+    }
+
+    admin.inner.answers_sent.lock().unwrap().clear();
+    admin.sync().await;
+    let dave = joining.await.unwrap().unwrap();
+    let phone = admin.state().store.device_records().unwrap()[0]
+        .certificate
+        .device;
+    assert_eq!(dave.state().store.person_of(&phone).unwrap(), bob.me());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_joins_after_a_removal_bound_by_a_v3_commit_and_follows_the_next() {
+    let (root, bucket, admin, bob, carol, erin, _phone) = bob_with_a_phone().await;
+    admin.remove_member(&erin.my_id()).await.unwrap();
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    admin.remove_member(&carol.my_id()).await.unwrap();
+
+    sync_all(&[&admin, &bob, &dave]).await;
+
+    assert_eq!(epoch_of(&dave), epoch_of(&admin));
+    assert_eq!(epoch_of(&dave), 7);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_from_an_app_that_cant_read_signed_answers_is_refused_once_there_are_devices() {
+    let (root, bucket, admin, ..) = bob_with_a_phone().await;
+    let invite = admin.create_test_invite("Old", Duration::from_secs(600)).unwrap();
+    let identity = SecretKey::generate();
+    let joiner = crate::membership::mls::Mls::open(
+        &root.path().join("old.db"),
+        crate::storage::TEST_DB_KEY,
+        &identity,
+        None,
+        None,
+    )
+    .unwrap();
+    let request = crate::membership::invite::JoinRequest {
+        key_package: joiner.key_package().unwrap(),
+        binding: identity
+            .sign(&crate::membership::mls::binding_message(joiner.signer_public()))
+            .to_bytes()
+            .to_vec(),
+        name: "Old".into(),
+        is_bot: false,
+        reads_signed_answers: false,
+    };
+    let sealed = crate::membership::request_seal::seal_request(&invite, &request).unwrap();
+    bucket.put_invite_request(&invite.token, sealed).await.unwrap();
+    wait_for_request(&admin, &invite.token).await;
+    let epoch = epoch_of(&admin);
+
+    let refused = admin.approve_invite(&invite.token).await.unwrap_err();
+
+    assert!(refused.to_string().contains("older version"), "{refused:#}");
+    assert_eq!(epoch_of(&admin), epoch, "nothing was committed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recomputing_the_map_ignores_commits_from_before_the_join() {
+    let (root, bucket, admin, bob, carol, _erin, phone) = bob_with_a_phone().await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    // The admin signs another wrapper for the commit that linked the
+    // phone, naming Carol as its person, and Dave somehow holds it.
+    let from_epoch = admin.state().store.device_records().unwrap()[0].added_epoch - 1;
+    let signed = bucket.commit(from_epoch).await.unwrap().unwrap();
+    let mls_commit = commit::verify(&signed, from_epoch, &admin.me()).unwrap().commit;
+    let carols = device_certificate(&carol.inner.identity, &carol.me(), &phone, from_epoch);
+    let epoch_key = admin.state().store.epoch_key(from_epoch).unwrap().unwrap();
+    let other = commit::sign_v3(
+        &admin.inner.identity,
+        &epoch_key,
+        from_epoch,
+        mls_commit,
+        Vec::new(),
+        &[carols],
+    )
+    .unwrap();
+    dave.state().store.put_commit_record(from_epoch, &other).unwrap();
+
+    dave.state()
+        .store
+        .recompute_device_map(&admin.inner.config.workspace_id, &admin.me())
+        .unwrap();
+
+    assert_eq!(dave.state().store.person_of(&phone.public()).unwrap(), bob.me());
+}
+
+/// Joins Dave while the admin's app changes the grant with `tamper`.
+async fn join_with_tampered_grant(
+    admin: &Workspace,
+    root: &std::path::Path,
+    bucket: &Bucket,
+    tamper: impl FnOnce(&mut crate::membership::invite::GrantWithDevices) + Send + 'static,
+) -> (PathBuf, anyhow::Result<Workspace>) {
+    *admin.inner.tamper_next_grant.lock().unwrap() = Some(Box::new(tamper));
+    let dir = root.join("dave");
+    let invite = admin
+        .create_test_invite("Dave", Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &dir, bucket, "Dave", false);
+    wait_for_request(admin, &token).await;
+    admin.approve_invite(&token).await.unwrap();
+    (dir, joining.await.unwrap())
+}
+
+fn assert_join_refused_and_cleared(dir: &std::path::Path, joined: anyhow::Result<Workspace>) {
+    let error = joined.err().unwrap().to_string();
+    assert!(
+        error.contains("doesn't match the one the workspace uses"),
+        "{error}"
+    );
+    for database in ["shy.db", "mls.db"] {
+        assert!(!dir.join(database).exists(), "{database} is cleared");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

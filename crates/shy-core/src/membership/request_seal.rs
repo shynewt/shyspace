@@ -113,13 +113,13 @@ pub(crate) fn open_request(identity: &SecretKey, slot: RequestSlot<'_>, bytes: &
         .hpke_open(HPKE, &ciphertext, &own.secret, &slot.info()?, &[])
         .map(Zeroizing::new)
         .map_err(|_| NotForThisInvite)?;
-    postcard::from_bytes(&plaintext).context("reading an opened join request")
+    JoinRequest::decode(&plaintext).context("reading an opened join request")
 }
 
 /// Whether `bytes` is a join request as versions before sealing sent it,
 /// in the clear, so the admin can be told to send a new invite.
 pub(crate) fn is_unsealed_request(bytes: &[u8]) -> bool {
-    postcard::from_bytes::<JoinRequest>(bytes).is_ok()
+    JoinRequest::decode(bytes).is_ok()
 }
 
 #[cfg(test)]
@@ -139,6 +139,7 @@ mod tests {
             request_url: String::new(),
             answer_url: String::new(),
             request_key: request_key_pair(admin, token).unwrap().public,
+            signs_acceptance: true,
         }
     }
 
@@ -148,6 +149,7 @@ mod tests {
             binding: vec![4, 5],
             name: "Bob Secretname".into(),
             is_bot: false,
+            reads_signed_answers: true,
         }
     }
 

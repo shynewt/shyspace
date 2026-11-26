@@ -35,7 +35,7 @@ pub struct DeviceCertificate {
 
 /// A certificate that counted, and the epoch its commit moved to: from then
 /// on the device is its person's.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceRecord {
     pub certificate: DeviceCertificate,
     pub added_epoch: u64,
@@ -49,7 +49,7 @@ thread_local! {
 
 /// Where a removed device's log ends, as a commit that binds the device map
 /// froze it: in that map's digest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoundFreeze {
     pub member: PublicKey,
     pub last_seq: u64,

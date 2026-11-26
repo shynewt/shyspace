@@ -25,6 +25,7 @@ pub(crate) const MAX_DEVICES_PER_PERSON: usize = 5;
 /// A certificate signed in epoch `e` counts in commits leaving `e` to
 /// `e + 4`, and never after: it can't be taken back, so it goes stale.
 pub(crate) const CERTIFICATE_LIFETIME_EPOCHS: u64 = 4;
+const JOINED_EPOCH_META: &str = "joined_epoch";
 
 impl Store {
     /// The person `device` spoke for in `epoch`.
@@ -105,6 +106,21 @@ impl Store {
         self.exists("SELECT 1 FROM devices LIMIT 1", [])
     }
 
+    /// Notes the epoch this device joined at (or created the workspace in).
+    pub fn record_joined_epoch(&self, epoch: u64) -> Result<()> {
+        self.set_meta(JOINED_EPOCH_META, &epoch.to_le_bytes())
+    }
+
+    /// The epoch this device joined at, if it joined on a version that notes it.
+    fn joined_epoch(&self) -> Result<Option<u64>> {
+        self.meta(JOINED_EPOCH_META)?
+            .map(|bytes| {
+                let bytes: [u8; 8] = bytes.as_slice().try_into().context("a damaged joined epoch")?;
+                Ok(u64::from_le_bytes(bytes))
+            })
+            .transpose()
+    }
+
     /// Counts again, oldest first, the certificates of every commit this
     /// device followed, keeping the rows it got from the grant: the map is a
     /// function of those two, so this repairs a damaged one.
@@ -123,7 +139,14 @@ impl Store {
                 }
             }
             store.db.execute("DELETE FROM devices WHERE from_grant = 0", [])?;
+            // The grant's rows stand for every commit before the join. A
+            // device that joined before this was noted kept only the commits
+            // it followed.
+            let joined_epoch = store.joined_epoch()?.unwrap_or_default();
             for (from_epoch, signed) in store.commit_records()? {
+                if from_epoch < joined_epoch {
+                    continue;
+                }
                 let Some(to_epoch) = from_epoch.checked_add(1) else {
                     continue;
                 };

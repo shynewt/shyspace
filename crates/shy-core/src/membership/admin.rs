@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 use super::{
     commit::{self, FrozenAuthor},
     device::DeviceCertificate,
-    invite::{Answer, Grant, Invite, JoinRequest, declined_bytes},
+    invite::{Answer, Grant, GrantWithDevices, Invite, JoinRequest, accepted_bytes, declined_bytes},
     keyring::KeyHistory,
     request_seal::{NotForThisInvite, RequestSlot, is_unsealed_request, open_request, request_key_pair},
 };
@@ -36,11 +36,41 @@ const ANSWER_REFRESH: Duration = Duration::from_secs(10 * 60);
 /// kept until the joiner posts, so neither a crash nor a failed upload strands
 /// them; re-uploading also repairs an answer someone overwrote.
 #[derive(Serialize, Deserialize)]
-struct Delivery {
-    welcome: Vec<u8>,
+pub(crate) struct Delivery {
+    pub welcome: Vec<u8>,
     /// Sealed right after the commit is applied; empty until then.
+    pub sealed_grant: Option<Vec<u8>>,
+    /// The device map's digest the add was committed with, once the
+    /// workspace has a linked device.
+    pub map_digest: Option<[u8; 32]>,
+    /// The joiner reads a signed acceptance, so it gets one.
+    pub is_signed: bool,
+}
+
+/// A delivery saved by a version from before linked devices.
+#[derive(Deserialize)]
+struct DeliveryBeforeDevices {
+    welcome: Vec<u8>,
     sealed_grant: Option<Vec<u8>>,
 }
+
+impl Delivery {
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self> {
+        if let Ok(delivery) = postcard::from_bytes::<Self>(bytes) {
+            return Ok(delivery);
+        }
+        let older: DeliveryBeforeDevices = postcard::from_bytes(bytes)?;
+        Ok(Self {
+            welcome: older.welcome,
+            sealed_grant: older.sealed_grant,
+            map_digest: None,
+            is_signed: false,
+        })
+    }
+}
+
+#[cfg(test)]
+pub(crate) type GrantTamper = Box<dyn FnOnce(&mut GrantWithDevices) + Send>;
 
 /// What goes into the next commit besides its proposals.
 struct CommitBinding {
@@ -53,7 +83,7 @@ struct CommitBinding {
 /// After a crash before a join commit was recorded, its Welcome is useless.
 pub(crate) fn drop_unsealed_deliveries(store: &Store) -> Result<()> {
     for (joiner, _, payload) in store.deliveries()? {
-        if postcard::from_bytes::<Delivery>(&payload)?.sealed_grant.is_none() {
+        if Delivery::decode(&payload)?.sealed_grant.is_none() {
             store.delete_delivery(&joiner)?;
         }
     }
@@ -95,6 +125,7 @@ impl Workspace {
             request_url: links.request_url,
             answer_url: links.answer_url,
             request_key: request_key_pair(&self.inner.identity, &token)?.public,
+            signs_acceptance: true,
         };
         self.state()
             .store
@@ -131,7 +162,7 @@ impl Workspace {
                 .store
                 .pending_request(token, now_ms()?)?
                 .context("this invite has no request waiting for approval")?;
-            let request: JoinRequest = postcard::from_bytes(&pending.request)?;
+            let request = JoinRequest::decode(&pending.request)?;
             let (claimed, key_package) = state
                 .mls
                 .verify_key_package(&request.key_package, &request.binding)?;
@@ -153,6 +184,11 @@ impl Workspace {
 
             let from_epoch = state.mls.epoch()?;
             let binding = self.bind_next_commit(&state, from_epoch, &[], &[])?;
+            ensure!(
+                binding.map_key.is_none() || request.reads_signed_answers,
+                "this request comes from an older version of shyspace, which can't join a workspace with linked \
+                 devices; decline it and ask them to update, then join again"
+            );
             let (commit, welcome) =
                 state
                     .mls
@@ -160,6 +196,8 @@ impl Workspace {
             let delivery = Delivery {
                 welcome,
                 sealed_grant: None,
+                map_digest: binding.map_key,
+                is_signed: request.reads_signed_answers,
             };
             state
                 .store
@@ -172,7 +210,11 @@ impl Workspace {
                 bucket: config::current_bucket(&state.store)?,
                 bucket_lamport: config::bucket_lamport(&state.store)?,
             };
-            let sealed_grant = state.mls.seal_for_members(&postcard::to_stdvec(&grant)?)?;
+            let grant = match delivery.map_digest {
+                Some(_) => postcard::to_stdvec(&self.grant_with_devices(&state.store, grant)?)?,
+                None => postcard::to_stdvec(&grant)?,
+            };
+            let sealed_grant = state.mls.seal_for_members(&grant)?;
             let delivery = Delivery {
                 sealed_grant: Some(sealed_grant),
                 ..delivery
@@ -327,7 +369,7 @@ impl Workspace {
         if self.state().store.has_ops_from(&joiner)? {
             return self.end_delivery(joiner, token).await;
         }
-        let delivery: Delivery = postcard::from_bytes(payload)?;
+        let delivery = Delivery::decode(payload)?;
         let Some(sealed_grant) = delivery.sealed_grant else {
             warn!("no grant sealed for {joiner}; they need a new invite");
             self.state().store.delete_delivery(&joiner)?;
@@ -346,9 +388,27 @@ impl Workspace {
         if is_recent {
             return Ok(());
         }
-        let answer = Answer::Accepted {
-            welcome: delivery.welcome,
-            sealed_grant,
+        let answer = match delivery.is_signed {
+            true => {
+                let bytes = accepted_bytes(
+                    &self.inner.config.workspace_id,
+                    token,
+                    &joiner,
+                    delivery.map_digest.as_ref(),
+                    &delivery.welcome,
+                    &sealed_grant,
+                )?;
+                Answer::AcceptedSigned {
+                    signature: self.inner.identity.sign(&bytes).to_bytes().to_vec(),
+                    welcome: delivery.welcome,
+                    sealed_grant,
+                    map_digest: delivery.map_digest,
+                }
+            }
+            false => Answer::Accepted {
+                welcome: delivery.welcome,
+                sealed_grant,
+            },
         };
         self.upload_answer(token, &answer).await?;
         self.answers_sent().insert(joiner, tokio::time::Instant::now());
@@ -427,6 +487,33 @@ impl Workspace {
         self.upload_commit(from_epoch, signed).await
     }
 
+    /// The grant with the device map and bound freezes, as they stand once
+    /// the add is settled.
+    fn grant_with_devices(&self, store: &Store, grant: Grant) -> Result<GrantWithDevices> {
+        let with_devices = GrantWithDevices {
+            grant,
+            devices: store.device_records()?,
+            bound_frozen: store.bound_freezes()?,
+        };
+        #[cfg(test)]
+        let with_devices = self.tampered(with_devices);
+        Ok(with_devices)
+    }
+
+    #[cfg(test)]
+    fn tampered(&self, mut with_devices: GrantWithDevices) -> GrantWithDevices {
+        let tamper = self
+            .inner
+            .tamper_next_grant
+            .lock()
+            .expect("grant tamper lock poisoned")
+            .take();
+        if let Some(tamper) = tamper {
+            tamper(&mut with_devices);
+        }
+        with_devices
+    }
+
     /// How the next commit binds its lists, and, once the workspace has a
     /// device or the commit adds one, the device map.
     fn bind_next_commit(
@@ -476,5 +563,31 @@ impl Workspace {
         self.bucket().put_commit(from_epoch, signed).await?;
         self.nudge_peers().await;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_delivery_saved_before_linked_devices_still_reads() {
+        #[derive(Serialize)]
+        struct Saved {
+            welcome: Vec<u8>,
+            sealed_grant: Option<Vec<u8>>,
+        }
+        let saved = postcard::to_stdvec(&Saved {
+            welcome: b"welcome".to_vec(),
+            sealed_grant: Some(b"grant".to_vec()),
+        })
+        .unwrap();
+
+        let delivery = Delivery::decode(&saved).unwrap();
+
+        assert_eq!(delivery.welcome, b"welcome");
+        assert_eq!(delivery.sealed_grant.unwrap(), b"grant");
+        assert_eq!(delivery.map_digest, None);
+        assert!(!delivery.is_signed);
     }
 }

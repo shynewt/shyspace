@@ -360,6 +360,10 @@ pub(crate) struct Inner {
     /// Makes the next join answer upload fail as an unreachable bucket would.
     #[cfg(test)]
     pub fail_next_answer_upload: std::sync::atomic::AtomicBool,
+    /// Changes the next grant for a workspace with devices, as a dishonest
+    /// admin's app might, after the digest was committed.
+    #[cfg(test)]
+    pub tamper_next_grant: Mutex<Option<crate::membership::admin::GrantTamper>>,
     /// Held while a huddle's audience is worked out and published, so an
     /// older result can never replace a newer one.
     pub audience_lock: Mutex<()>,

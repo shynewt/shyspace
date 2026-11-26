@@ -18,7 +18,11 @@ use crate::{
     identity,
     keys::{DeviceKey, KeyStorage},
     membership::{
-        invite::{Answer, Grant, Invite, JoinMailbox, JoinRequest, declined_bytes, ensure_not_expired},
+        device::map_digest,
+        invite::{
+            Answer, Grant, GrantWithDevices, Invite, JoinMailbox, JoinRequest, accepted_bytes,
+            declined_bytes, ensure_not_expired,
+        },
         mls::{Mls, binding_message},
         request_seal::seal_request,
     },
@@ -279,6 +283,7 @@ impl Workspace {
         let local = data.open_local().await?;
         let mut mls = local.open_mls(data, None)?;
         mls.create_group(workspace_id.as_bytes())?;
+        local.store.record_joined_epoch(mls.epoch()?)?;
         let config = WorkspaceConfig {
             workspace_id,
             name: workspace_name.to_owned(),
@@ -339,14 +344,15 @@ impl Workspace {
                 .to_vec(),
             name: name.clone(),
             is_bot: profile.is_bot,
+            reads_signed_answers: true,
         };
         let asked = async {
             mailbox.post_request(seal_request(&invite, &request)?).await?;
             wait_for_answer(&invite, mailbox, cancel, &local.identity.public()).await
         }
         .await;
-        let (welcome, sealed_grant) = match asked {
-            Ok(answer) => answer,
+        let accepted = match asked {
+            Ok(accepted) => accepted,
             // Declined (and signed so by the admin), the request is over:
             // asking again gets a new key, and with it a new safety code, which
             // the admin may need to see. A cancelled or expired one keeps its
@@ -354,31 +360,27 @@ impl Workspace {
             Err(error) if error.downcast_ref::<Declined>().is_some() => {
                 drop(mls);
                 drop(local);
-                if let Err(cleanup) = data.forget_unfinished().await {
-                    warn!(
-                        "couldn't clear a declined join from {}: {cleanup:#}",
-                        data.path.display()
-                    );
-                }
+                clear_spent_join(data).await;
                 return Err(error);
             }
             Err(error) => return Err(error),
         };
-        mls.join(
-            &welcome,
-            invite.workspace_id.as_bytes(),
-            &invite.admin,
-            &invite.admin_mls_key,
-        )?;
-        let grant: Grant = postcard::from_bytes(&mls.open_from_admin(&sealed_grant, &invite.admin)?)?;
-        grant.history.store_into(
-            &local.store,
-            ApplyContext {
-                workspace_id: &invite.workspace_id,
-                admin: invite.admin,
-                me: local.identity.public(),
-            },
-        )?;
+        let facts = JoinFacts {
+            workspace_id: &invite.workspace_id,
+            admin: invite.admin,
+            admin_mls_key: &invite.admin_mls_key,
+        };
+        // MLS deletes our key as it reads the Welcome, so a join that fails
+        // from here on can't be finished from this folder.
+        let grant = match admit(&local, &mut mls, &facts, accepted) {
+            Ok(grant) => grant,
+            Err(error) => {
+                drop(mls);
+                drop(local);
+                clear_spent_join(data).await;
+                return Err(error);
+            }
+        };
         let bucket_lamport = grant.bucket_lamport;
 
         let config = WorkspaceConfig {
@@ -568,6 +570,8 @@ impl Workspace {
                 drop_segment_transaction: Default::default(),
                 #[cfg(test)]
                 fail_next_answer_upload: Default::default(),
+                #[cfg(test)]
+                tamper_next_grant: Default::default(),
             }),
         };
         workspace.rebuild_views_if_rules_changed()?;
@@ -605,7 +609,7 @@ async fn wait_for_answer(
     mailbox: &impl JoinMailbox,
     cancel: &JoinCancel,
     me: &PublicKey,
-) -> Result<(Vec<u8>, Vec<u8>)> {
+) -> Result<Accepted> {
     let mut cancelled = cancel.0.subscribe();
     loop {
         // Fetching changes nothing on disk, so a cancel needn't wait for a slow one.
@@ -619,10 +623,37 @@ async fn wait_for_answer(
             && let Ok(answer) = postcard::from_bytes::<Answer>(&bytes)
         {
             match answer {
+                // The invite's admin signs every acceptance: an unsigned
+                // one is someone with the bucket keys trying to spend our key.
+                Answer::Accepted { .. } if invite.signs_acceptance => {
+                    warn!("ignoring an answer the admin didn't sign");
+                }
                 Answer::Accepted {
                     welcome,
                     sealed_grant,
-                } => return Ok((welcome, sealed_grant)),
+                } => {
+                    return Ok(Accepted {
+                        welcome,
+                        sealed_grant,
+                        map_digest: None,
+                    });
+                }
+                Answer::AcceptedSigned {
+                    welcome,
+                    sealed_grant,
+                    map_digest,
+                    signature,
+                } => {
+                    let acceptance = Accepted {
+                        welcome,
+                        sealed_grant,
+                        map_digest,
+                    };
+                    if is_signed_acceptance(invite, me, &acceptance, &signature) {
+                        return Ok(acceptance);
+                    }
+                    warn!("ignoring an answer the admin didn't sign");
+                }
                 Answer::Rejected { signature } => {
                     if is_signed_decline(invite, me, &signature) {
                         return Err(Declined.into());
@@ -642,6 +673,114 @@ async fn wait_for_answer(
     }
 }
 
+/// The admin's acceptance of our join request.
+pub(super) struct Accepted {
+    pub welcome: Vec<u8>,
+    pub sealed_grant: Vec<u8>,
+    /// The device map's digest, once the workspace has a linked device:
+    /// the Welcome needs it as a pre-shared key.
+    pub map_digest: Option<[u8; 32]>,
+}
+
+/// Where the workspace's bucket is, from the grant.
+pub(super) struct GrantedBucket {
+    pub bucket: BucketConfig,
+    pub bucket_lamport: u64,
+}
+
+/// The workspace facts a newcomer joins with, from its invite or link.
+pub(super) struct JoinFacts<'a> {
+    pub workspace_id: &'a str,
+    pub admin: PublicKey,
+    pub admin_mls_key: &'a [u8],
+}
+
+/// Joins the group with the admin's answer and stores the grant it seals.
+/// A grant whose device map doesn't match the answer's digest is refused
+/// before anything is stored.
+fn admit(local: &Local, mls: &mut Mls, facts: &JoinFacts, accepted: Accepted) -> Result<GrantedBucket> {
+    if let Some(map_digest) = &accepted.map_digest {
+        mls.store_map_key(map_digest)?;
+    }
+    mls.join(
+        &accepted.welcome,
+        facts.workspace_id.as_bytes(),
+        &facts.admin,
+        facts.admin_mls_key,
+    )?;
+    let opened = mls.open_from_admin(&accepted.sealed_grant, &facts.admin)?;
+    let context = ApplyContext {
+        workspace_id: facts.workspace_id,
+        admin: facts.admin,
+        me: local.identity.public(),
+    };
+    let granted = match accepted.map_digest {
+        None => {
+            let Grant {
+                history,
+                bucket,
+                bucket_lamport,
+            } = postcard::from_bytes(&opened)?;
+            history.store_into(&local.store, context)?;
+            GrantedBucket {
+                bucket,
+                bucket_lamport,
+            }
+        }
+        Some(expected) => {
+            let with_devices: GrantWithDevices = postcard::from_bytes(&opened)?;
+            // Before anything is stored, written or announced: a map the
+            // members don't share would split the workspace.
+            check_device_map(facts.workspace_id, &with_devices, &expected)?;
+            let GrantWithDevices {
+                grant:
+                    Grant {
+                        history,
+                        bucket,
+                        bucket_lamport,
+                    },
+                devices,
+                bound_frozen,
+            } = with_devices;
+            history.store_with_devices(&devices, &bound_frozen, &local.store, context)?;
+            GrantedBucket {
+                bucket,
+                bucket_lamport,
+            }
+        }
+    };
+    local.store.record_joined_epoch(mls.epoch()?)?;
+    Ok(granted)
+}
+
+/// Checks that the grant's device map and bound freezes are the ones the
+/// admin committed with, which every member also used, and that every
+/// record carries both of its signatures.
+fn check_device_map(workspace_id: &str, granted: &GrantWithDevices, expected: &[u8; 32]) -> Result<()> {
+    let is_signed = granted
+        .devices
+        .iter()
+        .all(|record| record.certificate.verify(workspace_id).is_ok());
+    let digest = map_digest(workspace_id, &granted.devices, &granted.bound_frozen)?;
+    ensure!(
+        is_signed && digest == *expected,
+        "the list of devices the admin sent doesn't match the one the workspace uses, so this join can't \
+         finish; ask the admin for a new invite"
+    );
+    Ok(())
+}
+
+/// Forgets a join that can't go on: its key is spent, and the next try
+/// makes a new one.
+async fn clear_spent_join(data: &DataDir) {
+    if let Err(cleanup) = data.forget_unfinished().await {
+        warn!(
+            "couldn't clear a join that ended from {}: {cleanup:#}",
+            data.path.display()
+        );
+    }
+}
+
 /// The admin declined the join request, as their signature shows.
 #[derive(Debug)]
 struct Declined;
@@ -657,7 +796,29 @@ impl std::error::Error for Declined {}
 /// Whether the invite's admin signed this decline of our request; anyone
 /// with the bucket keys can write the answer slot.
 fn is_signed_decline(invite: &Invite, me: &PublicKey, signature: &[u8]) -> bool {
-    let Ok(bytes) = declined_bytes(&invite.workspace_id, &invite.token, me) else {
+    is_signed_by_admin(
+        invite,
+        declined_bytes(&invite.workspace_id, &invite.token, me),
+        signature,
+    )
+}
+
+/// Whether the invite's admin signed this acceptance, all of it. Checked
+/// before MLS sees the Welcome, which it would use up.
+fn is_signed_acceptance(invite: &Invite, me: &PublicKey, acceptance: &Accepted, signature: &[u8]) -> bool {
+    let bytes = accepted_bytes(
+        &invite.workspace_id,
+        &invite.token,
+        me,
+        acceptance.map_digest.as_ref(),
+        &acceptance.welcome,
+        &acceptance.sealed_grant,
+    );
+    is_signed_by_admin(invite, bytes, signature)
+}
+
+fn is_signed_by_admin(invite: &Invite, bytes: Result<Vec<u8>>, signature: &[u8]) -> bool {
+    let Ok(bytes) = bytes else {
         return false;
     };
     let Ok(signature) = <[u8; 64]>::try_from(signature) else {
