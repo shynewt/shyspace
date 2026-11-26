@@ -605,3 +605,55 @@ async fn a_restore_names_a_change_missing_from_the_bucket() {
     );
     assert!(error.contains("missing from the bucket"), "{error}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restored_admin_still_knows_whose_devices_are_whose_and_a_newcomer_learns_the_same_map() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let records = admin.state().store.device_records().unwrap();
+    drop(admin);
+    let sealed = bucket.recovery_snapshot().await.unwrap().unwrap();
+    assert!(
+        !crate::membership::recovery::opens_under_the_label_before_devices(&kit, &sealed).unwrap(),
+        "a 0.1.4 app can't open it"
+    );
+
+    let restored = Workspace::restore_with(
+        &data_dir(&root.path().join("ada-new-laptop")),
+        &kit,
+        connector(&bucket),
+        Networking::Offline,
+    )
+    .await
+    .unwrap();
+    assert_eq!(restored.state().store.device_records().unwrap(), records);
+    assert_eq!(restored.state().store.person_of(&phone.me()).unwrap(), bob.me());
+
+    let carol = join(&restored, &root.path().join("carol"), &bucket, "Carol", false).await;
+    assert_eq!(carol.state().store.person_of(&phone.me()).unwrap(), bob.me());
+    sync_all(&[&restored, &bob, &phone, &carol]).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_snapshot_followed_by_a_commit_this_version_cant_read_is_refused_with_a_request_to_update() {
+    let (root, bucket, admin, _bob) = admin_and_bob().await;
+    let kit = admin.recovery_kit().await.unwrap();
+    let epoch = admin.state().mls.epoch().unwrap();
+    let newer = crate::membership::commit::sign_in_format(&admin.inner.identity, epoch, 4, 1).unwrap();
+    bucket.put_commit(epoch, newer).await.unwrap();
+    drop(admin);
+
+    let refused = Workspace::restore_with(
+        &data_dir(&root.path().join("ada-new-laptop")),
+        &kit,
+        connector(&bucket),
+        Networking::Offline,
+    )
+    .await
+    .err()
+    .unwrap();
+
+    assert!(format!("{refused:#}").contains("update shyspace"), "{refused:#}");
+}

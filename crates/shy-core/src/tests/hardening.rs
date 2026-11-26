@@ -5559,7 +5559,7 @@ async fn an_admin_crash_after_merging_finishes_the_freeze_at_start() {
         let from_epoch = state.mls.epoch().unwrap();
         let key = state.mls.epoch_key().unwrap();
         let binding = commit::lists_hash(&key, from_epoch, &[freeze], &[]).unwrap();
-        let removal = state.mls.remove_member(&carol.me(), &binding, None).unwrap();
+        let removal = state.mls.remove_members(&[carol.me()], &binding, None).unwrap();
         let signed = commit::sign(&admin.inner.identity, from_epoch, removal, vec![freeze]).unwrap();
         state.save_commit(from_epoch, &signed).unwrap();
         state.mls.merge_pending_commit().unwrap();
@@ -6411,13 +6411,38 @@ async fn a_device_added_while_the_bucket_is_down_still_gets_its_welcome() {
         .await
         .unwrap_err();
     let unpublished = error.downcast::<crate::UnpublishedDevice>().unwrap();
+    // The device starts at once and waits, well past its tries for a slot
+    // that holds something else, until a pass publishes the commit.
+    let finishing =
+        tokio::spawn(enrollment.finish_with(unpublished.welcome, connector(&bucket), Networking::Offline));
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    assert!(!finishing.is_finished());
     admin.sync().await;
 
-    let phone = enrollment
-        .finish_with(unpublished.welcome, connector(&bucket), Networking::Offline)
+    let phone = finishing.await.unwrap().unwrap();
+    assert_eq!(phone.my_person().unwrap(), bob.me());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_whose_join_commit_is_from_a_newer_version_is_told_to_update() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (enrollment, request) = begin_link(&bob, &root.path().join("phone")).await;
+    let from_epoch = epoch_of(&admin);
+    let welcome = admin
+        .add_device(&request.key_package, &request.binding, &vouch(&bob, &request))
         .await
         .unwrap();
-    assert_eq!(phone.my_person().unwrap(), bob.me());
+    let newer = commit::sign_in_format(&admin.inner.identity, from_epoch, 4, 1).unwrap();
+    bucket.put_commit(from_epoch, newer).await.unwrap();
+
+    let error = enrollment
+        .finish_with(welcome, connector(&bucket), Networking::Offline)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(error.contains("update"), "{error}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6545,6 +6570,106 @@ async fn a_device_whose_code_starts_like_a_members_is_refused() {
         .add_device(&request.key_package, &request.binding, &vouch(&bob, &request))
         .await
         .unwrap_err();
+
+    assert!(format!("{refused:#}").contains("safety code"), "{refused:#}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_and_the_devices_it_linked_are_removed_in_one_commit() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let tablet = link_device(&admin, &phone, &root.path().join("tablet"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone, &tablet]).await;
+    assert_eq!(admin.state().store.person_of(&tablet.me()).unwrap(), bob.me());
+    let epoch = epoch_of(&admin);
+
+    admin
+        .remove_devices(&[phone.my_id(), tablet.my_id()])
+        .await
+        .unwrap();
+    for device in [&bob, &phone, &tablet] {
+        device.sync().await;
+    }
+
+    assert_eq!(epoch_of(&admin), epoch + 1, "one commit");
+    assert!(phone.status().removed);
+    assert!(tablet.status().removed);
+    assert!(!bob.status().removed);
+    assert_eq!(epoch_of(&bob), epoch_of(&admin));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admin_cannot_remove_their_own_person_or_the_device_in_use() {
+    let (root, bucket, admin, _bob) = admin_and_bob().await;
+    let admins_phone = link_device(&admin, &admin, &root.path().join("phone"), &bucket).await;
+
+    let refused = admin.remove_member(&admins_phone.my_id()).await.unwrap_err();
+    assert!(
+        refused.to_string().contains("cannot remove themselves"),
+        "{refused:#}"
+    );
+    let refused = admin.remove_devices(&[admin.my_id()]).await.unwrap_err();
+    assert!(
+        refused.to_string().contains("device they're using"),
+        "{refused:#}"
+    );
+
+    admin.remove_devices(&[admins_phone.my_id()]).await.unwrap();
+    admins_phone.sync().await;
+    assert!(admins_phone.status().removed);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admins_app_refuses_a_sixth_link_in_a_day() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    for round in 0..5 {
+        let device = link_device(
+            &admin,
+            &bob,
+            &root.path().join(format!("device-{round}")),
+            &bucket,
+        )
+        .await;
+        admin.remove_devices(&[device.my_id()]).await.unwrap();
+        bob.sync().await;
+    }
+    let (_enrollment, request) = begin_link(&bob, &root.path().join("sixth")).await;
+    let epoch = epoch_of(&admin);
+
+    let refused = admin
+        .add_device(&request.key_package, &request.binding, &vouch(&bob, &request))
+        .await
+        .unwrap_err();
+
+    assert!(refused.to_string().contains("in the last day"), "{refused:#}");
+    assert_eq!(epoch_of(&admin), epoch, "nothing was committed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_whose_code_starts_like_a_person_whose_first_device_is_gone_is_refused() {
+    let (grace_key, mallory_key) = (seeded_key(2479), seeded_key(9890));
+    let (root, bucket, admin, _bob) = admin_and_bob().await;
+    let grace_dir = root.path().join("grace");
+    data_dir(&grace_dir)
+        .use_identity_for_test(&grace_key)
+        .await
+        .unwrap();
+    let grace = join(&admin, &grace_dir, &bucket, "Grace", false).await;
+    let _phone = link_device(&admin, &grace, &root.path().join("phone"), &bucket).await;
+    // Grace's first device is lost; her person lives on in the phone.
+    admin.remove_devices(&[grace.my_id()]).await.unwrap();
+
+    let mallory_dir = root.path().join("mallory");
+    data_dir(&mallory_dir)
+        .use_identity_for_test(&mallory_key)
+        .await
+        .unwrap();
+    let invite = admin.create_test_invite("", Duration::from_secs(600)).unwrap();
+    let token = invite.token.clone();
+    let _joining = start_join(invite, &mallory_dir, &bucket, "Grace", false);
+    wait_for_request(&admin, &token).await;
+
+    let refused = admin.approve_invite(&token).await.unwrap_err();
 
     assert!(format!("{refused:#}").contains("safety code"), "{refused:#}");
 }

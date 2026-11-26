@@ -1400,3 +1400,47 @@ async fn every_member_takes_a_linked_device_for_its_persons() {
         assert_eq!(state.mls.epoch().unwrap(), admins_epoch);
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn removing_a_person_removes_all_their_devices() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let epoch = admin.state().mls.epoch().unwrap();
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    bob.sync().await;
+    phone.sync().await;
+
+    assert_eq!(admin.state().mls.epoch().unwrap(), epoch + 1, "one commit");
+    assert!(bob.status().removed);
+    assert!(phone.status().removed);
+    {
+        let store = &admin.state().store;
+        assert!(store.frozen_last_seq(&bob.me()).unwrap().is_some());
+        assert!(store.frozen_last_seq(&phone.me()).unwrap().is_some());
+    }
+    let general = channel_id(&admin, "general");
+    admin.send_message(&general, "after Bob left", None).unwrap();
+    admin.sync().await;
+    phone.sync().await;
+    assert!(!texts_in(&phone, &general).contains(&"after Bob left".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn removing_one_device_leaves_its_siblings_working() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    admin.remove_devices(&[phone.my_id()]).await.unwrap();
+    sync_all(&[&admin, &bob]).await;
+    phone.sync().await;
+
+    assert!(phone.status().removed);
+    assert!(!bob.status().removed);
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "still here", None).unwrap();
+    sync_all(&[&admin, &bob]).await;
+    assert!(texts_in(&admin, &general).contains(&"still here".to_string()));
+}

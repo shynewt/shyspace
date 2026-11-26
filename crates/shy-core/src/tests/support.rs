@@ -424,7 +424,7 @@ pub fn stage_removal_unchecked(
 ) -> (u64, Vec<u8>) {
     let mut state = admin.state();
     let from_epoch = state.mls.epoch().unwrap();
-    let commit = state.mls.remove_member(member, binding, None).unwrap();
+    let commit = state.mls.remove_members(&[*member], binding, None).unwrap();
     state.mls.merge_pending_commit().unwrap();
     state.record_epoch(&admin.inner.config).unwrap();
     (from_epoch, commit)

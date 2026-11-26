@@ -102,6 +102,40 @@ impl Store {
         Ok(())
     }
 
+    /// Every device `device` vouched for, directly or through a device it
+    /// vouched for: what should go with it when it is stolen.
+    pub fn devices_vouched_through(&self, device: &PublicKey) -> Result<Vec<PublicKey>> {
+        let mut statement = self
+            .db
+            .prepare("SELECT device FROM devices WHERE voucher = ? ORDER BY added_epoch, device")?;
+        let mut found: Vec<PublicKey> = Vec::new();
+        let mut to_visit = vec![*device];
+        while let Some(voucher) = to_visit.pop() {
+            let vouched = statement
+                .query_map([voucher.as_bytes()], |row| row.get::<_, Vec<u8>>(0))?
+                .map(|row| to_public_key(row?))
+                .collect::<Result<Vec<_>>>()?;
+            for linked in vouched {
+                if linked != *device && !found.contains(&linked) {
+                    found.push(linked);
+                    to_visit.push(linked);
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    /// How many of `person`'s devices this device recorded linking at or
+    /// after `since_ms`, removed ones included.
+    pub fn links_since(&self, person: &PublicKey, since_ms: i64) -> Result<usize> {
+        let count: i64 = self.db.query_row(
+            "SELECT COUNT(*) FROM devices WHERE person = ? AND added_ms >= ?",
+            params![person.as_bytes(), since_ms],
+            |row| row.get(0),
+        )?;
+        Ok(usize::try_from(count)?)
+    }
+
     pub fn has_devices(&self) -> Result<bool> {
         self.exists("SELECT 1 FROM devices LIMIT 1", [])
     }
@@ -376,6 +410,28 @@ mod tests {
 
     fn with(members: &[PublicKey], added: &[PublicKey]) -> Vec<PublicKey> {
         members.iter().chain(added).copied().collect()
+    }
+
+    #[test]
+    fn the_devices_a_device_vouched_for_are_found_through_every_link() {
+        let world = world();
+        let (phone, tablet, watch, other) = (
+            SecretKey::generate(),
+            SecretKey::generate(),
+            SecretKey::generate(),
+            SecretKey::generate(),
+        );
+        world.put(&world.ada, &world.ada, &phone, 2);
+        world.put(&phone, &world.ada, &tablet, 3);
+        world.put(&tablet, &world.ada, &watch, 4);
+        world.put(&world.ada, &world.ada, &other, 5);
+
+        let mut found = world.store.devices_vouched_through(&phone.public()).unwrap();
+        found.sort_unstable();
+        let mut expected = vec![tablet.public(), watch.public()];
+        expected.sort_unstable();
+
+        assert_eq!(found, expected);
     }
 
     #[test]

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use iroh::PublicKey;
+use tracing::warn;
 
 use super::{
     Workspace, WorkspaceOptions,
@@ -17,17 +18,18 @@ use crate::{
     config::WorkspaceConfig,
     membership::{
         admin::DeviceWelcome,
-        commit::{self, VerifiedCommit},
+        commit::{self, NewerCommit, VerifiedCommit},
         device,
         mls::{Mls, binding_message},
     },
     ops::now_ms,
     storage::DeviceSource,
-    transport::bucket::{Bucket, Connector, s3_connector},
+    transport::bucket::{BucketConfig, Connector, s3_connector},
 };
 
-/// How often, and how far apart, the device tries to read the commit that
-/// added it: the admin's app or a member may still be putting it up.
+/// How many times the commit slot may hold something other than the
+/// commit that added this device before the link ends, and how far apart
+/// the reads are.
 const JOIN_COMMIT_READS: u32 = 30;
 #[cfg(not(test))]
 const JOIN_COMMIT_RETRY: Duration = Duration::from_secs(2);
@@ -126,13 +128,19 @@ impl DeviceEnrollment {
             sealed_grant: welcome.sealed_grant,
             map_digest: Some(welcome.map_digest),
         };
-        let checked = async {
-            let granted = admit(&local, &mut mls, &facts, accepted)?;
-            let bucket = connect(&link.workspace_id, &granted.bucket)?;
-            record_own_certificate(&local, &mls, &bucket, &facts, &link.person).await?;
-            anyhow::Ok(granted)
-        }
-        .await;
+        // Nothing borrowed from the store is held across the wait, so the
+        // future can move between threads.
+        let checked =
+            match admit(&local, &mut mls, &facts, accepted).and_then(|granted| Ok((granted, mls.epoch()?))) {
+                Err(error) => Err(error),
+                Ok((granted, join_epoch)) => {
+                    let read = read_join_commit(&connect, &link, &granted.bucket, join_epoch).await;
+                    read.and_then(|verified| {
+                        record_own_certificate(&local, &mls, &verified, join_epoch, &facts, &link.person)
+                    })
+                    .map(|()| granted)
+                }
+            };
         // MLS deletes our key as it reads the Welcome, so a link that
         // fails from here on can't be finished from this folder.
         let granted = match checked {
@@ -157,20 +165,19 @@ impl DeviceEnrollment {
     }
 }
 
-/// Reads the commit that added this device as every member does, and
+/// Checks the commit that added this device as every member does, and
 /// records the device as `person`'s if its certificate counts there. The
 /// row is kept like the grant's: its commit lies before this device's
 /// join, so recomputing the map never counts it again.
-async fn record_own_certificate(
+fn record_own_certificate(
     local: &Local,
     mls: &Mls,
-    bucket: &Bucket,
+    verified: &VerifiedCommit,
+    join_epoch: u64,
     facts: &JoinFacts<'_>,
     person: &PublicKey,
 ) -> Result<()> {
-    let join_epoch = mls.epoch()?;
     let from_epoch = join_epoch.checked_sub(1).context("joined at the first epoch")?;
-    let verified = read_join_commit(bucket, from_epoch, &facts.admin).await?;
     let epoch_key = local
         .store
         .epoch_key(from_epoch)?
@@ -203,26 +210,42 @@ async fn record_own_certificate(
     local.store.put_device(&record, DeviceSource::Grant, now_ms()?)
 }
 
-/// The admin's commit that moved the group from `from_epoch`, once it is in
-/// the bucket and verifies; tried for a while first, as it may still be on
-/// its way up. Nothing has been announced yet, so waiting costs nothing.
-async fn read_join_commit(bucket: &Bucket, from_epoch: u64, admin: &PublicKey) -> Result<VerifiedCommit> {
-    let mut last_error = anyhow::anyhow!("not tried");
-    for _ in 0..JOIN_COMMIT_READS {
-        let read = async {
-            let bytes = bucket
-                .commit(from_epoch)
-                .await?
-                .context("the commit that added this device isn't in the bucket")?;
-            commit::verify(&bytes, from_epoch, admin)
+/// The admin's commit that moved the group from `from_epoch`. Waited for as
+/// long as its slot is empty or the bucket can't be reached: the admin's
+/// app puts it up at its next sync if the upload failed, and nothing has
+/// been announced meanwhile. A slot that keeps holding something else ends
+/// the link; one from a newer version asks for an update at once.
+async fn read_join_commit(
+    connect: &Connector,
+    link: &DeviceLink,
+    bucket_config: &BucketConfig,
+    join_epoch: u64,
+) -> Result<VerifiedCommit> {
+    let from_epoch = join_epoch.checked_sub(1).context("joined at the first epoch")?;
+    let bucket = connect(&link.workspace_id, bucket_config)?;
+    let mut wrong_reads = 0;
+    loop {
+        let bytes = match bucket.commit(from_epoch).await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                warn!("can't read the commit that added this device yet: {error:#}");
+                None
+            }
         };
-        match read.await {
-            Ok(verified) => return Ok(verified),
-            Err(error) => last_error = error,
+        if let Some(bytes) = bytes {
+            match commit::verify(&bytes, from_epoch, &link.admin) {
+                Ok(verified) => return Ok(verified),
+                Err(error) if error.downcast_ref::<NewerCommit>().is_some() => return Err(error),
+                Err(error) => {
+                    wrong_reads += 1;
+                    if wrong_reads >= JOIN_COMMIT_READS {
+                        return Err(error.context("couldn't read the commit that added this device"));
+                    }
+                }
+            }
         }
         tokio::time::sleep(JOIN_COMMIT_RETRY).await;
     }
-    Err(last_error.context("couldn't read the commit that added this device"))
 }
 
 /// The commit that added this device doesn't make it the person's, so

@@ -38,7 +38,24 @@ const UPLOADED_GENERATION_META: &str = "recovery_uploaded_generation";
 const OVERSIZED_GENERATION_META: &str = "recovery_oversized_generation";
 /// How large the last snapshot was, uploaded or not.
 const SNAPSHOT_BYTES_META: &str = "recovery_snapshot_bytes";
-const SNAPSHOT_LABEL: &str = "shyspace recovery snapshot v1";
+
+/// The key a snapshot is sealed under. A 0.1.4 app can't read the commits
+/// of a workspace with a linked device, so it couldn't tell such a snapshot
+/// is stale; one sealed under the newer label just doesn't open for it.
+#[derive(Clone, Copy)]
+enum SnapshotLabel {
+    BeforeDevices,
+    WithDevices,
+}
+
+impl SnapshotLabel {
+    fn context(self) -> &'static str {
+        match self {
+            Self::BeforeDevices => "shyspace recovery snapshot v1",
+            Self::WithDevices => "shyspace recovery snapshot v2",
+        }
+    }
+}
 
 /// Everything needed to restore the admin on a new device. A secret: it
 /// unlocks the admin role and contains the bucket credentials.
@@ -90,15 +107,20 @@ struct Snapshot {
     mls_db: Vec<u8>,
 }
 
-fn snapshot_cipher(recovery_key: &[u8; 32]) -> XChaCha20Poly1305 {
-    let key = Zeroizing::new(blake3::derive_key(SNAPSHOT_LABEL, recovery_key));
+fn snapshot_cipher(recovery_key: &[u8; 32], label: SnapshotLabel) -> XChaCha20Poly1305 {
+    let key = Zeroizing::new(blake3::derive_key(label.context(), recovery_key));
     XChaCha20Poly1305::new((&*key).into())
 }
 
-fn seal_snapshot(recovery_key: &[u8; 32], workspace_id: &str, snapshot: &Snapshot) -> Result<Vec<u8>> {
+fn seal_snapshot(
+    recovery_key: &[u8; 32],
+    workspace_id: &str,
+    snapshot: &Snapshot,
+    label: SnapshotLabel,
+) -> Result<Vec<u8>> {
     let plaintext = Zeroizing::new(postcard::to_stdvec(snapshot)?);
     let nonce = XNonce::generate();
-    let ciphertext = snapshot_cipher(recovery_key)
+    let ciphertext = snapshot_cipher(recovery_key, label)
         .encrypt(
             &nonce,
             Payload {
@@ -112,20 +134,44 @@ fn seal_snapshot(recovery_key: &[u8; 32], workspace_id: &str, snapshot: &Snapsho
 
 fn open_snapshot(recovery_key: &[u8; 32], workspace_id: &str, sealed: &[u8]) -> Result<Snapshot> {
     ensure!(sealed.len() > 24, "the recovery snapshot is damaged");
+    let plaintext = open_snapshot_under(recovery_key, workspace_id, sealed, SnapshotLabel::WithDevices)
+        .or_else(|_| open_snapshot_under(recovery_key, workspace_id, sealed, SnapshotLabel::BeforeDevices))
+        .map_err(|_| anyhow!("the recovery snapshot doesn't match this kit"))?;
+    Ok(postcard::from_bytes(&plaintext)?)
+}
+
+/// Whether `sealed` opens under the label from before linked devices, as a
+/// 0.1.4 app would try it.
+#[cfg(test)]
+pub(crate) fn opens_under_the_label_before_devices(recovery_kit: &str, sealed: &[u8]) -> Result<bool> {
+    let kit = RecoveryKit::decode(recovery_kit)?;
+    Ok(open_snapshot_under(
+        &kit.recovery_key,
+        &kit.workspace_id,
+        sealed,
+        SnapshotLabel::BeforeDevices,
+    )
+    .is_ok())
+}
+
+fn open_snapshot_under(
+    recovery_key: &[u8; 32],
+    workspace_id: &str,
+    sealed: &[u8],
+    label: SnapshotLabel,
+) -> Result<Zeroizing<Vec<u8>>> {
     let (nonce, ciphertext) = sealed.split_at(24);
     let nonce: [u8; 24] = nonce.try_into()?;
-    let plaintext = Zeroizing::new(
-        snapshot_cipher(recovery_key)
-            .decrypt(
-                &nonce.into(),
-                Payload {
-                    msg: ciphertext,
-                    aad: workspace_id.as_bytes(),
-                },
-            )
-            .map_err(|_| anyhow!("the recovery snapshot doesn't match this kit"))?,
-    );
-    Ok(postcard::from_bytes(&plaintext)?)
+    let plaintext = snapshot_cipher(recovery_key, label)
+        .decrypt(
+            &nonce.into(),
+            Payload {
+                msg: ciphertext,
+                aad: workspace_id.as_bytes(),
+            },
+        )
+        .map_err(|_| anyhow!("the recovery snapshot doesn't open under this label"))?;
+    Ok(Zeroizing::new(plaintext))
 }
 
 fn generation(store: &crate::storage::Store, key: &str) -> Result<u64> {
@@ -229,7 +275,11 @@ impl Workspace {
             );
             // Taken under the state lock so the store and MLS copies agree.
             let snapshot = self.take_snapshot(state.mls.epoch()?)?;
-            let sealed = seal_snapshot(&recovery_key, &self.inner.config.workspace_id, &snapshot)?;
+            let label = match state.store.has_devices()? {
+                true => SnapshotLabel::WithDevices,
+                false => SnapshotLabel::BeforeDevices,
+            };
+            let sealed = seal_snapshot(&recovery_key, &self.inner.config.workspace_id, &snapshot, label)?;
             (current, sealed)
         };
         let size = sealed.len() as u64;
@@ -482,12 +532,20 @@ async fn ensure_snapshot_is_current(bucket: &Bucket, kit: &RecoveryKit, epoch: u
         .into_iter()
         .filter(|slot| *slot >= epoch)
     {
-        if let Some(bytes) = bucket.commit(later).await?
-            && commit::verify(&bytes, later, &kit.admin).is_ok()
-        {
-            anyhow::bail!(
+        let Some(bytes) = bucket.commit(later).await? else {
+            continue;
+        };
+        match commit::verify(&bytes, later, &kit.admin) {
+            Ok(_) => anyhow::bail!(
                 "the workspace changed after this recovery snapshot was taken; restoring it would split the group"
-            );
+            ),
+            // Signed by the admin, so the workspace did change; this app
+            // just can't read how.
+            Err(error) if error.downcast_ref::<commit::NewerCommit>().is_some() => anyhow::bail!(
+                "the workspace changed after this recovery snapshot was taken, with a newer version of shyspace; \
+                 update shyspace, then restore"
+            ),
+            Err(_) => {}
         }
     }
     Ok(())
@@ -506,12 +564,29 @@ mod tests {
             store_db: vec![2; 10],
             mls_db: vec![3; 10],
         };
-        let sealed = seal_snapshot(&[9; 32], "ws", &snapshot).unwrap();
-        assert_eq!(
-            open_snapshot(&[9; 32], "ws", &sealed).unwrap().store_db,
-            vec![2; 10]
-        );
-        assert!(open_snapshot(&[8; 32], "ws", &sealed).is_err());
-        assert!(open_snapshot(&[9; 32], "other", &sealed).is_err());
+        for label in [SnapshotLabel::BeforeDevices, SnapshotLabel::WithDevices] {
+            let sealed = seal_snapshot(&[9; 32], "ws", &snapshot, label).unwrap();
+            assert_eq!(
+                open_snapshot(&[9; 32], "ws", &sealed).unwrap().store_db,
+                vec![2; 10]
+            );
+            assert!(open_snapshot(&[8; 32], "ws", &sealed).is_err());
+            assert!(open_snapshot(&[9; 32], "other", &sealed).is_err());
+        }
+    }
+
+    #[test]
+    fn a_snapshot_from_a_workspace_with_devices_cannot_be_opened_under_the_old_label() {
+        let snapshot = Snapshot {
+            epoch: 0,
+            device_key: [1; 32],
+            workspace_json: b"{}".to_vec(),
+            store_db: vec![2; 10],
+            mls_db: vec![3; 10],
+        };
+        let sealed = seal_snapshot(&[9; 32], "ws", &snapshot, SnapshotLabel::WithDevices).unwrap();
+
+        // All a 0.1.4 app tries.
+        assert!(open_snapshot_under(&[9; 32], "ws", &sealed, SnapshotLabel::BeforeDevices).is_err());
     }
 }

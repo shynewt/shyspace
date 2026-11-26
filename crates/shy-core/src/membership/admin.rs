@@ -29,6 +29,10 @@ const MAX_REQUESTER_NAME: usize = 80;
 /// Refused join requests remembered so each is logged once; one per open
 /// invite is the most anyone but an attacker leaves.
 const MAX_REMEMBERED_REFUSALS: usize = 1024;
+/// At most this many devices linked to one person within `LINK_WINDOW_MS`,
+/// by this device's clock.
+const MAX_LINKS_PER_DAY: usize = 5;
+const LINK_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 /// How often a pending join answer is put up again, in case someone removed it.
 const ANSWER_REFRESH: Duration = Duration::from_secs(10 * 60);
 
@@ -83,7 +87,8 @@ pub struct DeviceWelcome {
 }
 
 /// The device was added, but its commit isn't in the bucket yet; the next
-/// sync pass puts it there. The welcome is still the device's to finish with.
+/// sync pass puts it there. The welcome is still the device's: hand it over
+/// once a pass has published the commit (the device waits for it either way).
 #[derive(Debug)]
 pub struct UnpublishedDevice {
     pub welcome: DeviceWelcome,
@@ -94,7 +99,8 @@ impl std::fmt::Display for UnpublishedDevice {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "the device was added, but the change isn't uploaded yet (the next sync tries again): {:#}",
+            "the device was added, but the change isn't uploaded yet; hand the device its welcome once a sync has \
+             uploaded it: {:#}",
             self.error
         )
     }
@@ -341,6 +347,12 @@ impl Workspace {
             );
             ensure!(!state.mls.is_member(&device)?, "this device is already a member");
             ensure_a_distinct_safety_code(&state, &device)?;
+            // Each link costs every member an epoch and a longer history.
+            let day_ago = now_ms()? - LINK_WINDOW_MS;
+            ensure!(
+                state.store.links_since(&certificate.person, day_ago)? < MAX_LINKS_PER_DAY,
+                "this person has linked {MAX_LINKS_PER_DAY} devices in the last day; try again tomorrow"
+            );
             let from_epoch = state.mls.epoch()?;
             let mut members_after = state.mls.members()?;
             members_after.push(device);
@@ -574,31 +586,82 @@ impl Workspace {
             .expect("sent answers lock poisoned by an earlier panic")
     }
 
-    /// Removes a member. Their log is frozen at the last op we have from
-    /// them, so we first pull everything they wrote.
+    /// Removes a person with every device of theirs, in one commit. Each
+    /// device's log is frozen at the last op we have from it, so we first
+    /// pull everything they wrote.
     pub async fn remove_member(&self, member_id: &str) -> Result<()> {
         self.ensure_admin()?;
-        let member = parse_member_id(member_id)?;
-        if member == self.me() {
-            bail!("the admin cannot remove themselves");
+        let devices = {
+            let state = self.state();
+            let person = state.store.person_of(&parse_member_id(member_id)?)?;
+            if person == state.store.person_of(&self.me())? {
+                bail!(
+                    "the admin cannot remove themselves; to remove one of their other devices, remove that device"
+                );
+            }
+            let mut devices = Vec::new();
+            for member in state.mls.members()? {
+                if state.store.person_of(&member)? == person {
+                    devices.push(member);
+                }
+            }
+            ensure!(!devices.is_empty(), "not a member");
+            devices
+        };
+        self.remove_leaves(devices).await
+    }
+
+    /// Removes these devices in one commit, as when a stolen device and the
+    /// devices it linked go together. Their persons keep any other devices.
+    pub async fn remove_devices(&self, device_ids: &[String]) -> Result<()> {
+        self.ensure_admin()?;
+        let mut devices = device_ids
+            .iter()
+            .map(|id| parse_member_id(id))
+            .collect::<Result<Vec<_>>>()?;
+        devices.sort_unstable();
+        devices.dedup();
+        ensure!(!devices.is_empty(), "no devices to remove");
+        ensure!(
+            !devices.contains(&self.me()),
+            "the admin cannot remove the device they're using"
+        );
+        {
+            let state = self.state();
+            for device in &devices {
+                ensure!(state.mls.is_member(device)?, "not a member");
+            }
         }
+        self.remove_leaves(devices).await
+    }
+
+    async fn remove_leaves(&self, devices: Vec<iroh::PublicKey>) -> Result<()> {
         // No pass may upload the commit before the snapshot below covers it.
         let _no_pass = self.inner.sync_lock.lock().await;
-        self.collect_removed_log(&member)
-            .await
-            .context("can't collect the member's last messages")?;
+        for device in &devices {
+            self.collect_removed_log(device)
+                .await
+                .context("can't collect the member's last messages")?;
+        }
+        // One hold from reading the last seqs to settling the freeze, so no
+        // op can land in between.
         let (from_epoch, signed) = {
             let mut state = self.state();
-            let frozen = FrozenAuthor {
-                member,
-                last_seq: state.store.last_seq(&member)?,
-            };
+            let frozen = devices
+                .iter()
+                .map(|member| {
+                    Ok(FrozenAuthor {
+                        member: *member,
+                        last_seq: state.store.last_seq(member)?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
             let from_epoch = state.mls.epoch()?;
-            let binding = self.bind_next_commit(&state, from_epoch, &[frozen], &[])?;
+            let binding = self.bind_next_commit(&state, from_epoch, &frozen, &[])?;
             let commit = state
                 .mls
-                .remove_member(&member, &binding.lists, binding.map_key.as_ref())?;
-            let signed = self.record_commit(&state, from_epoch, commit, vec![frozen], &[], &binding)?;
+                .remove_members(&devices, &binding.lists, binding.map_key.as_ref())?;
+            let signed = self.record_commit(&state, from_epoch, commit, frozen, &[], &binding)?;
             state.mls.merge_pending_commit()?;
             // Freezing comes after the merge, as on every member's device.
             state.record_epoch(&self.inner.config)?;

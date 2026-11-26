@@ -402,26 +402,30 @@ impl Mls {
     }
 
     /// `binding` and `map_key` as for [`Self::add_member`].
-    pub fn remove_member(
+    /// Stages one commit removing every leaf in `members`.
+    pub fn remove_members(
         &mut self,
-        member: &PublicKey,
+        members: &[PublicKey],
         binding: &[u8],
         map_key: Option<&[u8; 32]>,
     ) -> Result<Vec<u8>> {
         let group = self.group.as_ref().context("no group")?;
-        let leaf = group
-            .members()
-            .find(|candidate| identity_of(&candidate.credential).is_ok_and(|id| id == *member))
-            .context("not a member")?
-            .index;
+        let leaves = members
+            .iter()
+            .map(|member| {
+                Ok(group
+                    .members()
+                    .find(|candidate| identity_of(&candidate.credential).is_ok_and(|id| id == *member))
+                    .context("not a member")?
+                    .index)
+            })
+            .collect::<Result<Vec<_>>>()?;
         if let Some(map_key) = map_key {
-            return Ok(self
-                .commit_with_map_key(Vec::new(), vec![leaf], binding, map_key)?
-                .0);
+            return Ok(self.commit_with_map_key(Vec::new(), leaves, binding, map_key)?.0);
         }
         let group = self.group.as_mut().context("no group")?;
         group.set_aad(binding.to_vec());
-        let removed = group.remove_members(&self.provider, &self.signer, &[leaf]);
+        let removed = group.remove_members(&self.provider, &self.signer, &leaves);
         let (commit, _, _) = removed.inspect_err(|_| group.set_aad(Vec::new()))?;
         Ok(commit.to_bytes()?)
     }
@@ -552,7 +556,7 @@ mod tests {
         let sealed = admin.mls.seal_for_members(b"history").unwrap();
         assert_eq!(bob.mls.open_from_admin(&sealed, &admin.id()).unwrap(), b"history");
 
-        let removal = admin.mls.remove_member(&bob.id(), &[], None).unwrap();
+        let removal = admin.mls.remove_members(&[bob.id()], &[], None).unwrap();
         admin.mls.merge_pending_commit().unwrap();
         let outcome = bob
             .mls
