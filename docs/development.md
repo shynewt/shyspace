@@ -44,6 +44,8 @@ The CLI reads bucket settings from `SHY_S3_ENDPOINT`, `SHY_S3_BUCKET`, `SHY_S3_A
 - **CLI:** `cargo run -p shy-cli -- --dir <dir> <create|join|invite|recovery-kit|restore|mcp>`. The binary is called `shy`. It keeps its device key in the system keychain; add `--key-file <path>` (outside the data directory) on machines without one, and in tests. `restore` reads the recovery kit from standard input or `SHY_RECOVERY_KIT`, never from the command line.
 - **An agent as a member:** the admin creates an invite (app or `shy invite create`), then `shy join --bot --name Claude` reads the code from standard input (or `SHY_INVITE`, or as a last argument) and waits until the admin approves; then `claude mcp add shyspace -- shy mcp`. Named agents (`--agent <name>`) keep separate members in `~/.local/share/shyspace/agents/<name>`. The agent skill lives in `skills/shyspace/SKILL.md`; `shy skill` prints it, and the MCP server sends the same guidance as its instructions, so keep it in step with the tools.
 
+- **Phone bindings:** `cargo run -p shy-ffi --features bindgen --bin uniffi-bindgen -- generate --library target/debug/libshy_ffi.so --language kotlin --language swift --out-dir <dir>` after `cargo build -p shy-ffi`. The generated code isn't committed; the app builds make it.
+
 Note: one identity can only be online once. Don't run the CLI and the app on the same data directory at the same time.
 
 ## A demo workspace

@@ -65,6 +65,7 @@ use crate::{
 /// Whether to go online. Tests run several members against one in-memory
 /// bucket without networking.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum Networking {
     Online,
     Offline,

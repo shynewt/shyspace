@@ -35,6 +35,7 @@ Keep the diff to what the task needs. If you notice an unrelated problem, open a
 |---|---|---|
 | `crates/shy-core` | all logic: crypto, membership, sync, storage, merging, search | know about any UI, CLI or MCP |
 | `crates/shy-cli` | argument parsing, MCP tool definitions, terminal output | contain business logic |
+| `crates/shy-ffi` | one exported call per `Workspace`/`Workspaces` call for the phone apps, change forwarding | contain business logic |
 | `apps/desktop/src-tauri` | one Tauri command per `Workspace` call, event forwarding | contain business logic |
 | `apps/desktop/src/lib` | the `invoke` bridge (`api.ts`), hooks, pure helpers | render UI |
 | `apps/desktop/src/ui` | the design system: tokens, motion presets, shared components | know about workspaces, chat or pages |

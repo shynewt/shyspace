@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/shy-core", "crates/shy-cli", "crates/shy-media", "crates/shy-demo", "apps/desktop/src-tauri"]
+members = ["crates/shy-core", "crates/shy-cli", "crates/shy-ffi", "crates/shy-media", "crates/shy-demo", "apps/desktop/src-tauri"]
 exclude = ["vendor", "tools/upgrade-fixture"]
 
 [workspace.lints.rust]

@@ -57,6 +57,7 @@ mod tests {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Channel {
     pub id: EntityId,
     pub kind: ChannelKind,
@@ -84,6 +85,7 @@ pub struct Channel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum ChannelKind {
     Public,
     /// Only its members can read it.
@@ -107,6 +109,7 @@ pub struct PrivateMembers {
 /// A personal, per-channel choice of which new messages alert you.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum NotifyLevel {
     #[default]
     All,
@@ -144,6 +147,7 @@ impl NotifyLevel {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Reaction {
     pub emoji: String,
     pub count: u32,
@@ -151,6 +155,7 @@ pub struct Reaction {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Message {
     pub id: EntityId,
     pub channel: EntityId,
@@ -201,6 +206,7 @@ pub struct Message {
 /// `Workspace::file_bytes` or `Workspace::save_file`, or for a page's file
 /// through `page_file_bytes` or `save_page_file`.
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct FileInfo {
     pub id: EntityId,
     /// The channel, DM or page it was shared in.
@@ -221,6 +227,7 @@ pub struct FileInfo {
 
 /// Where to continue when loading older messages: the oldest one loaded.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct MessageCursor {
     pub lamport: u64,
     /// The device that wrote the message (hex).
@@ -276,6 +283,7 @@ pub struct Member {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct SavedMark {
     pub remind_ms: Option<i64>,
     pub is_done: bool,
@@ -373,6 +381,7 @@ pub struct StorageSettings {
 
 /// A workspace on this device, as the workspace rail shows it.
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct WorkspaceItem {
     pub workspace_id: String,
     pub name: String,
@@ -531,6 +540,7 @@ pub struct PagePresence {
 /// What changed, so listeners refresh only the affected view.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum Change {
     /// What's saved for later changed on this device.
     Later,

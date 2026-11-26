@@ -27,6 +27,9 @@ pub mod workspaces;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
+
 pub use keys::KeyStorage;
 pub use membership::admin::{DeviceWelcome, UnpublishedDevice};
 pub use pages::Edit;

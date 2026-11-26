@@ -166,6 +166,12 @@ impl Workspaces {
         Self::with_connector(root, keys, s3_connector())
     }
 
+    /// The workspaces kept under `root`, all on one bucket kept in memory.
+    #[cfg(feature = "memory-bucket")]
+    pub fn with_memory_bucket(root: impl Into<PathBuf>, keys: DeviceKeys) -> Self {
+        Self::with_connector(root, keys, crate::transport::bucket::memory_connector())
+    }
+
     pub(crate) fn with_connector(root: impl Into<PathBuf>, keys: DeviceKeys, connect: Connector) -> Self {
         Self::laid_out(Layout::Folders(root.into()), keys, connect)
     }

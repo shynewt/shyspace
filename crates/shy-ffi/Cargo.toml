@@ -1,0 +1,34 @@
+[package]
+name = "shy-ffi"
+version = "0.1.4"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+# Builds the binding generator (`cargo run -p shy-ffi --features bindgen --bin uniffi-bindgen`).
+bindgen = ["uniffi/cli"]
+# Adds `ShyApp.withMemoryBucket`, for tests and demos; never in a release.
+memory-bucket = ["shy-core/memory-bucket"]
+vendored-openssl = ["shy-core/vendored-openssl"]
+
+[dependencies]
+anyhow = "1.0.104"
+shy-core = { path = "../shy-core", features = ["ffi"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+uniffi = "0.31"
+zeroize = "1"
+
+[dev-dependencies]
+shy-core = { path = "../shy-core", features = ["ffi", "memory-bucket"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+required-features = ["bindgen"]
+
+[lints]
+workspace = true

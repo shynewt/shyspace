@@ -291,6 +291,14 @@ pub fn s3_connector() -> Connector {
     Arc::new(|workspace_id: &str, config: &BucketConfig| config.connect(workspace_id))
 }
 
+/// Connects every workspace to one bucket kept in memory, whatever the
+/// settings. It's gone when the process ends.
+#[cfg(feature = "memory-bucket")]
+pub fn memory_connector() -> Connector {
+    let bucket = Bucket::without_signing(Arc::new(object_store::memory::InMemory::new()));
+    Arc::new(move |_: &str, _: &BucketConfig| Ok(bucket.clone()))
+}
+
 /// Presigned links to one invite's request and answer slots.
 pub struct InviteLinks {
     pub request_url: String,
