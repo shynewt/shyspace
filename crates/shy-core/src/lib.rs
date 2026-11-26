@@ -28,6 +28,10 @@ pub mod workspaces;
 mod tests;
 
 pub use keys::KeyStorage;
+pub use membership::admin::{DeviceWelcome, UnpublishedDevice};
 pub use pages::Edit;
 pub use transport::{bucket::BucketConfig, gossip::ExtraProtocols};
-pub use workspace::{DataDir, JoinCancel, Networking, Profile, Workspace, WorkspaceOptions};
+pub use workspace::{
+    DataDir, DeviceEnrollment, DeviceLink, DeviceRequest, JoinCancel, Networking, Profile, Workspace,
+    WorkspaceOptions,
+};

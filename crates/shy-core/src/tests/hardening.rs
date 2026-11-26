@@ -20,10 +20,11 @@ use object_store::{
 
 use super::support::*;
 use crate::{
-    DataDir, KeyStorage, Networking, Workspace, crypto,
+    DataDir, DeviceLink, KeyStorage, Networking, Workspace, crypto,
     membership::{
         commit::{self, FrozenAuthor},
-        device::DeviceRecord,
+        device::{DeviceCertificate, DeviceRecord},
+        follow::{BOUND_COMMIT_FOLLOWED_META, JOIN_COMMIT_CHECKED_META},
         mls::CommitKeys,
     },
     ops::{Envelope, Op, OpBody, now_ms},
@@ -6298,6 +6299,254 @@ fn assert_join_refused_and_cleared(dir: &std::path::Path, joined: anyhow::Result
     for database in ["shy.db", "mls.db"] {
         assert!(!dir.join(database).exists(), "{database} is cleared");
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_device_takes_its_own_join_commit_as_bound() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+
+    let store = &phone.state().store;
+    assert!(store.meta(JOIN_COMMIT_CHECKED_META).unwrap().is_some());
+    assert!(store.meta(BOUND_COMMIT_FOLLOWED_META).unwrap().is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_device_keeps_its_own_row_when_it_recomputes_the_map() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let before = phone.state().store.device_records().unwrap();
+
+    phone
+        .state()
+        .store
+        .recompute_device_map(&admin.inner.config.workspace_id, &admin.me())
+        .unwrap();
+
+    assert_eq!(phone.state().store.device_records().unwrap(), before);
+    assert_eq!(phone.my_person().unwrap(), bob.me());
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &phone, &carol]).await;
+    assert_eq!(epoch_of(&phone), epoch_of(&admin));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_welcome_from_anyone_but_the_links_admin_is_refused() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    // The link names someone else's MLS key as the admin's.
+    let bobs_mls_key = bob.state().mls.signature_key_of(&bob.me()).unwrap();
+    let link = DeviceLink {
+        admin_mls_key: bobs_mls_key,
+        ..device_link(&bob)
+    };
+    let (enrollment, request) = crate::DeviceEnrollment::begin(data_dir(&dir), link)
+        .await
+        .unwrap();
+    let welcome = admin
+        .add_device(&request.key_package, &request.binding, &vouch(&bob, &request))
+        .await
+        .unwrap();
+
+    let error = enrollment
+        .finish_with(welcome, connector(&bucket), Networking::Offline)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(error.contains("admin"), "{error}");
+    assert!(!dir.join("shy.db").exists(), "the folder is cleared");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_waits_for_its_join_commit_and_gives_up_only_after_a_while() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    for gives_up in [false, true] {
+        let dir = root.path().join(format!("device-{gives_up}"));
+        let (enrollment, request) = begin_link(&bob, &dir).await;
+        let from_epoch = epoch_of(&admin);
+        let welcome = admin
+            .add_device(&request.key_package, &request.binding, &vouch(&bob, &request))
+            .await
+            .unwrap();
+        let real = bucket.commit(from_epoch).await.unwrap().unwrap();
+        bucket.put_commit(from_epoch, b"junk".to_vec()).await.unwrap();
+        if !gives_up {
+            let (bucket, real) = (bucket.clone(), real.clone());
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                bucket.put_commit(from_epoch, real.to_vec()).await.unwrap();
+            });
+        }
+
+        let finished = enrollment
+            .finish_with(welcome, connector(&bucket), Networking::Offline)
+            .await;
+
+        match gives_up {
+            false => assert_eq!(finished.unwrap().my_person().unwrap(), bob.me()),
+            true => {
+                let error = format!("{:#}", finished.err().unwrap());
+                assert!(error.contains("couldn't read the commit"), "{error}");
+                assert!(!dir.join("shy.db").exists(), "the folder is cleared");
+                bucket.put_commit(from_epoch, real.to_vec()).await.unwrap();
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_added_while_the_bucket_is_down_still_gets_its_welcome() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (enrollment, request) = begin_link(&bob, &root.path().join("phone")).await;
+    admin
+        .inner
+        .fail_next_commit_upload
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let error = admin
+        .add_device(&request.key_package, &request.binding, &vouch(&bob, &request))
+        .await
+        .unwrap_err();
+    let unpublished = error.downcast::<crate::UnpublishedDevice>().unwrap();
+    admin.sync().await;
+
+    let phone = enrollment
+        .finish_with(unpublished.welcome, connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+    assert_eq!(phone.my_person().unwrap(), bob.me());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_grant_whose_members_differ_from_the_welcomes_group_is_refused() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (enrollment, request) = begin_link(&bob, &dir).await;
+    let bobs_key = bob.me();
+    *admin.inner.tamper_next_grant.lock().unwrap() = Some(Box::new(move |grant| {
+        let newest = grant.grant.history.epochs.last_mut().unwrap();
+        newest.members.retain(|member| *member != bobs_key);
+    }));
+    let welcome = admin
+        .add_device(&request.key_package, &request.binding, &vouch(&bob, &request))
+        .await
+        .unwrap();
+
+    let error = enrollment
+        .finish_with(welcome, connector(&bucket), Networking::Offline)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(error.contains("members don't match"), "{error}");
+    assert!(!dir.join("shy.db").exists(), "the folder is cleared");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_that_finds_itself_a_stranger_fails_to_join_and_clears_its_folder() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let phone_key = SecretKey::generate();
+    let dir = root.path().join("phone");
+    data_dir(&dir).use_identity_for_test(&phone_key).await.unwrap();
+    // The phone asks to be Bob's, but the link goes through as Carol's.
+    let (enrollment, request) = begin_link(&bob, &dir).await;
+    let carols = device_certificate(&carol.inner.identity, &carol.me(), &phone_key, epoch_of(&carol));
+    let welcome = admin
+        .add_device(&request.key_package, &request.binding, &carols)
+        .await
+        .unwrap();
+
+    let error = enrollment
+        .finish_with(welcome, connector(&bucket), Networking::Offline)
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(
+        error.contains("didn't link this device to that person"),
+        "{error}"
+    );
+    for database in ["shy.db", "mls.db"] {
+        assert!(!dir.join(database).exists(), "{database} is cleared");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admin_cannot_attach_a_device_to_another_person() {
+    let (root, _bucket, admin, bob) = admin_and_bob().await;
+    let (_enrollment, request) = begin_link(&bob, &root.path().join("phone")).await;
+    let workspace_id = admin.inner.config.workspace_id.clone();
+    let epoch = epoch_of(&admin);
+    let vouched = |voucher: &SecretKey, epoch: u64| {
+        DeviceCertificate::vouch(
+            voucher,
+            &workspace_id,
+            bob.me(),
+            request.device,
+            epoch,
+            request.acceptance.clone(),
+        )
+        .unwrap()
+    };
+    // Signed by the admin, who isn't Bob; or dated after the epoch it's for.
+    for certificate in [
+        vouched(&admin.inner.identity, epoch),
+        vouched(&bob.inner.identity, epoch + 1),
+    ] {
+        let refused = admin
+            .add_device(&request.key_package, &request.binding, &certificate)
+            .await
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("rules every member checks"),
+            "{refused:#}"
+        );
+    }
+    // A person the device never agreed to belong to can't vouch at all.
+    let stranger = SecretKey::generate();
+    let by_a_stranger = DeviceCertificate::vouch(
+        &stranger,
+        &workspace_id,
+        stranger.public(),
+        request.device,
+        epoch,
+        request.acceptance.clone(),
+    );
+    assert!(by_a_stranger.is_err());
+    assert_eq!(epoch_of(&admin), epoch, "nothing was committed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_whose_code_starts_like_a_members_is_refused() {
+    let (grace_key, phone_key) = (seeded_key(2479), seeded_key(9890));
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let grace_dir = root.path().join("grace");
+    data_dir(&grace_dir)
+        .use_identity_for_test(&grace_key)
+        .await
+        .unwrap();
+    let _grace = join(&admin, &grace_dir, &bucket, "Grace", false).await;
+    sync_all(&[&admin, &bob]).await;
+    let phone_dir = root.path().join("phone");
+    data_dir(&phone_dir)
+        .use_identity_for_test(&phone_key)
+        .await
+        .unwrap();
+    let (_enrollment, request) = begin_link(&bob, &phone_dir).await;
+
+    let refused = admin
+        .add_device(&request.key_package, &request.binding, &vouch(&bob, &request))
+        .await
+        .unwrap_err();
+
+    assert!(format!("{refused:#}").contains("safety code"), "{refused:#}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

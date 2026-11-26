@@ -69,6 +69,59 @@ impl Delivery {
     }
 }
 
+/// What a newly linked device needs to finish joining (see
+/// [`DeviceEnrollment::finish`](crate::DeviceEnrollment::finish)). Who the
+/// admin is comes from the person's device instead, in the
+/// [`DeviceLink`](crate::DeviceLink).
+#[derive(Debug, Clone)]
+pub struct DeviceWelcome {
+    pub welcome: Vec<u8>,
+    pub sealed_grant: Vec<u8>,
+    /// The device map's digest the commit was made with, which the Welcome
+    /// needs and the grant must match.
+    pub map_digest: [u8; 32],
+}
+
+/// The device was added, but its commit isn't in the bucket yet; the next
+/// sync pass puts it there. The welcome is still the device's to finish with.
+#[derive(Debug)]
+pub struct UnpublishedDevice {
+    pub welcome: DeviceWelcome,
+    pub error: anyhow::Error,
+}
+
+impl std::fmt::Display for UnpublishedDevice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "the device was added, but the change isn't uploaded yet (the next sync tries again): {:#}",
+            self.error
+        )
+    }
+}
+
+impl std::error::Error for UnpublishedDevice {}
+
+/// Same-named people are told apart by the start of their safety code, so
+/// no new key may share it with a member's device or with a person, even
+/// one whose first device is gone; trying keys can make one that does.
+fn ensure_a_distinct_safety_code(state: &State, key: &iroh::PublicKey) -> Result<()> {
+    let shown = shown_safety_code(&safety_code(key));
+    let people = state
+        .store
+        .device_records()?
+        .into_iter()
+        .map(|record| record.certificate.person);
+    for existing in state.mls.members()?.into_iter().chain(people) {
+        ensure!(
+            shown_safety_code(&safety_code(&existing)) != shown,
+            "this request's safety code starts like a member's ({shown}), which could let them pass for that \
+             member; decline it and ask them to join again: a new request gets a new code"
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) type GrantTamper = Box<dyn FnOnce(&mut GrantWithDevices) + Send>;
 
@@ -171,16 +224,7 @@ impl Workspace {
                 "the stored request doesn't match its requester"
             );
             ensure!(!state.mls.is_member(&claimed)?, "this person is already a member");
-            // Same-named members are told apart by the start of their safety
-            // code, so no two may share it; trying keys can make one that does.
-            let shown = shown_safety_code(&safety_code(&claimed));
-            for member in state.mls.members()? {
-                ensure!(
-                    shown_safety_code(&safety_code(&member)) != shown,
-                    "this request's safety code starts like a member's ({shown}), which could let them pass for that \
-                     member; decline it and ask them to join again: a new request gets a new code"
-                );
-            }
+            ensure_a_distinct_safety_code(&state, &claimed)?;
 
             let from_epoch = state.mls.epoch()?;
             let binding = self.bind_next_commit(&state, from_epoch, &[], &[])?;
@@ -271,6 +315,90 @@ impl Workspace {
         ensure!(changed, "this invite is already used, revoked or unknown");
         self.emit(Change::Invites);
         self.bucket().delete_invite_request(token).await
+    }
+
+    /// Links a new device to the person whose device vouched for it in
+    /// `certificate`: adds it to the group in a commit that carries the
+    /// certificate, once the certificate meets every rule members check.
+    /// The returned welcome is all the device needs to finish joining.
+    pub async fn add_device(
+        &self,
+        key_package: &[u8],
+        binding: &[u8],
+        certificate: &DeviceCertificate,
+    ) -> Result<DeviceWelcome> {
+        self.ensure_admin()?;
+        // No pass may upload the commit before the snapshot below covers it.
+        let _no_pass = self.inner.sync_lock.lock().await;
+        let workspace_id = &self.inner.config.workspace_id;
+        let certificates = std::slice::from_ref(certificate);
+        let (from_epoch, signed, welcome) = {
+            let mut state = self.state();
+            let (device, key_package) = state.mls.verify_key_package(key_package, binding)?;
+            ensure!(
+                device == certificate.device,
+                "the device's request doesn't match its certificate"
+            );
+            ensure!(!state.mls.is_member(&device)?, "this device is already a member");
+            ensure_a_distinct_safety_code(&state, &device)?;
+            let from_epoch = state.mls.epoch()?;
+            let mut members_after = state.mls.members()?;
+            members_after.push(device);
+            let counted =
+                state
+                    .store
+                    .count_certificates(workspace_id, from_epoch, &members_after, certificates)?;
+            ensure!(
+                counted.len() == 1,
+                "this device can't be linked: its certificate doesn't meet the rules every member checks"
+            );
+
+            let binding = self.bind_next_commit(&state, from_epoch, &[], certificates)?;
+            let map_digest = binding
+                .map_key
+                .context("a commit that adds a device binds the map")?;
+            let (commit, welcome) = state
+                .mls
+                .add_member(key_package, &binding.lists, Some(&map_digest))?;
+            // The digest covers the map before the commit.
+            let devices = state.store.device_records()?;
+            let bound_frozen = state.store.bound_freezes()?;
+            let signed =
+                self.record_commit(&state, from_epoch, commit, Vec::new(), certificates, &binding)?;
+            state.mls.merge_pending_commit()?;
+            state.record_epoch(&self.inner.config)?;
+            let grant = GrantWithDevices {
+                grant: Grant {
+                    history: KeyHistory::collect(&state.store)?,
+                    bucket: config::current_bucket(&state.store)?,
+                    bucket_lamport: config::bucket_lamport(&state.store)?,
+                },
+                devices,
+                bound_frozen,
+            };
+            #[cfg(test)]
+            let grant = self.tampered(grant);
+            let sealed_grant = state.mls.seal_for_members(&postcard::to_stdvec(&grant)?)?;
+            Workspace::mark_recovery_snapshot_stale(&state.store)?;
+            let welcome = DeviceWelcome {
+                welcome,
+                sealed_grant,
+                map_digest,
+            };
+            (from_epoch, signed, welcome)
+        };
+        self.emit(Change::Members);
+        // Snapshot first: a commit must never be in the bucket before the
+        // recovery snapshot that includes it.
+        let published = async {
+            self.refresh_recovery_snapshot().await?;
+            self.upload_commit(from_epoch, signed).await
+        }
+        .await;
+        match published {
+            Ok(()) => Ok(welcome),
+            Err(error) => Err(UnpublishedDevice { welcome, error }.into()),
+        }
     }
 
     /// Picks up join requests and delivers answers owed.
@@ -560,6 +688,14 @@ impl Workspace {
     }
 
     async fn upload_commit(&self, from_epoch: u64, signed: Vec<u8>) -> Result<()> {
+        #[cfg(test)]
+        if self
+            .inner
+            .fail_next_commit_upload
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            anyhow::bail!("the bucket can't be reached");
+        }
         self.bucket().put_commit(from_epoch, signed).await?;
         self.nudge_peers().await;
         Ok(())

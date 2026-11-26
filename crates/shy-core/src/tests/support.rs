@@ -7,7 +7,8 @@ use object_store::memory::InMemory;
 use tokio::task::JoinHandle;
 
 use crate::{
-    BucketConfig, DataDir, JoinCancel, KeyStorage, Networking, Profile, Workspace, WorkspaceOptions, crypto,
+    BucketConfig, DataDir, DeviceEnrollment, DeviceLink, DeviceRequest, JoinCancel, KeyStorage, Networking,
+    Profile, Workspace, WorkspaceOptions, crypto,
     membership::{
         commit::{self, FrozenAuthor},
         device::{self, DeviceCertificate},
@@ -529,6 +530,55 @@ pub fn device_certificate(
         device.public(),
         epoch,
         acceptance,
+    )
+    .unwrap()
+}
+
+/// Links a new device in `dir` to `voucher`'s person: the device asks, the
+/// voucher vouches, the admin adds it, and the device finishes joining.
+pub async fn link_device(admin: &Workspace, voucher: &Workspace, dir: &Path, bucket: &Bucket) -> Workspace {
+    let (enrollment, request) = begin_link(voucher, dir).await;
+    let certificate = vouch(voucher, &request);
+    let welcome = admin
+        .add_device(&request.key_package, &request.binding, &certificate)
+        .await
+        .unwrap();
+    enrollment
+        .finish_with(welcome, connector(bucket), Networking::Offline)
+        .await
+        .unwrap()
+}
+
+/// A new device in `dir` asking to be `voucher`'s person's.
+pub async fn begin_link(voucher: &Workspace, dir: &Path) -> (DeviceEnrollment, DeviceRequest) {
+    DeviceEnrollment::begin(data_dir(dir), device_link(voucher))
+        .await
+        .unwrap()
+}
+
+/// What `voucher` tells a new device of its person's about the workspace.
+pub fn device_link(voucher: &Workspace) -> DeviceLink {
+    let config = &voucher.inner.config;
+    let admin_mls_key = voucher.state().mls.signature_key_of(&config.admin).unwrap();
+    DeviceLink {
+        workspace_id: config.workspace_id.clone(),
+        workspace_name: config.name.clone(),
+        admin: config.admin,
+        admin_mls_key,
+        person: voucher.my_person().unwrap(),
+    }
+}
+
+/// `voucher`'s certificate for the device behind `request`, at its epoch.
+pub fn vouch(voucher: &Workspace, request: &DeviceRequest) -> DeviceCertificate {
+    let epoch = voucher.state().mls.epoch().unwrap();
+    DeviceCertificate::vouch(
+        &voucher.inner.identity,
+        &voucher.inner.config.workspace_id,
+        voucher.my_person().unwrap(),
+        request.device,
+        epoch,
+        request.acceptance.clone(),
     )
     .unwrap()
 }

@@ -143,7 +143,7 @@ impl DataDir {
         Ok(safety_code(&self.open_local().await?.identity.public()))
     }
 
-    async fn open_local(&self) -> Result<Local> {
+    pub(super) async fn open_local(&self) -> Result<Local> {
         let lock = self.lock()?;
         // A new key for a folder that already has its database would make
         // that data unreadable for good, so only a new folder gets one.
@@ -189,15 +189,15 @@ impl DataDir {
 }
 
 /// The decrypted local pieces every workspace starts from.
-struct Local {
+pub(super) struct Local {
     lock: std::fs::File,
-    store: Store,
-    identity: SecretKey,
+    pub store: Store,
+    pub identity: SecretKey,
     device_key: DeviceKey,
 }
 
 impl Local {
-    fn open_mls(&self, data: &DataDir, group_id: Option<&[u8]>) -> Result<Mls> {
+    pub(super) fn open_mls(&self, data: &DataDir, group_id: Option<&[u8]>) -> Result<Mls> {
         let signer = self.store.meta(SIGNER_META)?;
         let mls = Mls::open(
             &data.mls_path(),
@@ -372,8 +372,8 @@ impl Workspace {
         };
         // MLS deletes our key as it reads the Welcome, so a join that fails
         // from here on can't be finished from this folder.
-        let grant = match admit(&local, &mut mls, &facts, accepted) {
-            Ok(grant) => grant,
+        let granted = match admit(&local, &mut mls, &facts, accepted) {
+            Ok(granted) => granted,
             Err(error) => {
                 drop(mls);
                 drop(local);
@@ -381,24 +381,46 @@ impl Workspace {
                 return Err(error);
             }
         };
-        let bucket_lamport = grant.bucket_lamport;
-
-        let config = WorkspaceConfig {
-            workspace_id: invite.workspace_id,
-            name: invite.workspace_name,
-            admin: invite.admin,
-            bucket: grant.bucket,
+        let admitted = Admitted {
+            config: WorkspaceConfig {
+                workspace_id: invite.workspace_id,
+                name: invite.workspace_name,
+                admin: invite.admin,
+                bucket: granted.bucket,
+            },
+            bucket_lamport: granted.bucket_lamport,
         };
-        config.save_in_store(&local.store)?;
-        config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
-        config::record_settings_op(&local.store, config::NO_SETTINGS_OP)?;
         let pending = PendingProfile {
             name,
             is_bot: profile.is_bot,
         };
-        local
-            .store
-            .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
+        Self::complete_join(data, local, mls, admitted, Some(pending), connect, options).await
+    }
+
+    /// Saves what the newcomer was admitted with, marks the workspace
+    /// complete and starts it. A device linked to a person has no profile
+    /// of its own to write.
+    pub(super) async fn complete_join(
+        data: &DataDir,
+        local: Local,
+        mls: Mls,
+        admitted: Admitted,
+        pending: Option<PendingProfile>,
+        connect: Connector,
+        options: impl Into<WorkspaceOptions>,
+    ) -> Result<Self> {
+        let Admitted {
+            config,
+            bucket_lamport,
+        } = admitted;
+        config.save_in_store(&local.store)?;
+        config::update_bucket(&local.store, &config.bucket, bucket_lamport)?;
+        config::record_settings_op(&local.store, config::NO_SETTINGS_OP)?;
+        if let Some(pending) = pending {
+            local
+                .store
+                .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
+        }
         config.mark_complete(&data.path)?;
         let workspace = Self::start(data, local, mls, config, connect, options).await?;
         // Without it, unbound commits are taken until the next bound one.
@@ -571,6 +593,8 @@ impl Workspace {
                 #[cfg(test)]
                 fail_next_answer_upload: Default::default(),
                 #[cfg(test)]
+                fail_next_commit_upload: Default::default(),
+                #[cfg(test)]
                 tamper_next_grant: Default::default(),
             }),
         };
@@ -688,6 +712,12 @@ pub(super) struct GrantedBucket {
     pub bucket_lamport: u64,
 }
 
+/// What a newcomer was let in with, ready to save.
+pub(super) struct Admitted {
+    pub config: WorkspaceConfig,
+    pub bucket_lamport: u64,
+}
+
 /// The workspace facts a newcomer joins with, from its invite or link.
 pub(super) struct JoinFacts<'a> {
     pub workspace_id: &'a str,
@@ -698,7 +728,12 @@ pub(super) struct JoinFacts<'a> {
 /// Joins the group with the admin's answer and stores the grant it seals.
 /// A grant whose device map doesn't match the answer's digest is refused
 /// before anything is stored.
-fn admit(local: &Local, mls: &mut Mls, facts: &JoinFacts, accepted: Accepted) -> Result<GrantedBucket> {
+pub(super) fn admit(
+    local: &Local,
+    mls: &mut Mls,
+    facts: &JoinFacts,
+    accepted: Accepted,
+) -> Result<GrantedBucket> {
     if let Some(map_digest) = &accepted.map_digest {
         mls.store_map_key(map_digest)?;
     }
@@ -772,7 +807,7 @@ fn check_device_map(workspace_id: &str, granted: &GrantWithDevices, expected: &[
 
 /// Forgets a join that can't go on: its key is spent, and the next try
 /// makes a new one.
-async fn clear_spent_join(data: &DataDir) {
+pub(super) async fn clear_spent_join(data: &DataDir) {
     if let Err(cleanup) = data.forget_unfinished().await {
         warn!(
             "couldn't clear a join that ended from {}: {cleanup:#}",
@@ -836,7 +871,7 @@ fn is_signed_by_admin(invite: &Invite, bytes: Result<Vec<u8>>, signature: &[u8])
 pub(crate) static CUT_SHORT_CREATES: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
 
 #[derive(Serialize, Deserialize)]
-struct PendingProfile {
+pub(super) struct PendingProfile {
     name: String,
     is_bot: bool,
 }
@@ -850,7 +885,7 @@ fn remove_if_there(path: &Path) -> Result<()> {
     }
 }
 
-fn prepare_empty_dir(dir: &Path) -> Result<()> {
+pub(super) fn prepare_empty_dir(dir: &Path) -> Result<()> {
     if WorkspaceConfig::exists(dir) {
         bail!("a workspace already exists in {}", dir.display());
     }

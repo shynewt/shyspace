@@ -3,6 +3,7 @@
 mod actions;
 mod alert_actions;
 mod drafts;
+mod enrollment;
 mod files;
 mod huddle_ring;
 mod huddles;
@@ -21,6 +22,7 @@ mod sent;
 mod storage;
 
 pub(crate) use actions::OpMaker;
+pub use enrollment::{DeviceEnrollment, DeviceLink, DeviceRequest};
 pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
 pub use huddles::Via;
 #[cfg(test)]
@@ -360,6 +362,9 @@ pub(crate) struct Inner {
     /// Makes the next join answer upload fail as an unreachable bucket would.
     #[cfg(test)]
     pub fail_next_answer_upload: std::sync::atomic::AtomicBool,
+    /// Makes the next commit upload fail as an unreachable bucket would.
+    #[cfg(test)]
+    pub fail_next_commit_upload: std::sync::atomic::AtomicBool,
     /// Changes the next grant for a workspace with devices, as a dishonest
     /// admin's app might, after the digest was committed.
     #[cfg(test)]
@@ -423,6 +428,12 @@ impl Workspace {
 
     pub fn my_id(&self) -> String {
         member_id(&self.me())
+    }
+
+    /// The person this device belongs to: itself, unless it was linked to
+    /// someone.
+    pub fn my_person(&self) -> Result<PublicKey> {
+        self.state().store.person_of(&self.me())
     }
 
     pub fn safety_code(&self) -> String {

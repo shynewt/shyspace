@@ -10,7 +10,7 @@ use super::{
 use crate::{views::Change, workspace::Workspace};
 
 /// Set once this device has looked at the commit that added it, bound or not.
-const JOIN_COMMIT_CHECKED_META: &str = "join_commit_checked";
+pub(crate) const JOIN_COMMIT_CHECKED_META: &str = "join_commit_checked";
 
 /// Set once this device has followed a commit that binds its lists, or
 /// joined through one.

@@ -270,6 +270,15 @@ impl Mls {
             .collect()
     }
 
+    /// A member's MLS signature key, from the group's tree.
+    pub fn signature_key_of(&self, member: &PublicKey) -> Result<Vec<u8>> {
+        self.group()?
+            .members()
+            .find(|candidate| identity_of(&candidate.credential).is_ok_and(|id| id == *member))
+            .map(|found| found.signature_key)
+            .context("not a member")
+    }
+
     /// Checks who a key package claims to be, without changing anything.
     /// `binding` must be the claimed identity's signature over its MLS key.
     pub fn verify_key_package(

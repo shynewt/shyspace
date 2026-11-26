@@ -1369,3 +1369,34 @@ async fn the_admin_sets_the_workspace_icon_and_look_for_everyone() {
         crate::views::WorkspaceLook::default()
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_device_reads_what_was_written_before_it_joined() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let general = channel_id(&admin, "general");
+    bob.send_message(&general, "written before the phone", None)
+        .unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    phone.sync().await;
+
+    assert_eq!(phone.status().error, None);
+    assert!(texts_in(&phone, &general).contains(&"written before the phone".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_member_takes_a_linked_device_for_its_persons() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &phone, &carol]).await;
+
+    assert_eq!(phone.my_person().unwrap(), bob.me());
+    let admins_epoch = admin.state().mls.epoch().unwrap();
+    for member in [&admin, &bob, &phone, &carol] {
+        let state = member.state();
+        assert_eq!(state.store.person_of(&phone.me()).unwrap(), bob.me());
+        assert_eq!(state.mls.epoch().unwrap(), admins_epoch);
+    }
+}
