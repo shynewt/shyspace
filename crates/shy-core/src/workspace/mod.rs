@@ -26,7 +26,7 @@ pub use enrollment::{DeviceEnrollment, DeviceLink, DeviceRequest};
 pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
 pub use huddles::Via;
 #[cfg(test)]
-pub(crate) use lifecycle::CUT_SHORT_CREATES;
+pub(crate) use lifecycle::{CUT_SHORT_CLEARINGS, CUT_SHORT_CREATES};
 pub use lifecycle::{DataDir, JoinCancel};
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
 pub use presence::Heartbeat;

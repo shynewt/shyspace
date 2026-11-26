@@ -27,9 +27,9 @@ use crate::{
     transport::bucket::{BucketConfig, Connector, s3_connector},
 };
 
-/// How many times the commit slot may hold something other than the
-/// commit that added this device before the link ends, and how far apart
-/// the reads are.
+/// How many reads of the commit slot may find something that doesn't verify
+/// as the commit that added this device before the link ends, and how far
+/// apart the reads are.
 const JOIN_COMMIT_READS: u32 = 30;
 #[cfg(not(test))]
 const JOIN_COMMIT_RETRY: Duration = Duration::from_secs(2);
@@ -70,9 +70,15 @@ pub struct DeviceRequest {
 }
 
 impl DeviceEnrollment {
-    /// Makes this device's key in the empty folder `data`, to be linked as
-    /// `link` says.
+    /// Makes this device's key in the folder `data`, to be linked as `link`
+    /// says. What an unfinished link or join left there, and nothing holds
+    /// open, is cleared first; an ordinary join cleared that way had a
+    /// request the admin can then never answer.
     pub async fn begin(data: DataDir, link: DeviceLink) -> Result<(Self, DeviceRequest)> {
+        // A try that stopped before it finished (the app quit while it
+        // waited, or crashed) left a key the admin may already have added;
+        // that key can't be linked again, so start over with a new one.
+        data.clear_unfinished_join().await?;
         prepare_empty_dir(&data.path)?;
         let local = data.open_local().await?;
         let mls = local.open_mls(&data, None)?;
@@ -224,11 +230,17 @@ async fn read_join_commit(
     let from_epoch = join_epoch.checked_sub(1).context("joined at the first epoch")?;
     let bucket = connect(&link.workspace_id, bucket_config)?;
     let mut wrong_reads = 0;
+    let mut has_warned = false;
     loop {
         let bytes = match bucket.commit(from_epoch).await {
             Ok(bytes) => bytes,
             Err(error) => {
-                warn!("can't read the commit that added this device yet: {error:#}");
+                if !has_warned {
+                    warn!(
+                        "can't reach the bucket for the commit that added this device; still waiting: {error:#}"
+                    );
+                    has_warned = true;
+                }
                 None
             }
         };

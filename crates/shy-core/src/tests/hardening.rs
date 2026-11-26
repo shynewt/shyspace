@@ -6424,6 +6424,117 @@ async fn a_device_added_while_the_bucket_is_down_still_gets_its_welcome() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_link_started_again_after_an_abandoned_one_makes_a_new_key() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (enrollment, first) = begin_link(&bob, &dir).await;
+    let from_epoch = epoch_of(&admin);
+    let welcome = admin
+        .add_device(&first.key_package, &first.binding, &vouch(&bob, &first))
+        .await
+        .unwrap();
+    // Its commit slot is empty, so the device waits, and the app quits.
+    bucket.delete_commit(from_epoch).await.unwrap();
+    let waiting = tokio::spawn(enrollment.finish_with(welcome, connector(&bucket), Networking::Offline));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    waiting.abort();
+    assert!(waiting.await.err().is_some_and(|error| error.is_cancelled()));
+
+    let (enrollment, again) = begin_link(&bob, &dir).await;
+    assert_ne!(again.device, first.device, "a new key");
+    let welcome = admin
+        .add_device(&again.key_package, &again.binding, &vouch(&bob, &again))
+        .await
+        .unwrap();
+    let phone = enrollment
+        .finish_with(welcome, connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+
+    assert_eq!(phone.my_person().unwrap(), bob.me());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_clearing_stopped_partway_is_finished_by_the_next_link() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (abandoned, first) = begin_link(&bob, &dir).await;
+    drop(abandoned);
+    crate::workspace::CUT_SHORT_CLEARINGS
+        .lock()
+        .unwrap()
+        .push(dir.clone());
+    let stopped = crate::DeviceEnrollment::begin(data_dir(&dir), device_link(&bob)).await;
+    assert!(format!("{:#}", stopped.err().unwrap()).contains("simulated stop"));
+    crate::workspace::CUT_SHORT_CLEARINGS
+        .lock()
+        .unwrap()
+        .retain(|cut| *cut != dir);
+
+    let (enrollment, again) = begin_link(&bob, &dir).await;
+    assert_ne!(again.device, first.device, "a new key");
+    let welcome = admin
+        .add_device(&again.key_package, &again.binding, &vouch(&bob, &again))
+        .await
+        .unwrap();
+    let phone = enrollment
+        .finish_with(welcome, connector(&bucket), Networking::Offline)
+        .await
+        .unwrap();
+
+    assert_eq!(phone.my_person().unwrap(), bob.me());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_never_clears_a_workspace_whose_mark_is_gone() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("carol");
+    let carol = join(&admin, &dir, &bucket, "Carol", false).await;
+    let general = channel_id(&admin, "general");
+    carol.send_message(&general, "kept", None).unwrap();
+    drop(carol);
+    std::fs::remove_file(dir.join("workspace.json")).unwrap();
+    let size = std::fs::metadata(dir.join("shy.db")).unwrap().len();
+
+    let refused = crate::DeviceEnrollment::begin(data_dir(&dir), device_link(&bob))
+        .await
+        .err()
+        .unwrap();
+
+    assert!(
+        format!("{refused:#}").contains("workspace.json is missing"),
+        "{refused:#}"
+    );
+    assert_eq!(std::fs::metadata(dir.join("shy.db")).unwrap().len(), size);
+    assert!(dir.join("mls.db").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_never_clears_a_folder_a_join_is_waiting_in() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("carol");
+    let invite = admin
+        .create_test_invite("Carol", Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &dir, &bucket, "Carol", false);
+    wait_for_request(&admin, &token).await;
+
+    let refused = crate::DeviceEnrollment::begin(data_dir(&dir), device_link(&bob))
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        format!("{refused:#}").contains("in progress in this folder"),
+        "{refused:#}"
+    );
+
+    admin.approve_invite(&token).await.unwrap();
+    let carol = joining.await.unwrap().unwrap();
+    assert_eq!(carol.status().error, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_device_whose_join_commit_is_from_a_newer_version_is_told_to_update() {
     let (root, bucket, admin, bob) = admin_and_bob().await;
     let (enrollment, request) = begin_link(&bob, &root.path().join("phone")).await;

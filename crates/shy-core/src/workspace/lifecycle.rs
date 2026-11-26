@@ -113,13 +113,25 @@ impl DataDir {
     /// in the folder stays, and the folder with it), then the device key. A
     /// key left by a crash in between opens nothing, and the next join works.
     async fn forget_unfinished(&self) -> Result<()> {
+        // The store before the MLS database: a stop partway leaves an MLS
+        // file without a store, which the next link clears again.
         for database in [STORE_FILE, MLS_FILE] {
             // Journal files first, so a stop partway never leaves one behind
             // for the next join's new database to find.
             for suffix in ["-wal", "-shm", ""] {
                 remove_if_there(&self.path.join(format!("{database}{suffix}")))?;
             }
+            #[cfg(test)]
+            if CUT_SHORT_CLEARINGS
+                .lock()
+                .expect("cut-short clearings lock poisoned")
+                .contains(&self.path)
+            {
+                bail!("a simulated stop while clearing");
+            }
         }
+        self.keys.forget(&self.path).await?;
+        // Last, so whoever cleared still held it until here.
         remove_if_there(&self.path.join(LOCK_FILE))?;
         match std::fs::remove_dir(&self.path) {
             // Someone keeps other files there, which stay.
@@ -133,7 +145,70 @@ impl DataDir {
             }
             _ => {}
         }
-        self.keys.forget(&self.path).await
+        Ok(())
+    }
+
+    /// Clears what an unfinished join or link left in this folder, so a new
+    /// link starts with a new key. A folder that is open elsewhere, holds a
+    /// workspace (even one whose `workspace.json` is gone), or can't be read
+    /// is refused, never cleared; a folder with only an identity keeps it.
+    pub(super) async fn clear_unfinished_join(&self) -> Result<()> {
+        if !self
+            .path
+            .try_exists()
+            .with_context(|| format!("checking {}", self.path.display()))?
+        {
+            return Ok(());
+        }
+        // Checked before the lock too, so an open workspace is reported as
+        // one rather than as a join in progress.
+        if self.is_marked()? {
+            return Ok(());
+        }
+        let lock = match self.lock() {
+            Ok(lock) => lock,
+            Err(error) => return Err(error.context("a join or link is in progress in this folder")),
+        };
+        if self.is_marked()? {
+            return Ok(());
+        }
+        let has_store = self
+            .store_path()
+            .try_exists()
+            .with_context(|| format!("checking {} for a store", self.path.display()))?;
+        let has_mls = self
+            .mls_path()
+            .try_exists()
+            .with_context(|| format!("checking {} for an MLS database", self.path.display()))?;
+        if !has_mls {
+            return Ok(());
+        }
+        if has_store {
+            let refusal = || {
+                format!(
+                    "{} holds data that can't be read, so it isn't cleared",
+                    self.path.display()
+                )
+            };
+            let device_key = self.keys.load(&self.path).await.with_context(refusal)?;
+            let store = Store::open(&self.store_path(), &device_key.database_key(STORE_FILE))
+                .with_context(refusal)?;
+            ensure!(
+                !WorkspaceConfig::is_saved_in(&store)?,
+                "{} holds a workspace whose workspace.json is missing; it isn't cleared",
+                self.path.display()
+            );
+        }
+        let cleared = self.forget_unfinished().await;
+        drop(lock);
+        cleared
+    }
+
+    fn is_marked(&self) -> Result<bool> {
+        self.path
+            .join(crate::config::CONFIG_FILE)
+            .try_exists()
+            .with_context(|| format!("checking {} for a workspace", self.path.display()))
     }
 
     /// This device's safety code, creating its identity if needed. A joiner
@@ -869,6 +944,11 @@ fn is_signed_by_admin(invite: &Invite, bytes: Result<Vec<u8>>, signature: &[u8])
 /// died then; keyed by folder so tests running alongside aren't touched.
 #[cfg(test)]
 pub(crate) static CUT_SHORT_CREATES: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
+
+/// Folders whose clearing stops after its first database, as a crash or a
+/// file that won't delete would stop it.
+#[cfg(test)]
+pub(crate) static CUT_SHORT_CLEARINGS: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct PendingProfile {

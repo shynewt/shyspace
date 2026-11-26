@@ -80,6 +80,12 @@ impl WorkspaceConfig {
         })
     }
 
+    /// Whether a join or create got as far as saving the workspace in this
+    /// store, which only happens just before it is marked complete.
+    pub fn is_saved_in(store: &Store) -> Result<bool> {
+        Ok(store.meta(IDENTITY_META)?.is_some())
+    }
+
     /// Keeps the bucket settings (syncing reads them there) and the
     /// workspace id and admin in the encrypted store.
     pub fn save_in_store(&self, store: &Store) -> Result<()> {
