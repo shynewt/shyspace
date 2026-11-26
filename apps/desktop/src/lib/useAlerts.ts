@@ -125,10 +125,13 @@ function targetOf(change: AlertChange): AlertTarget {
   return { kind: "channel", id: change.channel };
 }
 
-/** "Grace in Plan", or with the text hidden only "Grace": a page's title can say as much as its text. */
+/**
+ * "Grace mentioned you in 📄 Plan", so it doesn't read like a message in a channel;
+ * with the text hidden only "Grace": a page's title can say as much as its text.
+ */
 function pageAlertTitle(change: Extract<AlertChange, { kind: "page_alert" }>): string {
   const name = displayName(change.author_name, change.author);
-  return readPreferences().alertsShowText ? `${name} in ${change.page_title || "Untitled"}` : name;
+  return readPreferences().alertsShowText ? `${name} mentioned you in 📄 ${change.page_title || "Untitled"}` : name;
 }
 
 /** "Grace in #general", or for a DM who it's from and with whom, from the shown workspace's channels. */

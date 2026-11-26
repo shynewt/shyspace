@@ -21,7 +21,9 @@ test("a mention in a page notifies you, and the notification opens the page at i
   );
   await expect
     .poll(() => alertsShown(page))
-    .toEqual([{ title: "Grace in Plan", body: expect.stringMatching(/^Can you check @.+ before Friday\?$/) }]);
+    .toEqual([
+      { title: "Grace mentioned you in 📄 Plan", body: expect.stringMatching(/^Can you check @.+ before Friday\?$/) },
+    ]);
 
   await page.evaluate(() => window.fake.clickAlert(0));
 
