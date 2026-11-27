@@ -24,14 +24,14 @@ class HomeViewModelTest {
 
     @Test
     fun aPhoneWithoutWorkspacesSaysSo() = runBlocking {
-        val home = HomeViewModel(testCore(folder.root))
+        val home = mainThread.viewModel { HomeViewModel(testCore(folder.root)) }
         val state = withTimeout(5_000) { home.state.first { it !is HomeState.Loading } }
         assertEquals(HomeState.NoWorkspace(), state)
     }
 
     @Test
     fun aCreateThatFailsKeepsTheFormAndSaysWhy() = runBlocking {
-        val home = HomeViewModel(testCore(folder.root))
+        val home = mainThread.viewModel { HomeViewModel(testCore(folder.root)) }
         withTimeout(5_000) { home.state.first { it is HomeState.NoWorkspace } }
 
         // The core refuses a name with an invisible character in it.
@@ -47,7 +47,7 @@ class HomeViewModelTest {
     fun aWorkspaceShowsItsChannels() = runBlocking {
         val core = testCore(folder.root)
         core.createAcme()
-        val home = HomeViewModel(core)
+        val home = mainThread.viewModel { HomeViewModel(core) }
 
         val ready = withTimeout(5_000) { home.state.first { it is HomeState.Ready } } as HomeState.Ready
         assertEquals("Acme", ready.workspaceName)
@@ -58,7 +58,7 @@ class HomeViewModelTest {
     @Test
     fun aReplacedWorkspaceNoLongerSteersHome() = runBlocking {
         val core = testCore(folder.root)
-        val home = HomeViewModel(core)
+        val home = mainThread.viewModel { HomeViewModel(core) }
         withTimeout(5_000) { home.state.first { it is HomeState.NoWorkspace } }
         home.createWorkspace("Acme", "Ada", unusedBucket())
         val acme = withTimeout(5_000) { home.state.first { it is HomeState.Ready } as HomeState.Ready }

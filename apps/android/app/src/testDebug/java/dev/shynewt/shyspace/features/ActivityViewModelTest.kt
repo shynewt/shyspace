@@ -28,7 +28,7 @@ class ActivityViewModelTest {
         val core = testCore(folder.root)
         val acme = core.createAcme()
         acme.sendMessage(acme.channels().single().id, "hello", null)
-        val activity = ActivityViewModel(core)
+        val activity = mainThread.viewModel { ActivityViewModel(core) }
 
         activity.follow(acme.workspaceId())
 
@@ -40,7 +40,7 @@ class ActivityViewModelTest {
 
     @Test
     fun aWorkspaceThatIsNotOnThePhoneSaysSo() = runBlocking {
-        val activity = ActivityViewModel(testCore(folder.root))
+        val activity = mainThread.viewModel { ActivityViewModel(testCore(folder.root)) }
 
         activity.follow("missing")
 
@@ -54,7 +54,7 @@ class ActivityViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         acme.sendMessage(general, "hello", null)
-        val activity = ActivityViewModel(core)
+        val activity = mainThread.viewModel { ActivityViewModel(core) }
         activity.follow(acme.workspaceId())
         withTimeout(5_000) { activity.state.first { !it.isLoading } }
 
@@ -71,7 +71,7 @@ class ActivityViewModelTest {
         val core = testCore(folder.root)
         val acme = core.createAcme()
         val second = core.app.createWorkspace("Beta", "Ada", unusedBucket())
-        val activity = ActivityViewModel(core)
+        val activity = mainThread.viewModel { ActivityViewModel(core) }
         activity.follow(acme.workspaceId())
         withTimeout(5_000) { activity.state.first { !it.isLoading } }
 
@@ -83,7 +83,7 @@ class ActivityViewModelTest {
 
     @Test
     fun withNoWorkspaceItSaysWhyAndStopsLoading() {
-        val activity = ActivityViewModel(testCore(folder.root))
+        val activity = mainThread.viewModel { ActivityViewModel(testCore(folder.root)) }
 
         activity.showUnavailable("No workspaces on this phone yet.")
 

@@ -1,9 +1,7 @@
 package dev.shynewt.shyspace.features
 
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
-import androidx.lifecycle.viewModelScope
 import dev.shynewt.shyspace.MainThreadRule
 import dev.shynewt.shyspace.createAcme
 import dev.shynewt.shyspace.features.channel.ChannelState
@@ -32,7 +30,7 @@ class ChannelViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         acme.sendMessage(general, "first", null)
-        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
         withTimeout(5_000) { channel.state.first { it.messages.isNotEmpty() } }
 
         assertTrue(channel.send("  second  "))
@@ -45,7 +43,8 @@ class ChannelViewModelTest {
     fun blankTextIsNotSent() = runBlocking {
         val core = testCore(folder.root)
         val acme = core.createAcme()
-        val channel = ChannelViewModel(core, acme.workspaceId(), acme.channels().single().id)
+        val general = acme.channels().single().id
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
         withTimeout(5_000) { channel.state.first { !it.isLoading } }
 
         assertFalse(channel.send("   "))
@@ -58,7 +57,7 @@ class ChannelViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         val id = acme.sendMessage(general, "**ship** it `now`", null)
-        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
 
         val state = withTimeout(5_000) { channel.state.first { it.messages.isNotEmpty() } }
 
@@ -72,7 +71,7 @@ class ChannelViewModelTest {
         val general = acme.channels().single().id
         acme.sendMessage(general, "first", null)
         val newest = acme.sendMessage(general, "second", null)
-        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
         withTimeout(5_000) { channel.state.first { it.messages.size == 2 } }
 
         channel.markSeen(newest)
@@ -92,7 +91,7 @@ class ChannelViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         val id = acme.sendMessage(general, "hello", null)
-        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
         withTimeout(5_000) { channel.state.first { it.messages.isNotEmpty() } }
 
         channel.react(id, "👍", active = true)
@@ -113,7 +112,7 @@ class ChannelViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         repeat(120) { acme.sendMessage(general, "message $it", null) }
-        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
         withTimeout(5_000) { channel.state.first { it.messages.size == 50 } }
         assertTrue(channel.state.value.hasOlder)
 
@@ -134,7 +133,7 @@ class ChannelViewModelTest {
         sent.forEach { acme.sendMessage(general, it, null) }
 
         repeat(8) { round ->
-            val channel = ChannelViewModel(core, acme.workspaceId(), general)
+            val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
             withTimeout(5_000) { channel.state.first { it.messages.size == 50 } }
 
             val arriving = launch(Dispatchers.Default) {
@@ -153,7 +152,6 @@ class ChannelViewModelTest {
             }
             val expected = synchronized(sent) { sent.takeLast(100).reversed() }
             assertEquals("round $round", expected, settled.messages.map { it.text })
-            channel.viewModelScope.cancel()
         }
     }
 
@@ -163,7 +161,7 @@ class ChannelViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         repeat(100) { acme.sendMessage(general, "message $it", null) }
-        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
         withTimeout(5_000) { channel.state.first { it.messages.size == 50 } }
         channel.loadOlder()
         withTimeout(5_000) { channel.state.first { it.messages.size == 100 && !it.isLoadingOlder } }
@@ -182,7 +180,7 @@ class ChannelViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         repeat(10) { acme.sendMessage(general, "early $it", null) }
-        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
         withTimeout(5_000) { channel.state.first { it.messages.size == 10 } }
 
         repeat(100) { acme.sendMessage(general, "later $it", null) }
@@ -202,7 +200,7 @@ class ChannelViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         repeat(120) { acme.sendMessage(general, "message $it", null) }
-        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        val channel = mainThread.viewModel { ChannelViewModel(core, acme.workspaceId(), general) }
         withTimeout(5_000) { channel.state.first { it.messages.size == 50 } }
         val seen = mutableListOf<ChannelState>()
         val watching = launch { channel.state.collect { synchronized(seen) { seen += it } } }

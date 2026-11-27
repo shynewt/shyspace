@@ -38,8 +38,8 @@ class RestoreTest {
         before.app.close()
 
         val restored = testCore(folder.root, keys)
-        val channel = ChannelViewModel(restored, workspaceId, general)
-        val thread = ThreadViewModel(restored, workspaceId, general, root)
+        val channel = mainThread.viewModel { ChannelViewModel(restored, workspaceId, general) }
+        val thread = mainThread.viewModel { ThreadViewModel(restored, workspaceId, general, root) }
 
         val channelShown = withTimeout(5_000) { channel.state.first { it.error != null || !it.isLoading } }
         val threadShown = withTimeout(5_000) { thread.state.first { it.error != null || !it.isLoading } }
@@ -60,7 +60,7 @@ class RestoreTest {
         before.app.close()
 
         val withoutItsKey = testCore(folder.root, MemoryKeyStore())
-        val channel = ChannelViewModel(withoutItsKey, workspaceId, general)
+        val channel = mainThread.viewModel { ChannelViewModel(withoutItsKey, workspaceId, general) }
 
         val shown = withTimeout(5_000) { channel.state.first { it.error != null } }
         assertEquals("This workspace couldn't open. Home shows why.", shown.error)
