@@ -1,6 +1,7 @@
 mod alert_actions;
 mod capacity;
 mod collaboration;
+mod device_changes;
 mod drafts;
 mod editing;
 mod file_attacks;

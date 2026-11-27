@@ -117,6 +117,7 @@ impl Store {
             | Op::ProfilePicture { .. }
             | Op::WorkspaceIcon { .. }
             | Op::WorkspaceLook { .. }
+            | Op::DeviceChange { .. }
             | Op::File { .. } => {
                 return Ok(false);
             }

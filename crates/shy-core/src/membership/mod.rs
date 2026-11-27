@@ -4,6 +4,7 @@
 pub mod admin;
 pub(crate) mod commit;
 pub mod device;
+pub mod device_change;
 pub(crate) mod follow;
 pub mod invite;
 pub(crate) mod keyring;

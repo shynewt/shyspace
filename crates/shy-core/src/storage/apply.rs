@@ -88,6 +88,7 @@ impl Store {
         match &verified.body.op {
             Op::KeyGrant { wraps } => self.apply_key_grant(verified, wraps, context),
             Op::Sealed { payload } => self.apply_sealed(verified, payload, context),
+            Op::DeviceChange { change } => self.apply_device_change(verified, change, context),
             _ => Ok(match self.apply(verified)? {
                 Some(change) => Applied {
                     changes: vec![change],
@@ -276,6 +277,9 @@ impl Store {
             }
             Op::KeyGrant { .. } | Op::Sealed { .. } => {
                 return Err(rule_violation("a private op inside another"));
+            }
+            Op::DeviceChange { .. } => {
+                return Err(rule_violation("a device change inside a private op"));
             }
             Op::ProfileDetails { details } => {
                 if !self.put_profile_details(author, &details.cleaned(), lamport)? {

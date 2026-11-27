@@ -47,6 +47,7 @@ pub(super) const SHARED_VIEW_TABLES: &[&str] = &[
     "file_names",
     "workspace_icon",
     "workspace_look",
+    "device_changes",
 ];
 
 /// A page's updates gathered during a replay, written once at the end.

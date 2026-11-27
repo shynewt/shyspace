@@ -646,3 +646,7 @@ pub fn stage_devices_change_unchecked(
     state.record_epoch(&admin.inner.config).unwrap();
     (from_epoch, signed)
 }
+
+pub fn epoch_of(member: &Workspace) -> u64 {
+    member.state().mls.epoch().unwrap()
+}

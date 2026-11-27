@@ -5647,10 +5647,6 @@ async fn four_members() -> (
     (root, bucket, admin, bob, carol, dave)
 }
 
-fn epoch_of(member: &Workspace) -> u64 {
-    member.state().mls.epoch().unwrap()
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn two_wrappers_around_one_commit_cannot_split_members() {
     let (_root, bucket, admin, bob, carol, dave) = four_members().await;

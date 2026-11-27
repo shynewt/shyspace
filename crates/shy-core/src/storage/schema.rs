@@ -14,7 +14,13 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::crypto::OP_FORMAT;
 
 /// Every migration in order; the first is the schema as of v0.1.0.
-const MIGRATIONS: &[&str] = &[FIRST_SCHEMA, WORKSPACE_LOOK, PAGE_MENTIONS, DEVICES];
+const MIGRATIONS: &[&str] = &[
+    FIRST_SCHEMA,
+    WORKSPACE_LOOK,
+    PAGE_MENTIONS,
+    DEVICES,
+    DEVICE_CHANGES,
+];
 
 /// The workspace's icon and default look, set by the admin.
 const WORKSPACE_LOOK: &str = r#"
@@ -42,6 +48,15 @@ CREATE INDEX devices_by_person ON devices (person);
 ALTER TABLE message_edits ADD COLUMN device BLOB;
 ALTER TABLE file_names ADD COLUMN device BLOB;
 ALTER TABLE frozen_authors ADD COLUMN frozen_epoch INTEGER;
+"#;
+
+/// Device changes every member judged and kept, a view rebuilt from ops.
+const DEVICE_CHANGES: &str = r#"
+CREATE TABLE device_changes (
+    author BLOB NOT NULL, seq INTEGER NOT NULL, epoch INTEGER NOT NULL, person BLOB NOT NULL,
+    change BLOB NOT NULL, shown_ms INTEGER NOT NULL,
+    PRIMARY KEY (author, seq));
+CREATE INDEX device_changes_by_person ON device_changes (person);
 "#;
 
 const FIRST_SCHEMA: &str = r#"
@@ -161,8 +176,9 @@ INSERT INTO sidebar_sections (id, name, position) VALUES ('channels', 'Channels'
 /// under other rules has them rebuilt from its log on opening, which also
 /// applies ops of new kinds that an older version kept as unreadable. Rules
 /// 2 add the workspace icon and look; rules 3 let any device of a person
-/// edit their content, with equal clocks settled by device key.
-pub(crate) const VIEW_RULES: u8 = 3;
+/// edit their content, with equal clocks settled by device key; rules 4 add
+/// device changes.
+pub(crate) const VIEW_RULES: u8 = 4;
 pub(crate) const VIEW_RULES_META: &str = "view_rules";
 /// The newest op format any version that opened the store reads, as a
 /// little-endian `u32`: a store whose log may hold ops in a format we can't

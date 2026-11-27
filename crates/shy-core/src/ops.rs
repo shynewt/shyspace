@@ -167,6 +167,11 @@ pub enum Op {
         theme: Option<String>,
         accent: Option<String>,
     },
+    /// A request about the author's person's devices, which the admin's app
+    /// acts on (`membership/device_change.rs`).
+    DeviceChange {
+        change: crate::membership::device_change::DeviceChange,
+    },
 }
 
 const MAX_LOOK_NAME_CHARS: usize = 24;
@@ -240,7 +245,8 @@ impl Op {
             | Op::ProfileDetails { .. }
             | Op::ProfilePicture { .. }
             | Op::WorkspaceIcon { .. }
-            | Op::WorkspaceLook { .. } => Vec::new(),
+            | Op::WorkspaceLook { .. }
+            | Op::DeviceChange { .. } => Vec::new(),
         }
     }
 }
