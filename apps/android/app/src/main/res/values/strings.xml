@@ -20,6 +20,9 @@
     <string name="link_code">Link code</string>
     <string name="paste_code">Paste the code</string>
     <string name="paste">Paste</string>
+    <string name="scan_code">Scan code</string>
+    <string name="scan_hint">Point the camera at the code on your other device.</string>
+    <string name="camera_refused">Camera access is off, so paste the code instead.</string>
     <string name="link_tap_this">On your other device, tap this number</string>
     <string name="link_waiting">Waiting for your other device…</string>
     <string name="link_someone_else">Someone else used this code. On your other device, choose \'None of these\'.</string>

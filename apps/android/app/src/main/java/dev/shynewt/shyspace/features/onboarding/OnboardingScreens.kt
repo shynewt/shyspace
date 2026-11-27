@@ -215,6 +215,8 @@ private fun EnterCode(problem: String?, onCodeEntered: (String) -> Unit) {
             }
         }) { Text(stringResource(R.string.paste)) }
     }
+    // A scanned code fills the field, landing whole like a paste.
+    ScanCodeButton(onCode = { scanned -> code.setTextAndPlaceCursorAtEnd(scanned.trim()) })
     problem?.let {
         Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.dangerText, modifier = Modifier.announcedWhenItAppears())
     }
