@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <!-- The desktop logo's planet and ring (ui/Logo.tsx), scaled from its 32-unit box into the
+       adaptive icon's 66-unit safe zone; the violet square is the background layer. -->
+  <defs>
+    <mask id="behind-ring" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+      <rect width="32" height="32" fill="#fff"/>
+      <path d="M3.4 16A12.6 4 0 0 0 28.6 16" transform="rotate(-18 16 16)" fill="none" stroke="#000" stroke-width="5.6"/>
+    </mask>
+  </defs>
+  <g transform="translate(21 21) scale(2.0625)">
+    <ellipse cx="16" cy="16" rx="12.6" ry="4" transform="rotate(-18 16 16)" fill="none" stroke="#dcd7ff" stroke-width="2.8"/>
+    <g mask="url(#behind-ring)">
+      <circle cx="16" cy="16" r="8.6" fill="#fff"/>
+      <g transform="rotate(-14 16 16)">
+        <ellipse cx="13" cy="14.2" rx="1.5" ry="1.5" fill="#3a2bbd"/>
+        <ellipse cx="19" cy="14.2" rx="1.5" ry="1.5" fill="#3a2bbd"/>
+        <ellipse cx="10" cy="15.6" rx="1.4" ry=".9" fill="#ff9cc8"/>
+        <ellipse cx="22" cy="15.6" rx="1.4" ry=".9" fill="#ff9cc8"/>
+      </g>
+    </g>
+    <path d="M3.4 16A12.6 4 0 0 0 28.6 16" transform="rotate(-18 16 16)" fill="none" stroke="#dcd7ff" stroke-width="2.8" stroke-linecap="round"/>
+  </g>
+</svg>
