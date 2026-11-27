@@ -84,6 +84,24 @@ impl ShyWorkspace {
         run_blocking(move || workspace.plain_texts(&texts)).await
     }
 
+    /// Adds your `emoji` to a message, or with `active` false, takes it away.
+    pub async fn react(&self, message: String, emoji: String, active: bool) -> Result<(), ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.react(&message, &emoji, active)).await
+    }
+
+    /// Replaces the text of a message of yours.
+    pub async fn edit_message(&self, message: String, text: String) -> Result<(), ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.edit_message(&message, &text)).await
+    }
+
+    /// Deletes a message of yours (or anyone's, for the admin).
+    pub async fn delete_message(&self, message: String) -> Result<(), ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.delete_message(&message)).await
+    }
+
     /// Moves your read position in `channel` up to `message`, on this device only.
     pub async fn mark_read(&self, channel: String, message: String) -> Result<(), ShyError> {
         let workspace = self.inner.clone();

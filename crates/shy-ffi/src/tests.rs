@@ -199,6 +199,39 @@ async fn a_message_can_be_shown_as_plain_text() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_message_can_be_reacted_to_edited_and_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+    let general = general_of(&acme).await;
+    let id = acme
+        .send_message(general.clone(), "hello".into(), None)
+        .await
+        .unwrap();
+    let only_message = || async { acme.messages(general.clone(), None, 50).await.unwrap() };
+
+    acme.react(id.clone(), "👍".into(), true).await.unwrap();
+    let reactions = &only_message().await[0].reactions;
+    assert_eq!(reactions.len(), 1);
+    assert_eq!(
+        (reactions[0].emoji.as_str(), reactions[0].count, reactions[0].mine),
+        ("👍", 1, true)
+    );
+
+    acme.react(id.clone(), "👍".into(), false).await.unwrap();
+    assert!(only_message().await[0].reactions.is_empty());
+
+    acme.edit_message(id.clone(), "hello, again".into())
+        .await
+        .unwrap();
+    let edited = &only_message().await[0];
+    assert_eq!((edited.text.as_str(), edited.is_edited), ("hello, again", true));
+
+    acme.delete_message(id).await.unwrap();
+    assert!(only_message().await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn reading_up_to_a_message_moves_the_channels_read_position_to_it() {
     let dir = tempfile::tempdir().unwrap();
     let app = app_in(&dir, &Arc::new(AppKeystore::default()));
