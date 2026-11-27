@@ -41,7 +41,7 @@ class LinkViewModelTest {
     }
 
     private val linking = ScriptedLinking()
-    private val link = LinkViewModel(linking)
+    private val link = mainThread.viewModel { LinkViewModel(linking) }
 
     private suspend fun stepWhere(predicate: (LinkStep) -> Boolean): LinkStep = withTimeout(5_000) { link.step.first(predicate) }
 

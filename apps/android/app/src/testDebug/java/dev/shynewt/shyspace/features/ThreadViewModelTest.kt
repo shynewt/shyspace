@@ -28,7 +28,7 @@ class ThreadViewModelTest {
         val general = acme.channels().single().id
         val root = acme.sendMessage(general, "lunch?", null)
         acme.sendMessage(general, "yes", root)
-        val thread = ThreadViewModel(core, acme.workspaceId(), general, root)
+        val thread = mainThread.viewModel { ThreadViewModel(core, acme.workspaceId(), general, root) }
         val loaded = withTimeout(5_000) { thread.state.first { !it.isLoading } }
         assertEquals("lunch?", loaded.root?.text)
         assertEquals(listOf("yes"), loaded.replies.map { it.text })
@@ -45,7 +45,7 @@ class ThreadViewModelTest {
         val acme = core.createAcme()
         val general = acme.channels().single().id
         val root = acme.sendMessage(general, "lunch?", null)
-        val thread = ThreadViewModel(core, acme.workspaceId(), general, root)
+        val thread = mainThread.viewModel { ThreadViewModel(core, acme.workspaceId(), general, root) }
         withTimeout(5_000) { thread.state.first { !it.isLoading } }
 
         acme.deleteMessage(root)
