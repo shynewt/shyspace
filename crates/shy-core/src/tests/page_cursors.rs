@@ -195,3 +195,32 @@ async fn turning_sharing_on_or_off_tells_the_others_at_once() {
     );
     assert!(admin.move_cursor(&page, None).await.is_err(), "no longer sharing");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_on_a_page_from_two_devices_shows_once_and_not_to_themselves() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let page = admin.create_page("Plans", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    admin.join_page(&page, true).await.unwrap();
+    bob.join_page(&page, true).await.unwrap();
+
+    for device in [&bob, &phone] {
+        admin.receive_page(&beacon(device, &page, true)).unwrap();
+        admin.receive_page(&cursor(device, &page, 3)).unwrap();
+    }
+    bob.receive_page(&beacon(&phone, &page, true)).unwrap();
+    bob.receive_page(&cursor(&phone, &page, 4)).unwrap();
+
+    let seen_by_admin = admin.page_presence(&page).unwrap();
+    assert_eq!(seen_by_admin.viewers, [bob.my_id()]);
+    assert!(
+        seen_by_admin
+            .cursors
+            .iter()
+            .all(|cursor| cursor.member == bob.my_id())
+    );
+    let seen_by_bob = bob.page_presence(&page).unwrap();
+    assert!(seen_by_bob.viewers.is_empty(), "{:?}", seen_by_bob.viewers);
+    assert!(seen_by_bob.cursors.is_empty());
+}

@@ -4535,6 +4535,152 @@ fn reactions_on(member: &crate::Workspace, channel: &str, message: &str) -> Vec<
         .collect()
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn two_devices_of_one_person_change_the_name_with_equal_clocks_and_all_devices_agree() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+    let general = channel_id(&admin, "general");
+    let renamed = |forger: &mut Forger, name: &str| {
+        forger.seal_at(
+            90_000,
+            Op::Profile {
+                name: name.into(),
+                is_bot: false,
+            },
+        )
+    };
+    let mut laptop = Forger::new(&bob);
+    let from_laptop = renamed(&mut laptop, "Laptop Bob");
+    let from_phone = renamed(&mut Forger::new(&phone), "Phone Bob");
+    // A message after the rename, in the laptop's own log.
+    let said = crate::ops::new_owned_id(&bob.me());
+    let message = laptop.seal_at(
+        90_001,
+        Op::Message {
+            id: said.clone(),
+            channel: general.clone(),
+            text: "hi".into(),
+            reply_to: None,
+        },
+    );
+
+    admin.receive(from_laptop.clone()).unwrap();
+    admin.receive(from_phone.clone()).unwrap();
+    carol.receive(from_phone).unwrap();
+    carol.receive(from_laptop).unwrap();
+    for member in [&admin, &carol] {
+        member.receive(message.clone()).unwrap();
+    }
+
+    let expected = match bob.me().as_bytes() > phone.me().as_bytes() {
+        true => "Laptop Bob",
+        false => "Phone Bob",
+    };
+    for member in [&admin, &carol] {
+        let bobs = member
+            .members()
+            .unwrap()
+            .into_iter()
+            .find(|shown| shown.id == bob.my_id())
+            .unwrap();
+        assert_eq!(bobs.name, expected);
+        let on_message = member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .find(|message| message.id == said)
+            .unwrap()
+            .author_name;
+        assert_eq!(
+            on_message, expected,
+            "a message names them as the member list does"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_device_turning_a_reaction_on_and_another_off_at_one_clock_ends_the_same_everywhere() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+    let toggle = |device: &Workspace, active: bool| {
+        Forger::new(device).seal_at(
+            95_000,
+            Op::Reaction {
+                message: message.clone(),
+                emoji: "👍".into(),
+                active,
+            },
+        )
+    };
+    let on_laptop = toggle(&bob, true);
+    let off_phone = toggle(&phone, false);
+
+    for _ in 0..2 {
+        admin.receive(on_laptop.clone()).unwrap();
+        admin.receive(off_phone.clone()).unwrap();
+        carol.receive(off_phone.clone()).unwrap();
+        carol.receive(on_laptop.clone()).unwrap();
+    }
+
+    let is_on = bob.me().as_bytes() > phone.me().as_bytes();
+    for member in [&admin, &carol] {
+        let shown = reactions_on(member, &general, &message);
+        assert_eq!(shown.contains(&"👍".to_owned()), is_on, "{shown:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_device_keeps_its_own_reaction_limit_whatever_the_order() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+    let cap = crate::ops::MAX_REACTIONS_PER_AUTHOR;
+    let faces: Vec<String> = ('\u{1F600}'..='\u{1F63F}').map(String::from).collect();
+    // One over the cap on each device, the phone's starting where the
+    // laptop's last one would have been.
+    let seal_all = |device: &Workspace, from: usize| {
+        let mut forger = Forger::new(device);
+        faces[from..=from + cap]
+            .iter()
+            .map(|face| {
+                forger.seal(Op::Reaction {
+                    message: message.clone(),
+                    emoji: face.clone(),
+                    active: true,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let laptops = seal_all(&bob, 0);
+    let phones = seal_all(&phone, cap);
+
+    for (laptop, phone) in laptops.iter().zip(&phones) {
+        admin.receive(laptop.clone()).unwrap();
+        admin.receive(phone.clone()).unwrap();
+    }
+    for envelope in phones.iter().chain(&laptops) {
+        carol.receive(envelope.clone()).unwrap();
+    }
+
+    // Which reactions show is the same everywhere; their order follows
+    // arrival on each device, as it always has.
+    let mut on_admin = reactions_on(&admin, &general, &message);
+    let mut on_carol = reactions_on(&carol, &general, &message);
+    on_admin.sort();
+    on_carol.sort();
+    assert_eq!(on_admin, on_carol);
+    assert_eq!(on_admin.len(), 2 * cap, "each device kept its own {cap}");
+}
+
 #[tokio::test]
 async fn a_member_cant_flood_a_message_with_reactions() {
     let (_root, _bucket, admin, bob) = admin_and_bob().await;

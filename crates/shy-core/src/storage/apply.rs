@@ -287,6 +287,8 @@ impl Store {
                 file.blob
                     .check()
                     .map_err(|error| rule_violation(format!("malformed file: {error:#}")))?;
+                // Files are attached as their message is sent, by the device
+                // that sends it, so the message is that device's own.
                 if file
                     .message
                     .as_deref()

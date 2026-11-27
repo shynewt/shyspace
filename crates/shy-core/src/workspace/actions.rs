@@ -361,11 +361,39 @@ impl Workspace {
             clean_emoji(emoji) == emoji && is_emoji_only(emoji),
             "a reaction is one emoji (up to {MAX_EMOJI_CHARS} characters)"
         );
-        self.write(Op::Reaction {
+        let reaction = Op::Reaction {
             message: message.to_owned(),
             emoji: emoji.to_owned(),
             active,
-        })
+        };
+        // The limit counts this device's own log, where a reaction another of
+        // my devices took back is still on. At the limit, take back just the
+        // one the new reaction needs, the one taken back longest ago: a
+        // fresh take-back could hide a re-add this device hasn't heard of.
+        let freed = match active {
+            true => {
+                let store = &self.state().store;
+                match store.own_reactions_on(message, &self.me(), emoji)?
+                    >= crate::ops::MAX_REACTIONS_PER_AUTHOR
+                {
+                    true => store.oldest_own_reaction_shown_off(message, &self.me())?,
+                    false => None,
+                }
+            }
+            false => None,
+        };
+        let Some(freed) = freed else {
+            return self.write(reaction);
+        };
+        let take_back = Op::Reaction {
+            message: message.to_owned(),
+            emoji: freed,
+            active: false,
+        };
+        self.write_together(vec![
+            self.content_maker(take_back)?,
+            self.content_maker(reaction)?,
+        ])
     }
 
     pub fn create_page(&self, title: &str, parent: Option<EntityId>) -> Result<EntityId> {

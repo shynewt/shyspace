@@ -1685,3 +1685,386 @@ async fn paging_by_twos_keeps_two_devices_messages_at_one_clock_in_order() {
     let expected: Vec<_> = all.into_iter().map(|message| message.id).collect();
     assert_eq!(paged, expected);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_shows_once_in_the_member_list_with_their_newest_name() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    phone
+        .set_profile(crate::Profile {
+            name: "Bobby",
+            is_bot: false,
+        })
+        .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    for member in [&admin, &bob, &phone] {
+        let members = member.members().unwrap();
+        let bobs: Vec<_> = members.iter().filter(|shown| shown.id == bob.my_id()).collect();
+        assert_eq!(bobs.len(), 1);
+        assert_eq!(bobs[0].name, "Bobby");
+        assert!(members.iter().all(|shown| shown.id != phone.my_device_id()));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reaction_made_on_one_device_can_be_taken_back_on_another() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "lunch?", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let thumbs = |member: &Workspace| {
+        member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .find(|shown| shown.id == message)
+            .unwrap()
+            .reactions
+            .into_iter()
+            .find(|reaction| reaction.emoji == "👍")
+    };
+
+    bob.react(&message, "👍", true).unwrap();
+    phone.react(&message, "👍", true).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    for member in [&admin, &bob, &phone] {
+        assert_eq!(thumbs(member).unwrap().count, 1, "one person, one reaction");
+    }
+    assert!(thumbs(&phone).unwrap().mine);
+
+    phone.react(&message, "👍", false).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    for member in [&admin, &bob, &phone] {
+        assert!(thumbs(member).is_none());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn details_a_picture_and_a_name_set_on_my_phone_show_for_me() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    let picture = [b"\x89PNG\r\n\x1a\n".as_slice(), b"phone"].concat();
+
+    phone
+        .set_profile(crate::Profile {
+            name: "Phone Bob",
+            is_bot: false,
+        })
+        .unwrap();
+    phone
+        .set_profile_details(&crate::profile::ProfileDetails {
+            title: "Engineer".into(),
+            ..Default::default()
+        })
+        .unwrap();
+    phone.set_profile_picture(Some(picture.clone())).await.unwrap();
+    phone.send_message(&general, "from the phone", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    let shown = admin
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| member.id == bob.my_id())
+        .unwrap();
+    assert_eq!(shown.details.title, "Engineer");
+    assert!(shown.picture.is_some());
+    assert_eq!(admin.profile_picture(&bob.me()).await.unwrap(), Some(picture));
+    let message = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.text == "from the phone")
+        .unwrap();
+    assert_eq!(message.author_name, "Phone Bob");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_stays_active_while_any_device_remains_even_after_losing_the_first() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    let is_active = |member: &Workspace| {
+        member
+            .members()
+            .unwrap()
+            .into_iter()
+            .find(|shown| shown.id == bob.my_id())
+            .unwrap()
+            .active
+    };
+
+    admin.remove_devices(&[bob.my_device_id()]).await.unwrap();
+    sync_all(&[&admin, &phone]).await;
+    phone.send_message(&general, "still here", None).unwrap();
+    sync_all(&[&admin, &phone]).await;
+
+    assert!(is_active(&admin));
+    let message = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.text == "still here")
+        .unwrap();
+    assert_eq!(message.author, bob.my_id());
+    assert_eq!(message.author_name, "Bob");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reaction_another_of_my_devices_took_back_frees_room_on_this_one() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let faces: Vec<String> = ('\u{1F600}'..='\u{1F63F}').map(String::from).collect();
+    let cap = crate::ops::MAX_REACTIONS_PER_AUTHOR;
+
+    for face in &faces[..cap] {
+        phone.react(&message, face, true).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+    for face in &faces[..cap] {
+        bob.react(&message, face, false).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    phone.react(&message, &faces[cap], true).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    for member in [&admin, &bob, &phone] {
+        let shown: Vec<String> = member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .find(|shown| shown.id == message)
+            .unwrap()
+            .reactions
+            .into_iter()
+            .map(|reaction| reaction.emoji)
+            .collect();
+        assert_eq!(shown, [faces[cap].clone()]);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn after_removing_a_device_the_remaining_one_overrides_what_it_set() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let picture = |text: &[u8]| [b"\x89PNG\r\n\x1a\n".as_slice(), text].concat();
+    let status = |text: &'static str| crate::views::StatusUpdate {
+        emoji: "🎧",
+        text,
+        until_ms: None,
+        alerts: crate::views::NotifyLevel::Nothing,
+    };
+    // A stolen phone sets everything a person shows, then is removed.
+    phone
+        .set_profile(crate::Profile {
+            name: "Thief",
+            is_bot: false,
+        })
+        .unwrap();
+    phone
+        .set_profile_details(&crate::profile::ProfileDetails {
+            title: "Thief".into(),
+            ..Default::default()
+        })
+        .unwrap();
+    phone.set_profile_picture(Some(picture(b"thief"))).await.unwrap();
+    phone.set_status(status("Thief")).unwrap();
+    phone.react(&message, "👎", true).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    admin.remove_devices(&[phone.my_device_id()]).await.unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    bob.set_profile(crate::Profile {
+        name: "Bob",
+        is_bot: false,
+    })
+    .unwrap();
+    bob.set_profile_details(&crate::profile::ProfileDetails {
+        title: "Engineer".into(),
+        ..Default::default()
+    })
+    .unwrap();
+    bob.set_profile_picture(Some(picture(b"bob"))).await.unwrap();
+    bob.set_status(status("Back")).unwrap();
+    bob.react(&message, "👎", false).unwrap();
+    sync_all(&[&admin, &bob]).await;
+
+    let shown = admin
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| member.id == bob.my_id())
+        .unwrap();
+    assert_eq!(shown.name, "Bob");
+    assert_eq!(shown.details.title, "Engineer");
+    assert_eq!(shown.status.unwrap().text, "Back");
+    assert_eq!(
+        admin.profile_picture(&bob.me()).await.unwrap(),
+        Some(picture(b"bob"))
+    );
+    let reactions = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|shown| shown.id == message)
+        .unwrap()
+        .reactions;
+    assert!(reactions.is_empty(), "{reactions:?}");
+}
+
+fn reactions_shown(member: &Workspace, channel: &str, message: &str) -> Vec<String> {
+    member
+        .messages(channel, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|shown| shown.id == message)
+        .unwrap()
+        .reactions
+        .into_iter()
+        .map(|reaction| reaction.emoji)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn freeing_room_for_a_reaction_can_hide_only_the_one_emoji_it_frees() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let faces: Vec<String> = ('\u{1F600}'..='\u{1F63F}').map(String::from).collect();
+    let cap = crate::ops::MAX_REACTIONS_PER_AUTHOR;
+    for face in &faces[..cap] {
+        phone.react(&message, face, true).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+    for face in &faces[..cap] {
+        bob.react(&message, face, false).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    // The laptop adds three again, which the phone hasn't heard of yet.
+    for face in &faces[..3] {
+        bob.react(&message, face, true).unwrap();
+    }
+    phone.react(&message, &faces[cap], true).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    // The laptop's re-add of faces[0] and the phone's take-back of it land
+    // on one clock, so the device keys decide; nothing else is touched.
+    let is_readd_kept = bob.me().as_bytes() > phone.me().as_bytes();
+    let mut expected = vec![faces[1].clone(), faces[2].clone(), faces[cap].clone()];
+    if is_readd_kept {
+        expected.push(faces[0].clone());
+    }
+    expected.sort();
+    for member in [&admin, &bob, &phone] {
+        let mut shown = reactions_shown(member, &general, &message);
+        shown.sort();
+        assert_eq!(shown, expected);
+        assert_eq!(shown.contains(&faces[0]), is_readd_kept);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nothing_is_freed_below_the_reaction_limit() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let faces: Vec<String> = ('\u{1F600}'..='\u{1F63F}').map(String::from).collect();
+    for face in &faces[..2] {
+        phone.react(&message, face, true).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+    for face in &faces[..2] {
+        bob.react(&message, face, false).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    phone.react(&message, &faces[2], true).unwrap();
+
+    let oldest = phone
+        .state()
+        .store
+        .oldest_own_reaction_shown_off(&message, &phone.me())
+        .unwrap();
+    assert_eq!(oldest, Some(faces[0].clone()), "its stale rows stay as they were");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_reaction_taken_back_longest_ago_is_the_one_freed() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let faces: Vec<String> = ('\u{1F600}'..='\u{1F63F}').map(String::from).collect();
+    let cap = crate::ops::MAX_REACTIONS_PER_AUTHOR;
+    for face in &faces[..cap] {
+        phone.react(&message, face, true).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+    // Taken back last first, so the last one added is the oldest take-back.
+    for face in faces[..cap].iter().rev() {
+        bob.react(&message, face, false).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+    let oldest = |device: &Workspace| {
+        device
+            .state()
+            .store
+            .oldest_own_reaction_shown_off(&message, &device.me())
+            .unwrap()
+    };
+    assert_eq!(oldest(&phone), Some(faces[cap - 1].clone()));
+
+    phone.react(&message, &faces[cap], true).unwrap();
+
+    assert_eq!(
+        oldest(&phone),
+        Some(faces[cap - 2].clone()),
+        "only that one was freed"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn my_phone_taking_back_my_laptops_reactions_frees_room_on_the_laptop() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "news", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let faces: Vec<String> = ('\u{1F600}'..='\u{1F63F}').map(String::from).collect();
+    let cap = crate::ops::MAX_REACTIONS_PER_AUTHOR;
+
+    for face in &faces[..cap] {
+        bob.react(&message, face, true).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+    for face in &faces[..cap] {
+        phone.react(&message, face, false).unwrap();
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+    bob.react(&message, &faces[cap], true).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    for member in [&admin, &bob, &phone] {
+        assert_eq!(reactions_shown(member, &general, &message), [faces[cap].clone()]);
+    }
+}

@@ -160,7 +160,7 @@ impl Workspace {
     }
 
     fn status_allows_alerts(&self, state: &State, now: i64) -> Result<bool> {
-        let status = state.store.member_status(self.me().as_bytes(), now)?;
+        let status = state.store.member_status(self.my_person().as_bytes(), now)?;
         Ok(status.is_none_or(|status| status.alerts != NotifyLevel::Nothing))
     }
 

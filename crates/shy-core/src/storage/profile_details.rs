@@ -40,15 +40,20 @@ impl Store {
         Ok(changed > 0)
     }
 
-    /// `member`'s details, empty if they never shared any.
+    /// A person's details, the newest any of their devices shared, empty if
+    /// none did. `member` may be any of their devices.
     pub fn profile_details(&self, member: &[u8]) -> Result<ProfileDetails> {
+        let person = self.person_of(&super::to_public_key(member.to_vec())?)?;
+        let person = person.as_bytes();
         let details = self
             .db
             .query_row(
                 "SELECT title, pronouns, bio, email, phone, website, location, time_zone,
                         work_days, work_start, work_end
-                 FROM profile_details WHERE member = ?",
-                [member],
+                 FROM profile_details
+                 WHERE member = ?1 OR member IN (SELECT device FROM devices WHERE person = ?1)
+                 ORDER BY lamport DESC, member DESC LIMIT 1",
+                [person],
                 |row| {
                     let hours: (Option<u8>, Option<u16>, Option<u16>) =
                         (row.get(8)?, row.get(9)?, row.get(10)?);

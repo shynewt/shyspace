@@ -600,7 +600,9 @@ impl Workspace {
         }
         let member_name = {
             let state = self.state();
-            let my_status = state.store.member_status(self.me().as_bytes(), now_ms()?)?;
+            let my_status = state
+                .store
+                .member_status(self.my_person().as_bytes(), now_ms()?)?;
             let status_level = my_status.map_or(NotifyLevel::All, |status| status.alerts);
             if state.store.notify_level(channel)?.stricter(status_level) == NotifyLevel::Nothing {
                 return Ok(());

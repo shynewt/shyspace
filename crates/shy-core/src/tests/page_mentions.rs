@@ -403,3 +403,28 @@ async fn a_page_mention_from_my_other_device_makes_no_entry_and_no_alert() {
     assert!(inbox_previews(&bob).is_empty());
     assert!(page_alerts(&mut changes).is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_status_set_on_my_laptop_quiets_page_alerts_on_my_phone() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let page = shared_page(&admin, &bob, "# Plan").await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    bob.set_status(StatusUpdate {
+        emoji: "🎧",
+        text: "Focus",
+        until_ms: None,
+        alerts: NotifyLevel::Nothing,
+    })
+    .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let mut changes = phone.subscribe();
+
+    admin
+        .edit_page(&page, Edit::Append(&format!("Ask {}", mention_of(&bob))))
+        .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert!(page_alerts(&mut changes).is_empty());
+    assert_eq!(inbox_previews(&phone).len(), 1, "the entry is still kept");
+}

@@ -158,36 +158,50 @@ impl Workspace {
         self.send_cursor(page, selection).await
     }
 
-    /// Who else is on `page` and their cursors; nobody unless it's the page we joined.
+    /// Who else is on `page` and their cursors; nobody unless it's the page
+    /// we joined. Others are named by person, once each; my own other
+    /// devices aren't "someone else".
     pub fn page_presence(&self, page: &str) -> Result<PagePresence> {
         let members = self.current_members()?;
         let now = now_ms()?;
-        let live = self.page_live();
-        if live.open.as_ref().is_none_or(|open| open.page != page) {
-            return Ok(PagePresence::default());
+        let (viewers, heard) = {
+            let live = self.page_live();
+            if live.open.as_ref().is_none_or(|open| open.page != page) {
+                return Ok(PagePresence::default());
+            }
+            // Read back through current members: someone removed since is gone at once.
+            let viewers: Vec<PublicKey> = live
+                .viewers
+                .viewers(page, now)
+                .into_iter()
+                .filter(|viewer| members.contains(viewer) && *viewer != self.me())
+                .collect();
+            let heard = live.cursors.on_page(page, &viewers);
+            (viewers, heard)
+        };
+        let state = self.state();
+        let me = self.my_person();
+        let mut people: Vec<String> = Vec::new();
+        for viewer in &viewers {
+            let person = state.store.person_of(viewer)?;
+            let id = hex::encode(person.as_bytes());
+            if person != me && !people.contains(&id) {
+                people.push(id);
+            }
         }
-        // Read back through current members: someone removed since is gone at once.
-        let viewers: Vec<PublicKey> = live
-            .viewers
-            .viewers(page, now)
-            .into_iter()
-            .filter(|viewer| members.contains(viewer) && *viewer != self.me())
-            .collect();
-        let cursors = live
-            .cursors
-            .on_page(page, &viewers)
-            .into_iter()
-            .map(|(member, heard)| PageCursor {
-                member: hex::encode(member.as_bytes()),
-                selection: heard.selection,
-                idle_ms: now - heard.received_ms,
-            })
-            .collect();
+        let mut cursors = Vec::new();
+        for (device, heard) in heard {
+            let person = state.store.person_of(&device)?;
+            if person != me {
+                cursors.push(PageCursor {
+                    member: hex::encode(person.as_bytes()),
+                    selection: heard.selection,
+                    idle_ms: now - heard.received_ms,
+                });
+            }
+        }
         Ok(PagePresence {
-            viewers: viewers
-                .iter()
-                .map(|viewer| hex::encode(viewer.as_bytes()))
-                .collect(),
+            viewers: people,
             cursors,
         })
     }

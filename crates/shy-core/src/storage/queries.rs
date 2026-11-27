@@ -61,9 +61,15 @@ pub(super) const IS_SHOWN_IN_CHANNEL: &str = "(m.reply_to IS NULL OR NOT EXISTS 
     SELECT 1 FROM messages parent WHERE parent.id = m.reply_to AND parent.channel = m.channel))";
 pub(super) const MESSAGE_JOINS: &str = concat!(
     "FROM messages m
-     LEFT JOIN profiles p ON p.member = ",
+     LEFT JOIN profiles p ON p.rowid = (
+         SELECT rowid FROM profiles
+         WHERE member = ",
     person_of!("m.author"),
     "
+            OR member IN (SELECT device FROM devices WHERE person = ",
+    person_of!("m.author"),
+    ")
+         ORDER BY lamport DESC, member DESC LIMIT 1)
      LEFT JOIN message_edits e ON e.message = m.id"
 );
 
@@ -187,11 +193,21 @@ impl Store {
     }
 
     fn reactions(&self, message: &str, me: &PublicKey) -> Result<Vec<Reaction>> {
+        // Per emoji and person, the newest toggle among their devices decides
+        // (by clock, then device key), so any of them can take a reaction
+        // back and a person counts once.
         let mut statement = self.db.prepare(concat!(
-            "SELECT emoji, COUNT(*), MAX(",
-            person_of!("reactions.author"),
-            " = ?2), MIN(rowid) AS first FROM reactions
-                 WHERE message = ?1 AND active = 1 GROUP BY emoji ORDER BY first"
+            "WITH toggles AS (
+                 SELECT emoji, active, rowid AS position, ",
+            person_of!("r.author"),
+            " AS person, lamport, author
+                 FROM reactions r WHERE message = ?1),
+             latest AS (
+                 SELECT emoji, active, position, person,
+                        ROW_NUMBER() OVER (PARTITION BY emoji, person ORDER BY lamport DESC, author DESC) AS rank
+                 FROM toggles)
+             SELECT emoji, COUNT(*), MAX(person = ?2), MIN(position) AS first FROM latest
+             WHERE rank = 1 AND active = 1 GROUP BY emoji ORDER BY first"
         ))?;
         let rows = statement.query_map(params![message, me.as_bytes()], |row| {
             Ok(Reaction {
@@ -201,6 +217,47 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// How many of `device`'s own reactions to `message` are on in its log,
+    /// leaving out `emoji`: what its limit counts.
+    pub fn own_reactions_on(&self, message: &str, device: &PublicKey, emoji: &str) -> Result<usize> {
+        let count: i64 = self.db.query_row(
+            "SELECT COUNT(*) FROM reactions WHERE message = ?1 AND author = ?2 AND emoji != ?3 AND active = 1",
+            params![message, device.as_bytes(), emoji],
+            |row| row.get(0),
+        )?;
+        Ok(usize::try_from(count)?)
+    }
+
+    /// Of `device`'s reactions to `message` that are on in its own log but
+    /// that its person shows off (another of their devices took them back),
+    /// the one taken back longest ago: the least likely to have been added
+    /// again somewhere this device hasn't heard of yet.
+    pub fn oldest_own_reaction_shown_off(&self, message: &str, device: &PublicKey) -> Result<Option<String>> {
+        let person = self.person_of(device)?;
+        let mut own = self
+            .db
+            .prepare("SELECT emoji FROM reactions WHERE message = ?1 AND author = ?2 AND active = 1")?;
+        let emojis = own
+            .query_map(params![message, device.as_bytes()], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut oldest: Option<(u64, String)> = None;
+        for emoji in emojis {
+            let (is_on, lamport): (bool, u64) = self.db.query_row(
+                "SELECT active, lamport FROM reactions
+                 WHERE message = ?1 AND emoji = ?2
+                   AND (author = ?3 OR author IN (SELECT device FROM devices WHERE person = ?3))
+                 ORDER BY lamport DESC, author DESC LIMIT 1",
+                params![message, emoji, person.as_bytes()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let candidate = (lamport, emoji);
+            if !is_on && oldest.as_ref().is_none_or(|kept| candidate < *kept) {
+                oldest = Some(candidate);
+            }
+        }
+        Ok(oldest.map(|(_, emoji)| emoji))
     }
 
     pub fn pages(&self) -> Result<Vec<Page>> {
@@ -225,16 +282,30 @@ impl Store {
 
     pub fn members(&self, admin: &PublicKey) -> Result<Vec<Member>> {
         let mut statement = self.db.prepare(
-            // Until a newcomer's own profile arrives, the admin knows them by the
-            // name in their approved join request.
-            "SELECT m.member,
+            // One row per person, active while any of their devices is, with
+            // the newest profile among their devices. Until a newcomer's own
+            // profile arrives, the admin knows them by the name in their
+            // approved join request.
+            concat!(
+                "WITH people AS (
+                 SELECT ",
+                person_of!("m.member"),
+                " AS person,
+                        MAX(m.active) AS active
+                 FROM members m GROUP BY 1)
+             SELECT people.person,
                     COALESCE(p.name, i.joiner_name, ''),
                     COALESCE(p.is_bot, i.joiner_is_bot, 0),
-                    m.active
-             FROM members m
-             LEFT JOIN profiles p ON p.member = m.member
-             LEFT JOIN invites i ON i.joiner = m.member AND i.state = 'accepted'
-             ORDER BY m.active DESC, COALESCE(p.name, i.joiner_name)",
+                    people.active
+             FROM people
+             LEFT JOIN profiles p ON p.rowid = (
+                 SELECT rowid FROM profiles
+                 WHERE member = people.person
+                    OR member IN (SELECT device FROM devices WHERE person = people.person)
+                 ORDER BY lamport DESC, member DESC LIMIT 1)
+             LEFT JOIN invites i ON i.joiner = people.person AND i.state = 'accepted'
+             ORDER BY people.active DESC, COALESCE(p.name, i.joiner_name)"
+            ),
         )?;
         let rows = statement.query_map([], |row| {
             let id: Vec<u8> = row.get(0)?;
@@ -379,13 +450,18 @@ impl Store {
         })
     }
 
-    /// A member's status, if set and not expired at `now_ms`.
+    /// A person's status, the newest any of their devices set, if set and
+    /// not expired at `now_ms`. `member` may be any of their devices.
     pub fn member_status(&self, member: &[u8], now_ms: i64) -> Result<Option<crate::views::MemberStatus>> {
+        let person = self.person_of(&super::to_public_key(member.to_vec())?)?;
+        let person = person.as_bytes();
         let row: Option<(String, String, Option<i64>, u8)> = self
             .db
             .query_row(
-                "SELECT emoji, text, until_ms, alerts FROM member_status WHERE member = ?",
-                [member],
+                "SELECT emoji, text, until_ms, alerts FROM member_status
+                 WHERE member = ?1 OR member IN (SELECT device FROM devices WHERE person = ?1)
+                 ORDER BY lamport DESC, member DESC LIMIT 1",
+                [person],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;

@@ -37,7 +37,9 @@ impl Workspace {
         // Only what was stored counts, and the scans below stay bounded.
         let text = cut_to(text, MAX_MESSAGE_CHARS);
         // Your status can quiet things further, never louder than the channel.
-        let my_status = state.store.member_status(self.me().as_bytes(), now_ms()?)?;
+        let my_status = state
+            .store
+            .member_status(self.my_person().as_bytes(), now_ms()?)?;
         let status_level = my_status.map_or(NotifyLevel::All, |status| status.alerts);
         let my_id = self.my_id();
         let is_wanted = match state.store.notify_level(channel)?.stricter(status_level) {

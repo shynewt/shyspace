@@ -222,3 +222,42 @@ async fn an_alert_from_a_linked_device_names_its_person() {
     }
     assert_eq!(named, [(bob.my_id(), "Bob".to_string())]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_status_set_on_one_device_quiets_alerts_on_the_others() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    phone.set_status(status_alerting(NotifyLevel::Nothing)).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let mut changes = bob.subscribe();
+
+    admin.send_message(&general, "anyone?", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert!(alerted_texts(&mut changes).is_empty());
+    let shown = admin
+        .members()
+        .unwrap()
+        .into_iter()
+        .find(|member| member.id == bob.my_id())
+        .unwrap();
+    assert!(shown.status.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_status_set_on_my_laptop_quiets_alerts_on_my_phone() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    bob.set_status(status_alerting(NotifyLevel::Nothing)).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let mut changes = phone.subscribe();
+
+    admin.send_message(&general, "anyone?", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert!(alerted_texts(&mut changes).is_empty());
+}

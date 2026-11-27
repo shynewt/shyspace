@@ -58,6 +58,20 @@ impl Workspace {
         Ok(())
     }
 
+    /// Whether you may edit message `id`: in a private channel, only from the
+    /// device that wrote it, as its rules still check; elsewhere, from any
+    /// device of the person who wrote it.
+    pub(crate) fn may_edit(&self, store: &Store, epoch: u64, id: &str) -> Result<bool> {
+        if private_channel_of(id).is_some() {
+            return Ok(is_owned_by(id, &self.me()));
+        }
+        let edit = Op::MessageEdit {
+            id: id.to_owned(),
+            text: String::new(),
+        };
+        self.may(store, epoch, &edit)
+    }
+
     /// Whether you may delete `id`: in a private channel, your own messages,
     /// or anything if you own it; elsewhere, what you own or (as admin) all.
     pub(crate) fn may_delete(&self, store: &Store, epoch: u64, id: &str) -> Result<bool> {

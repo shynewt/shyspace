@@ -480,10 +480,12 @@ impl Workspace {
         Ok(())
     }
 
-    /// A member's picture, if they shared one.
-    pub async fn profile_picture(&self, member: &PublicKey) -> Result<Option<Vec<u8>>> {
-        let picture = self.state().store.profile_picture(member.as_bytes())?;
-        self.picture_bytes(member, picture).await
+    /// A person's picture: the newest any of their devices set.
+    pub async fn profile_picture(&self, person: &PublicKey) -> Result<Option<Vec<u8>>> {
+        let Some((device, picture)) = self.state().store.person_picture(person)? else {
+            return Ok(None);
+        };
+        self.picture_bytes(&device, Some(picture)).await
     }
 
     /// The bytes of `owner`'s `picture`, from the cache or the bucket.

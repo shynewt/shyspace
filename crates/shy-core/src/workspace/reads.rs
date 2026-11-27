@@ -201,14 +201,7 @@ impl Workspace {
             message.mentions_me =
                 message.author != my_id && mentions(&message.text, &self.inner.config.workspace_id, &my_id);
             message.saved = state.store.saved_mark(&message.id)?;
-            message.can_edit = self.may(
-                &state.store,
-                epoch,
-                &Op::MessageEdit {
-                    id: message.id.clone(),
-                    text: String::new(),
-                },
-            )?;
+            message.can_edit = self.may_edit(&state.store, epoch, &message.id)?;
             message.can_delete = self.may_delete(&state.store, epoch, &message.id)?;
             message.files = state
                 .store
@@ -286,8 +279,8 @@ impl Workspace {
             member.picture = self
                 .state()
                 .store
-                .profile_picture(key.as_bytes())?
-                .map(|picture| picture.id);
+                .person_picture(&key)?
+                .map(|(_, picture)| picture.id);
         }
         Ok(members)
     }

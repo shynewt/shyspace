@@ -6,7 +6,9 @@
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, Row, named_params, params};
 
-use super::Store;
+use iroh::PublicKey;
+
+use super::{Store, to_public_key};
 use crate::{
     files::{SharedFile, blob::BlobRef, clean_file_name, clean_media_type},
     ops::VerifiedOp,
@@ -262,6 +264,29 @@ impl Store {
         Ok(self
             .kept_picture(PictureSlot::Member(member))?
             .and_then(|(picture, _)| picture))
+    }
+
+    /// A person's picture, the newest any of their devices set, with the
+    /// device whose blob it is. `member` may be any of their devices.
+    pub fn person_picture(&self, member: &PublicKey) -> Result<Option<(PublicKey, BlobRef)>> {
+        let person = self.person_of(member)?;
+        let newest: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT member FROM profile_pictures
+                 WHERE member = ?1 OR member IN (SELECT device FROM devices WHERE person = ?1)
+                 ORDER BY lamport DESC, member DESC LIMIT 1",
+                [person.as_bytes()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(device) = newest else {
+            return Ok(None);
+        };
+        let Some(picture) = self.profile_picture(&device)? else {
+            return Ok(None);
+        };
+        Ok(Some((to_public_key(device)?, picture)))
     }
 
     pub fn workspace_icon(&self) -> Result<Option<BlobRef>> {
