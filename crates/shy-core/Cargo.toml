@@ -47,6 +47,11 @@ tracing = "0.1.44"
 yrs = "=0.28.1"
 zeroize = "1"
 
+# keyring's Apple store builds for iOS only with its "protected" store. The iOS app keeps device
+# keys itself (HostKeyStore), but the store still has to compile there.
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["protected"] }
+
 [dev-dependencies]
 async-trait = "0.1"
 rusqlite = { version = "0.37", features = ["hooks"] }

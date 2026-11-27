@@ -9299,6 +9299,7 @@ version = "0.1.4"
 dependencies = [
  "aead-stream",
  "anyhow",
+ "apple-native-keyring-store",
  "async-trait",
  "base64 0.22.1",
  "blake3",
