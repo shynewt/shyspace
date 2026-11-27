@@ -168,3 +168,6 @@ Tauri's autostart plugin falls short on every system: on macOS it offers only a 
 
 ## On macOS the app draws its title bar (2026-11)
 macOS's own title bar paints in the system's grey and follows the Mac's light or dark setting, so above a dark or tinted theme it was a band of the wrong colour. The window uses Tauri's overlay title bar instead, and the app draws a plain strip in its own colours under the window buttons (`shell/TitleBar.tsx`). It's a full-width strip rather than buttons tucked into the sidebar, so it looks the same with one workspace or several and with the sidebar shown or hidden. It needs `core:window:allow-start-dragging` and `allow-internal-toggle-maximize`; a double-click always zooms, even where someone set macOS to minimize on double-click.
+
+## Scanning codes with zxing-cpp and CameraX's Compose viewfinder (2026-11)
+Phones read a link code's QR with zxing-cpp, a maintained C++ port of ZXing that runs on the device, and CameraX for the camera. Google's ML Kit scanner was the other choice; it needs Google Play services, which GrapheneOS phones may not have. CameraX's `camera-compose` shows the preview instead of `camera-view`, which would also bring appcompat, fragments and video recording that a scanner doesn't use.
