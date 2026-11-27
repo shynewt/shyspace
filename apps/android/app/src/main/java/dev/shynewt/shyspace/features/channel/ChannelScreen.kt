@@ -1,5 +1,8 @@
 package dev.shynewt.shyspace.features.channel
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -91,6 +94,7 @@ fun ChannelScreen(
     onEdit: suspend (message: String, text: String) -> Boolean,
     onReact: (message: String, emoji: String, active: Boolean) -> Unit,
     onDelete: (message: String) -> Unit,
+    onLoadOlder: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
@@ -146,6 +150,8 @@ fun ChannelScreen(
                         textOf = state::textOf,
                         onLongPress = { actionsFor = it },
                         onReact = onReact,
+                        isLoadingOlder = state.isLoadingOlder,
+                        onNearOldest = { if (state.hasOlder) onLoadOlder() },
                     )
                 }
             }
@@ -204,9 +210,19 @@ private fun MessageList(
     textOf: (Message) -> String,
     onLongPress: (Message) -> Unit,
     onReact: (message: String, emoji: String, active: Boolean) -> Unit,
+    isLoadingOlder: Boolean,
+    onNearOldest: () -> Unit,
 ) {
     val clock = rememberClock()
     val rows = remember(newestFirst, clock.zone) { channelRows(newestFirst, clock.zone) }
+    // A few rows from the oldest loaded, the next page starts loading, before the end is reached.
+    val currentOnNearOldest by rememberUpdatedState(onNearOldest)
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            info.totalItemsCount > 0 && (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - OLDER_AHEAD
+        }.collect { isNearOldest -> if (isNearOldest) currentOnNearOldest() }
+    }
     // Reversed, so the newest sits at the bottom and new ones keep the view there.
     LazyColumn(
         state = listState,
@@ -220,8 +236,22 @@ private fun MessageList(
                 is ChannelRow.Item -> MessageItem(row.message, textOf(row.message), row.isContinuation, clock, onLongPress, onReact)
             }
         }
+        if (isLoadingOlder) {
+            item(key = "loading-older") {
+                Box(modifier = Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                    val loadingOlder = stringResource(R.string.loading_older)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp).semantics { contentDescription = loadingOlder },
+                        strokeWidth = 2.dp,
+                    )
+                }
+            }
+        }
     }
 }
+
+/** How many rows before the oldest loaded one the next page starts loading. */
+private const val OLDER_AHEAD = 10
 
 @Composable
 private fun dayLabel(date: LocalDate, today: LocalDate): String {

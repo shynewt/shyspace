@@ -34,6 +34,7 @@ import androidx.compose.ui.test.performTouchInput
 import uniffi.shy_core.Message
 import uniffi.shy_core.Reaction
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -60,6 +61,7 @@ class ChannelScreenTest {
                     onEdit = { _, _ -> true },
                     onReact = { _, _, _ -> },
                     onDelete = {},
+                    onLoadOlder = {},
                 )
             }
         }
@@ -80,7 +82,7 @@ class ChannelScreenTest {
     fun anEmptyChannelSaysSo() {
         compose.setContent {
             ShyTheme(isDark = false) {
-                ChannelScreen(title = "#general", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {})
+                ChannelScreen(title = "#general", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {})
             }
         }
         compose.onNodeWithText("No messages yet. Say hello.").assertExists()
@@ -100,6 +102,7 @@ class ChannelScreenTest {
                     onEdit = { _, _ -> true },
                     onReact = { _, _, _ -> },
                     onDelete = {},
+                    onLoadOlder = {},
                 )
             }
         }
@@ -123,6 +126,7 @@ class ChannelScreenTest {
                     onEdit = { _, _ -> true },
                     onReact = { _, _, _ -> },
                     onDelete = {},
+                    onLoadOlder = {},
                 )
             }
         }
@@ -143,6 +147,7 @@ class ChannelScreenTest {
                     onEdit = { _, _ -> true },
                     onReact = { _, _, _ -> },
                     onDelete = {},
+                    onLoadOlder = {},
                 )
             }
         }
@@ -187,7 +192,7 @@ class ChannelScreenTest {
         var state by mutableStateOf(ChannelState(messages = older, isLoading = false))
         compose.setContent {
             ShyTheme(isDark = false) {
-                ChannelScreen(title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = { seen += it }, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {})
+                ChannelScreen(title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = { seen += it }, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {})
             }
         }
         compose.waitForIdle()
@@ -209,7 +214,7 @@ class ChannelScreenTest {
         var state by mutableStateOf(ChannelState(messages = older, isLoading = false))
         compose.setContent {
             ShyTheme(isDark = false) {
-                ChannelScreen(title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {})
+                ChannelScreen(title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {})
             }
         }
         compose.waitForIdle()
@@ -244,6 +249,7 @@ class ChannelScreenTest {
                     onEdit = { message, text -> asked += "edit $message $text"; isEditSaved },
                     onReact = { message, emoji, active -> asked += "react $message $emoji $active" },
                     onDelete = { message -> asked += "delete $message" },
+                    onLoadOlder = { asked += "older" },
                 )
             }
         }
@@ -452,5 +458,33 @@ class ChannelScreenTest {
         for (action in listOf("Copy text", "Edit", "Delete")) {
             compose.onNodeWithText(action).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
         }
+    }
+
+    @Test
+    fun reachingTheOldestLoadedMessageAsksForOlderOnesOnlyWhileThereAreMore() {
+        val loaded = (1..60).map { sampleMessage("$it", "Ada", "message $it") }.reversed()
+        var requests = 0
+        var state by mutableStateOf(ChannelState(messages = loaded, isLoading = false, hasOlder = true))
+        compose.setContent {
+            ShyTheme(isDark = false) {
+                ChannelScreen(
+                    title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = {},
+                    onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = { requests++ },
+                )
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(0, requests)
+
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(loaded.size)
+        compose.waitForIdle()
+        assertTrue(requests > 0)
+
+        val asked = requests
+        state = state.copy(hasOlder = false)
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(loaded.size)
+        compose.waitForIdle()
+        assertEquals(asked, requests)
     }
 }

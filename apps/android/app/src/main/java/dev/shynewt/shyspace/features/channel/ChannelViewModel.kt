@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Mutex
 import uniffi.shy_core.Change
 import uniffi.shy_core.Message
 import uniffi.shy_ffi.ShyWorkspace
@@ -19,6 +21,9 @@ data class ChannelState(
     /** Each message's text as shown, by id: app links named, no markdown marks, lines and list items kept. */
     val plainTexts: Map<String, String> = emptyMap(),
     val isLoading: Boolean = true,
+    /** Whether older messages may be left to load: the last load came back full. */
+    val hasOlder: Boolean = false,
+    val isLoadingOlder: Boolean = false,
     val error: String? = null,
 ) {
     /** A message's plain text, or its own where none is known (screens drawn without a core). */
@@ -34,6 +39,10 @@ class ChannelViewModel(
     private val mutableState = MutableStateFlow(ChannelState())
     val state: StateFlow<ChannelState> = mutableState.asStateFlow()
     private val workspace: ShyWorkspace? = core.app.workspace(workspaceId)
+
+    /** How many of the newest messages to show; loading older ones raises it a page at a time. */
+    private var shownLimit = PAGE
+    private val reloading = Mutex()
 
     init {
         viewModelScope.launch { follow() }
@@ -63,6 +72,15 @@ class ChannelViewModel(
         viewModelScope.launch { coreCall(::showError) { workspace.deleteMessage(message) } }
     }
 
+    /** Loads the page of messages just older than the oldest shown. */
+    fun loadOlder() {
+        val current = mutableState.value
+        if (workspace == null || !current.hasOlder || current.isLoadingOlder) return
+        mutableState.update { it.copy(isLoadingOlder = true) }
+        shownLimit += PAGE
+        viewModelScope.launch { reload(workspace) }
+    }
+
     /** You saw [message], the newest: the channel is read up to it. */
     fun markSeen(message: String) {
         if (workspace == null) return
@@ -79,13 +97,26 @@ class ChannelViewModel(
         }
     }
 
-    private suspend fun reload(workspace: ShyWorkspace) {
-        val messages = coreCall(::showError) { workspace.messages(channelId, null, PAGE) } ?: return
-        val plain = coreCall(::showError) { workspace.plainTexts(messages.map { it.text }) } ?: return
+    /**
+     * Shows the newest [shownLimit] messages. The only writer of the list, one at a time, so a
+     * change arriving while older ones load can neither drop the page nor leave a gap.
+     */
+    private suspend fun reload(workspace: ShyWorkspace) = reloading.withLock {
+        val limit = shownLimit
+        val messages = coreCall(::showError) { workspace.messages(channelId, null, limit) }
+        val plain = messages?.let { coreCall(::showError) { workspace.plainTexts(it.map { message -> message.text }) } }
+        if (messages == null || plain == null) {
+            mutableState.update { it.copy(isLoadingOlder = false) }
+            return@withLock
+        }
         mutableState.value = ChannelState(
             messages = messages.asReversed(),
             plainTexts = messages.map { it.id }.zip(plain).toMap(),
             isLoading = false,
+            // A short load reached the channel's start; one that grew later fills the page again.
+            hasOlder = messages.size.toUInt() == limit,
+            // Older ones asked for after this load began are still on their way.
+            isLoadingOlder = shownLimit > limit,
         )
     }
 
