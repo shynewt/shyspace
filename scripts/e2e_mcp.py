@@ -2,7 +2,8 @@
 """End-to-end test: two real `shy` processes, real networking, a real bucket.
 
 An admin and a bot member talk over MCP. Checks joining, live delivery over
-gossip, page creation and search across members.
+gossip, page creation and search across members, then the admin linking a
+laptop of theirs by code and removing it.
 
 Needs a running S3-compatible bucket (see docs/development.md) and a built CLI
 (`cargo build -p shy-cli`). Settings come from the environment:
@@ -14,6 +15,7 @@ Needs a running S3-compatible bucket (see docs/development.md) and a built CLI
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -116,6 +118,132 @@ def wait_for_request() -> str:
                 return line.split()[0]
         time.sleep(1)
     raise AssertionError("the agent's join request never reached the admin")
+
+
+def read_line_until(stream, wanted: str, what: str) -> list[str]:
+    """Reads lines from `stream` until one contains `wanted`; returns them."""
+    lines = []
+    while True:
+        line = stream.readline()
+        if not line:
+            raise AssertionError(f"{what} ended before saying {wanted!r}: {lines}")
+        lines.append(line.rstrip("\n"))
+        if wanted in line:
+            return lines
+
+
+def start_link(environment: dict, voucher_name: str = "admin",
+               new_name: str = "laptop") -> tuple[subprocess.Popen, subprocess.Popen, list[list[str]], str]:
+    """`voucher_name` shows a code and `new_name` asks through it; returns
+    both processes, the voucher's numbered choices and the number the new
+    device shows."""
+    voucher = subprocess.Popen([SHY, *member_args(voucher_name), "link"], env=environment, stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    code = voucher.stdout.readline().strip()
+    check(code.startswith("shyl1_") and "shysecret123" not in code,
+          f"{voucher_name}'s device shows a link code that carries no bucket credentials")
+    laptop = subprocess.Popen([SHY, *member_args(new_name), "link-join"], env=environment,
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    laptop.stdin.write(code + "\n")
+    laptop.stdin.close()
+    choices = read_line_until(voucher.stderr, "None of these", "shy link")
+    shown = read_line_until(laptop.stderr, "On your other device, pick", "shy link-join")[-1].rsplit("pick ", 1)[1]
+    numbered = [parts for parts in (line.split() for line in choices) if len(parts) == 3 and parts[0] in ("1", "2", "3")]
+    return voucher, laptop, numbered, shown
+
+
+def a_wrong_pick_stops_the_link(environment: dict) -> None:
+    voucher, laptop = None, None
+    try:
+        voucher, laptop, numbered, shown = start_link(environment)
+        decoy = next(parts[0] for parts in numbered if " ".join(parts[1:]) != shown)
+        voucher.stdin.write(decoy + "\n")
+        voucher.stdin.close()
+        check(voucher.wait(timeout=DELIVERY_TIMEOUT_SECONDS) != 0 and "wasn't the number" in voucher.stderr.read(),
+              "picking another number ends the link on the admin's device")
+        check(laptop.wait(timeout=DELIVERY_TIMEOUT_SECONDS) != 0 and "stopped the link" in laptop.stderr.read(),
+              "the laptop is told at once, not after the answer link runs out")
+        check(not (WORK_DIR / "laptop.linking").exists() and not (WORK_DIR / "laptop/shy.db").exists(),
+              "the laptop keeps nothing from a stopped link")
+    finally:
+        for process in (voucher, laptop):
+            if process and process.poll() is None:
+                process.kill()
+
+
+def a_linked_device_links_another(environment: dict) -> None:
+    """The laptop, not the admin's device, links a tablet: it can't say the
+    tablet was added until the admin's app is online and adds it."""
+    voucher, tablet = None, None
+    try:
+        voucher, tablet, numbered, shown = start_link(environment, "laptop", "tablet")
+        pick = next(parts[0] for parts in numbered if " ".join(parts[1:]) == shown)
+        voucher.stdin.write(pick + "\n")
+        voucher.stdin.close()
+        check(voucher.wait(timeout=DELIVERY_TIMEOUT_SECONDS * 2) == 0
+              and "next online" in voucher.stderr.read(),
+              "the laptop doesn't claim the tablet was added while the admin's app is offline")
+        run_shy(*member_args("admin"), "devices")
+        check(tablet.wait(timeout=DELIVERY_TIMEOUT_SECONDS * 2) == 0,
+              "the tablet joined once the admin's app was online and added it")
+    finally:
+        for process in (voucher, tablet):
+            if process and process.poll() is None:
+                process.kill()
+
+
+def interrupting_the_pick_stops_the_link(environment: dict) -> None:
+    voucher, laptop = None, None
+    try:
+        voucher, laptop, _numbered, _shown = start_link(environment)
+        voucher.send_signal(signal.SIGINT)
+        check(voucher.wait(timeout=DELIVERY_TIMEOUT_SECONDS) != 0,
+              "Ctrl-C at the pick ends `shy link` at once, with standard input still open")
+        check(laptop.wait(timeout=DELIVERY_TIMEOUT_SECONDS) != 0 and "stopped the link" in laptop.stderr.read(),
+              "the laptop is told the link stopped")
+        check(not (WORK_DIR / "laptop.linking").exists() and not (WORK_DIR / "laptop/shy.db").exists(),
+              "the laptop keeps nothing from an interrupted link")
+    finally:
+        for process in (voucher, laptop):
+            if process and process.poll() is None:
+                process.kill()
+
+
+def link_a_device() -> None:
+    """The admin links a laptop of theirs by code, then removes it, each a
+    real process on the real bucket: the person picks, on the device they
+    use, the number the laptop shows, as they would by hand."""
+    environment = {**LOCAL_BUCKET, **os.environ}
+    a_wrong_pick_stops_the_link(environment)
+    interrupting_the_pick_stops_the_link(environment)
+    voucher, laptop = None, None
+    try:
+        voucher, laptop, numbered, shown = start_link(environment)
+        pick = next(parts[0] for parts in numbered if " ".join(parts[1:]) == shown)
+        check(len(numbered) == 3, "the admin's device shows three numbers to pick from")
+        voucher.stdin.write(pick + "\n")
+        voucher.stdin.close()
+        check(voucher.wait(timeout=DELIVERY_TIMEOUT_SECONDS) == 0, "picking the laptop's number links it")
+        check(laptop.wait(timeout=DELIVERY_TIMEOUT_SECONDS * 2) == 0, "the laptop joined once the admin's app added it")
+    finally:
+        for process in (voucher, laptop):
+            if process and process.poll() is None:
+                process.kill()
+    devices = run_shy(*member_args("admin"), "devices")
+    laptop_line = next(line for line in devices.splitlines() if line.startswith("Linux") or line.startswith("macOS"))
+    laptop_id = laptop_line.split()[-1]
+    check("This device, first device" in devices, "the admin lists the laptop among their devices")
+    member = McpMember("laptop")
+    try:
+        check(member.tool("read_page", page="Getting started").startswith("# Welcome"),
+              "the linked laptop reads the workspace's history")
+        member.tool("send_message", channel="general", text="Hello from the laptop")
+    finally:
+        member.close()
+    a_linked_device_links_another(environment)
+    run_shy(*member_args("admin"), "devices", "remove", laptop_id)
+    run_shy(*member_args("admin"), "devices")
+    check(laptop_id not in run_shy(*member_args("admin"), "devices"), "the admin removed the laptop")
 
 
 def main() -> int:
@@ -221,6 +349,7 @@ def main() -> int:
             joiner.kill()
         for member in members:
             member.close()
+    link_a_device()
     kit = run_shy(*member_args("admin"), "recovery-kit").strip()
     check(kit.startswith("shyrec1_"), "admin exported a recovery kit")
     restored = run_shy(*member_args("admin-restored"), "restore", stdin=kit)

@@ -1,4 +1,5 @@
 mod agents;
+mod devices;
 mod mcp;
 mod skill;
 
@@ -53,6 +54,23 @@ enum Command {
         /// Mark this member as a bot in everyone's member list.
         #[arg(long)]
         bot: bool,
+    },
+    /// Link a new device of yours: shows a code for it, then asks which
+    /// number it shows.
+    Link,
+    /// Link this device to a person who already uses shyspace, with the
+    /// code their device shows. Leave the code off to keep it out of shell
+    /// history: it is then read from SHY_LINK_CODE or standard input.
+    LinkJoin {
+        code: Option<String>,
+        /// Stop the link in progress instead, wiping what it was handed.
+        #[arg(long, conflicts_with = "code")]
+        cancel: bool,
+    },
+    /// List your devices, or ask to remove one.
+    Devices {
+        #[command(subcommand)]
+        command: Option<devices::DevicesCommand>,
     },
     /// Manage invites (admin only).
     #[command(subcommand)]
@@ -199,6 +217,22 @@ async fn main() -> Result<()> {
                 joined.name(),
                 data.path.display()
             );
+        }
+        Command::Link => {
+            let workspace = Workspace::open(&data, Networking::Offline).await?;
+            devices::link(&workspace).await?;
+        }
+        Command::LinkJoin { cancel: true, .. } => devices::cancel_link_join(data).await?,
+        Command::LinkJoin { code, .. } => {
+            devices::link_join(data, || match code {
+                Some(code) => Ok(code),
+                None => read_secret(devices::LINK_CODE_VARIABLE, "link code"),
+            })
+            .await?;
+        }
+        Command::Devices { command } => {
+            let workspace = Workspace::open(&data, Networking::Offline).await?;
+            devices::run(&workspace, command).await?;
         }
         Command::Invite(command) => {
             let workspace = Workspace::open(&data, Networking::Offline).await?;
