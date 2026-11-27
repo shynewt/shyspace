@@ -180,10 +180,6 @@ fun LinkScreen(
                     is LinkStep.EnterCode -> EnterCode(step.problem, onCodeChange, onCodeSubmitted)
                     LinkStep.Waiting -> Waiting()
                     is LinkStep.Checking -> Checking(step.checkCode)
-                    LinkStep.SomeoneElse -> {
-                        Note(stringResource(R.string.link_someone_else))
-                        OutlinedButton(onClick = onStartAgain, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.start_again)) }
-                    }
                     is LinkStep.Ended -> {
                         Note(step.reason)
                         OutlinedButton(onClick = onStartAgain, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.start_again)) }
@@ -233,9 +229,9 @@ private fun CodeField(code: TextFieldState, onDone: () -> Unit, modifier: Modifi
         label = { Text(label) },
         placeholder = { Text(stringResource(R.string.paste_code)) },
         lineLimits = TextFieldLineLimits.SingleLine,
-        // A password keyboard, shown as plain text: no autocorrect, no suggestions, and the
-        // keyboard doesn't learn the code.
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Done),
+        // A code, not words: no autocorrect. (A password type would also stop suggestions, but
+        // TalkBack would read it as dots.)
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, autoCorrectEnabled = false, imeAction = ImeAction.Done),
         onKeyboardAction = { onDone() },
         modifier = modifier,
     )
@@ -245,7 +241,12 @@ private fun CodeField(code: TextFieldState, onDone: () -> Unit, modifier: Modifi
 private fun Waiting() {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-        Text(stringResource(R.string.link_waiting), style = MaterialTheme.typography.bodyMedium, color = LocalShyColors.current.palette.textMuted)
+        Text(
+            stringResource(R.string.link_waiting),
+            style = MaterialTheme.typography.bodyMedium,
+            color = LocalShyColors.current.palette.textMuted,
+            modifier = Modifier.announcedWhenItAppears(),
+        )
     }
 }
 

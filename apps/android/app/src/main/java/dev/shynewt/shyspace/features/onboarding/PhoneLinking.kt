@@ -17,7 +17,7 @@ interface PhoneLinking {
     /** Waits until the other device hands this phone what it needs; returns the workspace it can now read. */
     suspend fun waitForLinkHandover(): String
 
-    /** Stops the link; nothing is kept. */
+    /** Stops the link for good, a running step too; nothing is kept. */
     suspend fun cancelLink()
 }
 
@@ -25,9 +25,6 @@ interface PhoneLinking {
 sealed interface LinkCheck {
     /** The person taps [code] on their other device. */
     data class ShowNumber(val code: String) : LinkCheck
-
-    /** The other device answered another device: someone else used the code. */
-    data object SomeoneElse : LinkCheck
 
     /** The person confirmed before this phone showed the number. */
     data object AlreadyConfirmed : LinkCheck

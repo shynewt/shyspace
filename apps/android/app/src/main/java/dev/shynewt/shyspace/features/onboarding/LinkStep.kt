@@ -11,9 +11,6 @@ sealed interface LinkStep {
     /** The other device must confirm by tapping [checkCode] (6 digits) among decoys. */
     data class Checking(val checkCode: String) : LinkStep
 
-    /** Another device answered this code: the person must refuse it on their other device. */
-    data object SomeoneElse : LinkStep
-
     /** The link ended without this phone being added, for [reason] (the core's words). */
     data class Ended(val reason: String) : LinkStep
 

@@ -130,7 +130,7 @@ class OnboardingScreensTest {
         step = LinkStep.Waiting
         showLink()
 
-        compose.onNodeWithText("Waiting for your other device…").assertExists()
+        compose.onNodeWithText("Waiting for your other device…").assert(isAnnounced)
         compose.onNodeWithText("Link code").assertDoesNotExist()
     }
 
@@ -151,17 +151,6 @@ class OnboardingScreensTest {
         showLink()
 
         compose.onNodeWithText("Your other device stopped the link. Nothing was shared.").assert(isAnnounced)
-        compose.onNodeWithText("Start again").performClick()
-
-        assertEquals(listOf("again"), asked)
-    }
-
-    @Test
-    fun whenSomeoneElseUsedTheCodeItSaysWhatToDoOnTheOtherDevice() {
-        step = LinkStep.SomeoneElse
-        showLink()
-
-        compose.onNodeWithText("Someone else used this code. On your other device, choose 'None of these'.").assert(isAnnounced)
         compose.onNodeWithText("Start again").performClick()
 
         assertEquals(listOf("again"), asked)

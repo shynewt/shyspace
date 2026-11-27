@@ -25,7 +25,6 @@
     <string name="camera_refused">Camera access is off, so paste the code instead.</string>
     <string name="link_tap_this">On your other device, tap this number</string>
     <string name="link_waiting">Waiting for your other device…</string>
-    <string name="link_someone_else">Someone else used this code. On your other device, choose \'None of these\'.</string>
     <string name="start_again">Start again</string>
     <string name="open_failed">Some workspaces couldn\'t open</string>
     <string name="notes">Notes</string>

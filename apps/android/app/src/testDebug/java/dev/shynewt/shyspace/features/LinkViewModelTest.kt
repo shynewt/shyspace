@@ -93,14 +93,14 @@ class LinkViewModelTest {
     }
 
     @Test
-    fun whenSomeoneElseUsedTheCodeItStopsThereAndCanStartAgain() = runBlocking {
-        linking.check.complete(LinkCheck.SomeoneElse)
+    fun whenSomeoneElseUsedTheCodeTheCoresWordsSayWhatToDo() = runBlocking {
+        val someoneElse = "Someone else used this code. On your other device, choose \"None of these\". Nothing was shared."
+        linking.check.completeExceptionally(ShyException.Failed(someoneElse))
 
         link.codeSubmitted("shy-link-1234")
-        stepWhere { it == LinkStep.SomeoneElse }
-        link.startAgain()
 
-        assertEquals(LinkStep.EnterCode(), link.step.value)
+        stepWhere { it == LinkStep.Ended(someoneElse) }
+        Unit
     }
 
     @Test
@@ -115,14 +115,20 @@ class LinkViewModelTest {
     }
 
     @Test
-    fun leavingPartWayStopsTheLink() = runBlocking {
+    fun leavingPartWayStopsTheLinkThroughTheCore() = runBlocking {
         link.codeSubmitted("shy-link-1234")
         withTimeout(5_000) { while (linking.callsSoFar().isEmpty()) delay(10) }
 
         link.stop()
 
-        withTimeout(5_000) { while ("cancel" !in linking.callsSoFar()) delay(10) }
         assertEquals(listOf("begin shy-link-1234", "cancel"), linking.callsSoFar())
+    }
+
+    @Test
+    fun leavingBeforeAnyCodeStopsNothing() = runBlocking {
+        link.stop()
+
+        assertEquals(emptyList<String>(), linking.callsSoFar())
     }
 
     @Test
