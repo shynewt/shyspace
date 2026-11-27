@@ -344,3 +344,39 @@ async fn the_channel_list_shows_kind_membership_and_who_may_delete() {
     sync_all(&[&bob, &carol]).await;
     assert!(!find(&carol, &channel).is_member);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_add_takes_its_grant_back_with_it() {
+    let (_root, _bucket, admin, bob, carol) = three_members().await;
+    let channel = admin.create_private_channel("plans", &[bob.my_id()]).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    let before = admin.state().store.last_seq(&admin.me()).unwrap();
+    // The grant is made first in the batch, then the sealed add is refused.
+    admin
+        .inner
+        .refuse_next_sealed_write
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let refused = format!(
+        "{:#}",
+        admin
+            .add_to_private_channel(&channel, &carol.my_id())
+            .unwrap_err()
+    );
+
+    assert!(refused.contains("refused on purpose"), "{refused}");
+    assert_eq!(
+        admin.state().store.last_seq(&admin.me()).unwrap(),
+        before,
+        "no grant was kept"
+    );
+    sync_all(&[&admin, &bob, &carol]).await;
+    assert!(
+        carol
+            .state()
+            .store
+            .channel_keys(Some(&channel))
+            .unwrap()
+            .is_empty()
+    );
+}

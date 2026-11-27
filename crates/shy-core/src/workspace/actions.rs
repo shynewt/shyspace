@@ -86,12 +86,22 @@ impl Workspace {
                 .context("missing key for the current epoch")?;
             let author = self.me();
             let context = self.apply_context();
+            #[cfg(test)]
+            let should_refuse_sealed = self
+                .inner
+                .refuse_next_sealed_write
+                .swap(false, std::sync::atomic::Ordering::SeqCst);
             state.store.atomically(|store| {
                 let mut envelopes = Vec::new();
                 let mut changes = Vec::new();
                 for make_op in makers {
                     let seq = store.next_seq(&author)?;
                     let op = make_op(store, seq)?;
+                    #[cfg(test)]
+                    ensure!(
+                        !(should_refuse_sealed && matches!(op, Op::Sealed { .. })),
+                        "refused on purpose"
+                    );
                     if !store.is_permitted(&op, &author, epoch, &self.inner.config.admin)? {
                         bail!("only its owner or the admin can do that");
                     }

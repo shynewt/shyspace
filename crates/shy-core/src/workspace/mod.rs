@@ -372,6 +372,10 @@ pub(crate) struct Inner {
     /// admin's app might, after the digest was committed.
     #[cfg(test)]
     pub tamper_next_grant: Mutex<Option<crate::membership::admin::GrantTamper>>,
+    /// Refuses the sealed op in the next batch written together, as a
+    /// refused change would, after the batch's other ops were made.
+    #[cfg(test)]
+    pub refuse_next_sealed_write: std::sync::atomic::AtomicBool,
     /// Held while a huddle's audience is worked out and published, so an
     /// older result can never replace a newer one.
     pub audience_lock: Mutex<()>,

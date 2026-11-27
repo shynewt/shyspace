@@ -98,19 +98,19 @@ impl Workspace {
                 store.next_position(channel)?,
             )
         };
-        // Everything that can refuse the add comes first, so a refused add
-        // hands over no key.
         let writing_key = self.writing_key(channel)?;
         let history: Vec<(u64, ChannelKey)> = keys.iter().map(|key| (key.generation, key.key)).collect();
-        self.grant(channel, &history, &[member], &[])?;
-        self.write_sealed(
+        // Written together: a refused add takes its grant back with it.
+        let mut makers = self.grant_makers(channel, &history, &[member], &[])?;
+        makers.push(self.sealed_maker(
             writing_key,
             PrivateOp::Add {
                 invitee: Invitee { member, after_seq },
                 from_generation: latest,
                 position,
             },
-        )
+        ));
+        self.write_together(makers)
     }
 
     /// Removes someone from a private channel you own. They keep what they
@@ -424,6 +424,18 @@ impl Workspace {
         recipients: &[PublicKey],
         dm_members: &[PublicKey],
     ) -> Result<()> {
+        self.write_together(self.grant_makers(channel, keys, recipients, dm_members)?)
+    }
+
+    /// The grants that wrap each key for each recipient, in as many ops as
+    /// it takes, to be written together with what they belong to.
+    fn grant_makers(
+        &self,
+        channel: &str,
+        keys: &[(u64, ChannelKey)],
+        recipients: &[PublicKey],
+        dm_members: &[PublicKey],
+    ) -> Result<Vec<OpMaker<'static>>> {
         let me = self.me();
         let granting = Granting {
             workspace_id: &self.inner.config.workspace_id,
@@ -446,12 +458,13 @@ impl Workspace {
                 wraps.push(wrap_key(granting, &public, &postcard::to_stdvec(&grant)?)?);
             }
         }
-        for chunk in wraps.chunks(MAX_WRAPS_PER_GRANT) {
-            self.write(Op::KeyGrant {
-                wraps: chunk.to_vec(),
-            })?;
-        }
-        Ok(())
+        Ok(wraps
+            .chunks(MAX_WRAPS_PER_GRANT)
+            .map(|chunk| {
+                let wraps = chunk.to_vec();
+                Box::new(move |_: &Store, _: u64| Ok(Op::KeyGrant { wraps })) as OpMaker<'static>
+            })
+            .collect())
     }
 
     /// Current workspace members other than you, none of them a linked

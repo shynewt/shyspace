@@ -674,6 +674,8 @@ impl Workspace {
                 fail_next_commit_upload: Default::default(),
                 #[cfg(test)]
                 tamper_next_grant: Default::default(),
+                #[cfg(test)]
+                refuse_next_sealed_write: Default::default(),
             }),
         };
         workspace.rebuild_views_if_rules_changed()?;

@@ -1019,3 +1019,106 @@ async fn a_device_linked_during_a_call_shows_as_its_person() {
         "Bob's phone joining plays no sound"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_huddle_is_full_by_devices_not_people() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let ada = create_admin_with(
+        &root.path().join("ada"),
+        &bucket,
+        with_media(&FakeMedia::default()),
+    )
+    .await;
+    let mut others = Vec::new();
+    for index in 0..MAX_PARTICIPANTS - 1 {
+        let name = format!("Member {index}");
+        others.push(
+            join_with(
+                &ada,
+                &root.path().join(&name),
+                &bucket,
+                &name,
+                with_media(&FakeMedia::default()),
+            )
+            .await,
+        );
+    }
+    let joined: Vec<&Workspace> = std::iter::once(&ada).chain(&others).collect();
+    sync_all(&joined).await;
+    let phone = link_device_with(
+        &ada,
+        &others[0],
+        &root.path().join("phone"),
+        &bucket,
+        with_media(&FakeMedia::default()),
+    )
+    .await;
+    others.push(phone);
+    let everyone: Vec<&Workspace> = std::iter::once(&ada).chain(&others).collect();
+    sync_all(&everyone).await;
+    let general = channel_id(&ada, "general");
+    for member in &others {
+        member.join_huddle(&general, true).unwrap();
+        carry(member, &[&ada], Via::Gossip);
+    }
+
+    let huddle = ada.huddle(&general).unwrap();
+    assert_eq!(
+        huddle.participants.len(),
+        MAX_PARTICIPANTS - 1,
+        "one person on two devices"
+    );
+    assert!(huddle.is_full, "eight devices fill it");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn my_own_other_device_joining_plays_no_sound() {
+    let TwoDevices {
+        ada,
+        bob,
+        bob_media,
+        phone,
+        general,
+        ..
+    } = bob_on_two_devices().await;
+    all_join(&[&ada, &bob], &general);
+    bob.age_huddles(Duration::from_millis(crate::huddle::ring::CUE_GAP_MS));
+    let cues_before = bob_media.cues();
+
+    phone.join_huddle(&general, false).unwrap();
+    carry(&phone, &[&ada, &bob], Via::Gossip);
+
+    assert_eq!(bob_media.cues(), cues_before);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_speaking_device_leaving_while_its_person_stays_stops_them_speaking() {
+    let TwoDevices {
+        ada,
+        ada_media,
+        bob,
+        phone,
+        general,
+        ..
+    } = bob_on_two_devices().await;
+    all_join(&[&ada, &bob, &phone], &general);
+    ada_media
+        .report(MediaEvent::Speaking {
+            peer: phone.me(),
+            speaking: true,
+        })
+        .await;
+    after_earlier_media_events(&ada, &ada_media).await;
+    let mut changes = ada.subscribe();
+
+    phone.leave_huddle().unwrap();
+    carry(&phone, &[&ada], Via::Gossip);
+    ada_media.report(MediaEvent::MeSpeaking(false)).await;
+
+    assert_eq!(
+        wait_for_speaking(&mut changes, (&ada.my_id(), false)).await,
+        [(bob.my_id(), false)],
+        "Bob stays, on his laptop, and isn't speaking"
+    );
+}

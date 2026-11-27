@@ -139,6 +139,10 @@ impl MySession {
         self.speaking.iter().any(|peer| self.person_of(peer) == *person)
     }
 
+    fn speaking_persons(&self) -> BTreeSet<PublicKey> {
+        self.speaking.iter().map(|peer| self.person_of(peer)).collect()
+    }
+
     /// The people other than `me` that `peers` stand for.
     fn persons_among(&self, peers: &BTreeMap<PublicKey, String>, me: &PublicKey) -> BTreeSet<PublicKey> {
         peers
@@ -801,12 +805,24 @@ impl Workspace {
             return Ok(Audience::Lost(session));
         };
         let heard = hearing_set(&roster, &me, &allowed);
+        let was_speaking = mine.speaking_persons();
         mine.links.retain(|peer, _| heard.contains_key(peer));
         mine.speaking.retain(|peer| heard.contains_key(peer));
         mine.persons = persons;
+        // A speaking device that left while another of its person's stays
+        // changes what the person is doing; nobody else would say so.
+        let is_speaking = mine.speaking_persons();
+        let my_person = self.my_person();
+        let speaking_changes: Vec<Change> = was_speaking
+            .symmetric_difference(&is_speaking)
+            .filter(|person| **person != my_person)
+            .map(|person| Change::HuddleSpeaking {
+                member: member_id(person),
+                speaking: is_speaking.contains(person),
+            })
+            .collect();
         // The people already there when joining are covered by `Joined`.
         let cue = if mine.phase == HuddlePhase::In {
-            let my_person = self.my_person();
             let before = mine.persons_among(&mine.peers.borrow(), &my_person);
             arrival_cue(&before, &mine.persons_among(&heard, &my_person))
         } else {
@@ -818,6 +834,9 @@ impl Workspace {
             is_changed
         });
         drop(huddles);
+        for change in speaking_changes {
+            self.emit(change);
+        }
         if let Some(cue) = cue {
             self.play_cue(cue);
         }
