@@ -33,7 +33,7 @@ import uniffi.shy_ffi.BucketSettings
  * reaches it. Release builds have an empty one (src/release).
  */
 @Composable
-fun DevelopmentWorkspaceTools(onCreate: (workspaceName: String, memberName: String, bucket: BucketSettings) -> Unit) {
+fun DevelopmentWorkspaceTools(isCreating: Boolean, onCreate: (workspaceName: String, memberName: String, bucket: BucketSettings) -> Unit) {
     var workspaceName by rememberSaveable { mutableStateOf("Test") }
     var memberName by rememberSaveable { mutableStateOf("") }
     var endpoint by rememberSaveable { mutableStateOf("http://10.0.2.2:9000") }
@@ -70,7 +70,7 @@ fun DevelopmentWorkspaceTools(onCreate: (workspaceName: String, memberName: Stri
                     )
                 }
             },
-            enabled = fields.all { it.isNotBlank() },
+            enabled = !isCreating && fields.all { it.isNotBlank() },
             modifier = Modifier.fillMaxWidth(),
         ) { Text(stringResource(R.string.create_test_workspace)) }
     }

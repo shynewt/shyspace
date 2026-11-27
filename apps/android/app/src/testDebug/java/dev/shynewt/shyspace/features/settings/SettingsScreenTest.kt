@@ -31,7 +31,7 @@ class SettingsScreenTest {
         val changes = mutableListOf<Boolean>()
         compose.setContent {
             ShyTheme(isDark = false) {
-                SettingsScreen(hidesScreenContent = false, onHidesScreenContentChange = { changes += it }, onBack = {})
+                YouScreen(hidesScreenContent = false, onHidesScreenContentChange = { changes += it }, saveFailed = false, bottomBar = {})
             }
         }
 
@@ -39,6 +39,17 @@ class SettingsScreenTest {
         compose.onNodeWithText("Hide screen content").performClick()
 
         assertEquals(listOf(true), changes)
+    }
+
+    @Test
+    fun aChangeThatWasntSavedIsShown() {
+        compose.setContent {
+            ShyTheme(isDark = false) {
+                YouScreen(hidesScreenContent = true, onHidesScreenContentChange = {}, saveFailed = true, bottomBar = {})
+            }
+        }
+
+        compose.onNodeWithText("Couldn't save this change", substring = true).assertExists()
     }
 
     @Test

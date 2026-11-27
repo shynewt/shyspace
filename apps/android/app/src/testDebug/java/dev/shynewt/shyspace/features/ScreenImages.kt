@@ -8,7 +8,25 @@ import dev.shynewt.shyspace.features.home.HomeScreen
 import dev.shynewt.shyspace.features.home.HomeState
 import dev.shynewt.shyspace.features.home.NoWorkspace
 import dev.shynewt.shyspace.features.home.DevelopmentWorkspaceTools
-import dev.shynewt.shyspace.features.settings.SettingsScreen
+import dev.shynewt.shyspace.MainTab
+import dev.shynewt.shyspace.MainTabBar
+import dev.shynewt.shyspace.features.settings.YouScreen
+import dev.shynewt.shyspace.ui.Avatar
+import dev.shynewt.shyspace.ui.Badge
+import dev.shynewt.shyspace.ui.BadgeTone
+import dev.shynewt.shyspace.ui.CountBadge
+import dev.shynewt.shyspace.ui.DayDivider
+import dev.shynewt.shyspace.ui.SectionLabel
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import dev.shynewt.shyspace.ui.theme.LocalShyColors
+import uniffi.shy_core.NotifyLevel
 import dev.shynewt.shyspace.sampleChannel
 import dev.shynewt.shyspace.sampleMessage
 import dev.shynewt.shyspace.ui.theme.ShyTheme
@@ -52,12 +70,14 @@ class ScreenImages {
                     sampleChannel("releases"),
                     sampleChannel("random"),
                     sampleChannel("leads", kind = ChannelKind.PRIVATE),
+                    sampleChannel("watercooler", unread = 9u).copy(notify = NotifyLevel.NOTHING),
                     sampleChannel("notes", kind = ChannelKind.NOTES),
                 ),
                 openFailures = emptyList(),
             ),
             onOpenChannel = { _, _ -> },
-            onOpenSettings = {},
+            onRetry = {},
+            bottomBar = { MainTabBar(MainTab.HOME, onSelect = {}) },
             noWorkspaceContent = {},
         )
     }
@@ -95,21 +115,50 @@ class ScreenImages {
     }
 
     @Test
-    fun settings() = capture("settings") {
-        SettingsScreen(hidesScreenContent = true, onHidesScreenContentChange = {}, onBack = {})
+    fun you() = capture("you") {
+        YouScreen(hidesScreenContent = true, onHidesScreenContentChange = {}, saveFailed = false, bottomBar = { MainTabBar(MainTab.YOU, onSelect = {}) })
+    }
+
+    /** The shared pieces in ui/, each in its variants. */
+    @Test
+    fun gallery() = capture("gallery") {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxSize().background(LocalShyColors.current.palette.surface).padding(16.dp),
+        ) {
+            SectionLabel("Avatar")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Ada Lovelace", "Grace Hopper", "Linus", "Margaret Hamilton", "Alan Kay", "Barbara Liskov")
+                    .forEach { Avatar(id = it.lowercase(), name = it) }
+                Avatar(id = "helper", name = "Helper", isBot = true)
+            }
+            SectionLabel("Badge")
+            Badge("Agent")
+            SectionLabel("CountBadge")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CountBadge("3", BadgeTone.ACCENT, "3 new")
+                CountBadge("@2", BadgeTone.DANGER, "2 mentions")
+                CountBadge("1", BadgeTone.QUIET, "1 draft")
+            }
+            SectionLabel("DayDivider")
+            DayDivider("Today")
+        }
     }
 
     @Test
     fun noWorkspace() = capture("no-workspace") {
-        NoWorkspace { DevelopmentWorkspaceTools(onCreate = { _, _, _ -> }) }
+        NoWorkspace(createError = "checking the bucket settings: can't write to the bucket: operation timed out") {
+            DevelopmentWorkspaceTools(isCreating = false, onCreate = { _, _, _ -> })
+        }
     }
 
     @Test
     fun failed() = capture("failed") {
         HomeScreen(
-            state = HomeState.Failed("checking the bucket settings: can't write to the bucket: operation timed out"),
+            state = HomeState.Failed("Acme: the workspace's data is in its folder, but its key is missing"),
             onOpenChannel = { _, _ -> },
-            onOpenSettings = {},
+            onRetry = {},
+            bottomBar = {},
             noWorkspaceContent = {},
         )
     }

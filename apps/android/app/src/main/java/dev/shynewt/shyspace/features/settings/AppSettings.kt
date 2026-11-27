@@ -9,8 +9,10 @@ import androidx.datastore.preferences.core.preferencesOf
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -37,13 +39,18 @@ class AppSettings(file: File, private val scope: CoroutineScope) {
     /** Whether screenshots, screen recording and the recent-apps preview show nothing of the app. */
     val hidesScreenContent: StateFlow<Boolean> = hides.stateIn(scope, SharingStarted.Eagerly, runBlocking { hides.first() })
 
-    /** A file that can't be written keeps the setting as it was. */
+    private val mutableSaveFailed = MutableStateFlow(false)
+
+    /** Whether the last change couldn't be written; the setting then stays as it was. */
+    val saveFailed: StateFlow<Boolean> = mutableSaveFailed.asStateFlow()
+
     fun setHidesScreenContent(hides: Boolean) {
         scope.launch {
-            try {
+            mutableSaveFailed.value = try {
                 store.edit { it[HIDES_SCREEN_CONTENT] = hides }
+                false
             } catch (error: IOException) {
-                return@launch
+                true
             }
         }
     }

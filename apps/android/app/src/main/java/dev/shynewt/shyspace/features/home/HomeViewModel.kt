@@ -17,7 +17,8 @@ import uniffi.shy_ffi.ShyWorkspace
 sealed interface HomeState {
     data object Loading : HomeState
 
-    data object NoWorkspace : HomeState
+    /** Nothing on this phone yet; [createError] says why the last create failed. */
+    data class NoWorkspace(val isCreating: Boolean = false, val createError: String? = null) : HomeState
 
     data class Ready(
         val workspaceId: String,
@@ -41,11 +42,19 @@ class HomeViewModel(private val core: ShyCore) : ViewModel() {
 
     /** Creates a workspace on the given bucket, for development builds. */
     fun createWorkspace(workspaceName: String, memberName: String, bucket: BucketSettings) {
-        mutableState.value = HomeState.Loading
+        mutableState.value = HomeState.NoWorkspace(isCreating = true)
         viewModelScope.launch {
-            val workspace = coreCall(::fail) { core.app.createWorkspace(workspaceName, memberName, bucket) } ?: return@launch
+            val workspace = coreCall({ reason -> mutableState.value = HomeState.NoWorkspace(createError = reason) }) {
+                core.app.createWorkspace(workspaceName, memberName, bucket)
+            } ?: return@launch
             show(workspace, emptyList())
         }
+    }
+
+    /** Opens this phone's workspaces again, after they failed to. */
+    fun retry() {
+        mutableState.value = HomeState.Loading
+        viewModelScope.launch { open() }
     }
 
     private suspend fun open() {
@@ -53,7 +62,7 @@ class HomeViewModel(private val core: ShyCore) : ViewModel() {
         val listed = coreCall(::fail) { core.app.workspaces() } ?: return
         val first = listed.firstOrNull()?.let { core.app.workspace(it.workspaceId) }
         if (first == null) {
-            mutableState.value = if (failures.isEmpty()) HomeState.NoWorkspace else HomeState.Failed(failures.describe())
+            mutableState.value = if (failures.isEmpty()) HomeState.NoWorkspace() else HomeState.Failed(failures.describe())
             return
         }
         show(first, failures)

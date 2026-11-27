@@ -21,14 +21,21 @@ import dev.shynewt.shyspace.features.home.HomeViewModel
 import dev.shynewt.shyspace.features.home.NoWorkspace
 import dev.shynewt.shyspace.features.home.workspaceCreator
 import dev.shynewt.shyspace.features.settings.AppSettings
-import dev.shynewt.shyspace.features.settings.SettingsScreen
+import dev.shynewt.shyspace.features.settings.YouScreen
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.togetherWith
+import androidx.navigation3.ui.NavDisplay.popTransitionSpec
+import androidx.navigation3.ui.NavDisplay.predictivePopTransitionSpec
+import androidx.navigation3.ui.NavDisplay.transitionSpec
 
 sealed interface Route {
     data object Home : Route
 
     data class Channel(val workspaceId: String, val channelId: String, val title: String) : Route
 
-    data object Settings : Route
+    /** The You tab; it sits on Home, so Back returns there, as Android's tabs do. */
+    data object You : Route
 }
 
 /** The back stack, kept across process death as plain strings. */
@@ -38,7 +45,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
             when (route) {
                 Route.Home -> listOf("home")
                 is Route.Channel -> listOf("channel", route.workspaceId, route.channelId, route.title)
-                Route.Settings -> listOf("settings")
+                Route.You -> listOf("you")
             }
         }
     },
@@ -46,7 +53,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
         saved.map { parts ->
             when (parts.first()) {
                 "channel" -> Route.Channel(parts[1], parts[2], parts[3])
-                "settings" -> Route.Settings
+                "you" -> Route.You
                 else -> Route.Home
             }
         }.toMutableStateList()
@@ -58,9 +65,10 @@ private fun List<Route>.toMutableStateList() = mutableStateListOf<Route>().also 
 @Composable
 fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
     val backStack = rememberSaveable(saver = backStackSaver) { mutableStateListOf<Route>(Route.Home) }
+    val tabs = Tabs(backStack)
     NavDisplay(
         backStack = backStack,
-        onBack = { backStack.removeLastOrNull() },
+        onBack = tabs::back,
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
@@ -76,9 +84,12 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                             backStack.add(Route.Channel(ready.workspaceId, channel.id, title))
                         }
                     },
-                    onOpenSettings = { backStack.add(Route.Settings) },
-                    noWorkspaceContent = {
-                        NoWorkspace { workspaceCreator?.invoke(home::createWorkspace) }
+                    onRetry = home::retry,
+                    bottomBar = { MainTabBar(MainTab.HOME, onSelect = { tabs.select(it) }) },
+                    noWorkspaceContent = { noWorkspace ->
+                        NoWorkspace(noWorkspace.createError) {
+                            workspaceCreator?.invoke(noWorkspace.isCreating, home::createWorkspace)
+                        }
                     },
                 )
             }
@@ -90,19 +101,41 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                 ChannelScreen(
                     title = route.title,
                     state = state,
-                    onBack = { backStack.removeLastOrNull() },
+                    onBack = tabs::back,
                     onSend = channel::send,
                     onSeen = channel::markSeen,
                 )
             }
-            entry<Route.Settings> {
+            entry<Route.You>(metadata = switchesAtOnce) {
                 val hidesScreenContent by settings.hidesScreenContent.collectAsStateWithLifecycle()
-                SettingsScreen(
+                val saveFailed by settings.saveFailed.collectAsStateWithLifecycle()
+                YouScreen(
                     hidesScreenContent = hidesScreenContent,
                     onHidesScreenContentChange = settings::setHidesScreenContent,
-                    onBack = { backStack.removeLastOrNull() },
+                    saveFailed = saveFailed,
+                    bottomBar = { MainTabBar(MainTab.YOU, onSelect = { tabs.select(it) }) },
                 )
             }
         },
     )
+}
+
+/** Switching tabs replaces the screen at once; only going deeper slides. */
+private val switchesAtOnce =
+    transitionSpec { EnterTransition.None togetherWith ExitTransition.None } +
+        popTransitionSpec { EnterTransition.None togetherWith ExitTransition.None } +
+        predictivePopTransitionSpec { EnterTransition.None togetherWith ExitTransition.None }
+
+/** Moving between screens: the tabs, and Back. */
+internal class Tabs(private val backStack: SnapshotStateList<Route>) {
+    /** You sits on Home, so Back from it returns Home, as Android's tabs do. */
+    fun select(tab: MainTab) {
+        backStack.clear()
+        backStack.add(Route.Home)
+        if (tab == MainTab.YOU) backStack.add(Route.You)
+    }
+
+    fun back() {
+        backStack.removeLastOrNull()
+    }
 }

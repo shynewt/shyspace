@@ -1,58 +1,68 @@
 package dev.shynewt.shyspace.features.home
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Badge
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.shynewt.shyspace.R
+import dev.shynewt.shyspace.ui.Avatar
+import dev.shynewt.shyspace.ui.BadgeTone
+import dev.shynewt.shyspace.ui.CountBadge
+import dev.shynewt.shyspace.ui.SectionLabel
 import dev.shynewt.shyspace.ui.theme.LocalShyColors
 import uniffi.shy_core.Channel
 import uniffi.shy_ffi.BucketSettings
 import uniffi.shy_core.ChannelKind
+import uniffi.shy_core.NotifyLevel
 
 /** The workspace's channels, or what to do when there's none. */
 @Composable
 fun HomeScreen(
     state: HomeState,
     onOpenChannel: (channel: Channel, title: String) -> Unit,
-    onOpenSettings: () -> Unit,
-    noWorkspaceContent: @Composable () -> Unit,
+    onRetry: () -> Unit,
+    bottomBar: @Composable () -> Unit,
+    noWorkspaceContent: @Composable (HomeState.NoWorkspace) -> Unit,
 ) {
     when (state) {
         HomeState.Loading -> Centered { CircularProgressIndicator() }
-        HomeState.NoWorkspace -> noWorkspaceContent()
-        is HomeState.Failed -> Centered { Text(state.reason, color = LocalShyColors.current.palette.dangerText) }
-        is HomeState.Ready -> ChannelList(state, onOpenChannel, onOpenSettings)
+        is HomeState.NoWorkspace -> noWorkspaceContent(state)
+        is HomeState.Failed -> OpenFailed(state.reason, onRetry)
+        is HomeState.Ready -> ChannelList(state, onOpenChannel, bottomBar)
     }
 }
 
@@ -64,34 +74,47 @@ fun channelTitle(channel: Channel): String = when (channel.kind) {
 }
 
 @Composable
-private fun ChannelList(state: HomeState.Ready, onOpenChannel: (Channel, String) -> Unit, onOpenSettings: () -> Unit) {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+private fun ChannelList(state: HomeState.Ready, onOpenChannel: (Channel, String) -> Unit, bottomBar: @Composable () -> Unit) {
+    val background = LocalShyColors.current.palette.bg
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     // DMs need their members' names, which the phone doesn't load yet.
     val shown = state.channels.filter { it.isMember && it.kind != ChannelKind.DM }
     Scaffold(
+        containerColor = background,
         topBar = {
-            LargeTopAppBar(
-                title = { Text(state.workspaceName) },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.settings))
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Avatar(id = state.workspaceId, name = state.workspaceName, size = 32.dp)
+                        Text(
+                            state.workspaceName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.semantics { heading() },
+                        )
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = background, scrolledContainerColor = background),
                 scrollBehavior = scrollBehavior,
             )
         },
+        bottomBar = bottomBar,
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { padding ->
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 8.dp)) {
             if (state.openFailures.isNotEmpty()) {
                 item {
                     Text(
                         stringResource(R.string.open_failed) + ": " + state.openFailures.joinToString { it.reason },
                         color = LocalShyColors.current.palette.dangerText,
-                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(12.dp),
                     )
                 }
             }
+            item { SectionLabel(stringResource(R.string.channels), modifier = Modifier.padding(horizontal = 12.dp)) }
             items(shown, key = { it.id }) { channel -> ChannelRow(channel, onOpen = onOpenChannel) }
         }
     }
@@ -99,27 +122,68 @@ private fun ChannelList(state: HomeState.Ready, onOpenChannel: (Channel, String)
 
 @Composable
 private fun ChannelRow(channel: Channel, onOpen: (Channel, String) -> Unit) {
+    val colors = LocalShyColors.current.palette
     val title = channelTitle(channel)
+    val isMuted = channel.notify == NotifyLevel.NOTHING
     val hasUnread = channel.unread > 0u
     val mentions = channel.unreadMentions.toInt()
-    val mentionLabel = if (mentions > 0) pluralStringResource(R.plurals.unread_mentions, mentions, mentions) else null
-    ListItem(
-        trailingContent = mentionLabel?.let {
-            {
-                Badge(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.semantics { contentDescription = it },
-                ) { Text(mentions.toString()) }
-            }
-        },
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.background),
-        modifier = Modifier.fillMaxWidth().clickable { onOpen(channel, title) },
+    val (icon, name) = when (channel.kind) {
+        ChannelKind.PRIVATE -> R.drawable.ic_lock to channel.name
+        ChannelKind.NOTES -> R.drawable.ic_notes to title
+        else -> R.drawable.ic_tag to channel.name
+    }
+    val ink = when {
+        hasUnread && !isMuted -> colors.text
+        isMuted -> colors.textFaint
+        else -> colors.textMuted
+    }
+    val state = when {
+        isMuted -> stringResource(R.string.muted)
+        hasUnread -> stringResource(R.string.unread)
+        else -> null
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .clickable { onOpen(channel, title) }
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 12.dp)
+            .semantics(mergeDescendants = true) { state?.let { stateDescription = it } },
     ) {
+        val iconLabel = if (channel.kind == ChannelKind.PRIVATE) stringResource(R.string.private_channel) else null
+        Icon(painterResource(icon), contentDescription = iconLabel, tint = if (hasUnread && !isMuted) colors.text else colors.textDecorative, modifier = Modifier.size(20.dp))
         Text(
-            title,
-            fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (hasUnread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            name,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (hasUnread && !isMuted) FontWeight.SemiBold else FontWeight.Normal,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        if (mentions > 0) {
+            CountBadge(
+                text = "@$mentions",
+                tone = BadgeTone.DANGER,
+                description = pluralStringResource(R.plurals.unread_mentions, mentions, mentions),
+            )
+        }
+    }
+}
+
+@Composable
+private fun OpenFailed(reason: String, onRetry: () -> Unit) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+    ) {
+        Text(stringResource(R.string.open_failed_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(reason, style = MaterialTheme.typography.bodyMedium, color = LocalShyColors.current.palette.textMuted, textAlign = TextAlign.Center)
+        Button(onClick = onRetry) { Text(stringResource(R.string.try_again)) }
     }
 }
 
@@ -128,8 +192,9 @@ private fun Centered(content: @Composable () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
 }
 
+/** Nothing on this phone yet: says so, then [extra] (the development tools, in debug builds). */
 @Composable
-fun NoWorkspace(extra: @Composable () -> Unit) {
+fun NoWorkspace(createError: String?, extra: @Composable () -> Unit) {
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -140,10 +205,16 @@ fun NoWorkspace(extra: @Composable () -> Unit) {
             .padding(24.dp),
     ) {
         Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
-        Text(stringResource(R.string.no_workspace), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.no_workspace), color = LocalShyColors.current.palette.textMuted)
         extra()
+        createError?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = LocalShyColors.current.palette.dangerText)
+        }
     }
 }
 
 /** A way to create a workspace from the phone, which only development builds have (`workspaceCreator`). */
-typealias WorkspaceCreator = @Composable (onCreate: (workspaceName: String, memberName: String, bucket: BucketSettings) -> Unit) -> Unit
+typealias WorkspaceCreator = @Composable (
+    isCreating: Boolean,
+    onCreate: (workspaceName: String, memberName: String, bucket: BucketSettings) -> Unit,
+) -> Unit

@@ -5,6 +5,7 @@ import dev.shynewt.shyspace.createAcme
 import dev.shynewt.shyspace.features.home.HomeState
 import dev.shynewt.shyspace.features.home.HomeViewModel
 import dev.shynewt.shyspace.testCore
+import dev.shynewt.shyspace.unusedBucket
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -24,7 +25,21 @@ class HomeViewModelTest {
     fun aPhoneWithoutWorkspacesSaysSo() = runBlocking {
         val home = HomeViewModel(testCore(folder.root))
         val state = withTimeout(5_000) { home.state.first { it !is HomeState.Loading } }
-        assertEquals(HomeState.NoWorkspace, state)
+        assertEquals(HomeState.NoWorkspace(), state)
+    }
+
+    @Test
+    fun aCreateThatFailsKeepsTheFormAndSaysWhy() = runBlocking {
+        val home = HomeViewModel(testCore(folder.root))
+        withTimeout(5_000) { home.state.first { it is HomeState.NoWorkspace } }
+
+        // The core refuses a name with an invisible character in it.
+        home.createWorkspace("Acme", memberName = "A\u200Bda", unusedBucket())
+
+        val state = withTimeout(5_000) {
+            home.state.first { it is HomeState.NoWorkspace && it.createError != null }
+        } as HomeState.NoWorkspace
+        assertEquals(false, state.isCreating)
     }
 
     @Test

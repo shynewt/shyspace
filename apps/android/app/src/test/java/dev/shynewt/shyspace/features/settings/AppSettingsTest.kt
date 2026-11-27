@@ -62,4 +62,14 @@ class AppSettingsTest {
         file.mkdirs()
         withSettings { settings -> assertTrue(settings.hidesScreenContent.value) }
     }
+
+    @Test
+    fun aChangeThatCantBeSavedSaysSo() {
+        file.mkdirs()
+        withSettings { settings ->
+            settings.setHidesScreenContent(false)
+            withTimeout(5_000) { settings.saveFailed.first { it } }
+            assertTrue(settings.hidesScreenContent.value)
+        }
+    }
 }
