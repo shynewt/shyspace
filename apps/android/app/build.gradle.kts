@@ -213,6 +213,7 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.jna) { artifact { type = "aar" } }
     implementation(files(platformVerifierAar))
 

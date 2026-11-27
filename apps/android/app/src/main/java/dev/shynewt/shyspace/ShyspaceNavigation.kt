@@ -20,11 +20,15 @@ import dev.shynewt.shyspace.features.home.HomeState
 import dev.shynewt.shyspace.features.home.HomeViewModel
 import dev.shynewt.shyspace.features.home.NoWorkspace
 import dev.shynewt.shyspace.features.home.workspaceCreator
+import dev.shynewt.shyspace.features.settings.AppSettings
+import dev.shynewt.shyspace.features.settings.SettingsScreen
 
 sealed interface Route {
     data object Home : Route
 
     data class Channel(val workspaceId: String, val channelId: String, val title: String) : Route
+
+    data object Settings : Route
 }
 
 /** The back stack, kept across process death as plain strings. */
@@ -34,6 +38,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
             when (route) {
                 Route.Home -> listOf("home")
                 is Route.Channel -> listOf("channel", route.workspaceId, route.channelId, route.title)
+                Route.Settings -> listOf("settings")
             }
         }
     },
@@ -41,6 +46,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
         saved.map { parts ->
             when (parts.first()) {
                 "channel" -> Route.Channel(parts[1], parts[2], parts[3])
+                "settings" -> Route.Settings
                 else -> Route.Home
             }
         }.toMutableStateList()
@@ -50,7 +56,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
 private fun List<Route>.toMutableStateList() = mutableStateListOf<Route>().also { it.addAll(this) }
 
 @Composable
-fun ShyspaceNavigation(core: ShyCore) {
+fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
     val backStack = rememberSaveable(saver = backStackSaver) { mutableStateListOf<Route>(Route.Home) }
     NavDisplay(
         backStack = backStack,
@@ -70,6 +76,7 @@ fun ShyspaceNavigation(core: ShyCore) {
                             backStack.add(Route.Channel(ready.workspaceId, channel.id, title))
                         }
                     },
+                    onOpenSettings = { backStack.add(Route.Settings) },
                     noWorkspaceContent = {
                         NoWorkspace { workspaceCreator?.invoke(home::createWorkspace) }
                     },
@@ -81,6 +88,14 @@ fun ShyspaceNavigation(core: ShyCore) {
                 }
                 val state by channel.state.collectAsStateWithLifecycle()
                 ChannelScreen(title = route.title, state = state, onBack = { backStack.removeLastOrNull() }, onSend = channel::send)
+            }
+            entry<Route.Settings> {
+                val hidesScreenContent by settings.hidesScreenContent.collectAsStateWithLifecycle()
+                SettingsScreen(
+                    hidesScreenContent = hidesScreenContent,
+                    onHidesScreenContentChange = settings::setHidesScreenContent,
+                    onBack = { backStack.removeLastOrNull() },
+                )
             }
         },
     )

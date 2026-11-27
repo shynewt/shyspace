@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Badge
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -25,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -42,13 +45,14 @@ import uniffi.shy_core.ChannelKind
 fun HomeScreen(
     state: HomeState,
     onOpenChannel: (channel: Channel, title: String) -> Unit,
+    onOpenSettings: () -> Unit,
     noWorkspaceContent: @Composable () -> Unit,
 ) {
     when (state) {
         HomeState.Loading -> Centered { CircularProgressIndicator() }
         HomeState.NoWorkspace -> noWorkspaceContent()
         is HomeState.Failed -> Centered { Text(state.reason, color = LocalShyColors.current.palette.dangerText) }
-        is HomeState.Ready -> ChannelList(state, onOpenChannel)
+        is HomeState.Ready -> ChannelList(state, onOpenChannel, onOpenSettings)
     }
 }
 
@@ -60,12 +64,22 @@ fun channelTitle(channel: Channel): String = when (channel.kind) {
 }
 
 @Composable
-private fun ChannelList(state: HomeState.Ready, onOpenChannel: (Channel, String) -> Unit) {
+private fun ChannelList(state: HomeState.Ready, onOpenChannel: (Channel, String) -> Unit, onOpenSettings: () -> Unit) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     // DMs need their members' names, which the phone doesn't load yet.
     val shown = state.channels.filter { it.isMember && it.kind != ChannelKind.DM }
     Scaffold(
-        topBar = { LargeTopAppBar(title = { Text(state.workspaceName) }, scrollBehavior = scrollBehavior) },
+        topBar = {
+            LargeTopAppBar(
+                title = { Text(state.workspaceName) },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.settings))
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+            )
+        },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {

@@ -5,6 +5,10 @@ import dev.shynewt.shyspace.core.AndroidDeviceKeyStore
 import dev.shynewt.shyspace.core.KeystoreSealer
 import dev.shynewt.shyspace.core.PlatformTls
 import dev.shynewt.shyspace.core.ShyCore
+import dev.shynewt.shyspace.features.settings.AppSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import uniffi.shy_core.Networking
 import uniffi.shy_ffi.ShyApp
 
@@ -13,5 +17,9 @@ class ShyspaceApplication : Application() {
         PlatformTls.usePhoneTrustStore(this)
         val keys = AndroidDeviceKeyStore(noBackupFilesDir.resolve("device-keys"), KeystoreSealer())
         ShyCore(ShyApp(noBackupFilesDir.resolve("workspaces").path, keys, Networking.ONLINE))
+    }
+
+    val settings: AppSettings by lazy {
+        AppSettings(noBackupFilesDir.resolve("settings.preferences_pb"), CoroutineScope(SupervisorJob() + Dispatchers.IO))
     }
 }

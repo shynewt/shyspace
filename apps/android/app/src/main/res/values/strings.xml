@@ -16,6 +16,10 @@
     <string name="bucket_name">Bucket</string>
     <string name="bucket_access_key">Access key</string>
     <string name="bucket_secret_key">Secret key</string>
+    <string name="settings">Settings</string>
+    <string name="privacy">Privacy</string>
+    <string name="hide_screen_content">Hide screen content</string>
+    <string name="hide_screen_content_detail">Blocks screenshots and screen recording, and shows nothing of shyspace in recent apps.</string>
     <plurals name="unread_mentions">
         <item quantity="one">%1$d mention</item>
         <item quantity="other">%1$d mentions</item>
