@@ -70,7 +70,10 @@ private fun materialColors(colors: ShyThemeColors, isDark: Boolean): ColorScheme
         surfaceContainer = palette.surface2,
         surfaceContainerHigh = palette.surface2,
         surfaceContainerHighest = palette.surface3,
-        outline = palette.border,
+        // Material draws control edges (a switch's off knob, a text field's border) in outline,
+        // which needs 3:1 against the surface; faint text gives at least 4.6:1 in every theme. The
+        // desktop's faint border is for dividers, Material's outlineVariant.
+        outline = palette.textFaint,
         outlineVariant = palette.border,
         error = palette.danger,
         // The danger fill is chosen so white text passes on it in every theme.

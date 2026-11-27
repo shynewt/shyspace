@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import dev.shynewt.shyspace.ui.theme.LocalShyColors
 import uniffi.shy_core.NotifyLevel
@@ -142,6 +145,12 @@ class ScreenImages {
             }
             SectionLabel("DayDivider")
             DayDivider("Today")
+            SectionLabel("Material controls in our colours")
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Switch(checked = false, onCheckedChange = {})
+                Switch(checked = true, onCheckedChange = {})
+            }
+            OutlinedTextField(value = "", onValueChange = {}, label = { Text("Bucket address") })
         }
     }
 
