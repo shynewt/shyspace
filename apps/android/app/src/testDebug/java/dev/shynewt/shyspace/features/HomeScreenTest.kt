@@ -44,7 +44,7 @@ class HomeScreenTest {
                     state = HomeState.Ready("w1", "Acme", channels = emptyList(), openFailures = emptyList()),
                     onOpenChannel = { _, _ -> },
                     onRetry = {},
-                    bottomBar = { MainTabBar(MainTab.HOME, onSelect = { chosen += it }) },
+                    bottomBar = { MainTabBar(MainTab.HOME, activityCount = 0, onSelect = { chosen += it }) },
                     noWorkspaceContent = {},
                 )
             }

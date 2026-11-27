@@ -22,6 +22,15 @@
     <string name="bucket_secret_key">Secret key</string>
     <string name="home">Home</string>
     <string name="you">You</string>
+    <string name="activity">Activity</string>
+    <string name="mentions_and_replies">Mentions and replies</string>
+    <string name="unread_channels">Unread channels</string>
+    <string name="mentioned_you_in">%1$s mentioned you in %2$s</string>
+    <string name="replied_in_thread_in">%1$s replied in a thread in %2$s</string>
+    <string name="mark_read">Mark read</string>
+    <string name="mark_read_label">Mark %1$s read</string>
+    <string name="caught_up">You\'re all caught up</string>
+    <string name="caught_up_detail">Mentions of you and new replies in threads you follow show up here.</string>
     <string name="channels">Channels</string>
     <string name="direct_messages">Direct messages</string>
     <string name="direct_message">Direct message</string>
@@ -69,6 +78,14 @@
     <plurals name="reaction">
         <item quantity="one">%2$s, %1$d reaction</item>
         <item quantity="other">%2$s, %1$d reactions</item>
+    </plurals>
+    <plurals name="unread_messages">
+        <item quantity="one">%1$d unread message</item>
+        <item quantity="other">%1$d unread messages</item>
+    </plurals>
+    <plurals name="waiting_activity">
+        <item quantity="one">%1$d waiting</item>
+        <item quantity="other">%1$d waiting</item>
     </plurals>
     <plurals name="unread_mentions">
         <item quantity="one">%1$d mention</item>

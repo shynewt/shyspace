@@ -3,7 +3,11 @@ package dev.shynewt.shyspace.features
 import androidx.compose.runtime.Composable
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.shynewt.shyspace.features.channel.ChannelScreen
+import dev.shynewt.shyspace.features.activity.ActivityScreen
+import dev.shynewt.shyspace.features.activity.ActivityState
 import dev.shynewt.shyspace.features.channel.ChannelState
+import uniffi.shy_core.InboxItem
+import uniffi.shy_core.InboxReason
 import dev.shynewt.shyspace.features.channel.ThreadScreen
 import dev.shynewt.shyspace.features.channel.ThreadState
 import dev.shynewt.shyspace.features.home.HomeScreen
@@ -87,8 +91,55 @@ class ScreenImages {
             ),
             onOpenChannel = { _, _ -> },
             onRetry = {},
-            bottomBar = { MainTabBar(MainTab.HOME, onSelect = {}) },
+            bottomBar = { MainTabBar(MainTab.HOME, activityCount = 2, onSelect = {}) },
             noWorkspaceContent = {},
+        )
+    }
+
+    @Test
+    fun activity() = capture("activity") {
+        ActivityScreen(
+            state = ActivityState(
+                attention = listOf(
+                    InboxItem(
+                        sampleMessage("9", "Grace", "linking", start + 31 * minute).copy(channel = "general"),
+                        channelName = "general",
+                        threadRoot = null,
+                        reason = InboxReason.MENTION,
+                    ),
+                    InboxItem(
+                        sampleMessage("8", "Linus", "noon", start + 9 * minute).copy(channel = "design"),
+                        channelName = "design",
+                        threadRoot = "3",
+                        reason = InboxReason.THREAD_REPLY,
+                    ),
+                ),
+                previews = mapOf(
+                    "9" to "@Ada can you check how the check code looks on your phone before the release?",
+                    "8" to "Noon works for me.",
+                ),
+                unreadChannels = listOf(sampleChannel("random", unread = 3u), sampleChannel("design", unread = 4u, mentions = 1u)),
+                isLoading = false,
+            ),
+            channels = listOf(sampleChannel("general"), sampleChannel("design"), sampleChannel("random")),
+            members = emptyList(),
+            onOpenItem = { _, _ -> },
+            onOpenChannel = { _, _ -> },
+            onMarkRead = {},
+            bottomBar = { MainTabBar(MainTab.ACTIVITY, activityCount = 2, onSelect = {}) },
+        )
+    }
+
+    @Test
+    fun activityCaughtUp() = capture("activity-caught-up") {
+        ActivityScreen(
+            state = ActivityState(isLoading = false),
+            channels = emptyList(),
+            members = emptyList(),
+            onOpenItem = { _, _ -> },
+            onOpenChannel = { _, _ -> },
+            onMarkRead = {},
+            bottomBar = { MainTabBar(MainTab.ACTIVITY, activityCount = 0, onSelect = {}) },
         )
     }
 
@@ -147,7 +198,7 @@ class ScreenImages {
 
     @Test
     fun you() = capture("you") {
-        YouScreen(hidesScreenContent = true, onHidesScreenContentChange = {}, saveFailed = false, bottomBar = { MainTabBar(MainTab.YOU, onSelect = {}) })
+        YouScreen(hidesScreenContent = true, onHidesScreenContentChange = {}, saveFailed = false, bottomBar = { MainTabBar(MainTab.YOU, activityCount = 0, onSelect = {}) })
     }
 
     /** The shared pieces in ui/, each in its variants. */

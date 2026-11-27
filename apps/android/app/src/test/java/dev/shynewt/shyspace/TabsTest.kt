@@ -27,4 +27,14 @@ class TabsTest {
 
         assertEquals(listOf(Route.Home), backStack.toList())
     }
+
+    @Test
+    fun backFromTheActivityTabReturnsHome() {
+        tabs.select(MainTab.ACTIVITY)
+        assertEquals(listOf(Route.Home, Route.Activity), backStack.toList())
+
+        tabs.back()
+
+        assertEquals(listOf(Route.Home), backStack.toList())
+    }
 }

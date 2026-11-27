@@ -1,6 +1,9 @@
 package dev.shynewt.shyspace
 
 import androidx.compose.runtime.Composable
+import uniffi.shy_core.InboxItem
+import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.saveable.listSaver
@@ -13,6 +16,8 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import dev.shynewt.shyspace.core.ShyCore
+import dev.shynewt.shyspace.features.activity.ActivityScreen
+import dev.shynewt.shyspace.features.activity.ActivityViewModel
 import dev.shynewt.shyspace.features.channel.ChannelScreen
 import dev.shynewt.shyspace.features.channel.ChannelViewModel
 import dev.shynewt.shyspace.features.channel.ThreadScreen
@@ -39,6 +44,8 @@ sealed interface Route {
     data class Thread(val workspaceId: String, val channelId: String, val rootId: String, val channelTitle: String) : Route
 
     /** The You tab; it sits on Home, so Back returns there, as Android's tabs do. */
+    data object Activity : Route
+
     data object You : Route
 }
 
@@ -50,6 +57,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
                 Route.Home -> listOf("home")
                 is Route.Channel -> listOf("channel", route.workspaceId, route.channelId, route.title)
                 is Route.Thread -> listOf("thread", route.workspaceId, route.channelId, route.rootId, route.channelTitle)
+                Route.Activity -> listOf("activity")
                 Route.You -> listOf("you")
             }
         }
@@ -59,6 +67,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
             when (parts.first()) {
                 "channel" -> Route.Channel(parts[1], parts[2], parts[3])
                 "thread" -> Route.Thread(parts[1], parts[2], parts[3], parts[4])
+                "activity" -> Route.Activity
                 "you" -> Route.You
                 else -> Route.Home
             }
@@ -72,6 +81,24 @@ private fun List<Route>.toMutableStateList() = mutableStateListOf<Route>().also 
 fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
     val backStack = rememberSaveable(saver = backStackSaver) { mutableStateListOf<Route>(Route.Home) }
     val tabs = Tabs(backStack)
+    // Kept for the whole app, so Activity follows the workspace Home shows, on any tab.
+    val home = viewModel { HomeViewModel(core) }
+    val homeState by home.state.collectAsStateWithLifecycle()
+    val ready = homeState as? HomeState.Ready
+    val activity = viewModel { ActivityViewModel(core) }
+    val activityState by activity.state.collectAsStateWithLifecycle()
+    val noWorkspace = stringResource(R.string.no_workspace)
+    LaunchedEffect(homeState) {
+        when (val state = homeState) {
+            is HomeState.Ready -> activity.follow(state.workspaceId)
+            is HomeState.NoWorkspace -> activity.showUnavailable(noWorkspace)
+            is HomeState.Failed -> activity.showUnavailable(state.reason)
+            HomeState.Loading -> Unit
+        }
+    }
+    val tabBar: @Composable (MainTab) -> Unit = { selected ->
+        MainTabBar(selected, activityCount = activityState.attention.size, onSelect = { tabs.select(it) })
+    }
     NavDisplay(
         backStack = backStack,
         onBack = tabs::back,
@@ -81,17 +108,13 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
         ),
         entryProvider = entryProvider {
             entry<Route.Home> {
-                val home = viewModel { HomeViewModel(core) }
-                val state by home.state.collectAsStateWithLifecycle()
                 HomeScreen(
-                    state = state,
+                    state = homeState,
                     onOpenChannel = { channel, title ->
-                        (state as? HomeState.Ready)?.let { ready ->
-                            backStack.add(Route.Channel(ready.workspaceId, channel.id, title))
-                        }
+                        ready?.let { backStack.add(Route.Channel(it.workspaceId, channel.id, title)) }
                     },
                     onRetry = home::retry,
-                    bottomBar = { MainTabBar(MainTab.HOME, onSelect = { tabs.select(it) }) },
+                    bottomBar = { tabBar(MainTab.HOME) },
                     noWorkspaceContent = { noWorkspace ->
                         NoWorkspace(noWorkspace.createError) {
                             workspaceCreator?.invoke(noWorkspace.isCreating, home::createWorkspace)
@@ -133,6 +156,21 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                     onDelete = thread::delete,
                 )
             }
+            entry<Route.Activity>(metadata = switchesAtOnce) {
+                ActivityScreen(
+                    state = activityState,
+                    channels = ready?.channels.orEmpty(),
+                    members = ready?.members.orEmpty(),
+                    onOpenItem = { item, title ->
+                        activityState.workspaceId?.let { backStack.add(routeTo(item, it, title)) }
+                    },
+                    onOpenChannel = { channel, title ->
+                        activityState.workspaceId?.let { backStack.add(Route.Channel(it, channel.id, title)) }
+                    },
+                    onMarkRead = activity::markChannelRead,
+                    bottomBar = { tabBar(MainTab.ACTIVITY) },
+                )
+            }
             entry<Route.You>(metadata = switchesAtOnce) {
                 val hidesScreenContent by settings.hidesScreenContent.collectAsStateWithLifecycle()
                 val saveFailed by settings.saveFailed.collectAsStateWithLifecycle()
@@ -140,11 +178,17 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                     hidesScreenContent = hidesScreenContent,
                     onHidesScreenContentChange = settings::setHidesScreenContent,
                     saveFailed = saveFailed,
-                    bottomBar = { MainTabBar(MainTab.YOU, onSelect = { tabs.select(it) }) },
+                    bottomBar = { tabBar(MainTab.YOU) },
                 )
             }
         },
     )
+}
+
+/** Where an Activity item opens: its thread when it's in one, mentions in a thread too. */
+internal fun routeTo(item: InboxItem, workspaceId: String, channelTitle: String): Route {
+    val root = item.threadRoot ?: return Route.Channel(workspaceId, item.message.channel, channelTitle)
+    return Route.Thread(workspaceId, item.message.channel, root, channelTitle)
 }
 
 /** Switching tabs replaces the screen at once; only going deeper slides. */
@@ -155,11 +199,15 @@ private val switchesAtOnce =
 
 /** Moving between screens: the tabs, and Back. */
 internal class Tabs(private val backStack: SnapshotStateList<Route>) {
-    /** You sits on Home, so Back from it returns Home, as Android's tabs do. */
+    /** Activity and You sit on Home, so Back from them returns Home, as Android's tabs do. */
     fun select(tab: MainTab) {
         backStack.clear()
         backStack.add(Route.Home)
-        if (tab == MainTab.YOU) backStack.add(Route.You)
+        when (tab) {
+            MainTab.HOME -> Unit
+            MainTab.ACTIVITY -> backStack.add(Route.Activity)
+            MainTab.YOU -> backStack.add(Route.You)
+        }
     }
 
     fun back() {
