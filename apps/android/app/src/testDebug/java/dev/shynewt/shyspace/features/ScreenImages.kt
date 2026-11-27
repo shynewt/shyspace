@@ -109,12 +109,15 @@ class ScreenImages {
             onBack = {},
             onSend = { true },
             onSeen = {},
+            onEdit = { _, _ -> true },
+            onReact = { _, _, _ -> },
+            onDelete = {},
         )
     }
 
     @Test
     fun emptyChannel() = capture("channel-empty") {
-        ChannelScreen(title = "#releases", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {})
+        ChannelScreen(title = "#releases", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {})
     }
 
     @Test

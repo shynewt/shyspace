@@ -104,6 +104,9 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                     onBack = tabs::back,
                     onSend = channel::send,
                     onSeen = channel::markSeen,
+                    onEdit = channel::edit,
+                    onReact = channel::react,
+                    onDelete = channel::delete,
                 )
             }
             entry<Route.You>(metadata = switchesAtOnce) {

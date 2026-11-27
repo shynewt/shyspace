@@ -80,4 +80,25 @@ class ChannelViewModelTest {
         val newestMessage = channel.state.value.messages.first()
         assertEquals(newestMessage.lamport to newestMessage.device, read.lamport to read.device)
     }
+
+    @Test
+    fun aMessageCanBeReactedToEditedAndDeleted() = runBlocking {
+        val core = testCore(folder.root)
+        val acme = core.createAcme()
+        val general = acme.channels().single().id
+        val id = acme.sendMessage(general, "hello", null)
+        val channel = ChannelViewModel(core, acme.workspaceId(), general)
+        withTimeout(5_000) { channel.state.first { it.messages.isNotEmpty() } }
+
+        channel.react(id, "👍", active = true)
+        withTimeout(5_000) { channel.state.first { it.messages.single().reactions.any { r -> r.emoji == "👍" && r.mine } } }
+
+        assertTrue(channel.edit(id, " hello, again "))
+        val edited = withTimeout(5_000) { channel.state.first { it.messages.single().isEdited } }
+        assertEquals("hello, again", edited.messages.single().text)
+
+        channel.delete(id)
+        val deleted = withTimeout(5_000) { channel.state.first { it.messages.isEmpty() } }
+        assertEquals(null, deleted.error)
+    }
 }

@@ -46,6 +46,23 @@ class ChannelViewModel(
         return coreCall(::showError) { workspace.sendMessage(channelId, trimmed, null) } != null
     }
 
+    /** Replaces a message's text with [text], trimmed; false when it's blank or the edit failed. */
+    suspend fun edit(message: String, text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty() || workspace == null) return false
+        return coreCall(::showError) { workspace.editMessage(message, trimmed) } != null
+    }
+
+    fun react(message: String, emoji: String, active: Boolean) {
+        if (workspace == null) return
+        viewModelScope.launch { coreCall(::showError) { workspace.react(message, emoji, active) } }
+    }
+
+    fun delete(message: String) {
+        if (workspace == null) return
+        viewModelScope.launch { coreCall(::showError) { workspace.deleteMessage(message) } }
+    }
+
     /** You saw [message], the newest: the channel is read up to it. */
     fun markSeen(message: String) {
         if (workspace == null) return
