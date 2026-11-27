@@ -353,6 +353,21 @@ impl Workspace {
         Ok(())
     }
 
+    /// Marks `channel` read up to its newest message, as "mark everything
+    /// read" does for each channel. Nothing to do in an empty channel.
+    pub fn mark_channel_read(&self, channel: &str) -> Result<()> {
+        self.require_item(channel, ItemKind::Channel)?;
+        {
+            let state = self.state();
+            let Some(newest) = state.store.latest_message(channel)? else {
+                return Ok(());
+            };
+            state.store.mark_read(channel, &newest)?;
+        }
+        self.emit(Change::Channels);
+        Ok(())
+    }
+
     /// Replaces a message's text. Its author only.
     pub fn edit_message(&self, message: &str, text: &str) -> Result<()> {
         let text = checked_message_text(text)?;

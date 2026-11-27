@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use super::{State, Workspace, follows_by_default};
 use crate::{
     storage::Reply,
-    views::{Change, Channel, Inbox, InboxItem, InboxReason},
+    views::{Change, Channel, Inbox, InboxItem, InboxReason, NotifyLevel},
 };
 
 const MAX_ATTENTION: usize = 100;
@@ -36,7 +36,8 @@ impl Workspace {
         })
     }
 
-    /// The inbox's mentions and followed replies, and its unread channels.
+    /// The inbox's mentions and followed replies, and its unread channels:
+    /// muted ones only while they mention you.
     pub(super) fn chat_attention(&self) -> Result<(Vec<InboxItem>, Vec<Channel>)> {
         let channels = self.channels()?;
         let state = self.state();
@@ -54,7 +55,9 @@ impl Workspace {
             .collect::<Result<_>>()?;
         let unread = channels
             .into_iter()
-            .filter(|channel| channel.unread > 0)
+            .filter(|channel| {
+                channel.unread > 0 && (channel.notify != NotifyLevel::Nothing || channel.unread_mentions > 0)
+            })
             .collect();
         Ok((attention, unread))
     }
