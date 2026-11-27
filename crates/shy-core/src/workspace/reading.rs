@@ -180,7 +180,9 @@ impl Workspace {
         .await
     }
 
-    pub(crate) fn is_reading_only(&self) -> bool {
+    /// Whether this is a new device's workspace that only reads until the
+    /// admin's app adds it.
+    pub fn is_reading_only(&self) -> bool {
         self.inner.mode == WorkspaceMode::Linking
     }
 }

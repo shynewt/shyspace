@@ -11,6 +11,7 @@ use super::{DeviceLinking, LINK_IS_OVER};
 use crate::views::Change;
 #[cfg(test)]
 use crate::workspace::DataDir;
+use crate::workspace::DeviceEnrollment;
 use crate::{
     membership::{admin::DeviceWelcome, invite::JoinMailbox},
     transport::bucket::Connector,
@@ -25,13 +26,13 @@ impl<M: JoinMailbox> DeviceLinking<M> {
     /// device's drafts and read positions, then lets the linking store go.
     /// It is marked first: a join that stops partway can't run again.
     pub(super) async fn finish(
-        mut self,
+        self,
         reading: Workspace,
         welcome: DeviceWelcome,
         connect: Connector,
         options: impl Into<WorkspaceOptions>,
     ) -> Result<Workspace> {
-        let enrollment = self.enrollment.take().context(LINK_IS_OVER)?;
+        let enrollment = self.take_enrollment().context(LINK_IS_OVER)?;
         let kept = {
             let store = &reading.state().store;
             mark_link_finishing(store)?;
@@ -51,6 +52,13 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         }
         self.close_reading(reading).await?;
         joined
+    }
+
+    fn take_enrollment(&self) -> Option<DeviceEnrollment> {
+        match self.enrollment.lock() {
+            Ok(mut enrollment) => enrollment.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        }
     }
 
     /// Stops linking this device, for good: both stores are wiped, so
@@ -78,7 +86,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         if let Some(reading) = &reading {
             mark_link_ended(&reading.state().store)?;
         }
-        if let Some(enrollment) = self.enrollment.take() {
+        if let Some(enrollment) = self.take_enrollment() {
             enrollment.forget().await?;
         }
         match reading {

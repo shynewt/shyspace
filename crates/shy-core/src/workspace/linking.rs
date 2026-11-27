@@ -60,7 +60,7 @@ enum CheckStep {
 
 /// What the person picks from before confirming: the code the new device
 /// shows, among two decoys.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct LinkCheckShown {
     pub choices: [String; 3],
     pub platform: Platform,

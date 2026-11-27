@@ -2266,3 +2266,25 @@ async fn the_app_takes_a_code_wrapped_across_lines() {
     assert!(matches!(check, CheckOnNewDevice::Code(_)));
     device.cancel_link().await.unwrap();
 }
+
+/// Every step of a link can run on a multi-thread runtime (the desktop's
+/// commands, the phones' bindings): none holds a lock or a store across an
+/// await. Each future is only built, never run: `assert_send` checks its
+/// type when this compiles, so the rule can't quietly break.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_link_step_can_run_on_any_thread() {
+    fn assert_send<T: Send>(_: &T) {}
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    let cancel = JoinCancel::new();
+    assert_send(&device.begin_link("", Platform::Linux, &cancel));
+    assert_send(&device.wait_for_link_handover(&cancel));
+    assert_send(&device.wait_until_linked(&cancel, Networking::Offline));
+    assert_send(&device.cancel_link());
+    assert_send(&device.resume_link());
+    let (_code, mut linking, reading) = reading_device(&bob, &root.path().join("phone"), &bucket).await;
+    assert_send(&linking.check_now());
+    assert_send(&linking.wait_for_check(&cancel));
+    assert_send(&linking.wait_for_handover_with(&cancel, ReadingConnector::over(connector(&bucket))));
+    assert_send(&linking.wait_until_added_with(reading, &cancel, connector(&bucket), Networking::Offline));
+}

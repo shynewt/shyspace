@@ -96,7 +96,9 @@ pub enum ResumedLink<M: JoinMailbox> {
 /// A link in progress on the new device.
 pub struct DeviceLinking<M: JoinMailbox> {
     /// Gone once the link joined or was wiped.
-    enrollment: Option<DeviceEnrollment>,
+    /// Behind a lock only so the handle can be shared across threads: the
+    /// enrollment's store can't be.
+    enrollment: std::sync::Mutex<Option<DeviceEnrollment>>,
     linking: DataDir,
     code: LinkCode,
     request: LinkRequest,
@@ -169,7 +171,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             .await?;
         mailbox.post_request(seal_link_request(&code, &request)?).await?;
         Ok(Self {
-            enrollment: Some(enrollment),
+            enrollment: std::sync::Mutex::new(Some(enrollment)),
             linking,
             code,
             request,
@@ -214,7 +216,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         // stop came before its secret was deleted.
         let is_handed_over = Workspace::exists(&linking.path);
         let linking_handle = Self {
-            enrollment: Some(enrollment),
+            enrollment: std::sync::Mutex::new(Some(enrollment)),
             linking,
             mailbox: mailbox_for(&code),
             code,
@@ -269,11 +271,8 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             if self.code.is_expired(now_ms()?) {
                 return self.wiped_after(anyhow!(CODE_RAN_OUT), None).await;
             }
-            tokio::select! {
-                () = sleep(POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
-                    return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
-                }
+            if is_cancelled_while_waiting(&mut cancelled, POLL).await {
+                return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
             }
         }
     }
@@ -338,11 +337,8 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             if now_ms()? >= answer_until_ms {
                 return self.wiped_after(anyhow!(NOT_HANDED_OVER_IN_TIME), None).await;
             }
-            tokio::select! {
-                () = sleep(POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
-                    return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
-                }
+            if is_cancelled_while_waiting(&mut cancelled, POLL).await {
+                return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
             }
         }
     }
@@ -400,11 +396,8 @@ impl<M: JoinMailbox> DeviceLinking<M> {
                     .wiped_after(anyhow::anyhow!(NOT_ADDED_IN_TIME), Some(reading))
                     .await;
             }
-            tokio::select! {
-                () = sleep(ADDED_POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
-                    return self.wiped_after(anyhow!(STOPPED_HERE), Some(reading)).await;
-                }
+            if is_cancelled_while_waiting(&mut cancelled, ADDED_POLL).await {
+                return self.wiped_after(anyhow!(STOPPED_HERE), Some(reading)).await;
             }
         }
     }
@@ -435,6 +428,18 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             }
         }
         Ok(None)
+    }
+}
+
+/// Waits `poll`, or less if the link is cancelled meanwhile. Nothing the
+/// wait holds outlives it, so callers stay safe to move between threads.
+async fn is_cancelled_while_waiting(
+    cancelled: &mut tokio::sync::watch::Receiver<bool>,
+    poll: Duration,
+) -> bool {
+    tokio::select! {
+        () = sleep(poll) => false,
+        _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => true,
     }
 }
 
