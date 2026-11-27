@@ -66,7 +66,10 @@ export type Reaction = { emoji: string; count: number; mine: boolean };
 export type Message = {
   id: string;
   channel: string;
+  /** The person who wrote it. */
   author: string;
+  /** The device that wrote it: with `lamport`, its place in the channel's order. */
+  device: string;
   author_name: string;
   author_is_bot: boolean;
   text: string;
@@ -162,7 +165,7 @@ export type PageMention = {
   mentioned_ms: number;
 };
 export type Inbox = { attention: InboxItem[]; channels: Channel[]; page_mentions: PageMention[] };
-export type MessageCursor = { lamport: number; author: string };
+export type MessageCursor = { lamport: number; device: string };
 export type Page = {
   id: string;
   parent: string | null;

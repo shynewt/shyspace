@@ -417,6 +417,10 @@ export class FakeBackend {
     return this.chat.receiveMessageIn(author, channelId, text);
   }
 
+  receiveMessageFromDevice(author: string, device: string, channelName: string, text: string, lamport: number): string {
+    return this.chat.receiveMessageFromDevice(author, device, channelName, text, lamport);
+  }
+
   receiveReply(author: string, root: string, text: string): string {
     return this.chat.receiveReply(author, root, text);
   }

@@ -146,6 +146,23 @@ test("focusing the window marks what's on screen read, and the line stays", asyn
   await expect(unreadLine(page)).toBeVisible();
 });
 
+test("two messages one person's devices wrote at the same clock both count, and both get read", async ({ page }) => {
+  await readHistory(page, 5);
+  await setWindowFocused(page, false);
+  await page.evaluate(() => {
+    const grace = window.fake.memberNamed("Grace");
+    const sameClock = 1_000_000;
+    window.fake.receiveMessageFromDevice(grace, "a".repeat(64), "general", "From the laptop", sameClock);
+    window.fake.receiveMessageFromDevice(grace, "f".repeat(64), "general", "From the phone", sameClock);
+  });
+  await expect(log(page).getByText("From the phone")).toBeInViewport();
+  await afterSaving(page);
+  expect(await unreadIn(page, "general")).toBe(2);
+
+  await setWindowFocused(page, true);
+  await expect.poll(() => unreadIn(page, "general")).toBe(0);
+});
+
 test("focusing the window marks only the messages on screen", async ({ page }) => {
   await readHistory(page);
   await scrollUpTo(page, "Old 20");

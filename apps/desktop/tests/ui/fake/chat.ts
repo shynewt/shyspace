@@ -77,15 +77,15 @@ function recentAuthors(replies: readonly StoredMessage[]): string[] {
 }
 
 function compareMessages(left: StoredMessage, right: StoredMessage): number {
-  return left.lamport - right.lamport || left.author.localeCompare(right.author);
+  return left.lamport - right.lamport || left.device.localeCompare(right.device);
 }
 
 function isAfter(message: StoredMessage, cursor: MessageCursor): boolean {
-  return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.author > cursor.author);
+  return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.device > cursor.device);
 }
 
 function isBefore(message: StoredMessage, cursor: MessageCursor): boolean {
-  return message.lamport < cursor.lamport || (message.lamport === cursor.lamport && message.author < cursor.author);
+  return message.lamport < cursor.lamport || (message.lamport === cursor.lamport && message.device < cursor.device);
 }
 
 export class FakeChat {
@@ -200,6 +200,11 @@ export class FakeChat {
     return id;
   }
 
+  /** A message from one of `author`'s devices other than the first, at a clock of the test's choosing. */
+  receiveMessageFromDevice(author: string, device: string, channelName: string, text: string, lamport: number): string {
+    return this.writeMessage(author, this.channelNamed(channelName).id, text, null, device, lamport);
+  }
+
   receiveReply(author: string, root: string, text: string): string {
     const channel = this.messages.find((message) => message.id === root)?.channel;
     if (!channel) throw new Error(`fake backend: no message ${root}`);
@@ -268,17 +273,25 @@ export class FakeChat {
     return channel;
   }
 
-  private writeMessage(author: string, channel: string, text: string, replyTo: string | null): string {
-    const id = ownedId(author);
+  private writeMessage(
+    author: string,
+    channel: string,
+    text: string,
+    replyTo: string | null,
+    device = author,
+    lamport = this.context.tick(),
+  ): string {
+    const id = ownedId(device);
     const created_ms = Date.now();
     this.messages.push({
       id,
       channel,
       author,
+      device,
       text,
       reply_to: replyTo,
       created_ms,
-      lamport: this.context.tick(),
+      lamport,
       is_edited: false,
     });
     this.context.notify({ kind: "messages", channel });
@@ -351,7 +364,7 @@ export class FakeChat {
     if (!message || rootOf(this.messages, messageId) !== root) throw "that message isn't in this thread";
     const marker = this.readMarkers.get(root);
     if (marker && !isAfter(message, marker)) return;
-    this.readMarkers.set(root, { lamport: message.lamport, author: message.author });
+    this.readMarkers.set(root, { lamport: message.lamport, device: message.device });
     this.context.notify({ kind: "messages", channel: message.channel });
   }
 
@@ -391,7 +404,7 @@ export class FakeChat {
     if (!message) throw "no such message in this channel";
     const marker = this.readMarkers.get(channel);
     if (marker && !isAfter(message, marker)) return;
-    this.readMarkers.set(channel, { lamport: message.lamport, author: message.author });
+    this.readMarkers.set(channel, { lamport: message.lamport, device: message.device });
     this.context.notify({ kind: "channels" });
   }
 
@@ -496,10 +509,10 @@ export class FakeChat {
     for (const channel of this.channels) {
       const inChannel = this.messages.filter((message) => message.channel === channel.id).sort(compareMessages);
       const latest = inChannel.at(-1);
-      if (latest) this.readMarkers.set(channel.id, { lamport: latest.lamport, author: latest.author });
+      if (latest) this.readMarkers.set(channel.id, { lamport: latest.lamport, device: latest.device });
       for (const root of inChannel) {
         const last = repliesOf(this.messages, root.id).sort(compareMessages).at(-1);
-        if (last) this.readMarkers.set(root.id, { lamport: last.lamport, author: last.author });
+        if (last) this.readMarkers.set(root.id, { lamport: last.lamport, device: last.device });
       }
       this.context.notify({ kind: "messages", channel: channel.id });
     }

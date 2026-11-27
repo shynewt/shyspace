@@ -15,11 +15,11 @@ const SAVE_WITHIN_MS = 300;
 const sentPositions = new Map<string, MessageCursor>();
 
 export function cursorOf(message: Message): MessageCursor {
-  return { lamport: message.lamport, author: message.author };
+  return { lamport: message.lamport, device: message.device };
 }
 
 export function isAfter(message: MessageCursor, cursor: MessageCursor): boolean {
-  return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.author > cursor.author);
+  return message.lamport > cursor.lamport || (message.lamport === cursor.lamport && message.device > cursor.device);
 }
 
 /** The newer of the core's read position for `key` and the one this device last sent. */
