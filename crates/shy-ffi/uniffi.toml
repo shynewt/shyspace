@@ -1,3 +1,8 @@
 # Kotlin for Android: Android's own cleaner from API 33, the JNA one before, behind checks lint understands.
 [bindings.kotlin]
 android = true
+
+# Swift for iOS: both crates' C declarations in one module, which ShyCore's XCFramework provides.
+[bindings.swift]
+ffi_module_name = "ShyCoreFFI"
+ffi_module_filename = "shy_ffiFFI"

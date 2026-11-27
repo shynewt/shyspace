@@ -8,7 +8,8 @@ license = "AGPL-3.0-only"
 crate-type = ["cdylib", "lib"]
 
 [features]
-# Builds the binding generator (`cargo run -p shy-ffi --features bindgen --bin uniffi-bindgen`).
+# Builds the binding generators (`cargo run -p shy-ffi --features bindgen --bin uniffi-bindgen`, or
+# `--bin uniffi-bindgen-swift` for iOS).
 bindgen = ["uniffi/cli"]
 # Adds `ShyApp.withMemoryBucket`, for tests and demos; never in a release.
 memory-bucket = ["shy-core/memory-bucket"]
@@ -33,6 +34,10 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 
 [[bin]]
 name = "uniffi-bindgen"
+required-features = ["bindgen"]
+
+[[bin]]
+name = "uniffi-bindgen-swift"
 required-features = ["bindgen"]
 
 [lints]

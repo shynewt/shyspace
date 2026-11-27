@@ -1,0 +1,8 @@
+# Made by build-core.sh from the Rust core.
+/ShyCore/ShyCoreFFI.xcframework/
+/ShyCore/Sources/ShyCore/
+# Made by XcodeGen from project.yml, and by Xcode.
+*.xcodeproj/
+.build/
+DerivedData/
+xcuserdata/

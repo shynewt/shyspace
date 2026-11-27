@@ -60,6 +60,14 @@ Everything builds in a container (`apps/android/Dockerfile`: JDK, Android SDK an
 - `make wrapper` regenerates the Gradle wrapper from a checked distribution; `debug.keystore` is a public key on purpose, so every build installs as an update. Because anyone can sign with it, anyone could install an "update" over a debug build and read its data: never keep a real workspace in a debug build.
 - `make device-test` runs the instrumented tests (`app/src/androidTest`: the Keystore, Android's file rules, and HTTPS through the phone's trust store, which needs the internet: `PlatformTlsDeviceTest` contacts `s3.us-east-1.amazonaws.com` with made-up keys, and serves a self-signed certificate on the phone's own `127.0.0.1`) on a phone adb can see: plugged in by USB with USB debugging on, or paired for wireless debugging. It waits up to two minutes for a phone offering adb (unlock it; a locked GrapheneOS phone drops USB data), updates the debug app and leaves it installed, with its data, and removes only the test app afterwards. The adb key is kept in the cache folder, so the phone asks once.
 
+## The iOS app
+
+iOS builds need Apple's SDK, so they run on a Mac (Apple silicon, Xcode 27) or in CI's `ios` job on GitHub's macOS runner; nothing for iOS builds on Linux. From the repository on a Mac with rustup:
+
+- `apps/ios/build-core.sh` builds the Rust core for iPhones and the Apple silicon simulator (`aarch64-apple-ios`, `aarch64-apple-ios-sim`), its Swift bindings, and `ShyCoreFFI.xcframework`, into the local Swift package `apps/ios/ShyCore` (generated, never committed; `release` leaves out the in-memory bucket). Run it again after changing `crates/`.
+- `cd apps/ios/ShyCore && xcodebuild test -scheme ShyCore -destination 'platform=iOS Simulator,name=iPhone 17'` runs the Swift tests against the real core.
+- Both crates' C declarations live in one module, `ShyCoreFFI` (their `uniffi.toml`); the generated Swift is compiled in the Swift 5 language mode until UniFFI's is Sendable-correct, and everything else in Swift 6.
+
 The phone apps' colours and motion come from `apps/desktop/src/styles.css` through `tools/design-tokens/export.mjs`, which writes `ShyTokens.kt`. `pnpm lint` fails if it's out of date; run `node tools/design-tokens/export.mjs` after changing a colour token.
 
 ## A demo workspace

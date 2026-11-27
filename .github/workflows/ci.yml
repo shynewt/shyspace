@@ -222,3 +222,21 @@ jobs:
       - name: Disk left
         if: always()
         run: df -h /
+
+  ios:
+    name: iOS core (build, Swift tests)
+    # iOS builds need Apple's SDK, so they run only here; see apps/ios.
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust targets for iPhones and the Apple silicon simulator
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2.9.3
+      - name: The core, its Swift bindings and the XCFramework
+        run: apps/ios/build-core.sh
+      - name: Swift tests on the simulator
+        working-directory: apps/ios/ShyCore
+        run: xcodebuild test -scheme ShyCore -destination 'platform=iOS Simulator,name=iPhone 17'

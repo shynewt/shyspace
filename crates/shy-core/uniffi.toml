@@ -1,0 +1,4 @@
+# Swift for iOS: both crates' C declarations in one module, which ShyCore's XCFramework provides.
+[bindings.swift]
+ffi_module_name = "ShyCoreFFI"
+ffi_module_filename = "shy_coreFFI"
