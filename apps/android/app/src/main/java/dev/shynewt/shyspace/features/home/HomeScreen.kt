@@ -153,7 +153,7 @@ private fun ChannelRow(channel: Channel, members: List<Member>, onOpen: (Channel
         else -> colors.textMuted
     }
     // The robot avatar is hidden from screen readers, so a DM with an agent says so in words.
-    val isWithAgent = dmPerson?.first?.isBot == true
+    val isWithAgent = channel.dmMembers.size == 1 && dmPerson?.first?.isBot == true
     val state = listOfNotNull(
         stringResource(R.string.agent).takeIf { isWithAgent },
         when {
