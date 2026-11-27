@@ -13,6 +13,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import dev.shynewt.shyspace.features.onboarding.LinkScreen
 import dev.shynewt.shyspace.features.onboarding.LinkStep
@@ -68,23 +69,36 @@ class OnboardingScreensTest {
     private fun showLink() {
         compose.setContent {
             ShyTheme(isDark = false) {
-                LinkScreen(step = step, onCodeChange = { if (it.isNotEmpty()) asked += "code $it" }, onStartAgain = { asked += "again" }, onBack = {})
+                LinkScreen(step = step, onCodeEntered = { asked += "code $it" }, onStartAgain = { asked += "again" }, onBack = {})
             }
         }
     }
 
     @Test
-    fun aTypedCodeIsTakenAsItLands() {
+    fun aCodePastedIntoTheFieldIsTakenAsItLands() {
         showLink()
 
         compose.onNodeWithText("Link code").performTextInput("shy-link-1234")
         compose.waitForIdle()
 
-        assertEquals("code shy-link-1234", asked.last())
+        assertEquals(listOf("code shy-link-1234"), asked)
     }
 
     @Test
-    fun pasteFillsTheCodeFromTheClipboard() {
+    fun aCodeTypedByHandIsTakenOnDone() {
+        showLink()
+
+        compose.onNodeWithText("Link code").performTextInput("a")
+        compose.onNodeWithText("Link code").performTextInput("b")
+        compose.waitForIdle()
+        assertEquals(emptyList<String>(), asked)
+        compose.onNodeWithText("Link code").performImeAction()
+
+        assertEquals(listOf("code ab"), asked)
+    }
+
+    @Test
+    fun pasteTakesTheCodeFromTheClipboard() {
         RuntimeEnvironment.getApplication().getSystemService(ClipboardManager::class.java)
             .setPrimaryClip(ClipData.newPlainText("code", "  shy-link-5678 \n"))
         showLink()
@@ -92,15 +106,24 @@ class OnboardingScreensTest {
         compose.onNodeWithText("Paste").performClick()
         compose.waitForIdle()
 
-        assertEquals("code shy-link-5678", asked.last())
+        assertEquals(listOf("code shy-link-5678"), asked)
     }
 
     @Test
-    fun anExpiredCodeSaysWhatToDo() {
-        step = LinkStep.EnterCode(hasExpired = true)
+    fun aProblemWithTheCodeIsShownInTheCoresWords() {
+        step = LinkStep.EnterCode(problem = "This code has run out. Show a new one on your other device.")
         showLink()
 
         compose.onNodeWithText("This code has run out. Show a new one on your other device.").assert(isAnnounced)
+    }
+
+    @Test
+    fun whileWaitingItSaysSo() {
+        step = LinkStep.Waiting
+        showLink()
+
+        compose.onNodeWithText("Waiting for your other device…").assertExists()
+        compose.onNodeWithText("Link code").assertDoesNotExist()
     }
 
     @Test
@@ -115,8 +138,8 @@ class OnboardingScreensTest {
     }
 
     @Test
-    fun aStoppedLinkSaysNothingWasSharedAndCanStartAgain() {
-        step = LinkStep.Stopped
+    fun anEndedLinkSaysWhyAndCanStartAgain() {
+        step = LinkStep.Ended("Your other device stopped the link. Nothing was shared.")
         showLink()
 
         compose.onNodeWithText("Your other device stopped the link. Nothing was shared.").assert(isAnnounced)

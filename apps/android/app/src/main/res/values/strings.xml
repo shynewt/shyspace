@@ -20,11 +20,9 @@
     <string name="link_code">Link code</string>
     <string name="paste_code">Paste the code</string>
     <string name="paste">Paste</string>
-    <string name="link_code_expired">This code has run out. Show a new one on your other device.</string>
     <string name="link_tap_this">On your other device, tap this number</string>
     <string name="link_waiting">Waiting for your other device…</string>
     <string name="link_someone_else">Someone else used this code. On your other device, choose \'None of these\'.</string>
-    <string name="link_stopped">Your other device stopped the link. Nothing was shared.</string>
     <string name="start_again">Start again</string>
     <string name="open_failed">Some workspaces couldn\'t open</string>
     <string name="notes">Notes</string>
