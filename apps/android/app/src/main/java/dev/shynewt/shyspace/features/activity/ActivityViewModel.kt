@@ -32,18 +32,18 @@ class ActivityViewModel(private val core: ShyCore) : ViewModel() {
     private val mutableState = MutableStateFlow(ActivityState())
     val state: StateFlow<ActivityState> = mutableState.asStateFlow()
     private var following: Job? = null
+    /** The handle on the workspace followed, released when another replaces it or this ends. */
+    private var followed: ShyWorkspace? = null
 
     /** Shows [workspaceId]'s activity from now on. */
     fun follow(workspaceId: String) {
         if (mutableState.value.workspaceId == workspaceId && following?.isActive == true) return
         following?.cancel()
-        val workspace = core.app.workspace(workspaceId)
-        if (workspace == null) {
-            mutableState.value = ActivityState(workspaceId = workspaceId, isLoading = false, error = "This workspace isn't open.")
-            return
-        }
         mutableState.value = ActivityState(workspaceId = workspaceId)
         following = viewModelScope.launch {
+            val workspace = core.openWorkspace(workspaceId, ::showError) ?: return@launch
+            followed?.close()
+            followed = workspace
             core.changes(workspace).collect { change ->
                 if (change is Change.Messages || change is Change.Channels || change is Change.Sync) reload(workspace)
             }
@@ -53,6 +53,8 @@ class ActivityViewModel(private val core: ShyCore) : ViewModel() {
     /** There's no workspace to follow, for [reason]: say so instead of loading. */
     fun showUnavailable(reason: String) {
         following?.cancel()
+        followed?.close()
+        followed = null
         mutableState.value = ActivityState(isLoading = false, error = reason)
     }
 
@@ -72,6 +74,10 @@ class ActivityViewModel(private val core: ShyCore) : ViewModel() {
             previews = inbox.attention.map { it.message.id }.zip(previews).toMap(),
             isLoading = false,
         )
+    }
+
+    override fun onCleared() {
+        followed?.close()
     }
 
     private fun showError(reason: String) {

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.shynewt.shyspace.core.ShyCore
 import dev.shynewt.shyspace.core.coreCall
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +39,10 @@ sealed interface HomeState {
 class HomeViewModel(private val core: ShyCore) : ViewModel() {
     private val mutableState = MutableStateFlow<HomeState>(HomeState.Loading)
     val state: StateFlow<HomeState> = mutableState.asStateFlow()
+    /** The handle on the workspace shown, released when another replaces it or Home ends. */
+    private var shown: ShyWorkspace? = null
+    /** Keeps the shown workspace current; stopped before its handle is released. */
+    private var showing: Job? = null
 
     init {
         viewModelScope.launch { open() }
@@ -71,20 +76,30 @@ class HomeViewModel(private val core: ShyCore) : ViewModel() {
         show(first, failures)
     }
 
-    private suspend fun show(workspace: ShyWorkspace, failures: List<OpenFailure>) {
-        core.changes(workspace).collect { change ->
-            if (change is Change.Channels || change is Change.Messages || change is Change.Members || change is Change.Sync) {
-                val channels = coreCall(::fail) { workspace.channels() } ?: return@collect
-                val members = coreCall(::fail) { workspace.members() } ?: return@collect
-                mutableState.value = HomeState.Ready(
-                    workspaceId = workspace.workspaceId(),
-                    workspaceName = workspace.name(),
-                    channels = channels,
-                    members = members,
-                    openFailures = failures,
-                )
+    private fun show(workspace: ShyWorkspace, failures: List<OpenFailure>) {
+        showing?.cancel()
+        shown?.close()
+        shown = workspace
+        showing = viewModelScope.launch {
+            core.changes(workspace).collect { change ->
+                if (change is Change.Channels || change is Change.Messages || change is Change.Members || change is Change.Sync) {
+                    val channels = coreCall(::fail) { workspace.channels() } ?: return@collect
+                    val members = coreCall(::fail) { workspace.members() } ?: return@collect
+                    mutableState.value = HomeState.Ready(
+                        workspaceId = workspace.workspaceId(),
+                        workspaceName = workspace.name(),
+                        channels = channels,
+                        members = members,
+                        openFailures = failures,
+                    )
+                }
             }
         }
+    }
+
+    override fun onCleared() {
+        showing?.cancel()
+        shown?.close()
     }
 
     private fun fail(reason: String) {

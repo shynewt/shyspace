@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.shynewt.shyspace.core.ShyCore
 import dev.shynewt.shyspace.core.coreCall
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,7 +40,10 @@ class ChannelViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(ChannelState())
     val state: StateFlow<ChannelState> = mutableState.asStateFlow()
-    private val workspace: ShyWorkspace? = core.app.workspace(workspaceId)
+    private val opening: Deferred<ShyWorkspace?> = viewModelScope.async {
+        // Released when the screen goes: the core needs every handle gone to swap a phone's key when linking.
+        core.openWorkspace(workspaceId, ::showError)?.also(::addCloseable)
+    }
 
     /** How many of the newest messages to show; loading older ones raises it a page at a time. */
     private var shownLimit = PAGE
@@ -51,47 +56,55 @@ class ChannelViewModel(
     /** Sends [text], trimmed; false when there was nothing to send or sending failed. */
     suspend fun send(text: String): Boolean {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || workspace == null) return false
+        if (trimmed.isEmpty()) return false
+        val workspace = opening.await() ?: return false
         return coreCall(::showError) { workspace.sendMessage(channelId, trimmed, null) } != null
     }
 
     /** Replaces a message's text with [text], trimmed; false when it's blank or the edit failed. */
     suspend fun edit(message: String, text: String): Boolean {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || workspace == null) return false
+        if (trimmed.isEmpty()) return false
+        val workspace = opening.await() ?: return false
         return coreCall(::showError) { workspace.editMessage(message, trimmed) } != null
     }
 
     fun react(message: String, emoji: String, active: Boolean) {
-        if (workspace == null) return
-        viewModelScope.launch { coreCall(::showError) { workspace.react(message, emoji, active) } }
+        viewModelScope.launch {
+            val workspace = opening.await() ?: return@launch
+            coreCall(::showError) { workspace.react(message, emoji, active) }
+        }
     }
 
     fun delete(message: String) {
-        if (workspace == null) return
-        viewModelScope.launch { coreCall(::showError) { workspace.deleteMessage(message) } }
+        viewModelScope.launch {
+            val workspace = opening.await() ?: return@launch
+            coreCall(::showError) { workspace.deleteMessage(message) }
+        }
     }
 
     /** Loads the page of messages just older than the oldest shown. */
     fun loadOlder() {
         val current = mutableState.value
-        if (workspace == null || !current.hasOlder || current.isLoadingOlder) return
+        if (!current.hasOlder || current.isLoadingOlder) return
         mutableState.update { it.copy(isLoadingOlder = true) }
         shownLimit += PAGE
-        viewModelScope.launch { reload(workspace) }
+        viewModelScope.launch {
+            val workspace = opening.await() ?: return@launch
+            reload(workspace)
+        }
     }
 
     /** You saw [message], the newest: the channel is read up to it. */
     fun markSeen(message: String) {
-        if (workspace == null) return
-        viewModelScope.launch { coreCall(::showError) { workspace.markRead(channelId, message) } }
+        viewModelScope.launch {
+            val workspace = opening.await() ?: return@launch
+            coreCall(::showError) { workspace.markRead(channelId, message) }
+        }
     }
 
     private suspend fun follow() {
-        if (workspace == null) {
-            mutableState.value = ChannelState(isLoading = false, error = "This workspace isn't open.")
-            return
-        }
+        val workspace = opening.await() ?: return
         core.changes(workspace).collect { change ->
             if ((change is Change.Messages && change.channel == channelId) || change is Change.Sync) reload(workspace)
         }

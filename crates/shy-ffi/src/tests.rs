@@ -390,3 +390,22 @@ async fn marking_a_channel_read_refreshes_the_channels() {
     .await
     .expect("the channel list was told to refresh");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_screens_opening_at_once_open_each_workspace_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let keystore = Arc::new(AppKeystore::default());
+    let app = app_in(&dir, &keystore);
+    let workspace_id = create_acme(&app).await.workspace_id();
+    app.close_all().await.unwrap();
+    drop(app);
+
+    for _ in 0..8 {
+        let reopened = app_in(&dir, &keystore);
+        let (first, second) = tokio::join!(reopened.open_all(), reopened.open_all());
+        assert!(first.unwrap().is_empty(), "the first opening failed");
+        assert!(second.unwrap().is_empty(), "the second opening failed");
+        assert!(reopened.workspace(workspace_id.clone()).is_some());
+        reopened.close_all().await.unwrap();
+    }
+}

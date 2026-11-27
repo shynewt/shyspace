@@ -39,12 +39,13 @@ class ActivityViewModelTest {
     }
 
     @Test
-    fun aWorkspaceThatIsNotOpenSaysSo() {
+    fun aWorkspaceThatIsNotOnThePhoneSaysSo() = runBlocking {
         val activity = ActivityViewModel(testCore(folder.root))
 
         activity.follow("missing")
 
-        assertEquals("This workspace isn't open.", activity.state.value.error)
+        val shown = withTimeout(5_000) { activity.state.first { !it.isLoading } }
+        assertEquals("This workspace isn't on this phone.", shown.error)
     }
 
     @Test

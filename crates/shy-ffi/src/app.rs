@@ -19,6 +19,9 @@ use crate::{
 pub struct ShyApp {
     workspaces: Arc<Workspaces>,
     networking: Networking,
+    /// One opening at a time: the core's would open a workspace twice if
+    /// two ran together, as when screens restore at once.
+    opening: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Bucket settings, opaque so the secret key can't end up in a log line.
@@ -60,14 +63,18 @@ impl ShyApp {
         Arc::new(Self {
             workspaces: Arc::new(Workspaces::new(data_dir, keys)),
             networking,
+            opening: Arc::default(),
         })
     }
 
     /// Opens every workspace not open yet. One that fails doesn't stop the
-    /// others; the failures are returned.
+    /// others; the failures are returned. Safe to call from several places
+    /// at once: they take turns.
     pub async fn open_all(&self) -> Result<Vec<OpenFailure>, ShyError> {
-        let (workspaces, networking) = (self.workspaces.clone(), self.networking);
+        let (workspaces, networking, opening) =
+            (self.workspaces.clone(), self.networking, self.opening.clone());
         run(async move {
+            let _turn = opening.lock().await;
             let opened = workspaces.open_all(|| networking.into()).await?;
             Ok(opened
                 .failed
@@ -151,6 +158,7 @@ impl ShyApp {
         Arc::new(Self {
             workspaces: Arc::new(Workspaces::with_memory_bucket(data_dir, keys)),
             networking,
+            opening: Arc::default(),
         })
     }
 }

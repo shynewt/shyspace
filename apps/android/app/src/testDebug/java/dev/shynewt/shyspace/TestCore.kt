@@ -25,8 +25,9 @@ class MemoryKeyStore : DeviceKeyStore {
     }
 }
 
-/** A real core in [folder], offline, on a bucket kept in memory. */
-fun testCore(folder: File) = ShyCore(ShyApp.withMemoryBucket(folder.path, MemoryKeyStore(), Networking.OFFLINE))
+/** A real core in [folder], offline, on a bucket kept in memory; pass [keys] again to start it anew on the same phone. */
+fun testCore(folder: File, keys: MemoryKeyStore = MemoryKeyStore()) =
+    ShyCore(ShyApp.withMemoryBucket(folder.path, keys, Networking.OFFLINE))
 
 fun unusedBucket() = BucketSettings("http://unused", "us-east-1", "unused", "unused", "unused-secret")
 
