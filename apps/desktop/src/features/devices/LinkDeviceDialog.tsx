@@ -17,7 +17,11 @@ type Step =
   | { kind: "code"; code: string }
   | { kind: "pick"; choices: [string, string, string] }
   | { kind: "stopped"; message: string }
-  | { kind: "done" };
+  | { kind: "done"; isFinishing: boolean };
+
+const LINKED = "Linked. Your new device can read now, and can send once your workspace adds it.";
+const FINISHING = "Linked, finishing… It goes on as soon as your workspace can be reached.";
+const UNREACHABLE = "Can't reach your workspace right now. Still watching for your new device…";
 
 /**
  * Links a new device of yours: shows a code for it, then the number it
@@ -27,7 +31,9 @@ type Step =
 export function LinkDeviceDialog({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>({ kind: "loading" });
   const [isBusy, setBusy] = useState(false);
+  const [isUnreachable, setUnreachable] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  const result = useRef<HTMLParagraphElement>(null);
 
   const makeCode = useCallback(async () => {
     setStep({ kind: "loading" });
@@ -48,9 +54,11 @@ export function LinkDeviceDialog({ onClose }: { onClose: () => void }) {
     const poll = window.setInterval(async () => {
       try {
         const shown = await api.pendingLink();
+        setUnreachable(false);
         if (shown) setStep({ kind: "pick", choices: shown.choices });
-      } catch (error) {
-        reportError(error);
+      } catch {
+        // Polled every 2 s: a failure is a quiet line until the next one works.
+        setUnreachable(true);
       }
     }, POLL_MS);
     const renew = window.setTimeout(() => void makeCode(), RENEW_MS);
@@ -61,8 +69,10 @@ export function LinkDeviceDialog({ onClose }: { onClose: () => void }) {
   }, [step.kind, makeCode]);
 
   // Focus goes to the heading, never to a number: the person has to look.
+  // A result takes focus, so it is read out.
   useEffect(() => {
     if (step.kind === "pick") heading.current?.focus();
+    if (step.kind === "done" || step.kind === "stopped") result.current?.focus();
   }, [step.kind]);
 
   useEffect(() => {
@@ -74,8 +84,8 @@ export function LinkDeviceDialog({ onClose }: { onClose: () => void }) {
   const pick = async (choice: string) => {
     setBusy(true);
     try {
-      await api.confirmLink(choice);
-      setStep({ kind: "done" });
+      const confirmed = await api.confirmLink(choice);
+      setStep({ kind: "done", isFinishing: confirmed.is_finishing });
     } catch (error) {
       setStep({ kind: "stopped", message: errorMessage(error) });
     } finally {
@@ -109,13 +119,15 @@ export function LinkDeviceDialog({ onClose }: { onClose: () => void }) {
           <>
             <h2 className="text-base font-semibold">Link a device</h2>
             <p className="text-sm text-muted">
-              This device will see the workspace's history and channels, not private channels or DMs yet.
+              The new device will see the workspace's history and channels, not private channels or DMs yet.
             </p>
             <QrCode value={step.code} label="The link code, to scan on your new device" />
             <div className="w-full text-left">
               <CopyField value={step.code} label="Copy the link code" />
             </div>
-            <StatusLine>On your new device, choose "I already use shyspace".</StatusLine>
+            <StatusLine>
+              {isUnreachable ? UNREACHABLE : 'On your new device, choose "I already use shyspace".'}
+            </StatusLine>
           </>
         )}
         {step.kind === "pick" && (
@@ -135,14 +147,18 @@ export function LinkDeviceDialog({ onClose }: { onClose: () => void }) {
         )}
         {step.kind === "stopped" && (
           <>
-            <p className="text-sm">{step.message}</p>
+            <p ref={result} tabIndex={-1} className="text-sm outline-none">
+              {step.message}
+            </p>
             <Button variant="primary" onClick={() => void makeCode()}>
               New code
             </Button>
           </>
         )}
         {step.kind === "done" && (
-          <p className="text-sm">Linked. Your new device can read now, and can send once your workspace adds it.</p>
+          <p ref={result} tabIndex={-1} className="text-sm outline-none">
+            {step.isFinishing ? FINISHING : LINKED}
+          </p>
         )}
       </motion.div>
       <DialogActions>

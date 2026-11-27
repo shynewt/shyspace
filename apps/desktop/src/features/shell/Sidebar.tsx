@@ -78,16 +78,18 @@ export function Sidebar({ status, onOpenSearch }: { status: SyncStatus | undefin
   );
 }
 
-/** The inbox, counting mentions (in pages too) and new replies in threads you follow. */
+/** The inbox, counting mentions (in pages too), new replies in threads you follow, and unseen notices about your devices. */
 function InboxLink() {
   const loadInbox = useCallback(() => api.inbox(), []);
   const inbox = useLive(loadInbox, isInboxChange);
+  const notices = useLive(api.deviceNotices, (change) => change.kind === "members");
+  const unseenNotices = notices?.filter((notice) => !notice.is_seen).length ?? 0;
   return (
     <NavItem
       view={{ kind: "inbox" }}
       icon={<InboxIcon size={15} />}
       label="Inbox"
-      unread={(inbox?.attention.length ?? 0) + (inbox?.page_mentions.length ?? 0)}
+      unread={(inbox?.attention.length ?? 0) + (inbox?.page_mentions.length ?? 0) + unseenNotices}
     />
   );
 }

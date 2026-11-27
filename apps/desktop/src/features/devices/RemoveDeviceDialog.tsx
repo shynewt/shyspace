@@ -13,10 +13,12 @@ export function RemoveDeviceDialog({
   device,
   devices,
   onClose,
+  onRemoved,
 }: {
   device: DeviceInfo;
   devices: DeviceInfo[];
   onClose: () => void;
+  onRemoved?: () => void;
 }) {
   const [isBusy, setBusy] = useState(false);
   const name = deviceName(device);
@@ -27,6 +29,7 @@ export function RemoveDeviceDialog({
       if (withLinked) await api.removeMyDeviceAndItsLinks(device.id);
       else await api.removeMyDevice(device.id);
       showToast(device.is_linking ? "The link was stopped." : "Removing… finishes when your workspace confirms.");
+      onRemoved?.();
       onClose();
     } catch (error) {
       reportError(error);

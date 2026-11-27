@@ -108,7 +108,7 @@ test("a device linked from another of yours shows in the inbox until you've seen
     ]),
   );
 
-  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  await page.getByRole("button", { name: /^Inbox/ }).click();
   const section = page.getByRole("region", { name: "Your devices" });
   await expect(section.getByText("A new device can use shyspace as you")).toBeVisible();
   await expect(section.getByText(/Android, linked from another of your devices/)).toBeVisible();
@@ -126,7 +126,7 @@ test("review devices opens Settings at Devices", async ({ page }) => {
       { device: "c".repeat(64), kind: "removed", platform: null, at_ms: Date.now(), is_seen: false },
     ]),
   );
-  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  await page.getByRole("button", { name: /^Inbox/ }).click();
 
   await page.getByRole("button", { name: "Review devices" }).click();
 
@@ -175,4 +175,142 @@ test("a notice in a workspace that isn't shown alerts too", async ({ page }) => 
     .poll(() => page.evaluate(() => window.fake.alertsShown.map((alert) => alert.title)))
     .toEqual(["A new device can use shyspace as you"]);
   expect(await page.evaluate(() => window.fake.alertWorkspaces)).toEqual([team]);
+});
+
+test("on a linked device, your first device's row says why it can't be removed from here", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.prepareFake = (fake) => {
+      fake.devices.isThisLinked = true;
+    };
+  });
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() =>
+    window.fake.devices.setDevices([{ id: "a".repeat(64), is_first_device: true, platform: "Linux" }]),
+  );
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Devices" }).click();
+
+  await expect(settings.getByText("Remove this one from that device, or ask your admin.")).toBeVisible();
+  await expect(settings.getByRole("button", { name: /^Remove Linux/ })).toHaveCount(0);
+  await expect(settings.getByRole("button", { name: "Remove this device" })).toBeVisible();
+});
+
+test("linking is refused, in the core's words, with five devices or after the day's links", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() =>
+    window.fake.devices.setDevices([1, 2, 3, 4].map((n) => ({ id: String(n).repeat(64), platform: "Linux" as const }))),
+  );
+  let dialog = await openLinkDialogFrom(page);
+  await expect(dialog.getByText("you already have 5 devices; remove one to link another")).toBeVisible();
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  await page.evaluate(() => {
+    window.fake.devices.setDevices([]);
+    window.fake.devices.hasReachedDailyLimit = true;
+  });
+  dialog = await openLinkDialogFrom(page);
+  await expect(dialog.getByText("you've linked several devices today; try again tomorrow")).toBeVisible();
+});
+
+async function openLinkDialogFrom(page: Page) {
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  if (!(await settings.isVisible())) {
+    await page.keyboard.press("Control+,");
+    await settings.getByRole("tab", { name: "Devices" }).click();
+  }
+  await settings.getByRole("button", { name: "Link a device" }).click();
+  return page.getByRole("dialog", { name: "Link a device" });
+}
+
+test("polls that can't reach the workspace show one quiet line, not an error each time", async ({ page }) => {
+  const dialog = await openLinkDialog(page);
+  await page.evaluate(() => {
+    window.fake.devices.pendingLinkFailures = 3;
+  });
+
+  await expect(
+    dialog.getByText("Can't reach your workspace right now. Still watching for your new device…"),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.fake.devices.pendingLinkPolls), { timeout: 10_000 })
+    .toBeGreaterThan(3);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(dialog.getByText('On your new device, choose "I already use shyspace".')).toBeVisible();
+});
+
+test("a confirmation kept but not finished says linked, finishing", async ({ page }) => {
+  const dialog = await openLinkDialog(page);
+  await page.evaluate(() => {
+    window.fake.devices.doesConfirmFinishLater = true;
+    window.fake.devices.newDeviceAsks();
+  });
+
+  await dialog
+    .getByRole("group", { name: "Tap the number your new device shows" })
+    .getByRole("button", { name: "482, 917" })
+    .click();
+
+  await expect(
+    dialog.getByText("Linked, finishing… It goes on as soon as your workspace can be reached."),
+  ).toBeVisible();
+});
+
+test("the result of a pick takes focus, so it is read out", async ({ page }) => {
+  const dialog = await openLinkDialog(page);
+  await page.evaluate(() => window.fake.devices.newDeviceAsks());
+
+  await dialog
+    .getByRole("group", { name: "Tap the number your new device shows" })
+    .getByRole("button", { name: "305, 116" })
+    .click();
+
+  await expect(dialog.getByText("That wasn't the number. Start again with a new code.")).toBeFocused();
+});
+
+test("not you? opens the remove confirm for that device, and unseen notices count in the inbox", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() => {
+    window.fake.devices.setDevices([{ id: "c".repeat(64), platform: "Android", linked_ms: Date.UTC(2026, 10, 27) }]);
+    window.fake.devices.setNotices([
+      { device: "c".repeat(64), kind: "linked", platform: "Android", at_ms: Date.UTC(2026, 10, 27), is_seen: false },
+    ]);
+  });
+  await expect(page.getByRole("button", { name: "Inbox, 1 unread" })).toBeVisible();
+  await page.getByRole("button", { name: "Inbox, 1 unread" }).click();
+
+  await page.getByRole("button", { name: "Not you? Remove it" }).click();
+
+  const confirm = page.getByRole("dialog", { name: /Remove "Android, linked/ });
+  await confirm.getByRole("button", { name: "Remove" }).click();
+  await expect.poll(() => page.evaluate(() => window.fake.devices.removing)).toEqual(["c".repeat(64)]);
+});
+
+test("after removing a device, one tap each to set your profile again and, for the admin, change the storage keys", async ({
+  page,
+}) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() =>
+    window.fake.devices.setDevices([{ id: "a".repeat(64), platform: "Android", linked_ms: Date.UTC(2026, 10, 27) }]),
+  );
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Devices" }).click();
+  await settings.getByRole("button", { name: /Remove Android, linked/ }).click();
+  await page
+    .getByRole("dialog", { name: /Remove "Android/ })
+    .getByRole("button", { name: "Remove" })
+    .click();
+
+  await expect(settings.getByText("If that device was lost")).toBeVisible();
+  await expect(settings.getByRole("button", { name: "Change the storage keys" })).toBeVisible();
+  await settings.getByRole("button", { name: "Set your name, picture and status again" }).click();
+  await expect(settings.getByRole("tab", { name: "Profile" })).toHaveAttribute("aria-selected", "true");
+  await settings.getByRole("tab", { name: "Devices" }).click();
+  await settings.getByRole("button", { name: "Dismiss" }).click();
+  await expect(settings.getByText("If that device was lost")).toHaveCount(0);
 });

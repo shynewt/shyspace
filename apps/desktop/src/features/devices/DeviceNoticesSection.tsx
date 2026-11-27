@@ -1,17 +1,19 @@
 import { MonitorSmartphone } from "lucide-react";
 import { useState } from "react";
-import { api } from "../../lib/api";
-import { reportError } from "../../lib/toast";
+import { api, type DeviceInfo, type DeviceNotice } from "../../lib/api";
+import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, RelativeTime, SectionLabel } from "../../ui";
 import { noticeKey, noticeText } from "./notices";
+import { RemoveDeviceDialog } from "./RemoveDeviceDialog";
 
 /** Unseen notices about your devices, at the top of the inbox until you've seen them. */
 export function DeviceNoticesSection() {
   const { openSettings } = useWorkspace();
   const notices = useLive(api.deviceNotices, (change) => change.kind === "members");
   const [isBusy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<{ device: DeviceInfo; devices: DeviceInfo[] } | null>(null);
   const unseen = notices?.filter((notice) => !notice.is_seen) ?? [];
   if (unseen.length === 0) return null;
   const markSeen = async () => {
@@ -22,6 +24,18 @@ export function DeviceNoticesSection() {
       reportError(error);
     } finally {
       setBusy(false);
+    }
+  };
+  // Straight to the confirm for that device: one step from the notice.
+  const removeLinked = async (notice: DeviceNotice) => {
+    try {
+      const devices = await api.myDevices();
+      const device = devices.find((candidate) => candidate.id === notice.device);
+      if (!device) return showToast("That device isn't one of yours any more.", "info");
+      if (!device.may_remove) return showToast(device.why_not_removable ?? "It can't be removed from here.", "info");
+      setRemoving({ device, devices });
+    } catch (error) {
+      reportError(error);
     }
   };
   return (
@@ -40,6 +54,11 @@ export function DeviceNoticesSection() {
                 </div>
                 <p className="text-xs text-muted">{body}</p>
               </div>
+              {notice.kind === "linked" && (
+                <Button size="sm" variant="secondary" onClick={() => void removeLinked(notice)}>
+                  Not you? Remove it
+                </Button>
+              )}
             </li>
           );
         })}
@@ -52,6 +71,9 @@ export function DeviceNoticesSection() {
           Got it
         </Button>
       </div>
+      {removing && (
+        <RemoveDeviceDialog device={removing.device} devices={removing.devices} onClose={() => setRemoving(null)} />
+      )}
     </section>
   );
 }
