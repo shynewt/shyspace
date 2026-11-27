@@ -1857,6 +1857,38 @@ async fn a_linking_store_is_not_created_over() {
     assert!(refused.contains("opens only for reading"), "{refused}");
 }
 
+/// Nor joined into with an invite.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linking_store_is_not_joined_into() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let code = bob.create_test_link_code().unwrap();
+    drop(begin_linking(&code, &dir, &bucket).await);
+    let invite = admin
+        .create_test_invite("phone", std::time::Duration::from_secs(600))
+        .unwrap();
+    let mailbox = BucketMailbox {
+        bucket: bucket.clone(),
+        token: invite.token.clone(),
+    };
+
+    let joined = Workspace::join_with(
+        &data_dir(&dir).linking(),
+        invite,
+        crate::Profile {
+            name: "Mallory",
+            is_bot: false,
+        },
+        &mailbox,
+        connector(&bucket),
+        Networking::Offline,
+        &JoinCancel::new(),
+    )
+    .await;
+
+    let refused = format!("{:#}", joined.err().unwrap());
+    assert!(refused.contains("opens only for reading"), "{refused}");
+
 /// Links that end with nothing handed over leave nothing behind, so the
 /// next link starts afresh.
 #[tokio::test(flavor = "multi_thread")]
