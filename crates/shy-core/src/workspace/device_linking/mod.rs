@@ -4,6 +4,11 @@
 //! once the admin's app adds it, keeping what was typed meanwhile. What it
 //! needs is kept beside its folder, so a restart picks the link up again.
 
+mod ending;
+
+#[cfg(test)]
+pub(crate) use ending::{STOPS_BEFORE_FORGETTING_READING, STOPS_BEFORE_JOINING};
+
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -37,6 +42,7 @@ const ADDED_POLL: Duration = Duration::from_secs(5);
 const DID_NOT_FINISH: &str = "Linking didn't finish on this device. Link again from your other device.";
 const NOT_ADDED_IN_TIME: &str =
     "This device wasn't added within a week, so nothing was kept. Link again from your other device.";
+const LINK_IS_OVER: &str = "this link is over; start again with a new code";
 
 /// What this device shows once the person's device opened its request.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,8 +56,9 @@ pub enum CheckOnNewDevice {
     Confirmed,
 }
 
-/// The admin's app refused the link, with its signed reason. Both stores
-/// are wiped by then.
+/// The link ended without this device being added: the admin's app refused
+/// it with its signed reason, or the person's other device stopped it
+/// (`Cancelled`). Both stores are wiped by then.
 #[derive(Debug)]
 pub struct LinkRefused(pub Reason);
 
@@ -82,7 +89,8 @@ pub enum ResumedLink<M: JoinMailbox> {
 
 /// A link in progress on the new device.
 pub struct DeviceLinking<M: JoinMailbox> {
-    enrollment: DeviceEnrollment,
+    /// Gone once the link joined or was wiped.
+    enrollment: Option<DeviceEnrollment>,
     linking: DataDir,
     code: LinkCode,
     request: LinkRequest,
@@ -121,7 +129,8 @@ impl DeviceLinking<PresignedMailbox> {
     }
 
     /// Waits until the admin's app adds this device, then joins, keeping
-    /// the drafts and read positions `reading` holds.
+    /// the drafts and read positions `reading` holds. Other handles to
+    /// `reading` may stay open: its store goes once the last one closes.
     pub async fn wait_until_added(
         self,
         reading: Workspace,
@@ -145,6 +154,8 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             "This code has run out. Show a new one on your other device."
         );
         let linking = data.linking();
+        // Refused while the last link's store is still held open somewhere.
+        linking.forget_reading().await?;
         let (enrollment, device_request) = DeviceEnrollment::begin(data, link_of(&code)).await?;
         let (request, handover_key) = enrollment.link_request(&code, &device_request, platform)?;
         linking
@@ -152,7 +163,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             .await?;
         mailbox.post_request(seal_link_request(&code, &request)?).await?;
         Ok(Self {
-            enrollment,
+            enrollment: Some(enrollment),
             linking,
             code,
             request,
@@ -171,14 +182,15 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         let Some(kept) = linking.kept_link().await? else {
             return Ok(None);
         };
-        if Workspace::exists(&data.path) {
-            // Joined before the app stopped: only the reading store was left.
+        // Joined, or wiped, while something still held the reading store.
+        if Workspace::exists(&data.path) || kept.is_ended {
             linking.forget_reading().await?;
             return Ok(None);
         }
         if kept.is_finishing || kept.is_expired(now_ms()?) {
             linking.forget_reading().await?;
-            data.forget_unfinished().await?;
+            // Never a folder that holds a joined workspace.
+            data.clear_unfinished_join().await?;
             bail!(match kept.is_finishing {
                 true => DID_NOT_FINISH,
                 false => NOT_ADDED_IN_TIME,
@@ -192,20 +204,26 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             ..
         } = kept;
         let enrollment = DeviceEnrollment::reopen(data, link_of(&code)).await?;
-        let is_handed_over = handover_secret.is_none();
+        // The hand-over opened once the reading store is complete, even if a
+        // stop came before its secret was deleted.
+        let is_handed_over = Workspace::exists(&linking.path);
         let linking_handle = Self {
-            enrollment,
+            enrollment: Some(enrollment),
             linking,
             mailbox: mailbox_for(&code),
             code,
             request,
-            handover_secret,
+            handover_secret: handover_secret.filter(|_| !is_handed_over),
             started_ms,
         };
         if !is_handed_over {
             return Ok(Some(ResumedLink::Waiting(linking_handle)));
         }
         let reading = Workspace::open_reading(&linking_handle.linking, connect).await?;
+        reading
+            .state()
+            .store
+            .delete_meta(super::linking_store::HANDOVER_SECRET_META)?;
         Ok(Some(ResumedLink::Reading(linking_handle, reading)))
     }
 
@@ -215,12 +233,18 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         self.started_ms -= age_ms;
     }
 
-    /// Waits until the person's device opens this device's request.
-    pub async fn wait_for_check(&self, cancel: &JoinCancel) -> Result<CheckOnNewDevice> {
+    /// Waits until the person's device opens this device's request. If it
+    /// stopped the link instead, both stores are wiped.
+    pub async fn wait_for_check(&mut self, cancel: &JoinCancel) -> Result<CheckOnNewDevice> {
         let mut cancelled = cancel.subscribe();
         loop {
-            if let Some(check) = self.check_now().await? {
-                return Ok(check);
+            match self.check_now().await {
+                Ok(Some(check)) => return Ok(check),
+                Ok(None) => {}
+                Err(error) if error.downcast_ref::<LinkRefused>().is_some() => {
+                    return self.wiped_after(error, None).await;
+                }
+                Err(error) => warn!("can't read the answer yet: {error:#}"),
             }
             ensure!(
                 !self.code.is_expired(now_ms()?),
@@ -233,8 +257,9 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         }
     }
 
-    /// The check, if the person's device has answered. Junk in the answer
-    /// slot, from someone with the bucket keys, is ignored.
+    /// The check, if the person's device has answered; a [`LinkRefused`]
+    /// error if it stopped the link. Junk in the answer slot, from someone
+    /// with the bucket keys, is ignored.
     pub(crate) async fn check_now(&self) -> Result<Option<CheckOnNewDevice>> {
         let device = &self.request.device;
         match self.answer_now().await? {
@@ -249,6 +274,13 @@ impl<M: JoinMailbox> DeviceLinking<M> {
                 }
             }
             Some(Answer::Handover(_)) => Ok(Some(CheckOnNewDevice::Confirmed)),
+            Some(Answer::Stopped(stop)) if stop.is_for(&self.code, device) => {
+                Err(LinkRefused(Reason::Cancelled).into())
+            }
+            Some(Answer::Stopped(_)) => {
+                warn!("ignoring a stop the person's device didn't sign for this device");
+                Ok(None)
+            }
             None => Ok(None),
         }
     }
@@ -271,6 +303,9 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             match self.handover_now().await {
                 Ok(Some(handover)) => return self.open_reading_from(handover, connect).await,
                 Ok(None) => {}
+                Err(error) if error.downcast_ref::<LinkRefused>().is_some() => {
+                    return self.wiped_after(error, None).await;
+                }
                 Err(error) => warn!("ignoring a hand-over the person's device didn't make: {error:#}"),
             }
             ensure!(
@@ -284,10 +319,15 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         }
     }
 
-    /// The hand-over, if the person's device has put it up.
+    /// The hand-over, if the person's device has put it up; a
+    /// [`LinkRefused`] error if it stopped the link.
     pub(crate) async fn handover_now(&self) -> Result<Option<Handover>> {
-        let Some(Answer::Handover(sealed)) = self.answer_now().await? else {
-            return Ok(None);
+        let sealed = match self.answer_now().await? {
+            Some(Answer::Handover(sealed)) => sealed,
+            Some(Answer::Stopped(stop)) if stop.is_for(&self.code, &self.request.device) => {
+                return Err(LinkRefused(Reason::Cancelled).into());
+            }
+            _ => return Ok(None),
         };
         let secret = self
             .handover_secret
@@ -310,7 +350,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
     }
 
     pub(crate) async fn wait_until_added_with(
-        self,
+        mut self,
         reading: Workspace,
         cancel: &JoinCancel,
         connect: Connector,
@@ -323,14 +363,14 @@ impl<M: JoinMailbox> DeviceLinking<M> {
                 Ok(Some(welcome)) => return self.finish(reading, welcome, connect, options).await,
                 Ok(None) => {}
                 Err(error) if error.downcast_ref::<LinkRefused>().is_some() => {
-                    self.wipe(reading).await?;
-                    return Err(error);
+                    return self.wiped_after(error, Some(reading)).await;
                 }
                 Err(error) => warn!("can't tell yet whether this device was added: {error:#}"),
             }
             if now_ms()? >= self.started_ms + super::linking_store::LINKING_LIFETIME_MS {
-                self.wipe(reading).await?;
-                bail!(NOT_ADDED_IN_TIME);
+                return self
+                    .wiped_after(anyhow::anyhow!(NOT_ADDED_IN_TIME), Some(reading))
+                    .await;
             }
             tokio::select! {
                 () = sleep(ADDED_POLL) => {}
@@ -366,51 +406,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         }
         Ok(None)
     }
-
-    /// Joins with `welcome` in the real folder, which starts with this
-    /// device's drafts and read positions, then deletes the linking store.
-    /// It is marked first: a join that stops partway can't run again.
-    async fn finish(
-        self,
-        reading: Workspace,
-        welcome: DeviceWelcome,
-        connect: Connector,
-        options: impl Into<WorkspaceOptions>,
-    ) -> Result<Workspace> {
-        let kept = reading
-            .state()
-            .store
-            .personal_reading()
-            .context("keeping what this device typed while it read")?;
-        drop(reading);
-        self.linking.mark_link_finishing().await?;
-        self.enrollment.keep_personal_reading(&kept)?;
-        let joined = self.enrollment.finish_with(welcome, connect, options).await;
-        #[cfg(test)]
-        if STOPS_BEFORE_FORGETTING_READING
-            .lock()
-            .expect("simulated stops lock poisoned")
-            .contains(&self.linking.path)
-        {
-            return joined;
-        }
-        self.linking.forget_reading().await?;
-        joined
-    }
-
-    /// Deletes both stores: the link is over and this device holds nothing.
-    async fn wipe(self, reading: Workspace) -> Result<()> {
-        drop(reading);
-        self.linking.forget_reading().await?;
-        self.enrollment.forget().await
-    }
 }
-
-/// Linking stores whose link stops, as if the app quit, after the join and
-/// before the reading store is deleted.
-#[cfg(test)]
-pub(crate) static STOPS_BEFORE_FORGETTING_READING: std::sync::Mutex<Vec<std::path::PathBuf>> =
-    std::sync::Mutex::new(Vec::new());
 
 fn link_of(code: &LinkCode) -> DeviceLink {
     DeviceLink {

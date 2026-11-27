@@ -10,6 +10,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
+use tracing::warn;
 
 use super::Workspace;
 use crate::{
@@ -17,10 +18,10 @@ use crate::{
     membership::{
         device::DeviceCertificate,
         device_change::DeviceChange,
-        handover::{Answer, Handover, seal_handover},
+        handover::{Answer, Handover, SignedStop, seal_handover},
         keyring::KeyHistory,
         link::{
-            ANSWER_LIFETIME_MS, LINK_CODE_LIFETIME_MS, LinkCode, LinkRequest, LinkSecrets, Platform,
+            ANSWER_LIFETIME_MS, LINK_CODE_LIFETIME_MS, LinkCode, LinkRequest, LinkSecrets, Platform, Token,
             check_choices, make_check, open_link_request,
         },
     },
@@ -46,6 +47,15 @@ struct OpenedCheck {
     check_code: String,
     /// Made once, so they stay put while the person looks.
     choices: [String; 3],
+    /// The check, until it is up in the answer slot.
+    check_to_put: Option<Vec<u8>>,
+}
+
+/// Where an open code stands: waiting for a request, or opened, with the
+/// check still to put up if its upload failed.
+enum CheckStep {
+    Waiting(Token),
+    Opened(LinkCheckShown, Option<(Token, Vec<u8>)>),
 }
 
 /// What the person picks from before confirming: the code the new device
@@ -94,6 +104,14 @@ impl Workspace {
         });
     }
 
+    /// Makes the open code look `age_ms` older.
+    #[cfg(test)]
+    pub(crate) fn age_open_link(&self, age_ms: i64) {
+        if let Some(open) = self.open_link_slot().as_mut() {
+            open.code.expires_ms -= age_ms;
+        }
+    }
+
     fn open_link_slot(&self) -> std::sync::MutexGuard<'_, Option<OpenLink>> {
         self.inner
             .open_link
@@ -107,7 +125,17 @@ impl Workspace {
         let person = self.my_person();
         let state = self.state();
         ensure!(state.mls.is_active(), "this device isn't in the workspace");
-        let pending = state.store.pending_links()?.len();
+        let day_ago = now_ms()? - crate::membership::admin::LINK_WINDOW_MS;
+        // Links not added yet: those still waiting count as devices, and
+        // every one confirmed today, refused or not, as a try.
+        let (mut waiting, mut tried_today) = (0, 0);
+        for link in state.store.pending_links()? {
+            if state.store.was_ever_member(&link.request.device)? {
+                continue;
+            }
+            waiting += usize::from(!link.is_refused);
+            tried_today += usize::from(link.until_ms - PENDING_LINK_LIFETIME_MS >= day_ago);
+        }
         let mut devices = 0;
         for device in state.store.devices_of(&person)? {
             if state.mls.is_member(&device)? {
@@ -115,12 +143,11 @@ impl Workspace {
             }
         }
         ensure!(
-            devices + pending < MAX_DEVICES_PER_PERSON,
+            devices + waiting < MAX_DEVICES_PER_PERSON,
             "you already have {MAX_DEVICES_PER_PERSON} devices; remove one to link another"
         );
-        let day_ago = now_ms()? - crate::membership::admin::LINK_WINDOW_MS;
         ensure!(
-            state.store.links_since(&person, day_ago)? + pending
+            state.store.links_since(&person, day_ago)? + tried_today
                 < crate::membership::admin::MAX_LINKS_PER_DAY,
             "you've linked several devices today; try again tomorrow"
         );
@@ -149,19 +176,33 @@ impl Workspace {
     /// open code. The first request that opens gets the check, once; junk
     /// in the slot is ignored.
     pub async fn pending_link(&self) -> Result<Option<LinkCheckShown>> {
-        let token = {
+        let step = {
             let open = self.open_link_slot();
             let Some(open) = open.as_ref() else {
                 return Ok(None);
             };
-            if let Some(opened) = &open.opened {
-                return Ok(Some(LinkCheckShown {
-                    choices: opened.choices.clone(),
-                    platform: opened.request.platform,
-                }));
+            match &open.opened {
+                Some(opened) => CheckStep::Opened(
+                    LinkCheckShown {
+                        choices: opened.choices.clone(),
+                        platform: opened.request.platform,
+                    },
+                    opened.check_to_put.clone().map(|check| (open.code.token, check)),
+                ),
+                None => {
+                    ensure!(!open.code.is_expired(now_ms()?), "this code has run out");
+                    CheckStep::Waiting(open.code.token)
+                }
             }
-            ensure!(!open.code.is_expired(now_ms()?), "this code has run out");
-            open.code.token
+        };
+        let token = match step {
+            CheckStep::Waiting(token) => token,
+            CheckStep::Opened(shown, to_put) => {
+                if let Some((token, check)) = to_put {
+                    self.put_check(&token, check).await?;
+                }
+                return Ok(Some(shown));
+            }
         };
         let Some(bytes) = self.bucket().link_slot(&token, "request").await? else {
             return Ok(None);
@@ -191,21 +232,55 @@ impl Workspace {
                 choices: choices.clone(),
                 platform: request.platform,
             };
+            let check = Answer::Check(check).encode()?;
             open.opened = Some(OpenedCheck {
                 request,
                 check_code,
                 choices,
+                check_to_put: Some(check.clone()),
             });
-            (Answer::Check(check).encode()?, shown)
+            (check, shown)
         };
-        self.bucket().put_link_slot(&token, "answer", answer.0).await?;
+        self.put_check(&token, answer.0).await?;
         Ok(Some(answer.1))
     }
 
+    /// Puts the check up, and notes it is there; one that fails is put up
+    /// again the next time the check is asked for.
+    async fn put_check(&self, token: &Token, check: Vec<u8>) -> Result<()> {
+        self.bucket().put_link_slot(token, "answer", check).await?;
+        if let Some(opened) = self
+            .open_link_slot()
+            .as_mut()
+            .filter(|open| open.code.token == *token)
+            .and_then(|open| open.opened.as_mut())
+        {
+            opened.check_to_put = None;
+        }
+        Ok(())
+    }
+
     /// Drops the open code: the person chose "None of these", or closed
-    /// the dialog.
-    pub fn cancel_link(&self) {
-        *self.open_link_slot() = None;
+    /// the dialog. A new device that already asked is told the link
+    /// stopped, so it wipes what it holds.
+    pub async fn cancel_link(&self) -> Result<()> {
+        let open = self.open_link_slot().take();
+        match open {
+            Some(OpenLink {
+                code,
+                opened: Some(opened),
+                ..
+            }) => self.put_stop(&code, &opened.request.device).await,
+            _ => Ok(()),
+        }
+    }
+
+    async fn put_stop(&self, code: &LinkCode, device: &iroh::PublicKey) -> Result<()> {
+        let stop = SignedStop::sign(&self.inner.identity, code, device)?;
+        self.bucket()
+            .put_link_slot(&code.token, "answer", Answer::Stopped(stop).encode()?)
+            .await
+            .context("telling the new device the link stopped")
     }
 
     /// Links the device whose code the person picked: vouches for it
@@ -221,12 +296,18 @@ impl Workspace {
         else {
             bail!("there's no new device waiting to be confirmed");
         };
-        ensure!(
-            picked == opened.check_code,
-            "That wasn't the number. Start again with a new code."
-        );
+        if picked != opened.check_code {
+            if let Err(error) = self.put_stop(&code, &opened.request.device).await {
+                warn!("the new device isn't told yet that the link stopped: {error:#}");
+            }
+            bail!("That wasn't the number. Start again with a new code.");
+        }
         let request = opened.request;
+        let answer_until_ms = code.expires_ms - LINK_CODE_LIFETIME_MS + ANSWER_LIFETIME_MS;
         self.sync().await;
+        // The new device can't read a hand-over after this, so no device is
+        // asked for that could never join.
+        ensure!(now_ms()? < answer_until_ms, "This code ran out. Make a new one.");
         let certificate = {
             let state = self.state();
             DeviceCertificate::vouch(
@@ -240,7 +321,7 @@ impl Workspace {
         };
         let now = now_ms()?;
         let pending = PendingLink {
-            answer_until_ms: code.expires_ms - LINK_CODE_LIFETIME_MS + ANSWER_LIFETIME_MS,
+            answer_until_ms,
             code,
             request,
             certificate,
@@ -250,7 +331,11 @@ impl Workspace {
             until_ms: now + PENDING_LINK_LIFETIME_MS,
         };
         let _one_at_a_time = self.inner.pending_links_lock.lock().await;
-        self.state().store.put_pending_link(&pending)?;
+        {
+            let store = &self.state().store;
+            store.put_device_platform(&pending.request.device, pending.request.platform)?;
+            store.put_pending_link(&pending)?;
+        }
         self.finish_pending_link(pending).await
     }
 

@@ -50,6 +50,45 @@ pub struct SealedHandover {
 pub enum Answer {
     Check(SignedCheck),
     Handover(SealedHandover),
+    /// The person picked another number or "None of these": the link is
+    /// over, and the new device wipes what it holds.
+    Stopped(SignedStop),
+}
+
+/// The voucher's word that it stopped the link with this device.
+#[derive(Serialize, Deserialize)]
+pub struct SignedStop {
+    signature: Vec<u8>,
+}
+
+const STOP_SIGNATURE_LABEL: &str = "shyspace link stopped v1";
+
+fn stop_bytes(code: &LinkCode, device: &PublicKey) -> Result<Vec<u8>> {
+    Ok(postcard::to_stdvec(&(
+        STOP_SIGNATURE_LABEL,
+        &code.workspace_id,
+        code.token,
+        device.as_bytes(),
+    ))?)
+}
+
+impl SignedStop {
+    pub(crate) fn sign(voucher: &SecretKey, code: &LinkCode, device: &PublicKey) -> Result<Self> {
+        ensure!(
+            voucher.public() == code.voucher,
+            "only the code's own device can stop it"
+        );
+        Ok(Self {
+            signature: voucher.sign(&stop_bytes(code, device)?).to_bytes().to_vec(),
+        })
+    }
+
+    /// Whether the code's voucher stopped the link with `device`.
+    pub(crate) fn is_for(&self, code: &LinkCode, device: &PublicKey) -> bool {
+        stop_bytes(code, device)
+            .and_then(|bytes| verify_signature(&code.voucher, &bytes, &self.signature))
+            .is_ok()
+    }
 }
 
 impl Answer {

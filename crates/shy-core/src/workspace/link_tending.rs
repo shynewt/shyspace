@@ -16,7 +16,7 @@ use crate::{
         link_answers::{Reason, SignedOutcome},
     },
     ops::{Op, now_ms},
-    storage::PendingLink,
+    storage::{PendingLink, RecordedChange},
 };
 
 impl Workspace {
@@ -69,6 +69,16 @@ impl Workspace {
             match self.signed_outcome(&link).await? {
                 Some(Reason::Stale) => return self.vouch_again(link).await,
                 Some(_) => {
+                    // A removal naming the device tells the person's other
+                    // devices it isn't linking any more; the admin's app
+                    // ignores it, as the link is already refused.
+                    if !self.has_asked_to_remove(&device)? {
+                        self.write(Op::DeviceChange {
+                            change: DeviceChange::Remove {
+                                devices: vec![device],
+                            },
+                        })?;
+                    }
                     link.is_refused = true;
                     return self.state().store.put_pending_link(&link);
                 }
@@ -109,7 +119,7 @@ impl Workspace {
     /// Vouches for the same device again at the current epoch and asks
     /// again, unless the person has removed it since.
     async fn vouch_again(&self, mut link: PendingLink) -> Result<()> {
-        if self.has_removed(&link.request.device)? {
+        if self.has_asked_to_remove(&link.request.device)? {
             link.is_refused = true;
             return self.state().store.put_pending_link(&link);
         }
@@ -136,7 +146,7 @@ impl Workspace {
         if !self.has_asked_to_link(&link)? {
             return self.state().store.delete_pending_link(&token);
         }
-        if !self.has_removed(&link.request.device)? {
+        if !self.has_asked_to_remove(&link.request.device)? {
             self.write(Op::DeviceChange {
                 change: DeviceChange::Remove {
                     devices: vec![link.request.device],
@@ -148,13 +158,32 @@ impl Workspace {
         self.state().store.put_pending_link(&link)
     }
 
-    /// Whether one of the person's devices asked to remove `device`.
-    fn has_removed(&self, device: &iroh::PublicKey) -> Result<bool> {
+    /// Whether the person still asks to remove `device`: a removal naming it
+    /// by one of their devices that is still a member and not frozen.
+    pub(super) fn has_asked_to_remove(&self, device: &iroh::PublicKey) -> Result<bool> {
+        Ok(!self.live_removals_naming(device)?.is_empty())
+    }
+
+    /// The removals naming `device` that can still count: written by one of
+    /// the person's devices that is a member now and not frozen. Members
+    /// can't see which requests the admin's app skipped, so callers that
+    /// show or skip a removal also look at the epoch it was written in.
+    pub(super) fn live_removals_naming(&self, device: &iroh::PublicKey) -> Result<Vec<RecordedChange>> {
         let person = self.my_person();
-        Ok(self.state().store.device_changes()?.iter().any(|change| {
-            change.person == person
-                && matches!(&change.change, DeviceChange::Remove { devices } if devices.contains(device))
-        }))
+        let state = self.state();
+        let mut live = Vec::new();
+        for change in state.store.device_changes()? {
+            let names_it =
+                matches!(&change.change, DeviceChange::Remove { devices } if devices.contains(device));
+            if change.person == person
+                && names_it
+                && state.mls.is_member(&change.author)?
+                && state.store.frozen_last_seq(&change.author)?.is_none()
+            {
+                live.push(change);
+            }
+        }
+        Ok(live)
     }
 
     async fn is_handover_up(&self, link: &PendingLink) -> Result<bool> {

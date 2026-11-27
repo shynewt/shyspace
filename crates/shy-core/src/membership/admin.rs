@@ -702,7 +702,12 @@ impl Workspace {
                 .mls
                 .remove_members(&devices, &binding.lists, binding.map_key.as_ref())?;
             let signed = self.sign_commit(&state, from_epoch, commit, frozen, &[], &binding)?;
-            state.save_commit_with(from_epoch, &signed, also)?;
+            // The admin follows no commit of its own, so its own devices'
+            // notices are noted here.
+            state.save_commit_with(from_epoch, &signed, |store| {
+                also(store)?;
+                self.note_removed_devices(store, &devices)
+            })?;
             state.mls.merge_pending_commit()?;
             // Freezing comes after the merge, as on every member's device.
             state.record_epoch(&self.inner.config)?;

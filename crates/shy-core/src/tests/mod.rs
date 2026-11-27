@@ -18,6 +18,7 @@ mod key_rotation;
 mod later;
 mod linking;
 mod mentions;
+mod my_devices;
 mod notes;
 mod notifications;
 mod page_cursors;

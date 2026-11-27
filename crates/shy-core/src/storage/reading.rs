@@ -244,6 +244,15 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// When `device`'s newest message says it was written.
+    pub fn newest_message_ms(&self, device: &PublicKey) -> Result<Option<i64>> {
+        Ok(self.db.query_row(
+            "SELECT MAX(created_ms) FROM messages WHERE author = ?",
+            [device.as_bytes()],
+            |row| row.get(0),
+        )?)
+    }
+
     /// What this device kept for itself: its drafts and read positions.
     pub fn personal_reading(&self) -> Result<PersonalReading> {
         let mut statement = self

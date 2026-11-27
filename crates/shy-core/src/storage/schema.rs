@@ -81,6 +81,10 @@ CREATE TABLE pending_links (
     token BLOB PRIMARY KEY, code BLOB NOT NULL, request BLOB NOT NULL, certificate BLOB NOT NULL,
     answer_until_ms INTEGER NOT NULL, handed_over INTEGER NOT NULL, refused INTEGER NOT NULL,
     slots_deleted INTEGER NOT NULL, until_ms INTEGER NOT NULL);
+CREATE TABLE device_platforms (device BLOB PRIMARY KEY, platform BLOB NOT NULL);
+CREATE TABLE device_notices (
+    device BLOB NOT NULL, kind INTEGER NOT NULL, at_ms INTEGER NOT NULL, seen INTEGER NOT NULL,
+    PRIMARY KEY (device, kind));
 "#;
 
 const FIRST_SCHEMA: &str = r#"

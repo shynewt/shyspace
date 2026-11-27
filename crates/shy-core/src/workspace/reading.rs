@@ -10,7 +10,10 @@ use iroh::PublicKey;
 use super::{DataDir, Networking, Workspace};
 use crate::{
     config::{self, WorkspaceConfig},
-    membership::{handover::Handover, link::LinkCode},
+    membership::{
+        handover::Handover,
+        link::{LinkCode, Token},
+    },
     storage::{ApplyContext, Store},
     transport::bucket::{Connector, read_only::ReadingConnector},
 };
@@ -39,6 +42,56 @@ impl Opening {
         match self {
             Self::Member(connect) => (connect, WorkspaceMode::Member),
             Self::Linking(connect) => (connect.into_connector(), WorkspaceMode::Linking),
+        }
+    }
+}
+
+/// Deletes a linking store once the last handle to it closes: a store can't
+/// be deleted while something holds it open (on Windows, not at all).
+pub(crate) struct ForgetOnClose {
+    data: std::sync::Mutex<Option<(DataDir, Token)>>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl ForgetOnClose {
+    pub(super) fn new(runtime: tokio::runtime::Handle) -> Self {
+        Self {
+            data: std::sync::Mutex::new(None),
+            runtime,
+        }
+    }
+
+    /// Forgets the armed delete, as if the app stopped before the last
+    /// handle closed.
+    #[cfg(test)]
+    pub(crate) fn disarm(&self) {
+        if let Ok(mut slot) = self.data.lock() {
+            *slot = None;
+        }
+    }
+
+    /// Arms the delete for the link with `token`, and only that one.
+    pub(super) fn forget_when_closed(&self, data: DataDir, token: Token) {
+        let mut slot = match self.data.lock() {
+            Ok(slot) => slot,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *slot = Some((data, token));
+    }
+}
+
+impl Drop for ForgetOnClose {
+    fn drop(&mut self) {
+        let data = match self.data.get_mut() {
+            Ok(data) => data.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some((data, token)) = data {
+            self.runtime.spawn(async move {
+                if let Err(error) = data.forget_reading_of(&token).await {
+                    tracing::warn!("the linking store is deleted at the next start instead: {error:#}");
+                }
+            });
         }
     }
 }
@@ -88,15 +141,25 @@ impl Workspace {
             me: identity.public(),
         };
         let store = &local.store;
-        handover
-            .history
-            .store_with_devices(&handover.devices, &handover.bound_frozen, store, context)?;
-        config.save_in_store(store)?;
-        config::update_bucket(store, &config.bucket, handover.bucket_lamport)?;
-        config::record_settings_op(store, config::NO_SETTINGS_OP)?;
-        store.set_meta(LINKING_PERSON_META, code.person.as_bytes())?;
-        store.delete_meta(super::linking_store::HANDOVER_SECRET_META)?;
+        // A stop after the store was filled, before `workspace.json` was
+        // written, leaves it filled: it isn't filled twice.
+        if store.meta(LINKING_PERSON_META)?.is_none() {
+            store.atomically(|store| {
+                handover.history.store_with_devices(
+                    &handover.devices,
+                    &handover.bound_frozen,
+                    store,
+                    context,
+                )?;
+                config.save_in_store(store)?;
+                config::update_bucket(store, &config.bucket, handover.bucket_lamport)?;
+                config::record_settings_op(store, config::NO_SETTINGS_OP)?;
+                store.set_meta(LINKING_PERSON_META, code.person.as_bytes())
+            })?;
+        }
         config.mark_complete(&data.path)?;
+        // Last: until here, a restart opens the hand-over again.
+        store.delete_meta(super::linking_store::HANDOVER_SECRET_META)?;
         drop(local);
         Self::open_reading(data, connect).await
     }

@@ -6,6 +6,7 @@
 use super::support::*;
 use crate::{
     DeviceEnrollment, Networking, Workspace,
+    membership::invite::JoinMailbox,
     membership::{
         device_change::DeviceChange,
         handover::{Answer, open_handover},
@@ -19,7 +20,7 @@ use crate::{
     workspace::{
         CheckOnNewDevice, DeviceLink, DeviceLinking, FileSource, JoinCancel, LinkRefused, NewFile,
         ResumedLink,
-        device_linking::STOPS_BEFORE_FORGETTING_READING,
+        device_linking::{STOPS_BEFORE_FORGETTING_READING, STOPS_BEFORE_JOINING},
         linking_store::{LINKING_LIFETIME_MS, backdate_link},
     },
 };
@@ -158,7 +159,10 @@ async fn a_wrong_pick_ends_the_link_and_spends_the_code() {
     assert!(refused.contains("wasn't the number"), "{refused}");
     assert!(bob.confirm_link(&real).await.is_err(), "the code is spent");
     assert!(bob.pending_link().await.unwrap().is_none());
-    assert!(matches!(answer(&bucket, &code).await, Answer::Check(_)));
+    assert!(
+        matches!(answer(&bucket, &code).await, Answer::Stopped(_)),
+        "the new device is told"
+    );
     assert!(bob.state().store.pending_links().unwrap().is_empty());
     assert!(bob.state().store.device_changes().unwrap().is_empty());
 }
@@ -185,11 +189,14 @@ async fn none_of_these_ends_the_link_and_spends_the_code() {
     bob.pending_link().await.unwrap().unwrap();
     let real = code_on(&new, &bucket, &code).await;
 
-    bob.cancel_link();
+    bob.cancel_link().await.unwrap();
 
     assert!(bob.confirm_link(&real).await.is_err());
     assert!(bob.pending_link().await.unwrap().is_none());
-    assert!(matches!(answer(&bucket, &code).await, Answer::Check(_)));
+    assert!(
+        matches!(answer(&bucket, &code).await, Answer::Stopped(_)),
+        "the new device is told"
+    );
     assert!(bob.state().store.pending_links().unwrap().is_empty());
 }
 
@@ -359,6 +366,19 @@ async fn begin_linking(
         .unwrap()
 }
 
+/// The new device's enrollment, its store, MLS database and key, is gone.
+fn assert_enrollment_gone(dir: &std::path::Path) {
+    assert!(
+        !dir.join(crate::workspace::STORE_FILE).exists(),
+        "the enrollment's store is gone"
+    );
+    assert!(
+        !dir.join(crate::workspace::MLS_FILE).exists(),
+        "its MLS database is gone"
+    );
+    assert!(!dir.with_extension("key").exists(), "its key is gone");
+}
+
 fn linking_store_of(dir: &std::path::Path) -> std::path::PathBuf {
     let mut path = dir.as_os_str().to_owned();
     path.push(".linking");
@@ -473,7 +493,7 @@ async fn a_signed_refusal_wipes_both_stores_on_the_new_device() {
     ));
     assert!(!linking_store_of(&dir).exists());
     assert!(!Workspace::exists(&dir));
-    assert!(!dir.join("store.db").exists(), "the enrollment is gone too");
+    assert_enrollment_gone(&dir);
 }
 
 /// Someone with the bucket keys can't make the new device give up.
@@ -652,12 +672,24 @@ async fn a_new_device_restarted_while_reading_reads_again_and_finishes() {
 /// stopped partway can't run again: both stores go, and it says so (R4).
 #[tokio::test(flavor = "multi_thread")]
 async fn a_join_that_stopped_partway_wipes_both_stores_and_says_link_again() {
-    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let (root, bucket, admin, bob) = admin_and_bob().await;
     let dir = root.path().join("phone");
     let (_code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
-    drop(reading);
-    drop(linking);
-    data_dir(&dir).linking().mark_link_finishing().await.unwrap();
+    bob.sync().await;
+    admin.sync().await;
+    STOPS_BEFORE_JOINING
+        .lock()
+        .unwrap()
+        .push(data_dir(&dir).linking().path);
+    let stopped = linking
+        .wait_until_added_with(
+            reading,
+            &JoinCancel::new(),
+            connector(&bucket),
+            Networking::Offline,
+        )
+        .await;
+    assert!(stopped.is_err(), "stopped as the app would, just before joining");
 
     let Err(error) = resume(&dir, &bucket).await else {
         panic!("a join that began can't be picked up");
@@ -665,7 +697,7 @@ async fn a_join_that_stopped_partway_wipes_both_stores_and_says_link_again() {
 
     assert!(format!("{error:#}").contains("Link again"), "{error:#}");
     assert!(!linking_store_of(&dir).exists());
-    assert!(!dir.join("store.db").exists());
+    assert_enrollment_gone(&dir);
     assert!(resume(&dir, &bucket).await.unwrap().is_none());
 }
 
@@ -686,7 +718,7 @@ async fn a_link_not_added_within_a_week_is_wiped_on_restart() {
 
     assert!(format!("{error:#}").contains("within a week"), "{error:#}");
     assert!(!linking_store_of(&dir).exists());
-    assert!(!dir.join("store.db").exists());
+    assert_enrollment_gone(&dir);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -769,32 +801,6 @@ async fn a_restart_after_the_join_deletes_only_the_reading_store() {
             .iter()
             .any(|draft| draft.text == "typed while reading")
     );
-}
-
-/// A device still waiting a week after it began wipes what it holds, even
-/// while its app stays open.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_link_not_added_within_a_week_is_wiped_while_waiting() {
-    let (root, bucket, _admin, bob) = admin_and_bob().await;
-    let dir = root.path().join("phone");
-    let (_code, mut linking, reading) = reading_device(&bob, &dir, &bucket).await;
-    linking.backdate(LINKING_LIFETIME_MS);
-
-    let Err(error) = linking
-        .wait_until_added_with(
-            reading,
-            &JoinCancel::new(),
-            connector(&bucket),
-            Networking::Offline,
-        )
-        .await
-    else {
-        panic!("a week-old link isn't waited on");
-    };
-
-    assert!(format!("{error:#}").contains("within a week"), "{error:#}");
-    assert!(!linking_store_of(&dir).exists());
-    assert!(!dir.join("store.db").exists());
 }
 
 fn edit_pending_link(voucher: &Workspace, change: impl FnOnce(&mut crate::storage::PendingLink)) {
@@ -1023,4 +1029,830 @@ async fn a_device_added_without_its_hand_over_is_removed() {
     assert!(!admin.state().mls.is_member(&device).unwrap());
     bob.sync().await;
     assert!(bob.state().store.pending_links().unwrap().is_empty());
+}
+
+/// The device that linked another knows what it runs on.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_voucher_shows_the_platform_of_the_device_it_linked() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    bob.sync().await;
+    admin.sync().await;
+    bob.sync().await;
+
+    let devices = bob.my_devices().unwrap();
+
+    assert_eq!(devices[1].platform, Some(Platform::Linux));
+    assert_eq!(admin.my_devices().unwrap()[0].platform, None);
+}
+
+/// A link one of your devices asked for shows on your other devices, and
+/// to nobody else.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_from_one_of_your_devices_shows_a_notice_on_the_others_only() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("tablet"), &bucket).await;
+    let tablet = bob.state().store.pending_links().unwrap()[0].request.device;
+
+    sync_all(&[&bob, &phone, &admin]).await;
+
+    let notices = phone.device_notices().unwrap();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].device, crate::views::member_id(&tablet));
+    assert_eq!(notices[0].kind, crate::views::DeviceNoticeKind::Linked);
+    assert!(!notices[0].is_seen);
+    assert!(
+        bob.device_notices().unwrap().is_empty(),
+        "not on the device that linked it"
+    );
+    assert!(admin.device_notices().unwrap().is_empty());
+
+    phone.mark_device_notices_seen().unwrap();
+    phone.state().store.rebuild_views(phone.apply_context()).unwrap();
+    let notices = phone.device_notices().unwrap();
+    assert_eq!(notices.len(), 1, "a rebuild notes it once");
+    assert!(notices[0].is_seen, "and keeps it seen");
+}
+
+/// A device still waiting a week after it began wipes what it holds, even
+/// while its app stays open.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_not_added_within_a_week_is_wiped_while_waiting() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (_code, mut linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    linking.backdate(LINKING_LIFETIME_MS);
+
+    let Err(error) = linking
+        .wait_until_added_with(
+            reading,
+            &JoinCancel::new(),
+            connector(&bucket),
+            Networking::Offline,
+        )
+        .await
+    else {
+        panic!("a week-old link isn't waited on");
+    };
+
+    assert!(format!("{error:#}").contains("within a week"), "{error:#}");
+    assert!(!linking_store_of(&dir).exists());
+    assert_enrollment_gone(&dir);
+}
+
+/// "Not you? Remove it": a stolen phone links a stranger's tablet; the
+/// person's first device sees it as linking, removes it, and the link is
+/// refused, never added.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_still_linking_can_be_removed_from_another_of_your_devices() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let (code, _linking) = handed_over(&phone, &root.path().join("tablet"), &bucket).await;
+    let tablet = phone.state().store.pending_links().unwrap()[0].request.device;
+    phone.sync().await;
+    bob.sync().await;
+
+    assert_eq!(
+        bob.device_notices().unwrap()[0].device,
+        crate::views::member_id(&tablet)
+    );
+    let linking = bob
+        .my_devices()
+        .unwrap()
+        .into_iter()
+        .find(|device| device.id == crate::views::member_id(&tablet))
+        .unwrap();
+    assert!(linking.is_linking);
+    bob.remove_my_device(&linking.id).await.unwrap();
+    bob.sync().await;
+    admin.sync().await;
+
+    assert!(!admin.state().mls.is_member(&tablet).unwrap());
+    let outcome = bucket
+        .link_reply(&code.token, &tablet, "outcome")
+        .await
+        .unwrap()
+        .unwrap();
+    let signed = SignedOutcome::decode(&outcome).unwrap();
+    let read = signed
+        .read(&admin.me(), &code.workspace_id, &code.token, &tablet)
+        .unwrap();
+    assert_eq!(read.reason, Reason::Cancelled);
+}
+
+/// A wrong pick tells the new device the link stopped: it wipes what it
+/// holds and says so, rather than waiting an hour.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_new_device_is_told_when_the_person_picks_another_number() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let code = bob.create_test_link_code().unwrap();
+    let mut linking = begin_linking(&code, &dir, &bucket).await;
+    let choices = bob.pending_link().await.unwrap().unwrap().choices;
+    let Some(CheckOnNewDevice::Code(shown)) = linking.check_now().await.unwrap() else {
+        panic!("the check answers this device");
+    };
+    let decoy = choices.iter().find(|choice| **choice != shown).unwrap();
+    assert!(bob.confirm_link(decoy).await.is_err());
+
+    let Err(error) = linking.wait_for_check(&JoinCancel::new()).await else {
+        panic!("the link stopped");
+    };
+
+    assert!(matches!(
+        error.downcast_ref::<LinkRefused>(),
+        Some(LinkRefused(Reason::Cancelled))
+    ));
+    assert!(!linking_store_of(&dir).exists());
+    assert_enrollment_gone(&dir);
+}
+
+/// A stop the voucher didn't sign for this device is junk.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_for_another_device_is_ignored() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let code = bob.create_test_link_code().unwrap();
+    let linking = begin_linking(&code, &root.path().join("phone"), &bucket).await;
+    let stranger = iroh::SecretKey::generate().public();
+    let stop = crate::membership::handover::SignedStop::sign(&bob.inner.identity, &code, &stranger).unwrap();
+    bucket
+        .put_link_slot(&code.token, "answer", Answer::Stopped(stop).encode().unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(linking.check_now().await.unwrap(), None);
+}
+
+// Rules the review asked to pin down.
+
+/// Two links the admin's app added count as members, not also as links
+/// waiting: a third code is still allowed.
+#[tokio::test(flavor = "multi_thread")]
+async fn links_already_added_do_not_count_twice_before_a_new_code() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    for name in ["phone", "tablet"] {
+        let (_code, _linking) = handed_over(&bob, &root.path().join(name), &bucket).await;
+        bob.sync().await;
+        admin.sync().await;
+        bob.sync().await;
+    }
+    assert_eq!(
+        bob.state().store.pending_links().unwrap().len(),
+        2,
+        "kept while the answer link works"
+    );
+    let other = link_device(&admin, &bob, &root.path().join("watch"), &bucket).await;
+    sync_all(&[&admin, &bob, &other]).await;
+
+    assert!(
+        bob.create_test_link_code().is_ok(),
+        "four devices and nothing waiting"
+    );
+}
+
+/// A refused link is a try for the day, not a device.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_link_counts_as_a_try_but_not_as_a_device() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    for index in 0..3 {
+        link_device(
+            &admin,
+            &bob,
+            &root.path().join(format!("linked-{index}")),
+            &bucket,
+        )
+        .await;
+    }
+    sync_all(&[&admin, &bob]).await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("refused"), &bucket).await;
+    let device = bob.state().store.pending_links().unwrap()[0].request.device;
+    bob.write(Op::DeviceChange {
+        change: DeviceChange::Remove {
+            devices: vec![device],
+        },
+    })
+    .unwrap();
+    bob.sync().await;
+    admin.sync().await;
+    bob.sync().await;
+    assert!(bob.state().store.pending_links().unwrap()[0].is_refused);
+
+    assert!(
+        bob.create_test_link_code().is_ok(),
+        "four devices, the refused link not one"
+    );
+}
+
+/// A link confirmed but not yet added counts as a device.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_waiting_for_the_admins_app_counts_as_a_device() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    for index in 0..3 {
+        link_device(
+            &admin,
+            &bob,
+            &root.path().join(format!("linked-{index}")),
+            &bucket,
+        )
+        .await;
+    }
+    sync_all(&[&admin, &bob]).await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("waiting"), &bucket).await;
+
+    let refused = format!("{:#}", bob.create_test_link_code().unwrap_err());
+
+    assert!(refused.contains("already have 5 devices"), "{refused}");
+}
+
+/// Five links today, even of devices removed since, use up the day.
+#[tokio::test(flavor = "multi_thread")]
+async fn five_links_today_refuse_a_sixth_code() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    for index in 0..5 {
+        let device = link_device(
+            &admin,
+            &bob,
+            &root.path().join(format!("linked-{index}")),
+            &bucket,
+        )
+        .await;
+        sync_all(&[&admin, &bob, &device]).await;
+        admin
+            .remove_devices(&[crate::views::member_id(&device.me())])
+            .await
+            .unwrap();
+        bob.sync().await;
+    }
+
+    let refused = format!("{:#}", bob.create_test_link_code().unwrap_err());
+
+    assert!(refused.contains("linked several devices today"), "{refused}");
+}
+
+/// A hand-over put up after the epoch moved holds no key past the
+/// certificate's epoch.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hand_over_holds_no_key_past_its_certificates_epoch() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (code, linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    let certificate_epoch = bob.state().store.pending_links().unwrap()[0].certificate.epoch;
+    bucket.delete_link_slot(&code.token, "answer").await.unwrap();
+    edit_pending_link(&bob, |link| link.is_handed_over = false);
+    admin.commit_keys_only().await.unwrap();
+
+    bob.sync().await;
+
+    assert!(epoch_of(&bob) > certificate_epoch);
+    let handover = linking.handover_now().await.unwrap().unwrap();
+    assert_eq!(handover.epoch, certificate_epoch);
+    assert!(
+        handover
+            .history
+            .epochs
+            .iter()
+            .all(|entry| entry.epoch <= certificate_epoch)
+    );
+    assert!(
+        handover
+            .history
+            .epochs
+            .iter()
+            .any(|entry| entry.epoch == certificate_epoch)
+    );
+}
+
+/// A stale outcome makes the new device wait, never wipe.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_outcome_wipes_nothing_on_the_new_device() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    let stale = SignedOutcome::sign(
+        &admin.inner.identity,
+        &code.workspace_id,
+        Outcome {
+            token: code.token,
+            device: reading.me(),
+            certificate_hash: [0; 32],
+            reason: Reason::Stale,
+        },
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+    bucket
+        .put_link_reply(&code.token, &reading.me(), "outcome", stale)
+        .await
+        .unwrap();
+
+    assert!(linking.added_now(&reading).await.unwrap().is_none());
+    assert!(linking_store_of(&dir).exists());
+}
+
+/// An outcome the admin signed for an earlier certificate doesn't end the
+/// voucher's current link.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_outcome_for_an_earlier_certificate_is_passed_over() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    let device = bob.state().store.pending_links().unwrap()[0].request.device;
+    let earlier = SignedOutcome::sign(
+        &admin.inner.identity,
+        &code.workspace_id,
+        Outcome {
+            token: code.token,
+            device,
+            certificate_hash: [0; 32],
+            reason: Reason::Cancelled,
+        },
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+    bucket
+        .put_link_reply(&code.token, &device, "outcome", earlier)
+        .await
+        .unwrap();
+
+    bob.sync().await;
+
+    assert!(!bob.state().store.pending_links().unwrap()[0].is_refused);
+}
+
+/// A cancel written by a device removed since counts for nothing: the
+/// stale link is vouched for again and added.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_devices_cancel_does_not_stop_a_new_vouch() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("tablet"), &bucket).await;
+    let tablet = bob.state().store.pending_links().unwrap()[0].request.device;
+    phone
+        .write(Op::DeviceChange {
+            change: DeviceChange::Remove {
+                devices: vec![tablet],
+            },
+        })
+        .unwrap();
+    phone.sync().await;
+    admin
+        .remove_devices(&[crate::views::member_id(&phone.me())])
+        .await
+        .unwrap();
+    for _ in 0..5 {
+        admin.commit_keys_only().await.unwrap();
+    }
+    bob.sync().await;
+    admin.sync().await;
+    assert!(!admin.state().mls.is_member(&tablet).unwrap(), "stale first");
+
+    bob.sync().await;
+    bob.sync().await;
+    admin.sync().await;
+
+    assert!(admin.state().mls.is_member(&tablet).unwrap());
+}
+
+/// A finished link's reading store goes once the last handle the app kept
+/// to it closes.
+#[tokio::test(flavor = "multi_thread")]
+async fn finishing_with_another_handle_open_lets_the_store_go_once_it_closes() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (_code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    let kept_by_the_app = reading.clone();
+    bob.sync().await;
+    admin.sync().await;
+
+    let phone = linking
+        .wait_until_added_with(
+            reading,
+            &JoinCancel::new(),
+            connector(&bucket),
+            Networking::Offline,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(phone.state().store.person_of(&phone.me()).unwrap(), bob.me());
+    drop(kept_by_the_app);
+    for _ in 0..50 {
+        if !linking_store_of(&dir).exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(!linking_store_of(&dir).exists());
+    assert!(!dir.with_extension("key.linking").exists());
+}
+
+/// The guarantee belongs to the folder: a linking store doesn't open as a
+/// member's workspace.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linking_store_does_not_open_as_a_members_workspace() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (_code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    drop(reading);
+    drop(linking);
+
+    let opened =
+        Workspace::open_with(&data_dir(&dir).linking(), connector(&bucket), Networking::Offline).await;
+
+    let refused = format!("{:#}", opened.err().unwrap());
+    assert!(refused.contains("opens only for reading"), "{refused}");
+}
+
+/// Past the answer link, a confirmation asks for nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn confirming_after_the_answer_link_ran_out_asks_for_nothing() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let code = bob.create_test_link_code().unwrap();
+    let linking = begin_linking(&code, &root.path().join("phone"), &bucket).await;
+    bob.pending_link().await.unwrap().unwrap();
+    let Some(CheckOnNewDevice::Code(shown)) = linking.check_now().await.unwrap() else {
+        panic!("the check answers this device");
+    };
+    bob.age_open_link(crate::membership::link::ANSWER_LIFETIME_MS);
+
+    let refused = format!("{:#}", bob.confirm_link(&shown).await.unwrap_err());
+
+    assert!(refused.contains("This code ran out"), "{refused}");
+    assert_eq!(links_asked_by(&bob, &bob), 0);
+    assert!(bob.state().store.pending_links().unwrap().is_empty());
+}
+
+/// A check whose upload failed goes up the next time it is asked for.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_that_failed_to_go_up_is_put_up_again() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let code = bob.create_test_link_code().unwrap();
+    let linking = begin_linking(&code, &root.path().join("phone"), &bucket).await;
+    let writable = bob.bucket();
+    *bob.inner.bucket.write().unwrap() =
+        crate::transport::bucket::read_only::ReadingBucket::over(writable.clone()).into_bucket();
+    assert!(bob.pending_link().await.is_err());
+    *bob.inner.bucket.write().unwrap() = writable;
+
+    let shown = bob.pending_link().await.unwrap().unwrap();
+
+    let Some(CheckOnNewDevice::Code(code_on_device)) = linking.check_now().await.unwrap() else {
+        panic!("the check went up");
+    };
+    assert!(shown.choices.contains(&code_on_device));
+}
+
+/// A hand-over someone took away while the new device can still read it
+/// goes up again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hand_over_taken_away_goes_up_again() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let (code, linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    bucket.delete_link_slot(&code.token, "answer").await.unwrap();
+
+    bob.sync().await;
+
+    assert!(linking.handover_now().await.unwrap().is_some());
+}
+
+/// Once the device is added and the answer link ran out, its outcome goes
+/// with the slots.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_added_devices_outcome_goes_with_its_slots() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    let device = bob.state().store.pending_links().unwrap()[0].request.device;
+    bob.sync().await;
+    admin.sync().await;
+    bucket
+        .put_link_reply(&code.token, &device, "outcome", b"left behind".to_vec())
+        .await
+        .unwrap();
+    edit_pending_link(&bob, |link| link.answer_until_ms = 0);
+
+    bob.sync().await;
+
+    assert!(
+        bucket
+            .link_reply(&code.token, &device, "outcome")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// A stop after the reading store was complete, before its secret was
+/// deleted, picks the link up as reading, and the secret goes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_before_the_secret_was_deleted_resumes_as_reading() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (_code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    reading
+        .state()
+        .store
+        .set_meta(crate::workspace::linking_store::HANDOVER_SECRET_META, &[1; 32])
+        .unwrap();
+    drop(reading);
+    drop(linking);
+
+    let Some(ResumedLink::Reading(linking, reading)) = resume(&dir, &bucket).await.unwrap() else {
+        panic!("the link reads again");
+    };
+
+    assert!(
+        reading
+            .state()
+            .store
+            .meta(crate::workspace::linking_store::HANDOVER_SECRET_META)
+            .unwrap()
+            .is_none()
+    );
+    assert!(linking.handover_now().await.is_err(), "nothing to open it with");
+}
+
+/// Stopping on the new device wipes both stores at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_on_the_new_device_wipes_both_stores() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (_code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
+
+    linking.cancel(Some(reading)).await.unwrap();
+
+    assert!(!linking_store_of(&dir).exists());
+    assert_enrollment_gone(&dir);
+    assert!(resume(&dir, &bucket).await.unwrap().is_none());
+}
+
+/// The probe: a store still held open by the app is never deleted under a
+/// newer link. A new link waits until the last handle closes, then works.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_link_waits_for_the_last_ones_store_to_close() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (_code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    let kept_by_the_app = reading.clone();
+    linking.cancel(Some(reading)).await.unwrap();
+    let code = bob.create_test_link_code().unwrap();
+    let mailbox = BucketLinkMailbox {
+        bucket: bucket.clone(),
+        token: code.token,
+    };
+
+    let refused = DeviceLinking::begin_with(data_dir(&dir), code.clone(), Platform::Linux, mailbox).await;
+
+    let refused = format!("{:#}", refused.err().unwrap());
+    assert!(refused.contains("Finishing the last link"), "{refused}");
+    drop(kept_by_the_app);
+    for _ in 0..50 {
+        if !linking_store_of(&dir).exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let mut linking = begin_linking(&code, &dir, &bucket).await;
+    bob.pending_link().await.unwrap().unwrap();
+    let Some(CheckOnNewDevice::Code(shown)) = linking.check_now().await.unwrap() else {
+        panic!("the check answers the new link");
+    };
+    bob.confirm_link(&shown).await.unwrap();
+    let reading = linking
+        .wait_for_handover_with(&JoinCancel::new(), ReadingConnector::over(connector(&bucket)))
+        .await
+        .unwrap();
+    bob.sync().await;
+    admin.sync().await;
+    let phone = linking
+        .wait_until_added_with(
+            reading,
+            &JoinCancel::new(),
+            connector(&bucket),
+            Networking::Offline,
+        )
+        .await
+        .unwrap();
+    assert_eq!(phone.state().store.person_of(&phone.me()).unwrap(), bob.me());
+}
+
+/// The delete armed for one link leaves a newer link's store alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_delete_armed_for_one_link_leaves_a_newer_one_alone() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let first = bob.create_test_link_code().unwrap();
+    begin_linking(&first, &dir, &bucket)
+        .await
+        .cancel(None)
+        .await
+        .unwrap();
+    let second = bob.create_test_link_code().unwrap();
+    let linking = begin_linking(&second, &dir, &bucket).await;
+
+    data_dir(&dir)
+        .linking()
+        .forget_reading_of(&first.token)
+        .await
+        .unwrap();
+
+    assert!(linking_store_of(&dir).exists());
+    drop(linking);
+    assert!(matches!(
+        resume(&dir, &bucket).await.unwrap(),
+        Some(ResumedLink::Waiting(_))
+    ));
+}
+
+/// A mailbox whose first fetches fail, as when the storage can't be reached.
+struct FlakyMailbox {
+    inner: BucketLinkMailbox,
+    failures_left: std::sync::atomic::AtomicUsize,
+}
+
+impl JoinMailbox for FlakyMailbox {
+    async fn post_request(&self, request: Vec<u8>) -> anyhow::Result<()> {
+        self.inner.post_request(request).await
+    }
+
+    async fn fetch_answer(&self) -> anyhow::Result<Option<Vec<u8>>> {
+        let failures_left = &self.failures_left;
+        if failures_left.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            failures_left.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            anyhow::bail!("can't reach the workspace's storage");
+        }
+        self.inner.fetch_answer().await
+    }
+}
+
+/// A fetch that fails while waiting for the check is retried, not a reason
+/// to wipe the link.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_fetch_while_waiting_for_the_check_is_retried() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let code = bob.create_test_link_code().unwrap();
+    let mailbox = FlakyMailbox {
+        inner: BucketLinkMailbox {
+            bucket: bucket.clone(),
+            token: code.token,
+        },
+        failures_left: std::sync::atomic::AtomicUsize::new(1),
+    };
+    let mut linking = DeviceLinking::begin_with(data_dir(&dir), code, Platform::Linux, mailbox)
+        .await
+        .unwrap();
+    bob.pending_link().await.unwrap().unwrap();
+
+    let check = linking.wait_for_check(&JoinCancel::new()).await.unwrap();
+
+    assert!(matches!(check, CheckOnNewDevice::Code(_)));
+    assert!(linking_store_of(&dir).exists());
+}
+
+/// A link the admin's app refused stops showing as linking on the person's
+/// other devices: its voucher names it in a removal everyone sees.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_link_stops_showing_as_linking_on_your_other_devices() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    for index in 0..2 {
+        link_device(
+            &admin,
+            &bob,
+            &root.path().join(format!("linked-{index}")),
+            &bucket,
+        )
+        .await;
+    }
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("tablet"), &bucket).await;
+    let tablet = crate::views::member_id(&bob.state().store.pending_links().unwrap()[0].request.device);
+    bob.sync().await;
+    phone.sync().await;
+    assert!(
+        phone
+            .my_devices()
+            .unwrap()
+            .iter()
+            .any(|device| device.id == tablet && device.is_linking)
+    );
+    // A fifth device added meanwhile: the admin's app refuses the tablet.
+    link_device(&admin, &bob, &root.path().join("watch"), &bucket).await;
+    admin.sync().await;
+
+    bob.sync().await;
+    bob.sync().await;
+    phone.sync().await;
+
+    assert!(bob.state().store.pending_links().unwrap()[0].is_refused);
+    assert!(
+        !phone
+            .my_devices()
+            .unwrap()
+            .iter()
+            .any(|device| device.id == tablet)
+    );
+    assert!(!bob.my_devices().unwrap().iter().any(|device| device.id == tablet));
+}
+
+/// A wipe that left the store held open, then a stop before the last
+/// handle closed: the app's other handle was told to let go, and the next
+/// start deletes the store rather than picking the link up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wiped_link_left_open_is_told_and_deleted_at_the_next_start() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (_code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    let kept_by_the_app = reading.clone();
+    let mut told = kept_by_the_app.subscribe();
+    linking.cancel(Some(reading)).await.unwrap();
+
+    let mut was_told = false;
+    while let Ok(change) = told.try_recv() {
+        was_told |= change == crate::views::Change::Removed;
+    }
+    assert!(was_told, "the app's handle is told to let go");
+    kept_by_the_app.inner.forget_on_close.disarm();
+    drop(kept_by_the_app);
+    assert!(linking_store_of(&dir).exists(), "as if the app stopped first");
+
+    assert!(resume(&dir, &bucket).await.unwrap().is_none());
+    assert!(!linking_store_of(&dir).exists());
+}
+
+/// Someone else's devices see nothing of a person's links in progress.
+#[tokio::test(flavor = "multi_thread")]
+async fn another_person_sees_none_of_your_links_in_progress() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    bob.sync().await;
+
+    carol.sync().await;
+
+    assert_eq!(links_asked_by(&carol, &bob), 1, "Carol read the link op");
+    assert!(bob.my_devices().unwrap().iter().any(|device| device.is_linking));
+    assert!(!carol.my_devices().unwrap().iter().any(|device| device.is_linking));
+}
+
+/// Refused tries alone use up the day.
+#[tokio::test(flavor = "multi_thread")]
+async fn five_refused_tries_today_refuse_a_sixth_code() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    for index in 0..5 {
+        let (_code, _linking) = handed_over(&bob, &root.path().join(format!("try-{index}")), &bucket).await;
+        let device = bob.state().store.pending_links().unwrap()[index].request.device;
+        bob.write(Op::DeviceChange {
+            change: DeviceChange::Remove {
+                devices: vec![device],
+            },
+        })
+        .unwrap();
+        bob.sync().await;
+        admin.sync().await;
+        bob.sync().await;
+    }
+    assert!(
+        bob.state()
+            .store
+            .pending_links()
+            .unwrap()
+            .iter()
+            .all(|link| link.is_refused)
+    );
+
+    let refused = format!("{:#}", bob.create_test_link_code().unwrap_err());
+
+    assert!(refused.contains("linked several devices today"), "{refused}");
+}
+
+/// A folder holding a link in progress isn't created over as a workspace.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linking_store_is_not_created_over() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let code = bob.create_test_link_code().unwrap();
+    drop(begin_linking(&code, &dir, &bucket).await);
+
+    let created = Workspace::create_with(
+        &data_dir(&dir).linking(),
+        "another".into(),
+        "Other",
+        crate::Profile {
+            name: "Mallory",
+            is_bot: false,
+        },
+        test_bucket_config(),
+        connector(&bucket),
+        Networking::Offline,
+    )
+    .await;
+
+    let refused = format!("{:#}", created.err().unwrap());
+    assert!(refused.contains("opens only for reading"), "{refused}");
 }

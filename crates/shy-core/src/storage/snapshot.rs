@@ -22,6 +22,8 @@ const PERSONAL_TABLES: &[&str] = &[
     "later",
     "page_mentions",
     "pending_links",
+    "device_platforms",
+    "device_notices",
 ];
 
 /// Everything a snapshot leaves out: what replaying the bucket gives back

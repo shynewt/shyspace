@@ -57,6 +57,15 @@ impl PresenceBook {
         }
     }
 
+    /// When `member` was last heard from in this run, by our clock.
+    pub(super) fn last_heard_ms(&self, member: &PublicKey) -> Option<i64> {
+        self.heard.get(member).map(|heard| heard.received_ms)
+    }
+
+    pub(super) fn is_reachable(&self, member: &PublicKey, now_ms: i64) -> bool {
+        self.state_of(member, now_ms) != PresenceState::Unreachable
+    }
+
     /// Newer heartbeats are accepted, but a change of state at most once per
     /// `MIN_CHANGE_GAP_MS`; repeats of the same state change nothing visible.
     fn should_accept(&self, heartbeat: &Heartbeat, now_ms: i64) -> bool {

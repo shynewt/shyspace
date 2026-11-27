@@ -4,6 +4,7 @@
 mod apply;
 mod device_actions;
 mod device_changes;
+mod device_notices;
 mod devices;
 mod epochs;
 mod files;
@@ -37,6 +38,7 @@ mod threads;
 pub use apply::{Applied, ApplyContext};
 pub use device_actions::{Acted, OwedWelcome};
 pub use device_changes::RecordedChange;
+pub use device_notices::{DEVICE_NOTICE_LIFETIME_MS, DeviceNoticeKind, KeptDeviceNotice};
 pub use devices::DeviceSource;
 pub(crate) use devices::{CERTIFICATE_LIFETIME_EPOCHS, MAX_DEVICES_PER_PERSON};
 pub use files::{BlobRemoval, StoredFile};

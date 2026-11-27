@@ -100,6 +100,8 @@ impl Workspace {
                 }
             };
             state.record_epoch(&self.inner.config)?;
+            let removed: Vec<_> = verified.frozen.iter().map(|frozen| frozen.member).collect();
+            self.note_removed_devices(&state.store, &removed)?;
             outcome
         };
         // At once, so the views don't lag; a failure is retried every pass.
@@ -114,6 +116,22 @@ impl Workspace {
         }
         self.emit(Change::Members);
         Ok(CommitOutcome::MovedOn)
+    }
+
+    /// Notes the person's own devices a followed commit removed, for their
+    /// own screens.
+    pub(crate) fn note_removed_devices(
+        &self,
+        store: &crate::storage::Store,
+        removed: &[iroh::PublicKey],
+    ) -> Result<()> {
+        let now = crate::ops::now_ms()?;
+        for device in removed {
+            if *device != self.me() && store.person_of(device)? == self.my_person() {
+                store.note_device(device, crate::storage::DeviceNoticeKind::Removed, now)?;
+            }
+        }
+        Ok(())
     }
 
     /// Does what freezing removed members' logs left for the views, and

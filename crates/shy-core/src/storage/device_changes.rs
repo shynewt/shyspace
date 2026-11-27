@@ -7,10 +7,11 @@ use anyhow::Result;
 use iroh::PublicKey;
 use rusqlite::params;
 
-use super::{Applied, ApplyContext, Store, apply::shown_time, to_public_key};
+use super::{Applied, ApplyContext, DeviceNoticeKind, Store, apply::shown_time, to_public_key};
 use crate::{
     membership::device_change::DeviceChange,
     ops::{VerifiedOp, rule_violation},
+    views::Change,
 };
 
 /// A change that passed every rule, with the person it is about.
@@ -66,6 +67,16 @@ impl Store {
                 }
             }
         }
+        if let DeviceChange::Link { certificate, .. } = change
+            && verified.author != context.me
+            && person == self.person_at(&context.me, verified.epoch)?
+        {
+            self.note_device(
+                &certificate.device,
+                DeviceNoticeKind::Linked,
+                shown_time(verified)?,
+            )?;
+        }
         self.observe_lamport(verified.body.lamport)?;
         self.db.execute(
             "INSERT OR IGNORE INTO device_changes (author, seq, epoch, person, change, shown_ms)
@@ -79,7 +90,10 @@ impl Store {
                 shown_time(verified)?,
             ],
         )?;
-        Ok(Applied::default())
+        Ok(Applied {
+            changes: vec![Change::Members],
+            ..Applied::default()
+        })
     }
 
     /// Every change that passed the rules, by author and then log order.

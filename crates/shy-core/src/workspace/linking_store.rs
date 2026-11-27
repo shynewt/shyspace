@@ -10,7 +10,7 @@ use zeroize::Zeroizing;
 use super::{DataDir, lifecycle::prepare_empty_dir};
 use crate::{
     identity,
-    membership::link::{LinkCode, LinkRequest},
+    membership::link::{LinkCode, LinkRequest, Token},
     ops::now_ms,
     storage::Store,
 };
@@ -18,9 +18,10 @@ use crate::{
 const LINKING_SUFFIX: &str = ".linking";
 const LINK_CODE_META: &str = "link_code";
 const LINK_REQUEST_META: &str = "link_request";
-pub(super) const HANDOVER_SECRET_META: &str = "link_handover_secret";
+pub(crate) const HANDOVER_SECRET_META: &str = "link_handover_secret";
 const LINK_STARTED_META: &str = "link_started_ms";
 const LINK_FINISHING_META: &str = "link_finishing";
+const LINK_ENDED_META: &str = "link_ended";
 
 /// How long a new device waits to be added before it wipes what it holds.
 pub(crate) const LINKING_LIFETIME_MS: i64 = 7 * 24 * 60 * 60 * 1000;
@@ -35,6 +36,9 @@ pub(super) struct KeptLink {
     /// Set just before joining: MLS spends this device's key as it reads
     /// the welcome, so a join that began can't run again.
     pub is_finishing: bool,
+    /// Wiped while something still held the store open: it goes at the
+    /// next start.
+    pub is_ended: bool,
 }
 
 impl KeptLink {
@@ -74,6 +78,20 @@ impl DataDir {
     }
 
     /// The link kept here, if there is one.
+    /// Deletes the linking store if it still holds the link for `token`:
+    /// a newer link started in the same folder since is left alone.
+    pub(crate) async fn forget_reading_of(&self, token: &Token) -> Result<()> {
+        if !self.store_path().try_exists()? {
+            return Ok(());
+        }
+        let local = self.open_local().await?;
+        let is_that_link = read_kept_link(&local.store).is_ok_and(|kept| kept.code.token == *token);
+        if !is_that_link {
+            return Ok(());
+        }
+        self.forget_reading_locked(local.into_lock()).await
+    }
+
     pub(super) async fn kept_link(&self) -> Result<Option<KeptLink>> {
         if !self.store_path().try_exists()? {
             return Ok(None);
@@ -81,10 +99,22 @@ impl DataDir {
         let local = self.open_local().await?;
         read_kept_link(&local.store).map(Some)
     }
+}
 
-    pub(crate) async fn mark_link_finishing(&self) -> Result<()> {
-        self.open_local().await?.store.set_meta(LINK_FINISHING_META, &[1])
-    }
+/// Whether `store` is a linking store, which opens only for reading.
+pub(super) fn is_linking_store(store: &Store) -> Result<bool> {
+    Ok(store.meta(LINK_CODE_META)?.is_some())
+}
+
+/// Marks the join as begun, in the linking store.
+pub(super) fn mark_link_finishing(store: &Store) -> Result<()> {
+    store.set_meta(LINK_FINISHING_META, &[1])
+}
+
+/// Marks the link as over, so the store goes even if something holds it
+/// open now.
+pub(super) fn mark_link_ended(store: &Store) -> Result<()> {
+    store.set_meta(LINK_ENDED_META, &[1])
 }
 
 /// Makes the link kept in `data` look `age_ms` old.
@@ -117,5 +147,6 @@ fn read_kept_link(store: &Store) -> Result<KeptLink> {
                 .context("a kept link's start time is corrupt")?,
         ),
         is_finishing: store.meta(LINK_FINISHING_META)?.is_some(),
+        is_ended: store.meta(LINK_ENDED_META)?.is_some(),
     })
 }

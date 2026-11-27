@@ -155,10 +155,23 @@ impl DataDir {
     }
 
     /// Deletes a store a linking device read from, settings first, so a
-    /// stop partway never leaves something that opens as a workspace.
+    /// stop partway never leaves something that opens as a workspace. It
+    /// holds the folder's lock throughout, so a store something still holds
+    /// open is never deleted, and a new link waits for the last one to go.
     pub(super) async fn forget_reading(&self) -> Result<()> {
+        if !self.path.try_exists()? {
+            return Ok(());
+        }
+        let lock = self.lock().context(FINISHING_LAST_LINK)?;
+        self.forget_reading_locked(lock).await
+    }
+
+    /// As [`Self::forget_reading`], with the folder's lock already held.
+    pub(super) async fn forget_reading_locked(&self, lock: std::fs::File) -> Result<()> {
         remove_if_there(&self.path.join(crate::config::CONFIG_FILE))?;
-        self.forget_unfinished().await
+        let forgotten = self.forget_unfinished().await;
+        drop(lock);
+        forgotten
     }
 
     /// Clears what an unfinished join or link left in this folder, so a new
@@ -276,12 +289,21 @@ impl DataDir {
     }
 }
 
+const FINISHING_LAST_LINK: &str = "Finishing the last link on this device… try again in a moment.";
+
 /// The decrypted local pieces every workspace starts from.
 pub(super) struct Local {
     lock: std::fs::File,
     pub store: Store,
     pub identity: SecretKey,
     device_key: DeviceKey,
+}
+
+impl Local {
+    /// Closes the store and keeps only the folder's lock.
+    pub(super) fn into_lock(self) -> std::fs::File {
+        self.lock
+    }
 }
 
 impl Local {
@@ -369,6 +391,7 @@ impl Workspace {
             .context("checking the bucket settings")?;
         prepare_empty_dir(&data.path)?;
         let local = data.open_local().await?;
+        refuse_linking_store(data, &local.store)?;
         let mut mls = local.open_mls(data, None)?;
         mls.create_group(workspace_id.as_bytes())?;
         local.store.record_joined_epoch(mls.epoch()?)?;
@@ -422,6 +445,7 @@ impl Workspace {
         ensure!(!name.is_empty(), "a name is needed to join");
         prepare_empty_dir(&data.path)?;
         let local = data.open_local().await?;
+        refuse_linking_store(data, &local.store)?;
         let mut mls = local.open_mls(data, None)?;
         let request = JoinRequest {
             key_package: mls.key_package()?,
@@ -530,6 +554,7 @@ impl Workspace {
             data.path.display()
         );
         let local = data.open_local().await?;
+        refuse_linking_store(data, &local.store)?;
         let config = WorkspaceConfig::load(&data.path, &local.store)?;
         ensure!(
             local.store.meta(SIGNER_META)?.is_some(),
@@ -705,6 +730,7 @@ impl Workspace {
                 tamper_next_grant: Default::default(),
                 #[cfg(test)]
                 refuse_next_sealed_write: Default::default(),
+                forget_on_close: super::reading::ForgetOnClose::new(tokio::runtime::Handle::current()),
             }),
         };
         workspace.rebuild_views_if_rules_changed()?;
@@ -1033,6 +1059,17 @@ fn remove_if_there(path: &Path) -> Result<()> {
         }
         _ => Ok(()),
     }
+}
+
+/// The guarantee that a linking store writes nothing belongs to the folder:
+/// it is never opened, joined into or created over as a member's.
+fn refuse_linking_store(data: &DataDir, store: &Store) -> Result<()> {
+    ensure!(
+        !super::linking_store::is_linking_store(store)?,
+        "{} holds a device's link in progress, which opens only for reading",
+        data.path.display()
+    );
+    Ok(())
 }
 
 pub(super) fn prepare_empty_dir(dir: &Path) -> Result<()> {

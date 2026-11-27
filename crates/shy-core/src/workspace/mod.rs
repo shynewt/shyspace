@@ -16,6 +16,7 @@ mod link_tending;
 mod linking;
 pub(crate) mod linking_store;
 mod look;
+mod my_devices;
 mod page_mentions;
 mod pages_live;
 mod presence;
@@ -426,6 +427,8 @@ pub(crate) struct Inner {
     /// logs, before it reads where to freeze them.
     #[cfg(test)]
     pub removal_pause: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
+    /// Last, so it drops after the database and the folder's lock.
+    pub forget_on_close: reading::ForgetOnClose,
 }
 
 #[derive(Clone)]

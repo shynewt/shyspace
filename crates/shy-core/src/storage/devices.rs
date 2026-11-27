@@ -66,6 +66,29 @@ impl Store {
             .collect()
     }
 
+    /// When this device recorded `device` as linked; `None` for a person's
+    /// first device, or one recorded from a grant (`added_ms` 0).
+    pub fn device_linked_ms(&self, device: &PublicKey) -> Result<Option<i64>> {
+        let added: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT added_ms FROM devices WHERE device = ?",
+                [device.as_bytes()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(added.filter(|added_ms| *added_ms > 0))
+    }
+
+    /// The devices `voucher` vouched for.
+    pub fn devices_vouched_by(&self, voucher: &PublicKey) -> Result<Vec<PublicKey>> {
+        let mut statement = self
+            .db
+            .prepare("SELECT device FROM devices WHERE voucher = ? ORDER BY added_epoch, device")?;
+        let devices = statement.query_map([voucher.as_bytes()], |row| row.get::<_, Vec<u8>>(0))?;
+        devices.map(|bytes| to_public_key(bytes?)).collect()
+    }
+
     /// Records that a device is its person's from `record.added_epoch` on.
     /// Putting the same record again changes nothing; a different one for
     /// the same device is refused, as a device's person never changes.

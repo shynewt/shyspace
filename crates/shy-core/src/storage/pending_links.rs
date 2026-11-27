@@ -4,12 +4,13 @@
 //! own state: it never leaves the device.
 
 use anyhow::{Context, Result};
-use rusqlite::params;
+use iroh::PublicKey;
+use rusqlite::{OptionalExtension, params};
 
 use super::Store;
 use crate::membership::{
     device::DeviceCertificate,
-    link::{LinkCode, LinkRequest, Token},
+    link::{LinkCode, LinkRequest, Platform, Token},
 };
 
 /// A link this device confirmed.
@@ -91,6 +92,29 @@ impl Store {
             })
         })
         .collect()
+    }
+
+    /// What a device this one linked runs on, for the person's own screens.
+    pub fn put_device_platform(&self, device: &PublicKey, platform: Platform) -> Result<()> {
+        self.db.execute(
+            "INSERT OR REPLACE INTO device_platforms (device, platform) VALUES (?, ?)",
+            params![device.as_bytes(), postcard::to_stdvec(&platform)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn device_platform(&self, device: &PublicKey) -> Result<Option<Platform>> {
+        let bytes: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT platform FROM device_platforms WHERE device = ?",
+                [device.as_bytes()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        bytes
+            .map(|bytes| postcard::from_bytes(&bytes).context("reading a device's platform"))
+            .transpose()
     }
 
     pub fn delete_pending_link(&self, token: &Token) -> Result<()> {

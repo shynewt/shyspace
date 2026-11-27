@@ -540,6 +540,55 @@ pub struct PagePresence {
     pub cursors: Vec<PageCursor>,
 }
 
+/// One of your own devices, for Settings › Devices.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DeviceInfo {
+    /// The device's member id (hex).
+    pub id: String,
+    pub is_this_device: bool,
+    /// Your first device, whose key is your id.
+    pub is_first_device: bool,
+    /// Known on the device that linked it.
+    pub platform: Option<crate::membership::link::Platform>,
+    /// When this device learned of the link; `None` for your first device.
+    pub linked_ms: Option<i64>,
+    pub is_active_now: bool,
+    /// Heard from this run, or its newest message.
+    pub last_active_ms: Option<i64>,
+    /// Nothing from it yet: no op, and not heard from this run. A linked
+    /// device writes nothing when it joins, so this can't mean "never used".
+    pub has_no_activity_seen: bool,
+    /// You asked to remove it; the admin's app hasn't yet.
+    pub is_removing: bool,
+    /// One of your devices confirmed it, and the admin's app hasn't added it
+    /// yet ("Linking…"). Removing it stops the link.
+    pub is_linking: bool,
+    /// What removing it with the devices it linked would also take (ids):
+    /// those it linked, and those they linked in turn, that are still
+    /// yours, never this device nor what this device linked.
+    pub linked_devices: Vec<String>,
+}
+
+/// Something that happened to one of your own devices, for your own screens.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DeviceNotice {
+    /// The device's member id (hex).
+    pub device: String,
+    pub kind: DeviceNoticeKind,
+    /// Known on the device that linked it.
+    pub platform: Option<crate::membership::link::Platform>,
+    pub at_ms: i64,
+    pub is_seen: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceNoticeKind {
+    /// A new device can now use shyspace as you.
+    Linked,
+    Removed,
+}
+
 /// What changed, so listeners refresh only the affected view.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
