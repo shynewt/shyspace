@@ -39,7 +39,7 @@ import dev.shynewt.shyspace.ui.theme.LocalShyColors
  */
 @Composable
 fun Composer(
-    title: String,
+    placeholder: String,
     draft: TextFieldState,
     isEditing: Boolean,
     onCancelEdit: () -> Unit,
@@ -75,7 +75,6 @@ fun Composer(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 8.dp),
         ) {
-            val placeholder = stringResource(R.string.message_placeholder, title)
             BasicTextField(
                 state = draft,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.palette.text),

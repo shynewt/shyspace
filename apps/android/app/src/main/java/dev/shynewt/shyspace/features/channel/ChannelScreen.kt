@@ -3,21 +3,10 @@ package dev.shynewt.shyspace.features.channel
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.snapshotFlow
@@ -26,23 +15,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,32 +38,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import dev.shynewt.shyspace.R
-import dev.shynewt.shyspace.ui.Avatar
-import dev.shynewt.shyspace.ui.Badge
-import dev.shynewt.shyspace.ui.Clock
-import dev.shynewt.shyspace.ui.displayName
 import dev.shynewt.shyspace.ui.rememberClock
 import dev.shynewt.shyspace.ui.DayDivider
 import dev.shynewt.shyspace.ui.theme.LocalShyColors
-import java.time.LocalDate
 import kotlinx.coroutines.launch
 import uniffi.shy_core.Message
-import uniffi.shy_core.Reaction
 
-private val AVATAR_SIZE = 36.dp
-private val GUTTER = 16.dp
 
 /** A channel: its messages, newest at the bottom, and a composer that rides on the keyboard. */
 @Composable
@@ -95,6 +65,7 @@ fun ChannelScreen(
     onReact: (message: String, emoji: String, active: Boolean) -> Unit,
     onDelete: (message: String) -> Unit,
     onLoadOlder: () -> Unit,
+    onOpenThread: (root: Message) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
@@ -152,6 +123,7 @@ fun ChannelScreen(
                         onReact = onReact,
                         isLoadingOlder = state.isLoadingOlder,
                         onNearOldest = { if (state.hasOlder) onLoadOlder() },
+                        onOpenThread = onOpenThread,
                     )
                 }
             }
@@ -164,7 +136,7 @@ fun ChannelScreen(
                 )
             }
             Composer(
-                title = title,
+                placeholder = stringResource(R.string.message_placeholder, title),
                 draft = draft.text,
                 isEditing = draft.editingId != null,
                 onCancelEdit = draft::stopEdit,
@@ -177,6 +149,7 @@ fun ChannelScreen(
             message = message,
             onDismiss = { actionsFor = null },
             onReact = { emoji, active -> onReact(message.id, emoji, active) },
+            onReplyInThread = { onOpenThread(message) },
             // The markdown as written, as the desktop copies it.
             onCopy = { scope.launch { clipboard.setClipEntry(sensitiveClipOf(message.text)) } },
             onEdit = { draft.startEdit(message) },
@@ -212,6 +185,7 @@ private fun MessageList(
     onReact: (message: String, emoji: String, active: Boolean) -> Unit,
     isLoadingOlder: Boolean,
     onNearOldest: () -> Unit,
+    onOpenThread: (Message) -> Unit,
 ) {
     val clock = rememberClock()
     val rows = remember(newestFirst, clock.zone) { channelRows(newestFirst, clock.zone) }
@@ -233,7 +207,7 @@ private fun MessageList(
         items(rows, key = { it.key }) { row ->
             when (row) {
                 is ChannelRow.Day -> DayDivider(dayLabel(row.date, clock.today), modifier = Modifier.padding(horizontal = GUTTER))
-                is ChannelRow.Item -> MessageItem(row.message, textOf(row.message), row.isContinuation, clock, onLongPress, onReact)
+                is ChannelRow.Item -> MessageItem(row.message, textOf(row.message), row.isContinuation, clock, onLongPress, onReact, onOpenThread)
             }
         }
         if (isLoadingOlder) {
@@ -252,114 +226,3 @@ private fun MessageList(
 
 /** How many rows before the oldest loaded one the next page starts loading. */
 private const val OLDER_AHEAD = 10
-
-@Composable
-private fun dayLabel(date: LocalDate, today: LocalDate): String {
-    val locale = LocalConfiguration.current.locales[0]
-    return when (val name = dayName(date, today, locale)) {
-        DayName.Today -> stringResource(R.string.today)
-        DayName.Yesterday -> stringResource(R.string.yesterday)
-        is DayName.Date -> name.text
-    }
-}
-
-@Composable
-private fun MessageItem(
-    message: Message,
-    text: String,
-    isContinuation: Boolean,
-    clock: Clock,
-    onLongPress: (Message) -> Unit,
-    onReact: (message: String, emoji: String, active: Boolean) -> Unit,
-) {
-    val colors = LocalShyColors.current.palette
-    val haptics = LocalHapticFeedback.current
-    val time = clock.time(message.createdMs)
-    val author = displayName(message.authorName, message.author)
-    val actionsLabel = stringResource(R.string.message_actions)
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .pointerInput(message.id) {
-                detectTapGestures(onLongPress = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onLongPress(message)
-                })
-            }
-            .padding(start = GUTTER, end = GUTTER, top = if (isContinuation) 2.dp else 10.dp, bottom = 2.dp)
-            .semantics(mergeDescendants = true) {
-                customActions = listOf(CustomAccessibilityAction(actionsLabel) { onLongPress(message); true })
-            },
-    ) {
-        if (isContinuation) {
-            // Shown without a name, but a screen reader still says whose it is.
-            Spacer(Modifier.width(AVATAR_SIZE).semantics { contentDescription = "$author, $time" })
-        } else {
-            Avatar(
-                id = message.author,
-                name = author,
-                isBot = message.authorIsBot,
-                size = AVATAR_SIZE,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (!isContinuation) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(author, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    if (message.authorIsBot) Badge(stringResource(R.string.agent))
-                    Text(time, style = MaterialTheme.typography.labelSmall, color = colors.textFaint)
-                }
-            }
-            val edited = stringResource(R.string.edited)
-            val faint = MaterialTheme.typography.labelSmall.toSpanStyle().copy(color = colors.textFaint)
-            Text(
-                buildAnnotatedString {
-                    append(text)
-                    if (message.isEdited) withStyle(faint) { append(" $edited") }
-                },
-                style = MaterialTheme.typography.bodyLarge,
-                color = colors.text,
-            )
-            if (message.reactions.isNotEmpty()) {
-                Reactions(message.reactions, onToggle = { reaction -> onReact(message.id, reaction.emoji, !reaction.mine) })
-            }
-            if (message.replyCount > 0u) {
-                val replies = message.replyCount.toInt()
-                Text(
-                    pluralStringResource(R.plurals.replies, replies, replies),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = LocalShyColors.current.accent.accentText,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun Reactions(reactions: List<Reaction>, onToggle: (Reaction) -> Unit) {
-    val colors = LocalShyColors.current
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
-        reactions.forEach { reaction ->
-            val description = pluralStringResource(R.plurals.reaction, reaction.count.toInt(), reaction.count.toInt(), reaction.emoji)
-            Text(
-                "${reaction.emoji} ${reaction.count}",
-                style = MaterialTheme.typography.labelLarge,
-                color = if (reaction.mine) colors.accent.accentText else colors.palette.textMuted,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clip(CircleShape)
-                    .clickable(role = Role.Button) { onToggle(reaction) }
-                    .semantics {
-                        contentDescription = description
-                        selected = reaction.mine
-                    }
-                    .background(if (reaction.mine) colors.accent.accentSoft else colors.palette.surface2, CircleShape)
-                    .border(1.dp, if (reaction.mine) colors.accent.accent else colors.palette.border, CircleShape)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
-        }
-    }
-}

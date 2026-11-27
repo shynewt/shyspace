@@ -15,6 +15,8 @@ import androidx.navigation3.ui.NavDisplay
 import dev.shynewt.shyspace.core.ShyCore
 import dev.shynewt.shyspace.features.channel.ChannelScreen
 import dev.shynewt.shyspace.features.channel.ChannelViewModel
+import dev.shynewt.shyspace.features.channel.ThreadScreen
+import dev.shynewt.shyspace.features.channel.ThreadViewModel
 import dev.shynewt.shyspace.features.home.HomeScreen
 import dev.shynewt.shyspace.features.home.HomeState
 import dev.shynewt.shyspace.features.home.HomeViewModel
@@ -34,6 +36,8 @@ sealed interface Route {
 
     data class Channel(val workspaceId: String, val channelId: String, val title: String) : Route
 
+    data class Thread(val workspaceId: String, val channelId: String, val rootId: String, val channelTitle: String) : Route
+
     /** The You tab; it sits on Home, so Back returns there, as Android's tabs do. */
     data object You : Route
 }
@@ -45,6 +49,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
             when (route) {
                 Route.Home -> listOf("home")
                 is Route.Channel -> listOf("channel", route.workspaceId, route.channelId, route.title)
+                is Route.Thread -> listOf("thread", route.workspaceId, route.channelId, route.rootId, route.channelTitle)
                 Route.You -> listOf("you")
             }
         }
@@ -53,6 +58,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
         saved.map { parts ->
             when (parts.first()) {
                 "channel" -> Route.Channel(parts[1], parts[2], parts[3])
+                "thread" -> Route.Thread(parts[1], parts[2], parts[3], parts[4])
                 "you" -> Route.You
                 else -> Route.Home
             }
@@ -108,6 +114,23 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                     onReact = channel::react,
                     onDelete = channel::delete,
                     onLoadOlder = channel::loadOlder,
+                    onOpenThread = { root -> backStack.add(Route.Thread(route.workspaceId, route.channelId, root.id, route.title)) },
+                )
+            }
+            entry<Route.Thread> { route ->
+                val thread = viewModel(key = "${route.workspaceId}/${route.rootId}") {
+                    ThreadViewModel(core, route.workspaceId, route.channelId, route.rootId)
+                }
+                val state by thread.state.collectAsStateWithLifecycle()
+                ThreadScreen(
+                    channelTitle = route.channelTitle,
+                    state = state,
+                    onBack = tabs::back,
+                    onReply = thread::reply,
+                    onSeen = thread::markSeen,
+                    onEdit = thread::edit,
+                    onReact = thread::react,
+                    onDelete = thread::delete,
                 )
             }
             entry<Route.You>(metadata = switchesAtOnce) {

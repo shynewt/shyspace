@@ -46,12 +46,16 @@ import uniffi.shy_core.Message
 /** The desktop's quick reactions, in its order. */
 val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "🎉", "👀", "🚀")
 
-/** What can be done with [message]: react, copy, and for its author, edit or delete. */
+/**
+ * What can be done with [message]: react, reply in its thread (null inside the thread), copy,
+ * and for its author, edit or delete.
+ */
 @Composable
 fun MessageActions(
     message: Message,
     onDismiss: () -> Unit,
     onReact: (emoji: String, active: Boolean) -> Unit,
+    onReplyInThread: (() -> Unit)?,
     onCopy: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -82,6 +86,12 @@ fun MessageActions(
                                 onDismiss()
                             },
                     ) { Text(emoji, fontSize = 22.sp) }
+                }
+            }
+            if (onReplyInThread != null) {
+                Action(R.drawable.ic_reply, R.string.reply_in_thread) {
+                    onReplyInThread()
+                    onDismiss()
                 }
             }
             Action(R.drawable.ic_copy, R.string.copy_text) {

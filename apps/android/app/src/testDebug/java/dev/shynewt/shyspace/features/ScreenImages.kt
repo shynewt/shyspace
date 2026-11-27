@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.shynewt.shyspace.features.channel.ChannelScreen
 import dev.shynewt.shyspace.features.channel.ChannelState
+import dev.shynewt.shyspace.features.channel.ThreadScreen
+import dev.shynewt.shyspace.features.channel.ThreadState
 import dev.shynewt.shyspace.features.home.HomeScreen
 import dev.shynewt.shyspace.features.home.HomeState
 import dev.shynewt.shyspace.features.home.NoWorkspace
@@ -118,12 +120,29 @@ class ScreenImages {
             onReact = { _, _, _ -> },
             onDelete = {},
             onLoadOlder = {},
+            onOpenThread = {},
+        )
+    }
+
+    @Test
+    fun thread() = capture("thread") {
+        ThreadScreen(
+            channelTitle = "#general",
+            state = ThreadState(
+                root = sampleMessage("3", "Grace", "On it. Mine is a Pixel, I'll report back here.", start + 5 * minute, replyCount = 2u),
+                replies = listOf(
+                    sampleMessage("9", "Grace", "Linking worked first time. The check code matched.", start + 31 * minute),
+                    sampleMessage("8", "Ada", "Tell me how the check code looks on yours.", start + 9 * minute),
+                ),
+                isLoading = false,
+            ),
+            onBack = {}, onReply = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {},
         )
     }
 
     @Test
     fun emptyChannel() = capture("channel-empty") {
-        ChannelScreen(title = "#releases", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {})
+        ChannelScreen(title = "#releases", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {}, onOpenThread = {})
     }
 
     @Test

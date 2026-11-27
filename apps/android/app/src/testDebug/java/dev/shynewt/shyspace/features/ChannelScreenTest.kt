@@ -62,6 +62,7 @@ class ChannelScreenTest {
                     onReact = { _, _, _ -> },
                     onDelete = {},
                     onLoadOlder = {},
+                    onOpenThread = {},
                 )
             }
         }
@@ -82,7 +83,7 @@ class ChannelScreenTest {
     fun anEmptyChannelSaysSo() {
         compose.setContent {
             ShyTheme(isDark = false) {
-                ChannelScreen(title = "#general", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {})
+                ChannelScreen(title = "#general", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {}, onOpenThread = {})
             }
         }
         compose.onNodeWithText("No messages yet. Say hello.").assertExists()
@@ -103,6 +104,7 @@ class ChannelScreenTest {
                     onReact = { _, _, _ -> },
                     onDelete = {},
                     onLoadOlder = {},
+                    onOpenThread = {},
                 )
             }
         }
@@ -127,6 +129,7 @@ class ChannelScreenTest {
                     onReact = { _, _, _ -> },
                     onDelete = {},
                     onLoadOlder = {},
+                    onOpenThread = {},
                 )
             }
         }
@@ -148,6 +151,7 @@ class ChannelScreenTest {
                     onReact = { _, _, _ -> },
                     onDelete = {},
                     onLoadOlder = {},
+                    onOpenThread = {},
                 )
             }
         }
@@ -192,7 +196,7 @@ class ChannelScreenTest {
         var state by mutableStateOf(ChannelState(messages = older, isLoading = false))
         compose.setContent {
             ShyTheme(isDark = false) {
-                ChannelScreen(title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = { seen += it }, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {})
+                ChannelScreen(title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = { seen += it }, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {}, onOpenThread = {})
             }
         }
         compose.waitForIdle()
@@ -214,7 +218,7 @@ class ChannelScreenTest {
         var state by mutableStateOf(ChannelState(messages = older, isLoading = false))
         compose.setContent {
             ShyTheme(isDark = false) {
-                ChannelScreen(title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {})
+                ChannelScreen(title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = {}, onOpenThread = {})
             }
         }
         compose.waitForIdle()
@@ -250,6 +254,7 @@ class ChannelScreenTest {
                     onReact = { message, emoji, active -> asked += "react $message $emoji $active" },
                     onDelete = { message -> asked += "delete $message" },
                     onLoadOlder = { asked += "older" },
+                    onOpenThread = {},
                 )
             }
         }
@@ -469,7 +474,7 @@ class ChannelScreenTest {
             ShyTheme(isDark = false) {
                 ChannelScreen(
                     title = "#general", state = state, onBack = {}, onSend = { true }, onSeen = {},
-                    onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = { requests++ },
+                    onEdit = { _, _ -> true }, onReact = { _, _, _ -> }, onDelete = {}, onLoadOlder = { requests++ }, onOpenThread = {},
                 )
             }
         }
@@ -486,5 +491,44 @@ class ChannelScreenTest {
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(loaded.size)
         compose.waitForIdle()
         assertEquals(asked, requests)
+    }
+
+    @Test
+    fun aMessagesRepliesOpenItsThread() {
+        val opened = mutableListOf<String>()
+        compose.setContent {
+            ShyTheme(isDark = false) {
+                ChannelScreen(
+                    title = "#general",
+                    state = ChannelState(messages = listOf(sampleMessage("1", "Grace", "lunch?", replyCount = 3u)), isLoading = false),
+                    onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> },
+                    onDelete = {}, onLoadOlder = {}, onOpenThread = { opened += it.id },
+                )
+            }
+        }
+
+        compose.onNodeWithText("3 replies").performClick()
+
+        assertEquals(listOf("1"), opened)
+    }
+
+    @Test
+    fun replyInThreadOpensTheMessagesThread() {
+        val opened = mutableListOf<String>()
+        compose.setContent {
+            ShyTheme(isDark = false) {
+                ChannelScreen(
+                    title = "#general",
+                    state = ChannelState(messages = listOf(sampleMessage("1", "Grace", "lunch?")), isLoading = false),
+                    onBack = {}, onSend = { true }, onSeen = {}, onEdit = { _, _ -> true }, onReact = { _, _, _ -> },
+                    onDelete = {}, onLoadOlder = {}, onOpenThread = { opened += it.id },
+                )
+            }
+        }
+
+        compose.onNodeWithText("lunch?").performTouchInput { longClick() }
+        compose.onNodeWithText("Reply in thread").performClick()
+
+        assertEquals(listOf("1"), opened)
     }
 }
