@@ -374,17 +374,32 @@ impl<M: JoinMailbox> DeviceLinking<M> {
     }
 
     pub(crate) async fn wait_until_added_with(
-        mut self,
+        self,
         reading: Workspace,
         cancel: &JoinCancel,
         connect: Connector,
         options: impl Into<WorkspaceOptions>,
     ) -> Result<Workspace> {
+        self.wait_until_added_registering(reading, cancel, connect, options, Ok)
+            .await
+    }
+
+    /// As `wait_until_added_with`, handing the joined workspace to
+    /// `register` before the reading one is let go and its other handles
+    /// are told ([`crate::views::Change::ReadingClosed`]).
+    pub(crate) async fn wait_until_added_registering(
+        mut self,
+        reading: Workspace,
+        cancel: &JoinCancel,
+        connect: Connector,
+        options: impl Into<WorkspaceOptions>,
+        register: impl FnOnce(Workspace) -> Result<Workspace> + Send,
+    ) -> Result<Workspace> {
         let mut cancelled = cancel.subscribe();
         loop {
             reading.sync().await;
             match self.added_now(&reading).await {
-                Ok(Some(welcome)) => return self.finish(reading, welcome, connect, options).await,
+                Ok(Some(welcome)) => return self.finish(reading, welcome, connect, options, register).await,
                 Ok(None) => {}
                 Err(error) if error.downcast_ref::<LinkRefused>().is_some() => {
                     return self.wiped_after(error, Some(reading)).await;

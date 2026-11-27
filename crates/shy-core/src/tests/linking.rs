@@ -1995,7 +1995,10 @@ async fn the_voucher_can_tell_when_the_device_it_linked_is_added() {
 }
 
 /// The app's set of workspaces on the new device, reaching `bucket`.
-fn app_on_new_device(root: &std::path::Path, bucket: &Bucket) -> crate::workspaces::Workspaces {
+fn app_on_new_device(
+    root: &std::path::Path,
+    bucket: &Bucket,
+) -> std::sync::Arc<crate::workspaces::Workspaces> {
     std::fs::create_dir_all(root.join("app-keys")).unwrap();
     let device = crate::workspaces::Workspaces::with_connector(
         root.join("app"),
@@ -2003,28 +2006,26 @@ fn app_on_new_device(root: &std::path::Path, bucket: &Bucket) -> crate::workspac
         connector(bucket),
     );
     device.set_test_link_bucket(bucket.clone());
-    device
+    std::sync::Arc::new(device)
 }
 
 /// The new device's app starts the link and waits for the number while the
 /// person's device opens the request.
 async fn begin_in_app(
-    device: &crate::workspaces::Workspaces,
+    device: &std::sync::Arc<crate::workspaces::Workspaces>,
     voucher: &Workspace,
     code: &LinkCode,
-    cancel: &JoinCancel,
 ) -> CheckOnNewDevice {
-    begin_pasted_in_app(device, voucher, &code.encode().unwrap(), cancel).await
+    begin_pasted_in_app(device, voucher, &code.encode().unwrap()).await
 }
 
 /// As `begin_in_app`, with the code as the person pasted it.
 async fn begin_pasted_in_app(
-    device: &crate::workspaces::Workspaces,
+    device: &std::sync::Arc<crate::workspaces::Workspaces>,
     voucher: &Workspace,
     pasted: &str,
-    cancel: &JoinCancel,
 ) -> CheckOnNewDevice {
-    let (check, ()) = tokio::join!(device.begin_link(pasted, Platform::Linux, cancel), async {
+    let (check, ()) = tokio::join!(device.begin_link(pasted, Platform::Linux), async {
         while voucher.pending_link().await.unwrap().is_none() {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
@@ -2037,22 +2038,18 @@ async fn the_app_shows_the_reading_workspace_then_the_real_one_in_its_place() {
     let (root, bucket, admin, bob) = admin_and_bob().await;
     let device = app_on_new_device(root.path(), &bucket);
     let code = bob.create_test_link_code().unwrap();
-    let cancel = JoinCancel::new();
 
-    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code, &cancel).await else {
+    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
         panic!("the number to show");
     };
     bob.confirm_link(&shown).await.unwrap();
-    let reading = device.wait_for_link_handover(&cancel).await.unwrap();
+    let reading = device.wait_for_link_handover().await.unwrap();
     assert!(reading.is_reading_only());
     assert!(device.selected().unwrap().is_reading_only(), "shown at once");
     bob.sync().await;
     admin.sync().await;
 
-    let joined = device
-        .wait_until_linked(&cancel, Networking::Offline)
-        .await
-        .unwrap();
+    let joined = device.wait_until_linked(Networking::Offline).await.unwrap();
 
     assert!(!joined.is_reading_only());
     let shown = device.open_workspaces();
@@ -2078,12 +2075,11 @@ async fn stopping_a_link_in_the_app_closes_the_reading_workspace_and_wipes() {
     let (root, bucket, _admin, bob) = admin_and_bob().await;
     let device = app_on_new_device(root.path(), &bucket);
     let code = bob.create_test_link_code().unwrap();
-    let cancel = JoinCancel::new();
-    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code, &cancel).await else {
+    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
         panic!("the number to show");
     };
     bob.confirm_link(&shown).await.unwrap();
-    drop(device.wait_for_link_handover(&cancel).await.unwrap());
+    drop(device.wait_for_link_handover().await.unwrap());
 
     device.cancel_link().await.unwrap();
 
@@ -2105,12 +2101,11 @@ async fn the_app_picks_a_reading_link_up_after_a_restart() {
     let code = bob.create_test_link_code().unwrap();
     {
         let device = app_on_new_device(root.path(), &bucket);
-        let cancel = JoinCancel::new();
-        let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code, &cancel).await else {
+        let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
             panic!("the number to show");
         };
         bob.confirm_link(&shown).await.unwrap();
-        drop(device.wait_for_link_handover(&cancel).await.unwrap());
+        drop(device.wait_for_link_handover().await.unwrap());
         drop(device.close_all());
     }
     let device = app_on_new_device(root.path(), &bucket);
@@ -2124,10 +2119,7 @@ async fn the_app_picks_a_reading_link_up_after_a_restart() {
     drop(reading);
     bob.sync().await;
     admin.sync().await;
-    let joined = device
-        .wait_until_linked(&JoinCancel::new(), Networking::Offline)
-        .await
-        .unwrap();
+    let joined = device.wait_until_linked(Networking::Offline).await.unwrap();
     assert_eq!(joined.state().store.person_of(&joined.me()).unwrap(), bob.me());
 }
 
@@ -2137,40 +2129,28 @@ async fn the_app_picks_a_reading_link_up_after_a_restart() {
 async fn the_apps_link_steps_refuse_clearly_out_of_turn() {
     let (root, bucket, _admin, bob) = admin_and_bob().await;
     let device = app_on_new_device(root.path(), &bucket);
-    let cancel = JoinCancel::new();
 
     assert!(device.resume_link().await.unwrap().is_none());
     for refused in [
-        device.wait_for_link_handover(&cancel).await.err().unwrap(),
-        device
-            .wait_until_linked(&cancel, Networking::Offline)
-            .await
-            .err()
-            .unwrap(),
-        device.cancel_link().await.err().unwrap(),
+        device.wait_for_link_handover().await.err().unwrap(),
+        device.wait_until_linked(Networking::Offline).await.err().unwrap(),
     ] {
         assert!(format!("{refused:#}").contains("no link waiting"), "{refused:#}");
     }
+    let nothing = device.cancel_link().await.err().unwrap();
+    assert!(format!("{nothing:#}").contains("no link to stop"), "{nothing:#}");
 
     let code = bob.create_test_link_code().unwrap();
-    let CheckOnNewDevice::Code(_) = begin_in_app(&device, &bob, &code, &cancel).await else {
+    let CheckOnNewDevice::Code(_) = begin_in_app(&device, &bob, &code).await else {
         panic!("the number to show");
     };
-    let not_yet = device
-        .wait_until_linked(&cancel, Networking::Offline)
-        .await
-        .err()
-        .unwrap();
+    let not_yet = device.wait_until_linked(Networking::Offline).await.err().unwrap();
     assert!(
         format!("{not_yet:#}").contains("isn't reading yet"),
         "{not_yet:#}"
     );
     let second = bob.create_test_link_code().unwrap().encode().unwrap();
-    let busy = device
-        .begin_link(&second, Platform::Linux, &cancel)
-        .await
-        .err()
-        .unwrap();
+    let busy = device.begin_link(&second, Platform::Linux).await.err().unwrap();
     assert!(format!("{busy:#}").contains("already linking"), "{busy:#}");
     assert!(
         device.resume_link().await.unwrap().is_none(),
@@ -2255,13 +2235,7 @@ async fn the_app_takes_a_code_wrapped_across_lines() {
     let device = app_on_new_device(root.path(), &bucket);
     let code = bob.create_test_link_code().unwrap();
 
-    let check = begin_pasted_in_app(
-        &device,
-        &bob,
-        &wrap_as_pasted(&code.encode().unwrap()),
-        &JoinCancel::new(),
-    )
-    .await;
+    let check = begin_pasted_in_app(&device, &bob, &wrap_as_pasted(&code.encode().unwrap())).await;
 
     assert!(matches!(check, CheckOnNewDevice::Code(_)));
     device.cancel_link().await.unwrap();
@@ -2277,9 +2251,9 @@ async fn every_link_step_can_run_on_any_thread() {
     let (root, bucket, _admin, bob) = admin_and_bob().await;
     let device = app_on_new_device(root.path(), &bucket);
     let cancel = JoinCancel::new();
-    assert_send(&device.begin_link("", Platform::Linux, &cancel));
-    assert_send(&device.wait_for_link_handover(&cancel));
-    assert_send(&device.wait_until_linked(&cancel, Networking::Offline));
+    assert_send(&device.begin_link("", Platform::Linux));
+    assert_send(&device.wait_for_link_handover());
+    assert_send(&device.wait_until_linked(Networking::Offline));
     assert_send(&device.cancel_link());
     assert_send(&device.resume_link());
     let (_code, mut linking, reading) = reading_device(&bob, &root.path().join("phone"), &bucket).await;
@@ -2287,4 +2261,232 @@ async fn every_link_step_can_run_on_any_thread() {
     assert_send(&linking.wait_for_check(&cancel));
     assert_send(&linking.wait_for_handover_with(&cancel, ReadingConnector::over(connector(&bucket))));
     assert_send(&linking.wait_until_added_with(reading, &cancel, connector(&bucket), Networking::Offline));
+}
+
+/// The joined workspace is handed over before the reading one's other
+/// handles are told it closed, so a screen told to let go finds the joined
+/// one in place at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_joined_workspace_is_in_place_before_reading_closed_is_sent() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (_code, linking, reading) = reading_device(&bob, &root.path().join("phone"), &bucket).await;
+    let kept_by_the_app = reading.clone();
+    let mut seen_while_registering = kept_by_the_app.subscribe();
+    let mut seen_after = kept_by_the_app.subscribe();
+    bob.sync().await;
+    admin.sync().await;
+
+    let joined = linking
+        .wait_until_added_registering(
+            reading,
+            &JoinCancel::new(),
+            connector(&bucket),
+            Networking::Offline,
+            move |joined| {
+                while let Ok(change) = seen_while_registering.try_recv() {
+                    assert_ne!(
+                        change,
+                        crate::views::Change::ReadingClosed,
+                        "not told before it's in place"
+                    );
+                }
+                Ok(joined)
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(!joined.is_reading_only());
+    let mut was_told = false;
+    while let Ok(change) = seen_after.try_recv() {
+        was_told |= change == crate::views::Change::ReadingClosed;
+    }
+    assert!(was_told, "told once the joined workspace is in place");
+}
+
+/// In the app: by the time a screen hears the reading workspace closed,
+/// the workspace open under that id is the joined one.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_shows_the_joined_workspace_by_the_time_reading_closed_arrives() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    let code = bob.create_test_link_code().unwrap();
+    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+        panic!("the number to show");
+    };
+    bob.confirm_link(&shown).await.unwrap();
+    let reading = device.wait_for_link_handover().await.unwrap();
+    let mut changes = reading.subscribe();
+    let workspace_id = code.workspace_id.clone();
+    let screen = {
+        let device = device.clone();
+        tokio::spawn(async move {
+            loop {
+                if changes.recv().await.unwrap() == crate::views::Change::ReadingClosed {
+                    return device.find(&workspace_id).map(|found| found.is_reading_only());
+                }
+            }
+        })
+    };
+    // Held, as a phone holds its handle to the workspace it shows.
+    let kept_by_the_screen = reading;
+    bob.sync().await;
+    admin.sync().await;
+
+    device.wait_until_linked(Networking::Offline).await.unwrap();
+
+    assert_eq!(screen.await.unwrap(), Some(false), "the joined workspace, by id");
+    drop(kept_by_the_screen);
+}
+
+/// The app on the new device, with a link reading: the code, the number
+/// confirmed on `voucher`, and the hand-over opened.
+async fn app_reading(
+    root: &std::path::Path,
+    bucket: &Bucket,
+    voucher: &Workspace,
+) -> (std::sync::Arc<crate::workspaces::Workspaces>, LinkCode) {
+    let device = app_on_new_device(root, bucket);
+    let code = voucher.create_test_link_code().unwrap();
+    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, voucher, &code).await else {
+        panic!("the number to show");
+    };
+    voucher.confirm_link(&shown).await.unwrap();
+    drop(device.wait_for_link_handover().await.unwrap());
+    (device, code)
+}
+
+/// A screen that stops waiting doesn't stop the step: the link can still
+/// be stopped afterwards.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_wait_leaves_a_link_that_can_still_be_stopped() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let (device, code) = app_reading(root.path(), &bucket, &bob).await;
+    let waited = tokio::time::timeout(
+        std::time::Duration::from_millis(400),
+        device.wait_until_linked(Networking::Offline),
+    )
+    .await;
+    assert!(waited.is_err(), "still waiting for the admin's app");
+
+    device.cancel_link().await.unwrap();
+
+    assert!(device.open_workspaces().is_empty());
+    let folder = root.path().join("app/workspaces").join(&code.workspace_id);
+    assert!(!folder.join(crate::workspace::STORE_FILE).exists());
+}
+
+/// ... nor a later wait: a fresh call waits for the same step.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_wait_leaves_a_link_a_fresh_wait_finishes() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (device, _code) = app_reading(root.path(), &bucket, &bob).await;
+    let waited = tokio::time::timeout(
+        std::time::Duration::from_millis(400),
+        device.wait_until_linked(Networking::Offline),
+    )
+    .await;
+    assert!(waited.is_err());
+    bob.sync().await;
+    admin.sync().await;
+
+    let joined = device.wait_until_linked(Networking::Offline).await.unwrap();
+
+    assert_eq!(joined.state().store.person_of(&joined.me()).unwrap(), bob.me());
+}
+
+/// After a restart that didn't pick the link up, a new code is refused: the
+/// confirmed link isn't lost, and it can still be picked up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_link_is_refused_while_one_is_on_disk() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    {
+        let (device, _code) = app_reading(root.path(), &bucket, &bob).await;
+        drop(device.close_all());
+        drop(device);
+    }
+    let device = app_on_new_device(root.path(), &bucket);
+    let other = bob.create_test_link_code().unwrap().encode().unwrap();
+
+    let refused = device.begin_link(&other, Platform::Linux).await.err().unwrap();
+
+    assert!(format!("{refused:#}").contains("already linking"), "{refused:#}");
+    assert!(matches!(
+        device.resume_link().await.unwrap(),
+        Some(crate::workspaces::ResumedLinkStep::Reading(_))
+    ));
+}
+
+/// After a restart while waiting for the hand-over, the number shows again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_picked_up_while_waiting_shows_its_number_again() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let code = bob.create_test_link_code().unwrap();
+    let shown = {
+        let device = app_on_new_device(root.path(), &bucket);
+        let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+            panic!("the number to show");
+        };
+        shown
+    };
+    let device = app_on_new_device(root.path(), &bucket);
+
+    let Some(crate::workspaces::ResumedLinkStep::Waiting { code: again }) =
+        device.resume_link().await.unwrap()
+    else {
+        panic!("waiting for the hand-over");
+    };
+
+    assert_eq!(again, Some(shown));
+}
+
+/// While a step runs, another step says so, and stopping stops the step.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_step_is_said_and_can_be_stopped() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    let code = bob.create_test_link_code().unwrap();
+    begin_in_app(&device, &bob, &code).await;
+    let waiting = {
+        let device = device.clone();
+        tokio::spawn(async move { device.wait_for_link_handover().await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let busy = device.wait_until_linked(Networking::Offline).await.err().unwrap();
+    assert!(format!("{busy:#}").contains("busy with another step"), "{busy:#}");
+    device.cancel_link().await.unwrap();
+
+    assert!(waiting.await.unwrap().is_err(), "the stopped step says so");
+    assert!(
+        device.resume_link().await.unwrap().is_none(),
+        "nothing left to pick up"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_refuses_a_junk_code_in_plain_words() {
+    let (root, bucket, _admin, _bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+
+    let refused = device
+        .begin_link("not a code", Platform::Linux)
+        .await
+        .err()
+        .unwrap();
+
+    assert!(
+        format!("{refused:#}").contains("This isn't a link code"),
+        "{refused:#}"
+    );
+}
+
+/// An empty leftover linking folder isn't a link to pick up.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_leftover_linking_folder_is_passed_over() {
+    let (root, bucket, _admin, _bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    std::fs::create_dir_all(root.path().join("app/workspaces/leftover.linking")).unwrap();
+
+    assert!(device.resume_link().await.unwrap().is_none());
 }
