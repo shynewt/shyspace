@@ -109,6 +109,12 @@ impl ShyWorkspace {
         run_blocking(move || workspace.delete_message(&message)).await
     }
 
+    /// Whether this phone can only read here yet: linked, and waiting for
+    /// the workspace to add it before it can send.
+    pub fn is_reading_only(&self) -> bool {
+        self.inner.is_reading_only()
+    }
+
     /// Marks `channel` read up to its newest message.
     pub async fn mark_channel_read(&self, channel: String) -> Result<(), ShyError> {
         let workspace = self.inner.clone();

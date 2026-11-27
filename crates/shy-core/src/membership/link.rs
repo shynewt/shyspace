@@ -140,6 +140,7 @@ impl LinkCode {
 
 /// Only for the person's own screens ("Pixel, linked 3 Dec").
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum Platform {
     Linux,
     MacOs,

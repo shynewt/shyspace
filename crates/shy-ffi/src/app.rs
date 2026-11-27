@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use shy_core::{
     BucketConfig, Networking, Profile,
-    views::WorkspaceItem,
-    workspaces::{DeviceKeys, Workspaces},
+    membership::link::Platform,
+    views::{LinkCodeSummary, WorkspaceItem},
+    workspace::CheckOnNewDevice,
+    workspaces::{DeviceKeys, ResumedLinkStep, Workspaces},
 };
 
 use crate::{
@@ -22,6 +24,18 @@ pub struct ShyApp {
     /// One opening at a time: the core's would open a workspace twice if
     /// two ran together, as when screens restore at once.
     opening: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// A link a restart interrupted: still waiting for the hand-over, or reading.
+#[derive(uniffi::Enum)]
+pub enum ResumedLink {
+    /// `code` is the number to show again, if the other device had opened the request.
+    Waiting {
+        code: Option<String>,
+    },
+    Reading {
+        workspace: Arc<ShyWorkspace>,
+    },
 }
 
 /// Bucket settings, opaque so the secret key can't end up in a log line.
@@ -84,6 +98,56 @@ impl ShyApp {
                     reason: format!("{error:#}"),
                 })
                 .collect())
+        })
+        .await
+    }
+
+    /// Whether `text` is a whole link code that hasn't run out, so a screen
+    /// can take it at once; the core's words for the person if not.
+    pub fn read_link_code(&self, text: String) -> Result<LinkCodeSummary, ShyError> {
+        Ok(Workspaces::read_link_code(&text)?)
+    }
+
+    /// Starts linking this device with the code from the person's other
+    /// device, and waits until that device opens the request. Like every
+    /// link step, it runs on in the core if the caller stops waiting, and
+    /// calling it again waits for that same run.
+    pub async fn begin_link(&self, code: String, platform: Platform) -> Result<CheckOnNewDevice, ShyError> {
+        let workspaces = self.workspaces.clone();
+        run(async move { workspaces.begin_link(&code, platform).await }).await
+    }
+
+    /// Waits until the person's device hands this one what it needs; the
+    /// workspace then opens for reading.
+    pub async fn wait_for_link_handover(&self) -> Result<Arc<ShyWorkspace>, ShyError> {
+        let workspaces = self.workspaces.clone();
+        run(async move { Ok(ShyWorkspace::new(workspaces.wait_for_link_handover().await?)) }).await
+    }
+
+    /// Waits until the admin's app adds this device; the joined workspace
+    /// then takes the reading one's place (`Change::ReadingClosed`).
+    pub async fn wait_until_linked(&self) -> Result<Arc<ShyWorkspace>, ShyError> {
+        let (workspaces, networking) = (self.workspaces.clone(), self.networking);
+        run(async move { Ok(ShyWorkspace::new(workspaces.wait_until_linked(networking).await?)) }).await
+    }
+
+    /// Stops linking this device for good, a running step too. Not for
+    /// closing the app: a link survives that and resumes.
+    pub async fn cancel_link(&self) -> Result<(), ShyError> {
+        let workspaces = self.workspaces.clone();
+        run(async move { workspaces.cancel_link().await }).await
+    }
+
+    /// Picks up a link a restart interrupted, after `open_all`.
+    pub async fn resume_link(&self) -> Result<Option<ResumedLink>, ShyError> {
+        let workspaces = self.workspaces.clone();
+        run(async move {
+            Ok(workspaces.resume_link().await?.map(|step| match step {
+                ResumedLinkStep::Waiting { code } => ResumedLink::Waiting { code },
+                ResumedLinkStep::Reading(workspace) => ResumedLink::Reading {
+                    workspace: ShyWorkspace::new(workspace),
+                },
+            }))
         })
         .await
     }

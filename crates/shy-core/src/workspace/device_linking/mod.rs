@@ -52,6 +52,7 @@ const STOPPED_HERE: &str = "You stopped linking this device. Nothing was kept.";
 
 /// What this device shows once the person's device opened its request.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum CheckOnNewDevice {
     /// The number the person taps on their other device.
     Code(String),

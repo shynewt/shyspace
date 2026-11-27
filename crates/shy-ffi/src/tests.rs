@@ -409,3 +409,35 @@ async fn two_screens_opening_at_once_open_each_workspace_once() {
         reopened.close_all().await.unwrap();
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pasted_text_that_is_no_link_code_says_so_in_plain_words() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+
+    let error = app.read_link_code("hello there".into()).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "This isn't a link code. Copy it again from your other device."
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_no_link_there_is_nothing_to_resume_or_cancel() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    app.open_all().await.unwrap();
+
+    assert!(app.resume_link().await.unwrap().is_none());
+    assert!(app.cancel_link().await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_made_here_is_not_reading_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+
+    assert!(!acme.is_reading_only());
+}
