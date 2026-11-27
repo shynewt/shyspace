@@ -2773,6 +2773,12 @@ async fn closing_the_app_during_a_wait_keeps_the_link_for_the_next_start() {
 
         let put_aside = waiting.await.unwrap().err().unwrap();
         assert!(format!("{put_aside:#}").contains("next start"), "{put_aside:#}");
+        assert!(
+            put_aside
+                .downcast_ref::<crate::workspaces::LinkPutAside>()
+                .is_some(),
+            "an app can tell it isn't an ending"
+        );
         bob.confirm_link(&shown).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(

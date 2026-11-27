@@ -37,11 +37,23 @@ const NOT_A_LINK_CODE: &str = "This isn't a link code. Copy it again from your o
 const CODE_RAN_OUT: &str = "This code has run out. Show a new one on your other device.";
 const STEP_RUNNING: &str = "This device's link is busy with another step. Wait for it, or stop the link.";
 const NO_LINK_WAITING: &str = "there's no link waiting for this step on this device";
-const PUT_ASIDE: &str = "The app closed this device's link; it picks up again at the next start.";
 const STEP_FAILED: &str =
     "Linking hit an unexpected problem on this device. Open the app again to pick the link up.";
 
 static NEXT_STEP_ID: AtomicU64 = AtomicU64::new(1);
+
+/// The app closed while a link step ran: not an ending, since the link
+/// stays on disk and picks up again at the next start.
+#[derive(Debug)]
+pub struct LinkPutAside;
+
+impl std::fmt::Display for LinkPutAside {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("The app closed this device's link; it picks up again at the next start.")
+    }
+}
+
+impl std::error::Error for LinkPutAside {}
 
 /// Where this device's link stands.
 #[derive(Default)]
@@ -88,6 +100,7 @@ enum StepOutcome {
     Rechecked(CheckAfterRestart),
     Opened(Workspace),
     Stopped,
+    PutAside,
     Failed(String),
 }
 
@@ -525,11 +538,11 @@ impl Workspaces {
         let running = {
             let mut slot = self.link_lock();
             let LinkSlot::Running(running) = &mut *slot else {
-                tell.send_replace(Some(StepOutcome::Failed(PUT_ASIDE.to_owned())));
+                tell.send_replace(Some(StepOutcome::PutAside));
                 return;
             };
             if running.id != id {
-                tell.send_replace(Some(StepOutcome::Failed(PUT_ASIDE.to_owned())));
+                tell.send_replace(Some(StepOutcome::PutAside));
                 return;
             }
             let task = tokio::spawn(step);
@@ -540,9 +553,7 @@ impl Workspaces {
         tokio::spawn(async move {
             let (next, ended) = match running.await {
                 Ok(done) => done,
-                Err(error) if error.is_cancelled() => {
-                    (LinkSlot::Idle, StepOutcome::Failed(PUT_ASIDE.to_owned()))
-                }
+                Err(error) if error.is_cancelled() => (LinkSlot::Idle, StepOutcome::PutAside),
                 Err(error) => {
                     tracing::error!("a link step stopped unexpectedly: {error}");
                     if let Some(reading_id) = &reading_id {
@@ -573,7 +584,7 @@ impl Workspaces {
         let slot = self.link_lock();
         ensure!(
             matches!(&*slot, LinkSlot::Running(running) if running.id == id),
-            PUT_ASIDE
+            LinkPutAside
         );
         change()
     }
@@ -738,6 +749,7 @@ async fn wait_for(mut outcome: watch::Receiver<Option<StepOutcome>>) -> Result<S
 fn unexpected(outcome: StepOutcome) -> anyhow::Error {
     match outcome {
         StepOutcome::Failed(message) => anyhow!(message),
+        StepOutcome::PutAside => anyhow::Error::new(LinkPutAside),
         _ => anyhow!("the link step ended in another state than asked"),
     }
 }

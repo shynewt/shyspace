@@ -12,7 +12,7 @@
 
 mod linking;
 
-pub use linking::{LinkStop, ResumedLinkStep};
+pub use linking::{LinkPutAside, LinkStop, ResumedLinkStep};
 
 use std::{
     path::{Path, PathBuf},
