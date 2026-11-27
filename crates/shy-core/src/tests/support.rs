@@ -117,6 +117,57 @@ impl JoinMailbox for BucketLinkMailbox {
     }
 }
 
+/// A link mailbox on the in-memory bucket whose first posts and answer
+/// fetches fail, as storage out of reach does.
+pub struct FlakyLinkMailbox {
+    inner: BucketLinkMailbox,
+    post_failures_left: std::sync::atomic::AtomicUsize,
+    fetch_failures_left: std::sync::atomic::AtomicUsize,
+}
+
+impl FlakyLinkMailbox {
+    pub fn new(
+        bucket: Bucket,
+        token: crate::membership::link::Token,
+        post_failures: usize,
+        fetch_failures: usize,
+    ) -> Self {
+        Self {
+            inner: BucketLinkMailbox { bucket, token },
+            post_failures_left: std::sync::atomic::AtomicUsize::new(post_failures),
+            fetch_failures_left: std::sync::atomic::AtomicUsize::new(fetch_failures),
+        }
+    }
+}
+
+/// Spends one of `left`, if any: whether this call fails.
+fn spends_failure(left: &std::sync::atomic::AtomicUsize) -> bool {
+    left.try_update(
+        std::sync::atomic::Ordering::SeqCst,
+        std::sync::atomic::Ordering::SeqCst,
+        |left| left.checked_sub(1),
+    )
+    .is_ok()
+}
+
+impl JoinMailbox for FlakyLinkMailbox {
+    async fn post_request(&self, request: Vec<u8>) -> Result<()> {
+        anyhow::ensure!(
+            !spends_failure(&self.post_failures_left),
+            "can't reach the workspace's storage"
+        );
+        self.inner.post_request(request).await
+    }
+
+    async fn fetch_answer(&self) -> Result<Option<Vec<u8>>> {
+        anyhow::ensure!(
+            !spends_failure(&self.fetch_failures_left),
+            "can't reach the workspace's storage"
+        );
+        self.inner.fetch_answer().await
+    }
+}
+
 /// Starts joining with `invite` in the background.
 pub fn start_join(
     invite: Invite,

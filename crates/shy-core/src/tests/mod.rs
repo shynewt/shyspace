@@ -36,7 +36,7 @@ mod sent;
 mod size_attacks;
 mod storage;
 mod succession;
-mod support;
+pub(crate) mod support;
 mod threads;
 mod upgrade;
 mod workspaces;

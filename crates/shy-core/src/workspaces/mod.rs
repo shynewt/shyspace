@@ -10,6 +10,10 @@
 //! recently also check the bucket at full pace, the rest every few minutes
 //! (`sync::Cadence`), so idle workspaces cost few requests.
 
+mod linking;
+
+pub use linking::{LinkStop, ResumedLinkStep};
+
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -158,6 +162,11 @@ pub struct Workspaces {
     /// `workspaces.json`, shared with the workspaces for the choices that are
     /// the device's (its huddle devices).
     settings_file: Arc<DeviceSettingsFile>,
+    /// This device's link to a person, if one is in progress.
+    link: Mutex<linking::LinkSlot>,
+    /// What tests make links do: reach the in-memory bucket, fail, pause.
+    #[cfg(test)]
+    test_link_hooks: Mutex<linking::TestLinkHooks>,
 }
 
 impl Workspaces {
@@ -197,6 +206,9 @@ impl Workspaces {
             connect,
             open: Mutex::default(),
             settings_file,
+            link: Mutex::default(),
+            #[cfg(test)]
+            test_link_hooks: Mutex::default(),
         }
     }
 
@@ -595,8 +607,10 @@ impl Workspaces {
     }
 
     /// Takes every workspace out of the open ones, for the caller to shut
-    /// down; `open_all` opens them again.
+    /// down; `open_all` opens them again. A link in progress is put aside,
+    /// kept on disk for `resume_link`.
     pub fn close_all(&self) -> Vec<Workspace> {
+        self.put_link_aside();
         std::mem::take(&mut *self.open_lock())
     }
 
@@ -821,10 +835,16 @@ impl Workspaces {
     }
 
     /// Opens a workspace just made here and selects it.
+    /// Opens `workspace` in place of any open one with its id, so none is
+    /// listed twice, and selects it.
     fn add_open(&self, workspace: Workspace) -> Result<Workspace> {
         let workspace_id = workspace.workspace_id().to_owned();
         self.place_last(&workspace_id)?;
-        self.open_lock().push(workspace);
+        {
+            let mut open = self.open_lock();
+            open.retain(|open| open.workspace_id() != workspace_id);
+            open.push(workspace);
+        }
         self.select(&workspace_id)
     }
 

@@ -96,7 +96,9 @@ pub enum ResumedLink<M: JoinMailbox> {
 /// A link in progress on the new device.
 pub struct DeviceLinking<M: JoinMailbox> {
     /// Gone once the link joined or was wiped.
-    enrollment: Option<DeviceEnrollment>,
+    /// Behind a lock only so the handle can be shared across threads: the
+    /// enrollment's store can't be.
+    enrollment: std::sync::Mutex<Option<DeviceEnrollment>>,
     linking: DataDir,
     code: LinkCode,
     request: LinkRequest,
@@ -167,16 +169,24 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         linking
             .keep_link(enrollment.identity(), &code, &request, &handover_key.secret)
             .await?;
-        mailbox.post_request(seal_link_request(&code, &request)?).await?;
-        Ok(Self {
-            enrollment: Some(enrollment),
+        let mut begun = Self {
+            enrollment: std::sync::Mutex::new(Some(enrollment)),
             linking,
             code,
             request,
             handover_secret: Some(handover_key.secret),
             started_ms: now_ms()?,
             mailbox,
-        })
+        };
+        // Nothing went up, so nothing is kept: the same code can be tried again.
+        let posted = match seal_link_request(&begun.code, &begun.request) {
+            Ok(sealed) => begun.mailbox.post_request(sealed).await,
+            Err(error) => Err(error),
+        };
+        match posted {
+            Ok(()) => Ok(begun),
+            Err(error) => begun.wiped_after(error, None).await,
+        }
     }
 
     pub(crate) async fn resume_with(
@@ -214,7 +224,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         // stop came before its secret was deleted.
         let is_handed_over = Workspace::exists(&linking.path);
         let linking_handle = Self {
-            enrollment: Some(enrollment),
+            enrollment: std::sync::Mutex::new(Some(enrollment)),
             linking,
             mailbox: mailbox_for(&code),
             code,
@@ -269,13 +279,34 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             if self.code.is_expired(now_ms()?) {
                 return self.wiped_after(anyhow!(CODE_RAN_OUT), None).await;
             }
-            tokio::select! {
-                () = sleep(POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
-                    return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
-                }
+            if is_cancelled_while_waiting(&mut cancelled, POLL).await {
+                return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
             }
         }
+    }
+
+    /// The number to show again after a restart, if the person's device
+    /// opened the request. Someone else using the code, or a signed stop,
+    /// wipes as while waiting; storage out of reach keeps the link, with no
+    /// number yet.
+    pub(crate) async fn check_after_restart(&mut self) -> Result<Option<String>> {
+        match self.check_now().await {
+            Ok(Some(CheckOnNewDevice::Code(code))) => Ok(Some(code)),
+            Ok(Some(CheckOnNewDevice::SomeoneElse)) => self.wiped_after(anyhow!(SOMEONE_ELSE), None).await,
+            Ok(Some(CheckOnNewDevice::Confirmed) | None) => Ok(None),
+            Err(error) if error.downcast_ref::<LinkRefused>().is_some() => {
+                self.wiped_after(error, None).await
+            }
+            Err(error) => {
+                warn!("can't read the answer after a restart yet: {error:#}");
+                Ok(None)
+            }
+        }
+    }
+
+    /// The workspace's name as the code claims it.
+    pub(crate) fn workspace_name(&self) -> &str {
+        &self.code.workspace_name
     }
 
     /// The check, if the person's device has answered; a [`LinkRefused`]
@@ -338,11 +369,8 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             if now_ms()? >= answer_until_ms {
                 return self.wiped_after(anyhow!(NOT_HANDED_OVER_IN_TIME), None).await;
             }
-            tokio::select! {
-                () = sleep(POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
-                    return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
-                }
+            if is_cancelled_while_waiting(&mut cancelled, POLL).await {
+                return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
             }
         }
     }
@@ -378,17 +406,32 @@ impl<M: JoinMailbox> DeviceLinking<M> {
     }
 
     pub(crate) async fn wait_until_added_with(
-        mut self,
+        self,
         reading: Workspace,
         cancel: &JoinCancel,
         connect: Connector,
         options: impl Into<WorkspaceOptions>,
     ) -> Result<Workspace> {
+        self.wait_until_added_registering(reading, cancel, connect, options, Ok)
+            .await
+    }
+
+    /// As `wait_until_added_with`, handing the joined workspace to
+    /// `register` before the reading one is let go and its other handles
+    /// are told ([`crate::views::Change::ReadingClosed`]).
+    pub(crate) async fn wait_until_added_registering(
+        mut self,
+        reading: Workspace,
+        cancel: &JoinCancel,
+        connect: Connector,
+        options: impl Into<WorkspaceOptions>,
+        register: impl FnOnce(Workspace) -> Result<Workspace> + Send,
+    ) -> Result<Workspace> {
         let mut cancelled = cancel.subscribe();
         loop {
             reading.sync().await;
             match self.added_now(&reading).await {
-                Ok(Some(welcome)) => return self.finish(reading, welcome, connect, options).await,
+                Ok(Some(welcome)) => return self.finish(reading, welcome, connect, options, register).await,
                 Ok(None) => {}
                 Err(error) if error.downcast_ref::<LinkRefused>().is_some() => {
                     return self.wiped_after(error, Some(reading)).await;
@@ -400,11 +443,8 @@ impl<M: JoinMailbox> DeviceLinking<M> {
                     .wiped_after(anyhow::anyhow!(NOT_ADDED_IN_TIME), Some(reading))
                     .await;
             }
-            tokio::select! {
-                () = sleep(ADDED_POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
-                    return self.wiped_after(anyhow!(STOPPED_HERE), Some(reading)).await;
-                }
+            if is_cancelled_while_waiting(&mut cancelled, ADDED_POLL).await {
+                return self.wiped_after(anyhow!(STOPPED_HERE), Some(reading)).await;
             }
         }
     }
@@ -435,6 +475,18 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             }
         }
         Ok(None)
+    }
+}
+
+/// Waits `poll`, or less if the link is cancelled meanwhile. Nothing the
+/// wait holds outlives it, so callers stay safe to move between threads.
+async fn is_cancelled_while_waiting(
+    cancelled: &mut tokio::sync::watch::Receiver<bool>,
+    poll: Duration,
+) -> bool {
+    tokio::select! {
+        () = sleep(poll) => false,
+        _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => true,
     }
 }
 

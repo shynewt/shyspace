@@ -307,6 +307,8 @@ export type Change =
   | { kind: "page_mentions" }
   | { kind: "channels" }
   | { kind: "drafts" }
+  /** This reading workspace closed: its device was added, or its link ended. Let go of it. */
+  | { kind: "reading_closed" }
   | { kind: "later" }
   | { kind: "messages"; channel: string }
   | { kind: "pages" }

@@ -11,6 +11,7 @@ use super::{DeviceLinking, LINK_IS_OVER};
 use crate::views::Change;
 #[cfg(test)]
 use crate::workspace::DataDir;
+use crate::workspace::DeviceEnrollment;
 use crate::{
     membership::{admin::DeviceWelcome, invite::JoinMailbox},
     transport::bucket::Connector,
@@ -22,16 +23,19 @@ use crate::{
 
 impl<M: JoinMailbox> DeviceLinking<M> {
     /// Joins with `welcome` in the real folder, which starts with this
-    /// device's drafts and read positions, then lets the linking store go.
+    /// device's drafts and read positions, hands the joined workspace to
+    /// `register`, then lets the linking store go: so whoever holds the
+    /// reading workspace finds the joined one in place when told it closed.
     /// It is marked first: a join that stops partway can't run again.
     pub(super) async fn finish(
-        mut self,
+        self,
         reading: Workspace,
         welcome: DeviceWelcome,
         connect: Connector,
         options: impl Into<WorkspaceOptions>,
+        register: impl FnOnce(Workspace) -> Result<Workspace> + Send,
     ) -> Result<Workspace> {
-        let enrollment = self.enrollment.take().context(LINK_IS_OVER)?;
+        let enrollment = self.take_enrollment().context(LINK_IS_OVER)?;
         let kept = {
             let store = &reading.state().store;
             mark_link_finishing(store)?;
@@ -49,8 +53,16 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         if is_stopped_for_test(&STOPS_BEFORE_FORGETTING_READING, &self.linking) {
             return joined;
         }
+        let registered = joined.and_then(register);
         self.close_reading(reading).await?;
-        joined
+        registered
+    }
+
+    fn take_enrollment(&self) -> Option<DeviceEnrollment> {
+        match self.enrollment.lock() {
+            Ok(mut enrollment) => enrollment.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        }
     }
 
     /// Stops linking this device, for good: both stores are wiped, so
@@ -78,7 +90,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         if let Some(reading) = &reading {
             mark_link_ended(&reading.state().store)?;
         }
-        if let Some(enrollment) = self.enrollment.take() {
+        if let Some(enrollment) = self.take_enrollment() {
             enrollment.forget().await?;
         }
         match reading {
@@ -97,7 +109,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             return self.linking.forget_reading().await;
         }
         reading.stop_background();
-        reading.emit(Change::Removed);
+        reading.emit(Change::ReadingClosed);
         reading
             .inner
             .forget_on_close

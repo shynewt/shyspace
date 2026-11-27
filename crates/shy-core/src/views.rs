@@ -540,6 +540,14 @@ pub struct PagePresence {
     pub cursors: Vec<PageCursor>,
 }
 
+/// A link code pasted on a new device, read without contacting anything.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct LinkCodeSummary {
+    /// The workspace the code links this device into.
+    pub workspace_name: String,
+}
+
 /// One of your own devices, for Settings › Devices.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct DeviceInfo {
@@ -598,6 +606,9 @@ pub enum Change {
     Later,
     /// Drafts changed on this device.
     Drafts,
+    /// This reading workspace closed: its device was added (the real
+    /// workspace takes its place) or its link ended. Let go of it.
+    ReadingClosed,
     /// A new message from someone else that this member's level for its
     /// channel says should alert them. Only recent ones: catching up on old
     /// messages never alerts.

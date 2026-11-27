@@ -1773,7 +1773,7 @@ async fn a_wiped_link_left_open_is_told_and_deleted_at_the_next_start() {
 
     let mut was_told = false;
     while let Ok(change) = told.try_recv() {
-        was_told |= change == crate::views::Change::Removed;
+        was_told |= change == crate::views::Change::ReadingClosed;
     }
     assert!(was_told, "the app's handle is told to let go");
     kept_by_the_app.inner.forget_on_close.disarm();
@@ -1888,6 +1888,7 @@ async fn a_linking_store_is_not_joined_into() {
 
     let refused = format!("{:#}", joined.err().unwrap());
     assert!(refused.contains("opens only for reading"), "{refused}");
+}
 
 /// Links that end with nothing handed over leave nothing behind, so the
 /// next link starts afresh.
@@ -1993,6 +1994,191 @@ async fn the_voucher_can_tell_when_the_device_it_linked_is_added() {
     assert!(bob.is_device_added(&device).unwrap());
 }
 
+/// The app's set of workspaces on the new device, reaching `bucket`.
+fn app_on_new_device(
+    root: &std::path::Path,
+    bucket: &Bucket,
+) -> std::sync::Arc<crate::workspaces::Workspaces> {
+    std::fs::create_dir_all(root.join("app-keys")).unwrap();
+    let device = crate::workspaces::Workspaces::with_connector(
+        root.join("app"),
+        crate::workspaces::DeviceKeys::Files(root.join("app-keys")),
+        connector(bucket),
+    );
+    device.set_test_link_bucket(bucket.clone());
+    std::sync::Arc::new(device)
+}
+
+/// The new device's app starts the link and waits for the number while the
+/// person's device opens the request.
+async fn begin_in_app(
+    device: &std::sync::Arc<crate::workspaces::Workspaces>,
+    voucher: &Workspace,
+    code: &LinkCode,
+) -> CheckOnNewDevice {
+    begin_pasted_in_app(device, voucher, &code.encode().unwrap()).await
+}
+
+/// As `begin_in_app`, with the code as the person pasted it.
+async fn begin_pasted_in_app(
+    device: &std::sync::Arc<crate::workspaces::Workspaces>,
+    voucher: &Workspace,
+    pasted: &str,
+) -> CheckOnNewDevice {
+    let (check, ()) = tokio::join!(device.begin_link(pasted, Platform::Linux), async {
+        while voucher.pending_link().await.unwrap().is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    });
+    check.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_shows_the_reading_workspace_then_the_real_one_in_its_place() {
+    within(async {
+        let (root, bucket, admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let code = bob.create_test_link_code().unwrap();
+
+        let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+            panic!("the number to show");
+        };
+        bob.confirm_link(&shown).await.unwrap();
+        let reading = device.wait_for_link_handover().await.unwrap();
+        assert!(reading.is_reading_only());
+        assert!(device.selected().unwrap().is_reading_only(), "shown at once");
+        bob.sync().await;
+        admin.sync().await;
+
+        let joined = device.wait_until_linked(Networking::Offline).await.unwrap();
+
+        assert!(!joined.is_reading_only());
+        let shown = device.open_workspaces();
+        assert_eq!(shown.len(), 1, "the real workspace took the reading one's place");
+        assert!(!shown[0].is_reading_only());
+        assert_eq!(joined.state().store.person_of(&joined.me()).unwrap(), bob.me());
+        drop(reading);
+        let linking_folder = root
+            .path()
+            .join("app/workspaces")
+            .join(format!("{}.linking", code.workspace_id));
+        for _ in 0..50 {
+            if !linking_folder.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(!linking_folder.exists());
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_a_link_in_the_app_closes_the_reading_workspace_and_wipes() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let code = bob.create_test_link_code().unwrap();
+        let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+            panic!("the number to show");
+        };
+        bob.confirm_link(&shown).await.unwrap();
+        drop(device.wait_for_link_handover().await.unwrap());
+
+        device.cancel_link().await.unwrap();
+
+        assert!(device.open_workspaces().is_empty());
+        let folder = root.path().join("app/workspaces").join(&code.workspace_id);
+        assert!(!folder.join(crate::workspace::STORE_FILE).exists());
+        assert!(
+            !root
+                .path()
+                .join("app/workspaces")
+                .join(format!("{}.linking", code.workspace_id))
+                .exists()
+        );
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_picks_a_reading_link_up_after_a_restart() {
+    within(async {
+        let (root, bucket, admin, bob) = admin_and_bob().await;
+        let code = bob.create_test_link_code().unwrap();
+        {
+            let device = app_on_new_device(root.path(), &bucket);
+            let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+                panic!("the number to show");
+            };
+            bob.confirm_link(&shown).await.unwrap();
+            drop(device.wait_for_link_handover().await.unwrap());
+            drop(device.close_all());
+        }
+        let device = app_on_new_device(root.path(), &bucket);
+
+        let Some(crate::workspaces::ResumedLinkStep::Reading(reading)) = device.resume_link().await.unwrap()
+        else {
+            panic!("the link reads again");
+        };
+
+        assert!(reading.is_reading_only());
+        drop(reading);
+        bob.sync().await;
+        admin.sync().await;
+        let joined = device.wait_until_linked(Networking::Offline).await.unwrap();
+        assert_eq!(joined.state().store.person_of(&joined.me()).unwrap(), bob.me());
+    })
+    .await;
+}
+
+/// Every step says so when there's no link at it, and picking up with
+/// nothing to pick up is harmless.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_link_steps_refuse_clearly_out_of_turn() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+
+        assert!(device.resume_link().await.unwrap().is_none());
+        for refused in [
+            device.wait_for_link_handover().await.err().unwrap(),
+            device.wait_until_linked(Networking::Offline).await.err().unwrap(),
+        ] {
+            assert!(format!("{refused:#}").contains("no link waiting"), "{refused:#}");
+        }
+        let nothing = device.cancel_link().await.err().unwrap();
+        assert!(format!("{nothing:#}").contains("no link to stop"), "{nothing:#}");
+
+        let code = bob.create_test_link_code().unwrap();
+        let CheckOnNewDevice::Code(_) = begin_in_app(&device, &bob, &code).await else {
+            panic!("the number to show");
+        };
+        let not_yet = device.wait_until_linked(Networking::Offline).await.err().unwrap();
+        assert!(
+            format!("{not_yet:#}").contains("isn't reading yet"),
+            "{not_yet:#}"
+        );
+        let second = bob.create_test_link_code().unwrap().encode().unwrap();
+        let busy = device.begin_link(&second, Platform::Linux).await.err().unwrap();
+        assert!(format!("{busy:#}").contains("already linking"), "{busy:#}");
+        assert!(
+            format!("{busy:#}").contains(&code.workspace_name),
+            "names the workspace: {busy:#}"
+        );
+        assert!(
+            !format!("{busy:#}").contains(&code.workspace_id),
+            "never its id: {busy:#}"
+        );
+        assert!(
+            device.resume_link().await.unwrap().is_none(),
+            "one link already runs here"
+        );
+        device.cancel_link().await.unwrap();
+    })
+    .await;
+}
+
 /// Once the hand-over opened, the early waits touch nothing, even with the
 /// code long run out: the device keeps the key it joins with.
 #[tokio::test(flavor = "multi_thread")]
@@ -2024,4 +2210,651 @@ async fn early_waits_called_again_after_the_hand_over_touch_nothing() {
     assert!(linking_store_of(&dir).exists());
     reading.sync().await;
     assert_eq!(reading.status().error, None);
+}
+
+/// A pasted code is read by the core alone, so every app takes it the same
+/// way: the workspace's name, or why it can't be used.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pasted_link_code_is_read_without_contacting_anything() {
+    let (_root, _bucket, _admin, bob) = admin_and_bob().await;
+    let mut code = bob.create_test_link_code().unwrap();
+    let encoded = code.encode().unwrap();
+    let wrapped = wrap_as_pasted(&encoded);
+
+    let summary = crate::workspaces::Workspaces::read_link_code(&wrapped).unwrap();
+
+    assert_eq!(summary.workspace_name, code.workspace_name);
+    for junk in ["", "hello", &encoded[..encoded.len() / 2], "shy3_abc"] {
+        let refused = crate::workspaces::Workspaces::read_link_code(junk).unwrap_err();
+        assert!(
+            format!("{refused:#}").contains("This isn't a link code"),
+            "{refused:#}"
+        );
+    }
+    code.expires_ms = 0;
+    let refused = crate::workspaces::Workspaces::read_link_code(&code.encode().unwrap()).unwrap_err();
+    assert!(
+        format!("{refused:#}").contains("This code has run out"),
+        "{refused:#}"
+    );
+}
+
+/// A code pasted with spaces around it and broken across lines.
+fn wrap_as_pasted(encoded: &str) -> String {
+    let lines: Vec<String> = encoded
+        .as_bytes()
+        .chunks(40)
+        .map(|chunk| String::from_utf8(chunk.to_vec()).unwrap())
+        .collect();
+    format!("  {}\r\n", lines.join("\n  "))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_takes_a_code_wrapped_across_lines() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let code = bob.create_test_link_code().unwrap();
+
+        let check = begin_pasted_in_app(&device, &bob, &wrap_as_pasted(&code.encode().unwrap())).await;
+
+        assert!(matches!(check, CheckOnNewDevice::Code(_)));
+        device.cancel_link().await.unwrap();
+    })
+    .await;
+}
+
+/// Every step of a link can run on a multi-thread runtime (the desktop's
+/// commands, the phones' bindings): none holds a lock or a store across an
+/// await. Each future is only built, never run: `assert_send` checks its
+/// type when this compiles, so the rule can't quietly break.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_link_step_can_run_on_any_thread() {
+    fn assert_send<T: Send>(_: &T) {}
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    let cancel = JoinCancel::new();
+    assert_send(&device.begin_link("", Platform::Linux));
+    assert_send(&device.wait_for_link_handover());
+    assert_send(&device.wait_until_linked(Networking::Offline));
+    assert_send(&device.cancel_link());
+    assert_send(&device.resume_link());
+    let (_code, mut linking, reading) = reading_device(&bob, &root.path().join("phone"), &bucket).await;
+    assert_send(&linking.check_now());
+    assert_send(&linking.wait_for_check(&cancel));
+    assert_send(&linking.wait_for_handover_with(&cancel, ReadingConnector::over(connector(&bucket))));
+    assert_send(&linking.wait_until_added_with(reading, &cancel, connector(&bucket), Networking::Offline));
+}
+
+/// The joined workspace is handed over before the reading one's other
+/// handles are told it closed, so a screen told to let go finds the joined
+/// one in place at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_joined_workspace_is_in_place_before_reading_closed_is_sent() {
+    within(async {
+        let (root, bucket, admin, bob) = admin_and_bob().await;
+        let (_code, linking, reading) = reading_device(&bob, &root.path().join("phone"), &bucket).await;
+        let kept_by_the_app = reading.clone();
+        let mut seen_while_registering = kept_by_the_app.subscribe();
+        let mut seen_after = kept_by_the_app.subscribe();
+        bob.sync().await;
+        admin.sync().await;
+
+        let joined = linking
+            .wait_until_added_registering(
+                reading,
+                &JoinCancel::new(),
+                connector(&bucket),
+                Networking::Offline,
+                move |joined| {
+                    while let Ok(change) = seen_while_registering.try_recv() {
+                        assert_ne!(
+                            change,
+                            crate::views::Change::ReadingClosed,
+                            "not told before it's in place"
+                        );
+                    }
+                    Ok(joined)
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(!joined.is_reading_only());
+        let mut was_told = false;
+        while let Ok(change) = seen_after.try_recv() {
+            was_told |= change == crate::views::Change::ReadingClosed;
+        }
+        assert!(was_told, "told once the joined workspace is in place");
+    })
+    .await;
+}
+
+/// In the app: by the time a screen hears the reading workspace closed,
+/// the workspace open under that id is the joined one.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_shows_the_joined_workspace_by_the_time_reading_closed_arrives() {
+    within(async {
+        let (root, bucket, admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let code = bob.create_test_link_code().unwrap();
+        let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+            panic!("the number to show");
+        };
+        bob.confirm_link(&shown).await.unwrap();
+        let reading = device.wait_for_link_handover().await.unwrap();
+        let mut changes = reading.subscribe();
+        let workspace_id = code.workspace_id.clone();
+        let screen = {
+            let device = device.clone();
+            tokio::spawn(async move {
+                loop {
+                    if changes.recv().await.unwrap() == crate::views::Change::ReadingClosed {
+                        return device.find(&workspace_id).map(|found| found.is_reading_only());
+                    }
+                }
+            })
+        };
+        // Held, as a phone holds its handle to the workspace it shows.
+        let kept_by_the_screen = reading;
+        bob.sync().await;
+        admin.sync().await;
+
+        device.wait_until_linked(Networking::Offline).await.unwrap();
+
+        assert_eq!(screen.await.unwrap(), Some(false), "the joined workspace, by id");
+        drop(kept_by_the_screen);
+    })
+    .await;
+}
+
+/// The app on the new device, with a link reading: the code, the number
+/// confirmed on `voucher`, and the hand-over opened.
+async fn app_reading(
+    root: &std::path::Path,
+    bucket: &Bucket,
+    voucher: &Workspace,
+) -> (std::sync::Arc<crate::workspaces::Workspaces>, LinkCode) {
+    let device = app_on_new_device(root, bucket);
+    let code = voucher.create_test_link_code().unwrap();
+    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, voucher, &code).await else {
+        panic!("the number to show");
+    };
+    voucher.confirm_link(&shown).await.unwrap();
+    drop(device.wait_for_link_handover().await.unwrap());
+    (device, code)
+}
+
+/// A screen that stops waiting doesn't stop the step: the link can still
+/// be stopped afterwards.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_wait_leaves_a_link_that_can_still_be_stopped() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let (device, code) = app_reading(root.path(), &bucket, &bob).await;
+        let waited = tokio::time::timeout(
+            std::time::Duration::from_millis(400),
+            device.wait_until_linked(Networking::Offline),
+        )
+        .await;
+        assert!(waited.is_err(), "still waiting for the admin's app");
+
+        device.cancel_link().await.unwrap();
+
+        assert!(device.open_workspaces().is_empty());
+        let folder = root.path().join("app/workspaces").join(&code.workspace_id);
+        assert!(!folder.join(crate::workspace::STORE_FILE).exists());
+    })
+    .await;
+}
+
+/// ... nor a later wait: a fresh call waits for the same step.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_wait_leaves_a_link_a_fresh_wait_finishes() {
+    within(async {
+        let (root, bucket, admin, bob) = admin_and_bob().await;
+        let (device, _code) = app_reading(root.path(), &bucket, &bob).await;
+        let waited = tokio::time::timeout(
+            std::time::Duration::from_millis(400),
+            device.wait_until_linked(Networking::Offline),
+        )
+        .await;
+        assert!(waited.is_err());
+        bob.sync().await;
+        admin.sync().await;
+
+        let joined = device.wait_until_linked(Networking::Offline).await.unwrap();
+
+        assert_eq!(joined.state().store.person_of(&joined.me()).unwrap(), bob.me());
+    })
+    .await;
+}
+
+/// After a restart that didn't pick the link up, a new code is refused: the
+/// confirmed link isn't lost, and it can still be picked up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_link_is_refused_while_one_is_on_disk() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        {
+            let (device, _code) = app_reading(root.path(), &bucket, &bob).await;
+            drop(device.close_all());
+            drop(device);
+        }
+        let device = app_on_new_device(root.path(), &bucket);
+        let other = bob.create_test_link_code().unwrap().encode().unwrap();
+
+        let refused = device.begin_link(&other, Platform::Linux).await.err().unwrap();
+
+        assert!(format!("{refused:#}").contains("already linking"), "{refused:#}");
+        assert!(format!("{refused:#}").contains("a workspace"), "{refused:#}");
+        assert!(matches!(
+            device.resume_link().await.unwrap(),
+            Some(crate::workspaces::ResumedLinkStep::Reading(_))
+        ));
+    })
+    .await;
+}
+
+/// After a restart while waiting for the hand-over, the number shows again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_picked_up_while_waiting_shows_its_number_again() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let code = bob.create_test_link_code().unwrap();
+        let shown = {
+            let device = app_on_new_device(root.path(), &bucket);
+            let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+                panic!("the number to show");
+            };
+            shown
+        };
+        let device = app_on_new_device(root.path(), &bucket);
+
+        let Some(crate::workspaces::ResumedLinkStep::Waiting { code: again }) =
+            device.resume_link().await.unwrap()
+        else {
+            panic!("waiting for the hand-over");
+        };
+
+        assert_eq!(again, Some(shown));
+    })
+    .await;
+}
+
+/// While a step runs, another step says so, and stopping stops the step.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_step_is_said_and_can_be_stopped() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let code = bob.create_test_link_code().unwrap();
+        begin_in_app(&device, &bob, &code).await;
+        let waiting = {
+            let device = device.clone();
+            tokio::spawn(async move { device.wait_for_link_handover().await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let busy = device.wait_until_linked(Networking::Offline).await.err().unwrap();
+        assert!(format!("{busy:#}").contains("busy with another step"), "{busy:#}");
+        device.cancel_link().await.unwrap();
+
+        assert!(waiting.await.unwrap().is_err(), "the stopped step says so");
+        assert!(
+            device.resume_link().await.unwrap().is_none(),
+            "nothing left to pick up"
+        );
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_refuses_a_junk_code_in_plain_words() {
+    within(async {
+        let (root, bucket, _admin, _bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+
+        let refused = device
+            .begin_link("not a code", Platform::Linux)
+            .await
+            .err()
+            .unwrap();
+
+        assert!(
+            format!("{refused:#}").contains("This isn't a link code"),
+            "{refused:#}"
+        );
+    })
+    .await;
+}
+
+/// An empty leftover linking folder isn't a link to pick up.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_leftover_linking_folder_is_passed_over() {
+    within(async {
+        let (root, bucket, _admin, _bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        std::fs::create_dir_all(root.path().join("app/workspaces/leftover.linking")).unwrap();
+
+        assert!(device.resume_link().await.unwrap().is_none());
+    })
+    .await;
+}
+
+/// Fails a linking test whose step hangs, instead of hanging the run.
+async fn within<T>(test: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(60), test)
+        .await
+        .expect("the linking test took over a minute")
+}
+
+fn app_linking_folder(root: &std::path::Path, code: &LinkCode) -> std::path::PathBuf {
+    root.join("app/workspaces")
+        .join(format!("{}.linking", code.workspace_id))
+}
+
+async fn until_requested(bucket: &Bucket, code: &LinkCode) {
+    while bucket.link_slot(&code.token, "request").await.unwrap().is_none() {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+async fn until_opened(voucher: &Workspace) {
+    while voucher.pending_link().await.unwrap().is_none() {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+/// Holds each step, once done, until the test lets it settle.
+fn hold_steps(
+    device: &crate::workspaces::Workspaces,
+) -> (
+    std::sync::Arc<tokio::sync::Notify>,
+    std::sync::Arc<tokio::sync::Semaphore>,
+) {
+    let reached = std::sync::Arc::new(tokio::sync::Notify::new());
+    let release = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let gate = (reached.clone(), release.clone());
+    device.change_test_link_hooks(|hooks| hooks.settle_gate = Some(gate));
+    (reached, release)
+}
+
+/// Starting the app with the storage out of reach keeps a waiting link:
+/// the person's device may have confirmed it already.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_picked_up_with_its_storage_out_of_reach_is_kept() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let code = bob.create_test_link_code().unwrap();
+        let shown = {
+            let device = app_on_new_device(root.path(), &bucket);
+            let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+                panic!("the number to show");
+            };
+            drop(device.close_all());
+            shown
+        };
+        let device = app_on_new_device(root.path(), &bucket);
+        device.change_test_link_hooks(|hooks| hooks.fetch_failures = 1);
+
+        let Some(crate::workspaces::ResumedLinkStep::Waiting { code: number }) =
+            device.resume_link().await.unwrap()
+        else {
+            panic!("still waiting for the hand-over");
+        };
+
+        assert_eq!(number, None, "no number while the storage is out of reach");
+        assert!(app_linking_folder(root.path(), &code).exists());
+        bob.confirm_link(&shown).await.unwrap();
+        let reading = device.wait_for_link_handover().await.unwrap();
+        assert!(reading.is_reading_only());
+    })
+    .await;
+}
+
+/// A link put aside before its check, whose code someone else then used,
+/// is wiped at the next start with the same words as while waiting.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_picked_up_after_someone_else_used_its_code_is_wiped_and_says_so() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let code = bob.create_test_link_code().unwrap();
+        {
+            let device = app_on_new_device(root.path(), &bucket);
+            let begun = {
+                let device = device.clone();
+                let pasted = code.encode().unwrap();
+                tokio::spawn(async move { device.begin_link(&pasted, Platform::Linux).await })
+            };
+            until_requested(&bucket, &code).await;
+            drop(device.close_all());
+            assert!(begun.await.unwrap().is_err(), "the step was put aside");
+        }
+        let _intruder = ask_through(&code, &root.path().join("intruder"), &bucket).await;
+        bob.pending_link().await.unwrap().unwrap();
+        let device = app_on_new_device(root.path(), &bucket);
+
+        let refused = device.resume_link().await.err().unwrap();
+
+        assert!(
+            format!("{refused:#}").contains("Someone else used this code"),
+            "{refused:#}"
+        );
+        assert!(!app_linking_folder(root.path(), &code).exists());
+        assert!(device.resume_link().await.unwrap().is_none());
+    })
+    .await;
+}
+
+/// While one code begins, the same code waits for the same step and another
+/// is refused as busy, never handed the first code's number.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_same_code_joins_a_beginning_link() {
+    within(async {
+        let (root, bucket, admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let code = bob.create_test_link_code().unwrap();
+        let begin = |device: std::sync::Arc<crate::workspaces::Workspaces>| {
+            let pasted = code.encode().unwrap();
+            tokio::spawn(async move { device.begin_link(&pasted, Platform::Linux).await })
+        };
+        let first = begin(device.clone());
+        until_requested(&bucket, &code).await;
+        let again = begin(device.clone());
+
+        let other = admin.create_test_link_code().unwrap().encode().unwrap();
+        let busy = device.begin_link(&other, Platform::Linux).await.err().unwrap();
+
+        assert!(format!("{busy:#}").contains("busy"), "{busy:#}");
+        until_opened(&bob).await;
+        let first = first.await.unwrap().unwrap();
+        assert!(matches!(first, CheckOnNewDevice::Code(_)));
+        assert_eq!(again.await.unwrap().unwrap(), first);
+        device.cancel_link().await.unwrap();
+    })
+    .await;
+}
+
+/// A step that ends just as the link is stopped is stopped too, and nothing
+/// starts in between.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_step_ending_as_the_link_stops_is_stopped_too() {
+    within(async {
+        let (root, bucket, admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let (reached, release) = hold_steps(&device);
+        let code = bob.create_test_link_code().unwrap();
+        let begun = {
+            let device = device.clone();
+            let pasted = code.encode().unwrap();
+            tokio::spawn(async move { device.begin_link(&pasted, Platform::Linux).await })
+        };
+        until_opened(&bob).await;
+        reached.notified().await;
+
+        let stopping = {
+            let device = device.clone();
+            tokio::spawn(async move { device.cancel_link().await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let other = admin.create_test_link_code().unwrap().encode().unwrap();
+        let busy = device.begin_link(&other, Platform::Linux).await.err().unwrap();
+        assert!(format!("{busy:#}").contains("busy"), "{busy:#}");
+        release.add_permits(10);
+
+        assert!(matches!(
+            stopping.await.unwrap().unwrap(),
+            crate::workspaces::LinkStop::Stopped
+        ));
+        assert!(matches!(begun.await.unwrap().unwrap(), CheckOnNewDevice::Code(_)));
+        assert!(!app_linking_folder(root.path(), &code).exists());
+        assert!(device.resume_link().await.unwrap().is_none());
+    })
+    .await;
+}
+
+/// A stop that comes just after the admin's app added the device says the
+/// device joined, and the joined workspace stays.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_just_after_the_device_was_added_says_it_joined() {
+    within(async {
+        let (root, bucket, admin, bob) = admin_and_bob().await;
+        let (device, _code) = app_reading(root.path(), &bucket, &bob).await;
+        bob.sync().await;
+        admin.sync().await;
+        let (reached, release) = hold_steps(&device);
+        let waiting = {
+            let device = device.clone();
+            tokio::spawn(async move { device.wait_until_linked(Networking::Offline).await })
+        };
+        reached.notified().await;
+
+        let stopping = {
+            let device = device.clone();
+            tokio::spawn(async move { device.cancel_link().await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        release.add_permits(10);
+
+        let crate::workspaces::LinkStop::AlreadyJoined(joined) = stopping.await.unwrap().unwrap() else {
+            panic!("the device had joined");
+        };
+        assert!(!joined.is_reading_only());
+        assert!(waiting.await.unwrap().is_ok());
+        let shown = device.open_workspaces();
+        assert_eq!(shown.len(), 1);
+        assert!(!shown[0].is_reading_only());
+    })
+    .await;
+}
+
+/// Closing the app during a wait keeps the link for the next start, and the
+/// step it put aside opens nothing afterwards.
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_the_app_during_a_wait_keeps_the_link_for_the_next_start() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let code = bob.create_test_link_code().unwrap();
+        let closed = app_on_new_device(root.path(), &bucket);
+        let CheckOnNewDevice::Code(shown) = begin_in_app(&closed, &bob, &code).await else {
+            panic!("the number to show");
+        };
+        let waiting = {
+            let closed = closed.clone();
+            tokio::spawn(async move { closed.wait_for_link_handover().await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        drop(closed.close_all());
+
+        let put_aside = waiting.await.unwrap().err().unwrap();
+        assert!(format!("{put_aside:#}").contains("next start"), "{put_aside:#}");
+        bob.confirm_link(&shown).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(
+            closed.open_workspaces().is_empty(),
+            "the step put aside opened nothing"
+        );
+        assert!(app_linking_folder(root.path(), &code).exists());
+        let device = app_on_new_device(root.path(), &bucket);
+        assert!(matches!(
+            device.resume_link().await.unwrap(),
+            Some(crate::workspaces::ResumedLinkStep::Waiting { .. })
+        ));
+        assert!(device.wait_for_link_handover().await.unwrap().is_reading_only());
+    })
+    .await;
+}
+
+/// A step that panics says so, and leaves a link that can be picked up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_step_that_panics_leaves_a_link_to_pick_up() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let code = bob.create_test_link_code().unwrap();
+        let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code).await else {
+            panic!("the number to show");
+        };
+        device.change_test_link_hooks(|hooks| hooks.panics_next_step = true);
+
+        let failed = device.wait_for_link_handover().await.err().unwrap();
+
+        assert!(format!("{failed:#}").contains("unexpected problem"), "{failed:#}");
+        assert!(matches!(
+            device.resume_link().await.unwrap(),
+            Some(crate::workspaces::ResumedLinkStep::Waiting { .. })
+        ));
+        bob.confirm_link(&shown).await.unwrap();
+        assert!(device.wait_for_link_handover().await.unwrap().is_reading_only());
+    })
+    .await;
+}
+
+/// A request that couldn't be posted leaves nothing behind: the person
+/// retries with the same code, which is still good.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_that_could_not_go_up_leaves_nothing_and_the_same_code_works_again() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        device.change_test_link_hooks(|hooks| hooks.post_failures = 1);
+        let code = bob.create_test_link_code().unwrap();
+
+        let failed = device
+            .begin_link(&code.encode().unwrap(), Platform::Linux)
+            .await
+            .err()
+            .unwrap();
+
+        assert!(format!("{failed:#}").contains("can't reach"), "{failed:#}");
+        assert!(!app_linking_folder(root.path(), &code).exists());
+        device.change_test_link_hooks(|hooks| hooks.post_failures = 0);
+        assert!(matches!(
+            begin_in_app(&device, &bob, &code).await,
+            CheckOnNewDevice::Code(_)
+        ));
+    })
+    .await;
+}
+
+/// Picking a link up after a step panicked while reading lists its
+/// workspace once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_picked_up_after_a_panic_while_reading_is_listed_once() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let (device, _code) = app_reading(root.path(), &bucket, &bob).await;
+        device.change_test_link_hooks(|hooks| hooks.panics_next_step = true);
+        assert!(device.wait_until_linked(Networking::Offline).await.is_err());
+
+        assert!(matches!(
+            device.resume_link().await.unwrap(),
+            Some(crate::workspaces::ResumedLinkStep::Reading(_))
+        ));
+
+        assert_eq!(device.open_workspaces().len(), 1);
+    })
+    .await;
 }
