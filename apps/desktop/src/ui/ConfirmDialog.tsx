@@ -13,6 +13,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  cancelLabel = "Cancel",
   onConfirm,
   children,
 }: {
@@ -21,6 +22,8 @@ export function ConfirmDialog({
   title: string;
   description: string;
   confirmLabel: string;
+  /** Says what keeping things as they are means, where "Cancel" would be unclear. */
+  cancelLabel?: string;
   onConfirm: () => Promise<void>;
   /** What the action applies to, shown above the buttons. */
   children?: ReactNode;
@@ -42,7 +45,7 @@ export function ConfirmDialog({
       {children && <div>{children}</div>}
       <DialogActions>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>
-          Cancel
+          {cancelLabel}
         </Button>
         <Button variant="danger" isLoading={isBusy} onClick={confirm}>
           {confirmLabel}

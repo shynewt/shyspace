@@ -98,7 +98,7 @@ The app is for desktop windows, full screen (1280 to 2560 px wide) and split scr
 | `CheckCodeChoice` | the number to tap among decoys, plus "None of these"; three large buttons in a named group, never focused for you, so the person has to look |
 | `StatusLine` | how something stands, in one still line with an optional small icon (a link waiting, a device only reading); announced politely, never animated |
 | `EmojiPicker` | a searchable emoji grid (names and keywords), recently used first, inside a `Popover`; it and its data load on first open, ship with the app and are never fetched from the network |
-| `ConfirmDialog` | asks before something that can't be undone (deletes), showing what it applies to; stays open showing the error if it fails |
+| `ConfirmDialog` | asks before something that can't be undone (deletes), showing what it applies to; stays open showing the error if it fails; `cancelLabel` replaces "Cancel" where that would be unclear ("Keep linking") |
 | `Toasts` | transient messages above the message box, from `lib/toast.ts`: `showToast` (a success, or `"info"`), `showUndoToast`, `showReminderToast` (with Open) and `reportError` (announced as an alert) |
 
 Dialogs, menus, popovers and tooltips use [Radix](https://www.radix-ui.com/primitives) primitives for focus handling and keyboard support, styled by us.

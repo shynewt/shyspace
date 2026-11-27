@@ -168,10 +168,18 @@ pub(crate) async fn wait_for_device_link_handover(
 #[tauri::command]
 pub(crate) async fn stop_device_link(app: AppHandle, state: State<'_, AppState>) -> CommandResult<()> {
     let stopped = state.workspaces.cancel_link().await.map_err(failed)?;
-    link_state(&state)?.waiting = None;
-    if let LinkStop::AlreadyJoined(joined) = stopped {
-        install(&app, &joined);
+    match stopped {
+        LinkStop::Stopped => {}
+        LinkStop::AlreadyJoined(joined) => {
+            install(&app, &joined);
+        }
+        LinkStop::PutAside => {
+            return Err(
+                "The app closed before the link stopped. Stop it again once the app is open.".to_owned(),
+            );
+        }
     }
+    link_state(&state)?.waiting = None;
     emit_workspaces_changed(&app);
     Ok(())
 }
@@ -188,8 +196,14 @@ pub(crate) fn waiting_device_link(state: State<'_, AppState>) -> CommandResult<O
 #[tauri::command]
 pub(crate) async fn recheck_device_link(state: State<'_, AppState>) -> CommandResult<CheckAfterRestart> {
     let rechecked = state.workspaces.recheck_link().await;
+    // A link that ended is gone from disk; one busy for a moment still waits.
+    let is_still_waiting = state.workspaces.has_link_in_progress().map_err(failed)?;
     let mut link = link_state(&state)?;
-    link.waiting = rechecked.as_ref().ok().cloned();
+    match &rechecked {
+        Ok(check) => link.waiting = Some(check.clone()),
+        Err(_) if !is_still_waiting => link.waiting = None,
+        Err(_) => {}
+    }
     rechecked.map_err(failed)
 }
 

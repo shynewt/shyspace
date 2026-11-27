@@ -66,6 +66,9 @@ export function LinkJoinForm({
       try {
         showCheck(await api.recheckDeviceLink());
       } catch (error) {
+        // Busy for a moment, the link still waits: ask again. Ended: say why.
+        const waiting = await api.waitingDeviceLink().catch(() => null);
+        if (waiting) return setStep({ kind: "check", check: waiting });
         setProblem(errorMessage(error));
         setStep({ kind: "paste" });
       }

@@ -205,10 +205,15 @@ async function readingDevice(page: Page) {
   await expect(page.getByLabel("Message #general")).toBeVisible();
 }
 
-test("stopping a link that reads goes back to the start, with nothing kept", async ({ page }) => {
+test("stopping a link that reads asks first, then goes back to the start", async ({ page }) => {
   await readingDevice(page);
 
   await page.getByRole("button", { name: "Stop linking" }).click();
+  const confirm = page.getByRole("dialog", { name: "Stop linking this device?" });
+  await confirm.getByRole("button", { name: "Keep linking" }).click();
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.getByRole("button", { name: "Stop linking" }).click();
+  await confirm.getByRole("button", { name: "Stop linking" }).click();
 
   await expect(page.getByRole("heading", { name: "Welcome to shyspace" })).toBeVisible();
 });
@@ -220,6 +225,10 @@ test("a stop just after the device was added keeps the joined workspace", async 
   });
 
   await page.getByRole("button", { name: "Stop linking" }).click();
+  await page
+    .getByRole("dialog", { name: "Stop linking this device?" })
+    .getByRole("button", { name: "Stop linking" })
+    .click();
 
   await expect(page.getByText(/This device can read now/)).toHaveCount(0);
   await page.getByLabel("Message #general").fill("joined after all");
@@ -239,4 +248,31 @@ test("a reading device offers no reactions, new channels or new pages", async ({
   const nav = page.getByRole("navigation", { name: "Workspace" });
   await expect(nav.getByRole("button", { name: "New channel" })).toHaveCount(0);
   await expect(nav.getByRole("button", { name: "New page" })).toHaveCount(0);
+});
+
+test("a recheck that's only busy keeps waiting, and the number still comes", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.prepareFake = (fake) => {
+      fake.devices.interrupted = { kind: "not_yet" };
+      fake.devices.recheckFailures = 1;
+      fake.devices.rechecks = [{ kind: "code", code: "482 917" }];
+    };
+  });
+  await page.goto("?start=onboarding");
+
+  await expect(page.getByText("On your other device, tap this number")).toBeVisible();
+  await expect(page.getByText(/busy with another step/)).toHaveCount(0);
+});
+
+test("on a reading device, Settings › Devices shows one calm line and a way to stop", async ({ page }) => {
+  await readingDevice(page);
+  const listings = await page.evaluate(() => window.fake.devices.deviceListings);
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Devices" }).click();
+
+  await expect(settings.getByText("Your devices appear here once this device is added.")).toBeVisible();
+  await expect(settings.getByRole("button", { name: "Stop linking" })).toBeVisible();
+  await expect(settings.getByRole("button", { name: "Link a device" })).toHaveCount(0);
+  expect(await page.evaluate(() => window.fake.devices.deviceListings)).toBe(listings);
 });

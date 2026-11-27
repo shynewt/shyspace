@@ -3,14 +3,33 @@ import { useState } from "react";
 import { api, type DeviceInfo, type Platform } from "../../lib/api";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, Card, IconButton, RelativeTime } from "../../ui";
+import { Button, Card, IconButton, RelativeTime, StatusLine } from "../../ui";
 import { Setting } from "../settings/layout";
 import { LinkDeviceDialog } from "./LinkDeviceDialog";
 import { deviceName } from "./names";
 import { RemoveDeviceDialog } from "./RemoveDeviceDialog";
+import { StopLinkingButton } from "./StopLinkingButton";
 
 /** Settings › Devices: your devices, linking a new one, and removing one. */
 export function DevicesSettings() {
+  const { session } = useWorkspace();
+  if (session.is_reading_only) return <WhileReading />;
+  return <YourDevices />;
+}
+
+/** A device that only reads isn't one of the person's devices yet, so there's no list to show. */
+function WhileReading() {
+  return (
+    <Setting title="Your devices">
+      <div className="flex items-center gap-3">
+        <StatusLine className="flex-1">Your devices appear here once this device is added.</StatusLine>
+        <StopLinkingButton />
+      </div>
+    </Setting>
+  );
+}
+
+function YourDevices() {
   const devices = useLive(api.myDevices, (change) => change.kind === "members");
   const [isLinking, setLinking] = useState(false);
   const [removing, setRemoving] = useState<DeviceInfo | null>(null);

@@ -38,7 +38,7 @@ pub fn clipboard_text(app: AppHandle) -> CommandResult<String> {
     let text = app
         .clipboard()
         .read_text()
-        .map_err(|error| format!("there's no text on the clipboard to paste ({error})"))?;
+        .map_err(|_| "There's no text on the clipboard to paste.".to_owned())?;
     if text.len() > MAX_TEXT_BYTES {
         return Err("the clipboard's text is too long to be a code".to_owned());
     }

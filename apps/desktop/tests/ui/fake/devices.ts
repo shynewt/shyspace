@@ -65,6 +65,8 @@ export class FakeDevices {
   interrupted: CheckAfterRestart | null = null;
   /** What each recheck answers next; then the last one again. */
   rechecks: CheckAfterRestart[] = [];
+  /** The next rechecks fail while the link still waits, as a busy step does. */
+  recheckFailures = 0;
   /** Why the last link ended, until the app takes it. */
   ended: string | null = null;
   /** The choices in the order they show, real one in the middle unless a test says otherwise. */
@@ -76,6 +78,8 @@ export class FakeDevices {
   doesConfirmFinishLater = false;
   /** A stop while reading finds the device added just before. */
   joinsOnStop = false;
+  /** How many times the app asked for the device list. */
+  deviceListings = 0;
   /** What the system clipboard holds. */
   clipboard = "";
   /** How many times the app polled for the new device. */
@@ -153,6 +157,7 @@ export class FakeDevices {
         this.openCode = null;
         return null;
       case "my_devices":
+        this.deviceListings += 1;
         return this.listed();
       case "remove_my_device":
         return this.remove([requireString(args, "id")]);
@@ -183,6 +188,10 @@ export class FakeDevices {
       case "waiting_device_link":
         return this.interrupted;
       case "recheck_device_link":
+        if (this.recheckFailures > 0) {
+          this.recheckFailures -= 1;
+          throw "This device's link is busy with another step. Wait for it, or stop the link.";
+        }
         this.interrupted = this.rechecks.shift() ?? this.interrupted;
         return this.interrupted;
       case "take_ended_device_link": {

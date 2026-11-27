@@ -1,11 +1,10 @@
 import type { ReactNode } from "react";
 import { api, type Channel, type Member } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
-import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Button, Notice, StatusLine } from "../../ui";
-import { useWorkspaces } from "../shell/Workspaces";
+import { Notice, StatusLine } from "../../ui";
+import { StopLinkingButton } from "../devices/StopLinkingButton";
 
 /** Why you can't write in `channel` any more, or null if you can. */
 function whyReadOnly(channel: Channel | undefined, members: Member[] | undefined): string | null {
@@ -55,15 +54,12 @@ export function WriteGate({ channelId, children }: { channelId: string; children
 
 /** On a device that only reads until it is added: why Send waits, and a way to stop linking. */
 export function ReadingLine() {
-  const { stopLink } = useWorkspaces();
   return (
     <div className="flex items-center gap-3 px-5 pb-1">
       <StatusLine className="flex-1">
         This device can read now. It can send once the admin's app adds it, the next time it syncs.
       </StatusLine>
-      <Button size="sm" variant="ghost" onClick={() => void stopLink().catch(reportError)}>
-        Stop linking
-      </Button>
+      <StopLinkingButton />
     </div>
   );
 }
