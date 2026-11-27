@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Android asks for local network access only for a bucket on the local network (2026-11)
+Since Android 17, an app built for it can reach private and link-local addresses only with the local network permission, which Android shows as "Nearby devices"; without it, connections there time out. Most buckets are on the internet and need nothing, so the app asks only when a bucket's address is local, says why first, and points to Settings after a refusal, as Android stops asking after the second. Devices on the same network still reach each other through relays until the permission is granted.
+
 ## Android checks HTTPS certificates with the phone's trust store, and vendors the verifier's Kotlin half (2026-11)
 The core's HTTP client already checks certificates with `rustls-platform-verifier`, which on Android asks the system through JNI, so the app hands it the app's context once at startup. That covers the bucket and the core's other requests through reqwest; iroh's relay connections and its DNS resolver keep the Mozilla roots they bundle (`webpki-roots`), as iroh chooses. A fixed list of certificate authorities bundled in the app would avoid the JNI call, but it would ignore a company authority the phone trusts and revocations the phone knows, and change only with app releases. The verifier's small Kotlin half is published only on a branch of its GitHub repository, which can be rewritten, so `apps/android/app/libs` keeps a copy with its checksum instead of downloading it at build time.
 

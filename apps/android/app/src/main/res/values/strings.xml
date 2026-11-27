@@ -20,6 +20,14 @@
     <string name="privacy">Privacy</string>
     <string name="hide_screen_content">Hide screen content</string>
     <string name="hide_screen_content_detail">Blocks screenshots and screen recording, and shows nothing of shyspace in recent apps.</string>
+    <string name="local_network_title">Reach your network?</string>
+    <string name="local_network_reason">This bucket is on your local network. Android calls this access \"Nearby devices\"; shyspace uses it only to connect to your bucket and to your devices on the same network.</string>
+    <string name="local_network_refused_title">Can\'t reach your network</string>
+    <string name="local_network_refused">To use a bucket on your local network, allow Nearby devices for shyspace in Settings, under Permissions.</string>
+    <string name="continue_action">Continue</string>
+    <string name="not_now">Not now</string>
+    <string name="open_settings">Open settings</string>
+    <string name="close">Close</string>
     <plurals name="unread_mentions">
         <item quantity="one">%1$d mention</item>
         <item quantity="other">%1$d mentions</item>
