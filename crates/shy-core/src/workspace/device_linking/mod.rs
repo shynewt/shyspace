@@ -62,6 +62,20 @@ pub enum CheckOnNewDevice {
     Confirmed,
 }
 
+/// Where a link picked up after a restart stands before its hand-over.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CheckAfterRestart {
+    /// The number to show; the person hasn't tapped it yet.
+    Code { code: String },
+    /// The person confirmed: the hand-over is on its way or there.
+    Confirmed,
+    /// The person's device hasn't opened the request yet.
+    NotYet,
+    /// The storage can't be reached right now; ask again later.
+    Unreachable,
+}
+
 /// The link ended without this device being added: the admin's app refused
 /// it with its signed reason, or the person's other device stopped it
 /// (`Cancelled`). Both stores are wiped by then.
@@ -285,21 +299,21 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         }
     }
 
-    /// The number to show again after a restart, if the person's device
-    /// opened the request. Someone else using the code, or a signed stop,
-    /// wipes as while waiting; storage out of reach keeps the link, with no
-    /// number yet.
-    pub(crate) async fn check_after_restart(&mut self) -> Result<Option<String>> {
+    /// Where the link stands after a restart, before its hand-over.
+    /// Someone else using the code, or a signed stop, wipes as while
+    /// waiting; storage out of reach keeps the link.
+    pub(crate) async fn check_after_restart(&mut self) -> Result<CheckAfterRestart> {
         match self.check_now().await {
-            Ok(Some(CheckOnNewDevice::Code(code))) => Ok(Some(code)),
+            Ok(Some(CheckOnNewDevice::Code(code))) => Ok(CheckAfterRestart::Code { code }),
             Ok(Some(CheckOnNewDevice::SomeoneElse)) => self.wiped_after(anyhow!(SOMEONE_ELSE), None).await,
-            Ok(Some(CheckOnNewDevice::Confirmed) | None) => Ok(None),
+            Ok(Some(CheckOnNewDevice::Confirmed)) => Ok(CheckAfterRestart::Confirmed),
+            Ok(None) => Ok(CheckAfterRestart::NotYet),
             Err(error) if error.downcast_ref::<LinkRefused>().is_some() => {
                 self.wiped_after(error, None).await
             }
             Err(error) => {
                 warn!("can't read the answer after a restart yet: {error:#}");
-                Ok(None)
+                Ok(CheckAfterRestart::Unreachable)
             }
         }
     }

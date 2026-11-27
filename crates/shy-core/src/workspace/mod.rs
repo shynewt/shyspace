@@ -28,7 +28,7 @@ mod sent;
 mod storage;
 
 pub(crate) use actions::OpMaker;
-pub use device_linking::{CheckOnNewDevice, DeviceLinking, LinkRefused, ResumedLink};
+pub use device_linking::{CheckAfterRestart, CheckOnNewDevice, DeviceLinking, LinkRefused, ResumedLink};
 pub use enrollment::{DeviceEnrollment, DeviceLink, DeviceRequest};
 pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
 pub use huddles::Via;

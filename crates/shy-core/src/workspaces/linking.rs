@@ -28,8 +28,8 @@ use crate::{
     transport::{bucket::read_only::ReadingConnector, presigned::PresignedMailbox},
     views::LinkCodeSummary,
     workspace::{
-        CheckOnNewDevice, DeviceLinking, JoinCancel, ResumedLink, Workspace, WorkspaceOptions,
-        linking_store::LINKING_SUFFIX,
+        CheckAfterRestart, CheckOnNewDevice, DeviceLinking, JoinCancel, ResumedLink, Workspace,
+        WorkspaceOptions, linking_store::LINKING_SUFFIX,
     },
 };
 
@@ -74,6 +74,8 @@ pub(super) struct RunningStep {
 enum Step {
     /// Joined only by a caller with the same code.
     Begin(Token),
+    /// Asking again where a link picked up after a restart stands.
+    Recheck,
     Handover,
     Added,
     /// Wiping a link that was between steps.
@@ -83,6 +85,7 @@ enum Step {
 #[derive(Clone)]
 enum StepOutcome {
     Check(CheckOnNewDevice),
+    Rechecked(CheckAfterRestart),
     Opened(Workspace),
     Stopped,
     Failed(String),
@@ -92,12 +95,11 @@ fn held(linking: DeviceLinking<LinkMailbox>, reading: Option<Workspace>) -> Link
     LinkSlot::Held(Box::new(HeldLink { linking, reading }))
 }
 
-/// What a restart found: a link still waiting for its hand-over, with the
-/// number to show if the person's device opened the request already (none
-/// while the storage is out of reach), or one reading, whose workspace is
-/// open and selected.
+/// What a restart found: a link still waiting for its hand-over, with where
+/// it stands (ask again with `recheck_link` until it has a number or is
+/// confirmed), or one reading, whose workspace is open and selected.
 pub enum ResumedLinkStep {
-    Waiting { code: Option<String> },
+    Waiting { check: CheckAfterRestart },
     Reading(Workspace),
 }
 
@@ -224,6 +226,39 @@ impl Workspaces {
         };
         match wait_for(outcome).await? {
             StepOutcome::Check(check) => Ok(check),
+            other => Err(unexpected(other)),
+        }
+    }
+
+    /// Asks again where a link picked up after a restart stands, before
+    /// its hand-over: the number once the person's device opened the
+    /// request, or why there's none yet. Endings wipe as at the restart.
+    pub async fn recheck_link(self: &Arc<Self>) -> Result<CheckAfterRestart> {
+        let outcome = match self.next_step(Step::Recheck)? {
+            Next::Join(outcome) => outcome,
+            Next::Start(StartedStep {
+                id,
+                taken,
+                tell,
+                outcome,
+                ..
+            }) => {
+                let HeldLink { mut linking, reading } = self.take_held(id, taken)?;
+                if let Some(reading) = reading {
+                    self.settle(id, held(linking, Some(reading)));
+                    bail!("this device is reading already: wait until it is added");
+                }
+                self.spawn_step(id, tell, None, async move {
+                    match linking.check_after_restart().await {
+                        Ok(check) => (held(linking, None), StepOutcome::Rechecked(check)),
+                        Err(error) => (LinkSlot::Idle, failed(&error)),
+                    }
+                });
+                outcome
+            }
+        };
+        match wait_for(outcome).await? {
+            StepOutcome::Rechecked(check) => Ok(check),
             other => Err(unexpected(other)),
         }
     }
@@ -404,9 +439,9 @@ impl Workspaces {
         match DeviceLinking::resume_with(data, |code| self.link_mailbox(code), connect).await? {
             None => Ok(None),
             Some(ResumedLink::Waiting(mut linking)) => {
-                let code = linking.check_after_restart().await?;
+                let check = linking.check_after_restart().await?;
                 self.set_link_slot(held(linking, None));
-                Ok(Some(ResumedLinkStep::Waiting { code }))
+                Ok(Some(ResumedLinkStep::Waiting { check }))
             }
             Some(ResumedLink::Reading(linking, reading)) => {
                 self.set_link_slot(held(linking, Some(reading.clone())));

@@ -18,8 +18,8 @@ use crate::{
     private::crypto::SealingKeyPair,
     transport::bucket::{Bucket, read_only::ReadingConnector},
     workspace::{
-        CheckOnNewDevice, DeviceLink, DeviceLinking, FileSource, JoinCancel, LinkRefused, NewFile,
-        ResumedLink,
+        CheckAfterRestart, CheckOnNewDevice, DeviceLink, DeviceLinking, FileSource, JoinCancel, LinkRefused,
+        NewFile, ResumedLink,
         device_linking::{STOPS_BEFORE_FORGETTING_READING, STOPS_BEFORE_JOINING},
         linking_store::{LINKING_LIFETIME_MS, backdate_link},
     },
@@ -2471,13 +2471,12 @@ async fn a_link_picked_up_while_waiting_shows_its_number_again() {
         };
         let device = app_on_new_device(root.path(), &bucket);
 
-        let Some(crate::workspaces::ResumedLinkStep::Waiting { code: again }) =
-            device.resume_link().await.unwrap()
+        let Some(crate::workspaces::ResumedLinkStep::Waiting { check }) = device.resume_link().await.unwrap()
         else {
             panic!("waiting for the hand-over");
         };
 
-        assert_eq!(again, Some(shown));
+        assert_eq!(check, CheckAfterRestart::Code { code: shown });
     })
     .await;
 }
@@ -2598,13 +2597,17 @@ async fn a_link_picked_up_with_its_storage_out_of_reach_is_kept() {
         let device = app_on_new_device(root.path(), &bucket);
         device.change_test_link_hooks(|hooks| hooks.fetch_failures = 1);
 
-        let Some(crate::workspaces::ResumedLinkStep::Waiting { code: number }) =
-            device.resume_link().await.unwrap()
+        let Some(crate::workspaces::ResumedLinkStep::Waiting { check }) = device.resume_link().await.unwrap()
         else {
             panic!("still waiting for the hand-over");
         };
 
-        assert_eq!(number, None, "no number while the storage is out of reach");
+        assert_eq!(check, CheckAfterRestart::Unreachable);
+        assert_eq!(
+            device.recheck_link().await.unwrap(),
+            CheckAfterRestart::Code { code: shown.clone() },
+            "asked again once the storage is back"
+        );
         assert!(app_linking_folder(root.path(), &code).exists());
         bob.confirm_link(&shown).await.unwrap();
         let reading = device.wait_for_link_handover().await.unwrap();
@@ -2855,6 +2858,43 @@ async fn a_link_picked_up_after_a_panic_while_reading_is_listed_once() {
         ));
 
         assert_eq!(device.open_workspaces().len(), 1);
+    })
+    .await;
+}
+
+/// After a restart before the person's device opened the request, the app
+/// says so, and asking again brings the number once it opens.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_picked_up_before_its_request_was_opened_says_so_and_asks_again() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let code = bob.create_test_link_code().unwrap();
+        {
+            let device = app_on_new_device(root.path(), &bucket);
+            let begun = {
+                let device = device.clone();
+                let pasted = code.encode().unwrap();
+                tokio::spawn(async move { device.begin_link(&pasted, Platform::Linux).await })
+            };
+            until_requested(&bucket, &code).await;
+            drop(device.close_all());
+            assert!(begun.await.unwrap().is_err());
+        }
+        let device = app_on_new_device(root.path(), &bucket);
+
+        let Some(crate::workspaces::ResumedLinkStep::Waiting { check }) = device.resume_link().await.unwrap()
+        else {
+            panic!("waiting for the hand-over");
+        };
+        assert_eq!(check, CheckAfterRestart::NotYet);
+
+        until_opened(&bob).await;
+        let CheckAfterRestart::Code { code: shown } = device.recheck_link().await.unwrap() else {
+            panic!("the number, now the request is open");
+        };
+        bob.confirm_link(&shown).await.unwrap();
+        assert_eq!(device.recheck_link().await.unwrap(), CheckAfterRestart::Confirmed);
+        assert!(device.wait_for_link_handover().await.unwrap().is_reading_only());
     })
     .await;
 }

@@ -10,7 +10,7 @@ use serde::Serialize;
 use shy_core::{
     membership::link::Platform,
     views::{DeviceInfo, DeviceNotice, LinkCodeSummary},
-    workspace::{CheckOnNewDevice, LinkCheckShown},
+    workspace::{CheckAfterRestart, CheckOnNewDevice, LinkCheckShown},
     workspaces::{LinkStop, ResumedLinkStep, Workspaces},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -163,7 +163,11 @@ pub(crate) async fn resume_device_link(app: &AppHandle, state: &AppState) {
             install(app, &reading);
             wait_until_linked_in_background(app);
         }
-        Ok(Some(ResumedLinkStep::Waiting { code })) => {
+        Ok(Some(ResumedLinkStep::Waiting { check })) => {
+            let code = match check {
+                CheckAfterRestart::Code { code } => Some(code),
+                _ => None,
+            };
             if let Err(error) = set_waiting_link(state, Some(LinkCheck { code })) {
                 tracing::error!("couldn't keep the interrupted link for the UI: {error}");
             }
