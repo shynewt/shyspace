@@ -98,3 +98,81 @@ test("removing a device that linked others offers removing only it, or them too"
   await confirm.getByRole("button", { name: "Remove this one" }).click();
   await expect(settings.getByText("Removing… finishes when your workspace confirms.")).toBeVisible();
 });
+
+test("a device linked from another of yours shows in the inbox until you've seen it", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() =>
+    window.fake.devices.setNotices([
+      { device: "c".repeat(64), kind: "linked", platform: "Android", at_ms: Date.now(), is_seen: false },
+    ]),
+  );
+
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  const section = page.getByRole("region", { name: "Your devices" });
+  await expect(section.getByText("A new device can use shyspace as you")).toBeVisible();
+  await expect(section.getByText(/Android, linked from another of your devices/)).toBeVisible();
+
+  await section.getByRole("button", { name: "Got it" }).click();
+  await expect(section).toHaveCount(0);
+  expect(await page.evaluate(() => window.fake.devices.seenNotices)).toBe(true);
+});
+
+test("review devices opens Settings at Devices", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  await page.evaluate(() =>
+    window.fake.devices.setNotices([
+      { device: "c".repeat(64), kind: "removed", platform: null, at_ms: Date.now(), is_seen: false },
+    ]),
+  );
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+
+  await page.getByRole("button", { name: "Review devices" }).click();
+
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings.getByRole("tab", { name: "Devices" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("a notice arriving while the app runs shows a desktop notification; older ones don't", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.prepareFake = (fake) => {
+      fake.devices.setNotices([
+        { device: "d".repeat(64), kind: "removed", platform: "Linux", at_ms: Date.UTC(2026, 10, 20), is_seen: false },
+      ]);
+    };
+  });
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+
+  await page.evaluate(() =>
+    window.fake.devices.setNotices([
+      { device: "d".repeat(64), kind: "removed", platform: "Linux", at_ms: Date.UTC(2026, 10, 20), is_seen: false },
+      { device: "e".repeat(64), kind: "linked", platform: "Android", at_ms: Date.now(), is_seen: false },
+    ]),
+  );
+
+  await expect
+    .poll(() => page.evaluate(() => window.fake.alertsShown.map((alert) => alert.title)))
+    .toEqual(["A new device can use shyspace as you"]);
+});
+
+test("a notice in a workspace that isn't shown alerts too", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+  const team = await page.evaluate(() => window.fake.workspaces.add("Team"));
+  await expect(page.getByRole("button", { name: /^Team/ })).toBeVisible();
+
+  await page.evaluate(
+    (id) =>
+      window.fake.devices.setNoticesIn(id, [
+        { device: "f".repeat(64), kind: "linked", platform: "Android", at_ms: Date.UTC(2026, 10, 27), is_seen: false },
+      ]),
+    team,
+  );
+
+  await expect
+    .poll(() => page.evaluate(() => window.fake.alertsShown.map((alert) => alert.title)))
+    .toEqual(["A new device can use shyspace as you"]);
+  expect(await page.evaluate(() => window.fake.alertWorkspaces)).toEqual([team]);
+});

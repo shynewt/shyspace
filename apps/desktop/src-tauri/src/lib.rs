@@ -1244,6 +1244,7 @@ pub fn run() {
             devices::remove_my_device,
             devices::remove_my_device_and_its_links,
             devices::device_notices,
+            devices::workspace_device_notices,
             devices::mark_device_notices_seen,
             devices::read_link_code,
             devices::begin_device_link,

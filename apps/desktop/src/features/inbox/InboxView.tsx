@@ -9,6 +9,7 @@ import { reportError } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { Button, CountBadge, EmptyState, ListRow, RelativeTime, SectionLabel, tweens } from "../../ui";
+import { DeviceNoticesSection } from "../devices/DeviceNoticesSection";
 import { MemberAvatar } from "../members/MemberAvatar";
 import { ChannelName } from "../private/ChannelName";
 import { HeaderAction, ViewHeader } from "../shell/ViewHeader";
@@ -41,6 +42,7 @@ export function InboxView() {
       </ViewHeader>
       <div className="flex-1 overflow-y-auto px-5 py-4">
         <div className="mx-auto max-w-reading">
+          <DeviceNoticesSection />
           {isEmpty && (
             <EmptyState icon={<CheckCheck size={22} />} title="You're all caught up">
               Mentions of you, in chat and in pages, and new replies in threads you follow show up here.

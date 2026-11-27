@@ -541,6 +541,8 @@ export const api = {
   removeMyDevice: (id: string) => invoke<void>("remove_my_device", { id }),
   removeMyDeviceAndItsLinks: (id: string) => invoke<void>("remove_my_device_and_its_links", { id }),
   deviceNotices: () => invoke<DeviceNotice[]>("device_notices"),
+  /** The notices in one open workspace, shown or not. */
+  workspaceDeviceNotices: (workspaceId: string) => invoke<DeviceNotice[]>("workspace_device_notices", { workspaceId }),
   markDeviceNoticesSeen: () => invoke<void>("mark_device_notices_seen"),
   /** Whether pasted text is a usable link code, or why not, without contacting anything. */
   readLinkCode: (code: string) => invoke<LinkCodeSummary>("read_link_code", { code }),

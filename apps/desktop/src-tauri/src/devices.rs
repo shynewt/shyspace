@@ -77,6 +77,19 @@ pub(crate) async fn device_notices(state: State<'_, AppState>) -> CommandResult<
     current(&state).await?.device_notices().map_err(failed)
 }
 
+/// The notices in one open workspace, shown or not, so each can alert.
+#[tauri::command]
+pub(crate) async fn workspace_device_notices(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> CommandResult<Vec<DeviceNotice>> {
+    let workspace = state
+        .workspaces
+        .find(&workspace_id)
+        .ok_or_else(|| "that workspace isn't open on this device".to_owned())?;
+    workspace.device_notices().map_err(failed)
+}
+
 #[tauri::command]
 pub(crate) async fn mark_device_notices_seen(state: State<'_, AppState>) -> CommandResult<()> {
     current(&state).await?.mark_device_notices_seen().map_err(failed)

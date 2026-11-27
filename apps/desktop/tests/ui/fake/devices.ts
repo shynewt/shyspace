@@ -1,5 +1,6 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import type {
+  Change,
   DeviceInfo,
   DeviceNotice,
   LinkCheck,
@@ -17,6 +18,9 @@ const DECOYS = ["305 116", "771 482"];
 
 type Context = {
   me: () => string;
+  /** The shown workspace's id. */
+  workspaceId: () => string;
+  emitFrom: (workspaceId: string, change: Change) => void;
   /** Tells the UI the device list or notices changed. */
   onChange: () => void;
   /** Opens the workspace for reading on this device, as a hand-over does. */
@@ -31,6 +35,8 @@ type Context = {
 export class FakeDevices {
   private devices: DeviceInfo[] = [];
   private notices: DeviceNotice[] = [];
+  /** Notices in workspaces that aren't shown, by workspace id. */
+  private noticesIn = new Map<string, DeviceNotice[]>();
   private openCode: { code: string; hasAsked: boolean } | null = null;
   /** A link a restart interrupted before its hand-over. */
   interrupted: LinkCheck | null = null;
@@ -55,6 +61,12 @@ export class FakeDevices {
   setNotices(notices: DeviceNotice[]): void {
     this.notices = notices;
     this.context.onChange();
+  }
+
+  /** Notices in another open workspace, which says its members changed. */
+  setNoticesIn(workspaceId: string, notices: DeviceNotice[]): void {
+    this.noticesIn.set(workspaceId, notices);
+    this.context.emitFrom(workspaceId, { kind: "members" });
   }
 
   /** The new device asked through the open code. */
@@ -111,6 +123,11 @@ export class FakeDevices {
       }
       case "device_notices":
         return this.notices;
+      case "workspace_device_notices": {
+        const workspaceId = requireString(args, "workspaceId");
+        if (workspaceId === this.context.workspaceId()) return this.notices;
+        return this.noticesIn.get(workspaceId) ?? [];
+      }
       case "mark_device_notices_seen":
         this.notices = this.notices.map((notice) => ({ ...notice, is_seen: true }));
         this.context.onChange();

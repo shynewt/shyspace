@@ -197,6 +197,8 @@ export class FakeBackend {
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
   readonly devices = new FakeDevices({
     me: () => this.me(),
+    workspaceId: () => this.session?.workspace_id ?? "",
+    emitFrom: (workspaceId, change) => void emit("change", { workspace_id: workspaceId, change }),
     onChange: () => this.notify({ kind: "members" }),
     startReading: () => {
       const joined = this.joinWorkspace("You");

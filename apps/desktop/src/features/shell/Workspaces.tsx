@@ -20,6 +20,7 @@ import { useLive } from "../../lib/useLive";
 import { usePresence } from "../../lib/usePresence";
 import { useReminders } from "../../lib/useReminders";
 import { savedItemView, type View } from "../../lib/workspace";
+import { useDeviceNoticeAlerts } from "../devices/useDeviceNoticeAlerts";
 
 type WorkspacesValue = {
   /** Every workspace on this device, in rail order. */
@@ -183,6 +184,7 @@ export function WorkspacesProvider({
     [workspaces, openIn],
   );
   useAlerts(alertWorkspaces);
+  useDeviceNoticeAlerts(useMemo(() => workspaces.map((workspace) => workspace.workspace_id), [workspaces]));
   useAlertActions(
     useMemo(() => workspaces.map((workspace) => workspace.workspace_id).join(" "), [workspaces]),
     openIn,
