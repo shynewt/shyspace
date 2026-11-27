@@ -294,3 +294,64 @@ async fn a_request_from_an_earlier_epoch_is_not_shown_removing() {
     bob.remove_my_device(&member_id(&phone.me())).await.unwrap();
     assert_eq!(bob.state().store.last_seq(&bob.me()).unwrap(), written + 1);
 }
+
+fn removal_of(member: &Workspace, device: &iroh::PublicKey) -> (bool, Option<String>) {
+    let info = member
+        .my_devices()
+        .unwrap()
+        .into_iter()
+        .find(|info| info.id == member_id(device))
+        .expect("the device is listed");
+    (info.may_remove, info.why_not_removable)
+}
+
+/// The list says which devices may be removed from here and why not, by the
+/// same rules a removal checks.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_list_says_which_devices_may_be_removed_from_here_and_why_not() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (alone, reason) = removal_of(&bob, &bob.me());
+    assert!(!alone);
+    assert_eq!(reason.as_deref(), Some("Keep at least one of your devices."));
+
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert_eq!(removal_of(&bob, &phone.me()), (true, None));
+    assert_eq!(removal_of(&bob, &bob.me()), (true, None), "another device stays");
+    let (first, reason) = removal_of(&phone, &bob.me());
+    assert!(!first);
+    assert_eq!(
+        reason.as_deref(),
+        Some("Remove this one from that device, or ask your admin.")
+    );
+    let refused = phone.remove_my_device(&member_id(&bob.me())).await.unwrap_err();
+    assert_eq!(
+        format!("{refused:#}"),
+        reason.unwrap(),
+        "the same words as a removal"
+    );
+
+    bob.remove_my_device(&member_id(&phone.me())).await.unwrap();
+    let (again, reason) = removal_of(&bob, &phone.me());
+    assert!(!again);
+    assert!(reason.unwrap().starts_with("Removing already"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admins_own_device_is_never_offered_for_removal() {
+    let (root, bucket, admin, _bob) = admin_and_bob().await;
+    let laptop = link_device(&admin, &admin, &root.path().join("laptop"), &bucket).await;
+    sync_all(&[&admin, &laptop]).await;
+
+    let (may, reason) = removal_of(&laptop, &admin.me());
+
+    assert!(!may);
+    assert!(reason.is_some());
+    assert_eq!(removal_of(&admin, &laptop.me()), (true, None));
+    assert_eq!(
+        removal_of(&admin, &admin.me()),
+        (false, Some("The admin's own device can't be removed.".to_owned())),
+        "not even from itself"
+    );
+}

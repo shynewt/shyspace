@@ -575,6 +575,10 @@ pub struct DeviceInfo {
     /// those it linked, and those they linked in turn, that are still
     /// yours, never this device nor what this device linked.
     pub linked_devices: Vec<String>,
+    /// Whether this device may ask to remove it now; if not,
+    /// `why_not_removable` says why in plain words.
+    pub may_remove: bool,
+    pub why_not_removable: Option<String>,
 }
 
 /// Something that happened to one of your own devices, for your own screens.

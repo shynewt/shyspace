@@ -14,6 +14,10 @@ use crate::{
 };
 
 const UNREACHABLE: &str = "Couldn't reach your workspace. Try again.";
+const FIRST_FROM_LINKED: &str = "Remove this one from that device, or ask your admin.";
+const ADMINS_DEVICE: &str = "The admin's own device can't be removed.";
+const KEEP_ONE: &str = "Keep at least one of your devices.";
+const ALREADY_REMOVING: &str = "Removing already. It finishes when your workspace confirms.";
 
 impl Workspace {
     /// Your devices that are in the workspace, this one first, then those
@@ -40,6 +44,8 @@ impl Workspace {
                     is_removing: false,
                     is_linking: false,
                     linked_devices,
+                    may_remove: false,
+                    why_not_removable: None,
                 },
             ));
         }
@@ -63,6 +69,8 @@ impl Workspace {
                     is_removing: false,
                     is_linking: true,
                     linked_devices: Vec::new(),
+                    may_remove: false,
+                    why_not_removable: None,
                 },
             ));
         }
@@ -84,11 +92,18 @@ impl Workspace {
             }
         }
         let epoch = self.state().mls.epoch()?;
+        let mine = self.my_member_devices()?;
         for (device, info) in &mut devices {
             info.is_removing = self
                 .live_removals_naming(device)?
                 .iter()
                 .any(|removal| removal.epoch >= epoch);
+            let why_not = match info.is_removing {
+                true => Some(ALREADY_REMOVING),
+                false => self.why_not_removable(device, &mine),
+            };
+            info.may_remove = why_not.is_none();
+            info.why_not_removable = why_not.map(str::to_owned);
         }
         devices.sort_by_key(|(_, info)| !info.is_this_device);
         Ok(devices.into_iter().map(|(_, info)| info).collect())
@@ -152,18 +167,11 @@ impl Workspace {
                 mine.contains(device) || linking.contains(device),
                 "that isn't one of your devices in this workspace"
             );
-            if *device == person && self.me() != person {
-                bail!("Remove this one from that device, or ask your admin.");
+            if let Some(why_not) = self.why_not_removable_in_any_set(device, person) {
+                bail!(why_not);
             }
-            ensure!(
-                *device != self.inner.config.admin,
-                "the admin's own device can't be removed"
-            );
         }
-        ensure!(
-            mine.iter().any(|device| !devices.contains(device)),
-            "Keep at least one of your devices."
-        );
+        ensure!(mine.iter().any(|device| !devices.contains(device)), KEEP_ONE);
         // Asked again unless this device already asked in this epoch: once the
         // epoch moves and the device is still there, the request was skipped.
         let epoch = self.state().mls.epoch()?;
@@ -196,6 +204,27 @@ impl Workspace {
             self.push().await.map_err(|_| anyhow!(UNREACHABLE))?;
         }
         Ok(())
+    }
+
+    /// Why this device may not ask to remove `device` on its own, if it
+    /// may not: the rules `ask_to_remove` checks, for one device.
+    fn why_not_removable(&self, device: &PublicKey, mine: &[PublicKey]) -> Option<&'static str> {
+        if self.is_reading_only() {
+            return Some(super::reading::READING_ONLY);
+        }
+        if let Some(why_not) = self.why_not_removable_in_any_set(device, self.my_person()) {
+            return Some(why_not);
+        }
+        let is_only_member = mine.len() == 1 && mine.contains(device);
+        is_only_member.then_some(KEEP_ONE)
+    }
+
+    /// The rules for one device that hold whatever else is removed with it.
+    fn why_not_removable_in_any_set(&self, device: &PublicKey, person: PublicKey) -> Option<&'static str> {
+        if *device == person && self.me() != person {
+            return Some(FIRST_FROM_LINKED);
+        }
+        (*device == self.inner.config.admin).then_some(ADMINS_DEVICE)
     }
 
     /// The devices `device` linked, and those they linked in turn, that are
