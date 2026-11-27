@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import dev.shynewt.shyspace.ui.theme.LocalShyColors
 import uniffi.shy_core.NotifyLevel
 import dev.shynewt.shyspace.sampleChannel
+import dev.shynewt.shyspace.sampleMember
 import dev.shynewt.shyspace.sampleMessage
 import dev.shynewt.shyspace.ui.theme.ShyTheme
 import org.junit.Test
@@ -75,8 +76,12 @@ class ScreenImages {
                     sampleChannel("leads", kind = ChannelKind.PRIVATE),
                     sampleChannel("watercooler", unread = 9u).copy(notify = NotifyLevel.NOTHING),
                     sampleChannel("notes", kind = ChannelKind.NOTES),
+                    sampleChannel("dm-grace", unread = 1u, kind = ChannelKind.DM, dmMembers = listOf("grace")),
+                    sampleChannel("dm-linus", kind = ChannelKind.DM, dmMembers = listOf("linus")),
+                    sampleChannel("dm-helper", kind = ChannelKind.DM, dmMembers = listOf("helper")),
                 ),
                 openFailures = emptyList(),
+                members = listOf(sampleMember("grace", "Grace Hopper"), sampleMember("linus", "Linus"), sampleMember("helper", "Helper", isBot = true)),
             ),
             onOpenChannel = { _, _ -> },
             onRetry = {},

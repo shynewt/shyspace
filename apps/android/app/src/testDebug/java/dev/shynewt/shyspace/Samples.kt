@@ -2,7 +2,10 @@ package dev.shynewt.shyspace
 
 import uniffi.shy_core.Channel
 import uniffi.shy_core.ChannelKind
+import uniffi.shy_core.Member
 import uniffi.shy_core.Message
+import uniffi.shy_core.PresenceState
+import uniffi.shy_core.ProfileDetails
 import uniffi.shy_core.NotifyLevel
 import uniffi.shy_core.Reaction
 
@@ -23,7 +26,24 @@ fun sampleMessage(
 )
 
 /** A channel this person is in, as the core would give it. */
-fun sampleChannel(name: String, unread: UInt = 0u, mentions: UInt = 0u, kind: ChannelKind = ChannelKind.PUBLIC) = Channel(
-    id = name, kind = kind, name = name, dmMembers = emptyList(), isMember = true, isMissingKey = false,
+fun sampleChannel(
+    name: String,
+    unread: UInt = 0u,
+    mentions: UInt = 0u,
+    kind: ChannelKind = ChannelKind.PUBLIC,
+    dmMembers: List<String> = emptyList(),
+) = Channel(
+    id = name, kind = kind, name = name, dmMembers = dmMembers, isMember = true, isMissingKey = false,
     canDelete = false, unread = unread, unreadMentions = mentions, lastRead = null, notify = NotifyLevel.ALL,
+)
+
+/** A member as the core would list them, with only a name and id set. */
+fun sampleMember(id: String, name: String, isBot: Boolean = false) = Member(
+    id = id, name = name, isBot = isBot, isAdmin = false, active = true, status = null,
+    presence = PresenceState.UNREACHABLE,
+    details = ProfileDetails(
+        title = "", pronouns = "", bio = "", email = "", phone = "", website = "", location = "", timeZone = "",
+        workingHours = null,
+    ),
+    picture = null, safetyCode = "",
 )

@@ -43,8 +43,10 @@ import dev.shynewt.shyspace.ui.Avatar
 import dev.shynewt.shyspace.ui.BadgeTone
 import dev.shynewt.shyspace.ui.CountBadge
 import dev.shynewt.shyspace.ui.SectionLabel
+import dev.shynewt.shyspace.ui.displayName
 import dev.shynewt.shyspace.ui.theme.LocalShyColors
 import uniffi.shy_core.Channel
+import uniffi.shy_core.Member
 import uniffi.shy_ffi.BucketSettings
 import uniffi.shy_core.ChannelKind
 import uniffi.shy_core.NotifyLevel
@@ -66,10 +68,11 @@ fun HomeScreen(
     }
 }
 
-/** The name a channel shows with: `#name`, or Notes. */
+/** The name a channel shows with: `#name`, Notes, or for a direct message, the others' names. */
 @Composable
-fun channelTitle(channel: Channel): String = when (channel.kind) {
+fun channelTitle(channel: Channel, members: List<Member>): String = when (channel.kind) {
     ChannelKind.NOTES -> stringResource(R.string.notes)
+    ChannelKind.DM -> channel.dmMembers.joinToString { id -> displayName(members.find { it.id == id }?.name.orEmpty(), id) }
     else -> "#${channel.name}"
 }
 
@@ -77,8 +80,10 @@ fun channelTitle(channel: Channel): String = when (channel.kind) {
 private fun ChannelList(state: HomeState.Ready, onOpenChannel: (Channel, String) -> Unit, bottomBar: @Composable () -> Unit) {
     val background = LocalShyColors.current.palette.bg
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-    // DMs need their members' names, which the phone doesn't load yet.
-    val shown = state.channels.filter { it.isMember && it.kind != ChannelKind.DM }
+    val joined = state.channels.filter { it.isMember }
+    val channels = joined.filter { it.kind == ChannelKind.PUBLIC || it.kind == ChannelKind.PRIVATE }
+    // As on the desktop, your notes lead the direct messages.
+    val direct = joined.filter { it.kind == ChannelKind.NOTES } + joined.filter { it.kind == ChannelKind.DM }
     Scaffold(
         containerColor = background,
         topBar = {
@@ -115,22 +120,28 @@ private fun ChannelList(state: HomeState.Ready, onOpenChannel: (Channel, String)
                 }
             }
             item { SectionLabel(stringResource(R.string.channels), modifier = Modifier.padding(horizontal = 12.dp)) }
-            items(shown, key = { it.id }) { channel -> ChannelRow(channel, onOpen = onOpenChannel) }
+            items(channels, key = { it.id }) { channel -> ChannelRow(channel, state.members, onOpen = onOpenChannel) }
+            item { SectionLabel(stringResource(R.string.direct_messages), modifier = Modifier.padding(horizontal = 12.dp)) }
+            items(direct, key = { it.id }) { channel -> ChannelRow(channel, state.members, onOpen = onOpenChannel) }
         }
     }
 }
 
 @Composable
-private fun ChannelRow(channel: Channel, onOpen: (Channel, String) -> Unit) {
+private fun ChannelRow(channel: Channel, members: List<Member>, onOpen: (Channel, String) -> Unit) {
     val colors = LocalShyColors.current.palette
-    val title = channelTitle(channel)
+    val title = channelTitle(channel, members)
     val isMuted = channel.notify == NotifyLevel.NOTHING
     val hasUnread = channel.unread > 0u
     val mentions = channel.unreadMentions.toInt()
     val (icon, name) = when (channel.kind) {
         ChannelKind.PRIVATE -> R.drawable.ic_lock to channel.name
-        ChannelKind.NOTES -> R.drawable.ic_notes to title
-        else -> R.drawable.ic_tag to channel.name
+        ChannelKind.NOTES, ChannelKind.DM -> R.drawable.ic_notes to title
+        ChannelKind.PUBLIC -> R.drawable.ic_tag to channel.name
+    }
+    // A direct message shows its first other person instead of an icon.
+    val dmPerson = channel.dmMembers.firstOrNull()?.takeIf { channel.kind == ChannelKind.DM }?.let { id ->
+        members.find { it.id == id } to id
     }
     val ink = when {
         hasUnread && !isMuted -> colors.text
@@ -153,8 +164,13 @@ private fun ChannelRow(channel: Channel, onOpen: (Channel, String) -> Unit) {
             .padding(horizontal = 12.dp)
             .semantics(mergeDescendants = true) { state?.let { stateDescription = it } },
     ) {
-        val iconLabel = if (channel.kind == ChannelKind.PRIVATE) stringResource(R.string.private_channel) else null
-        Icon(painterResource(icon), contentDescription = iconLabel, tint = if (hasUnread && !isMuted) colors.text else colors.textDecorative, modifier = Modifier.size(20.dp))
+        if (dmPerson != null) {
+            val (member, id) = dmPerson
+            Avatar(id = id, name = displayName(member?.name.orEmpty(), id), isBot = member?.isBot == true, size = 20.dp)
+        } else {
+            val iconLabel = if (channel.kind == ChannelKind.PRIVATE) stringResource(R.string.private_channel) else null
+            Icon(painterResource(icon), contentDescription = iconLabel, tint = if (hasUnread && !isMuted) colors.text else colors.textDecorative, modifier = Modifier.size(20.dp))
+        }
         Text(
             name,
             style = MaterialTheme.typography.bodyLarge,

@@ -50,6 +50,7 @@ class HomeViewModelTest {
 
         val ready = withTimeout(5_000) { home.state.first { it is HomeState.Ready } } as HomeState.Ready
         assertEquals("Acme", ready.workspaceName)
+        assertEquals(listOf("Ada"), ready.members.map { it.name })
         assertEquals(listOf("general"), ready.channels.map { it.name })
     }
 }

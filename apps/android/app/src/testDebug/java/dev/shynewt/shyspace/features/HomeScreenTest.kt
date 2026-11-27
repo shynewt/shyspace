@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import dev.shynewt.shyspace.MainTab
 import dev.shynewt.shyspace.MainTabBar
 import dev.shynewt.shyspace.sampleChannel
+import dev.shynewt.shyspace.sampleMember
 import dev.shynewt.shyspace.features.home.HomeScreen
 import dev.shynewt.shyspace.features.home.HomeState
 import dev.shynewt.shyspace.ui.theme.ShyTheme
@@ -105,16 +106,36 @@ class HomeScreenTest {
     }
 
     @Test
-    fun onlyChannelsYouAreInShowAndDirectMessagesWaitForNames() {
-        showHome(
-            sampleChannel("general"),
-            sampleChannel("archive").copy(isMember = false),
-            sampleChannel("dm-ada", kind = ChannelKind.DM),
-        )
+    fun onlyChannelsYouAreInShowAndADirectMessageIsNamedForItsPerson() {
+        compose.setContent {
+            ShyTheme(isDark = false) {
+                HomeScreen(
+                    state = HomeState.Ready(
+                        "w1",
+                        "Acme",
+                        channels = listOf(
+                            sampleChannel("general"),
+                            sampleChannel("archive").copy(isMember = false),
+                            sampleChannel("dm-1", kind = ChannelKind.DM, dmMembers = listOf("grace-id")),
+                            sampleChannel("dm-2", kind = ChannelKind.DM, dmMembers = listOf("f00dfeedcafe")),
+                        ),
+                        openFailures = emptyList(),
+                        members = listOf(sampleMember("grace-id", "Grace")),
+                    ),
+                    onOpenChannel = { _, _ -> },
+                    onRetry = {},
+                    bottomBar = {},
+                    noWorkspaceContent = {},
+                )
+            }
+        }
 
         compose.onNodeWithText("general").assertExists()
         compose.onNodeWithText("archive").assertDoesNotExist()
-        compose.onNodeWithText("dm-ada").assertDoesNotExist()
+        compose.onNodeWithText("Direct messages").assertExists()
+        compose.onNodeWithText("Grace").assertExists()
+        compose.onNodeWithText("member f00dfe").assertExists()
+        compose.onNodeWithText("dm-1").assertDoesNotExist()
     }
 
     @Test

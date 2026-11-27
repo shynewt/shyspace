@@ -19,6 +19,7 @@
     <string name="home">Home</string>
     <string name="you">You</string>
     <string name="channels">Channels</string>
+    <string name="direct_messages">Direct messages</string>
     <string name="unread">Unread</string>
     <string name="muted">Muted</string>
     <string name="private_channel">Private</string>

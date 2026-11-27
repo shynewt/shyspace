@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import uniffi.shy_core.Change
 import uniffi.shy_core.Channel
+import uniffi.shy_core.Member
 import uniffi.shy_ffi.BucketSettings
 import uniffi.shy_ffi.OpenFailure
 import uniffi.shy_ffi.ShyWorkspace
@@ -24,6 +25,8 @@ sealed interface HomeState {
         val workspaceId: String,
         val workspaceName: String,
         val channels: List<Channel>,
+        /** Everyone in it, for direct messages' names. */
+        val members: List<Member> = emptyList(),
         /** Workspaces here that couldn't open, and why. */
         val openFailures: List<OpenFailure>,
     ) : HomeState
@@ -70,9 +73,16 @@ class HomeViewModel(private val core: ShyCore) : ViewModel() {
 
     private suspend fun show(workspace: ShyWorkspace, failures: List<OpenFailure>) {
         core.changes(workspace).collect { change ->
-            if (change is Change.Channels || change is Change.Messages || change is Change.Sync) {
+            if (change is Change.Channels || change is Change.Messages || change is Change.Members || change is Change.Sync) {
                 val channels = coreCall(::fail) { workspace.channels() } ?: return@collect
-                mutableState.value = HomeState.Ready(workspace.workspaceId(), workspace.name(), channels, failures)
+                val members = coreCall(::fail) { workspace.members() } ?: return@collect
+                mutableState.value = HomeState.Ready(
+                    workspaceId = workspace.workspaceId(),
+                    workspaceName = workspace.name(),
+                    channels = channels,
+                    members = members,
+                    openFailures = failures,
+                )
             }
         }
     }
