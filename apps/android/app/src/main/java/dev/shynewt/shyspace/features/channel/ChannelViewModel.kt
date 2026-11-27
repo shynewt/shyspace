@@ -46,7 +46,6 @@ class ChannelViewModel(
             mutableState.value = ChannelState(isLoading = false, error = "This workspace isn't open.")
             return
         }
-        reload(workspace)
         core.changes(workspace).collect { change ->
             if ((change is Change.Messages && change.channel == channelId) || change is Change.Sync) reload(workspace)
         }

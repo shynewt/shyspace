@@ -60,13 +60,11 @@ class HomeViewModel(private val core: ShyCore) : ViewModel() {
     }
 
     private suspend fun show(workspace: ShyWorkspace, failures: List<OpenFailure>) {
-        suspend fun refresh() {
-            val channels = coreCall(::fail) { workspace.channels() } ?: return
-            mutableState.value = HomeState.Ready(workspace.workspaceId(), workspace.name(), channels, failures)
-        }
-        refresh()
         core.changes(workspace).collect { change ->
-            if (change is Change.Channels || change is Change.Messages || change is Change.Sync) refresh()
+            if (change is Change.Channels || change is Change.Messages || change is Change.Sync) {
+                val channels = coreCall(::fail) { workspace.channels() } ?: return@collect
+                mutableState.value = HomeState.Ready(workspace.workspaceId(), workspace.name(), channels, failures)
+            }
         }
     }
 

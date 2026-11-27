@@ -12,7 +12,11 @@ import uniffi.shy_ffi.ShyWorkspace
 
 /** The core for the whole app: one per process, since a workspace's folder can be open only once. */
 class ShyCore(val app: ShyApp) {
-    /** Every change in [workspace] while collected, none dropped when the collector is slow. */
+    /**
+     * Every change in [workspace] while collected, none dropped when the collector is slow. It
+     * starts with [Change.Sync] once listening: load on that, not before collecting, and no
+     * change can fall between the load and the first change heard.
+     */
     fun changes(workspace: ShyWorkspace): Flow<Change> = callbackFlow {
         val subscription = workspace.subscribe(
             object : ChangeListener {
@@ -21,6 +25,7 @@ class ShyCore(val app: ShyApp) {
                 }
             },
         )
+        trySend(Change.Sync)
         awaitClose { subscription.close() }
     }.buffer(Channel.UNLIMITED)
 }
