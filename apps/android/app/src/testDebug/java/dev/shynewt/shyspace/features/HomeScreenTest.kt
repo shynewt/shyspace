@@ -187,6 +187,14 @@ class HomeScreenTest {
     }
 
     @Test
+    fun aGroupWithAnAgentInItIsNotCalledAnAgent() {
+        val group = sampleChannel("dm-group", kind = ChannelKind.DM, dmMembers = listOf("helper", "grace"))
+        showHomeWith(listOf(group), listOf(sampleMember("helper", "Helper", isBot = true), sampleMember("grace", "Grace")))
+
+        compose.onNode(hasText("Helper, Grace")).assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+    }
+
+    @Test
     fun aRenamedPersonsDirectMessageTakesTheNewName() {
         val dm = sampleChannel("dm-grace", kind = ChannelKind.DM, dmMembers = listOf("grace"))
         showHomeWith(listOf(dm), listOf(sampleMember("grace", "Grace")))
