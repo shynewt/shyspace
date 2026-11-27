@@ -116,11 +116,13 @@ pub enum ResumedLinkStep {
     Reading(Workspace),
 }
 
-/// How a stop ended: the link stopped and was wiped, or the admin's app
-/// had added the device just before, and the joined workspace stays.
+/// How a stop ended: the link stopped and was wiped; the admin's app had
+/// added the device just before, and the joined workspace stays; or the
+/// app closed meanwhile, and the link is still on disk, not stopped.
 pub enum LinkStop {
     Stopped,
     AlreadyJoined(Workspace),
+    PutAside,
 }
 
 /// How a new device reaches its code's slots: the code's presigned links,
@@ -392,6 +394,7 @@ impl Workspaces {
                 StepOutcome::Opened(joined) if !joined.is_reading_only() => {
                     Ok(LinkStop::AlreadyJoined(joined))
                 }
+                StepOutcome::PutAside => Ok(LinkStop::PutAside),
                 StepOutcome::Failed(message) if is_own_stop => Err(anyhow!(message)),
                 _ => Ok(LinkStop::Stopped),
             };
@@ -461,6 +464,15 @@ impl Workspaces {
                 Ok(Some(ResumedLinkStep::Reading(self.add_open(reading)?)))
             }
         }
+    }
+
+    /// Whether this device has a link in progress: one this set runs or
+    /// holds, or one on disk that a restart hasn't picked up yet.
+    pub fn has_link_in_progress(&self) -> Result<bool> {
+        if !matches!(*self.link_lock(), LinkSlot::Idle) {
+            return Ok(true);
+        }
+        Ok(self.linking_folder()?.is_some())
     }
 
     /// Puts this device's link aside as the app closes: a running step is

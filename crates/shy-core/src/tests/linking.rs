@@ -2904,3 +2904,64 @@ async fn a_link_picked_up_before_its_request_was_opened_says_so_and_asks_again()
     })
     .await;
 }
+
+/// A stop that meets the app closing says the link was only put aside: it
+/// is still on disk, not stopped.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_meeting_the_app_closing_says_the_link_was_put_aside() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let device = app_on_new_device(root.path(), &bucket);
+        let code = bob.create_test_link_code().unwrap();
+        let (reached, _release) = hold_steps(&device);
+        let begun = {
+            let device = device.clone();
+            let pasted = code.encode().unwrap();
+            tokio::spawn(async move { device.begin_link(&pasted, Platform::Linux).await })
+        };
+        until_opened(&bob).await;
+        reached.notified().await;
+        let stopping = {
+            let device = device.clone();
+            tokio::spawn(async move { device.cancel_link().await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        drop(device.close_all());
+
+        assert!(matches!(
+            stopping.await.unwrap().unwrap(),
+            crate::workspaces::LinkStop::PutAside
+        ));
+        assert!(begun.await.unwrap().is_err());
+        assert!(app_linking_folder(root.path(), &code).exists(), "still on disk");
+    })
+    .await;
+}
+
+/// Whether a link is in progress here: from begin, through a restart, to
+/// its end.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_can_tell_whether_a_link_is_in_progress() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let code = bob.create_test_link_code().unwrap();
+        {
+            let device = app_on_new_device(root.path(), &bucket);
+            assert!(!device.has_link_in_progress().unwrap());
+            begin_in_app(&device, &bob, &code).await;
+            assert!(device.has_link_in_progress().unwrap());
+            drop(device.close_all());
+        }
+        let device = app_on_new_device(root.path(), &bucket);
+        assert!(
+            device.has_link_in_progress().unwrap(),
+            "on disk, before picking it up"
+        );
+
+        device.cancel_link().await.unwrap();
+
+        assert!(!device.has_link_in_progress().unwrap());
+    })
+    .await;
+}
