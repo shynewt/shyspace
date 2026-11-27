@@ -97,7 +97,7 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             return self.linking.forget_reading().await;
         }
         reading.stop_background();
-        reading.emit(Change::Removed);
+        reading.emit(Change::ReadingClosed);
         reading
             .inner
             .forget_on_close

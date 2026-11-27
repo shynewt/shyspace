@@ -105,9 +105,14 @@ impl LinkCode {
         ))
     }
 
+    /// Reads a code as pasted: whitespace anywhere (a wrapped line, an
+    /// email's line breaks) is dropped, as a code never holds any.
     pub fn decode(code: &str) -> Result<Self> {
-        let payload = code
-            .trim()
+        let compact: String = code
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect();
+        let payload = compact
             .strip_prefix(CODE_PREFIX)
             .context("not a shyspace link code")?;
         let bytes = URL_SAFE_NO_PAD.decode(payload).context("link code is damaged")?;

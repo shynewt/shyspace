@@ -10,6 +10,10 @@
 //! recently also check the bucket at full pace, the rest every few minutes
 //! (`sync::Cadence`), so idle workspaces cost few requests.
 
+mod linking;
+
+pub use linking::ResumedLinkStep;
+
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -158,6 +162,11 @@ pub struct Workspaces {
     /// `workspaces.json`, shared with the workspaces for the choices that are
     /// the device's (its huddle devices).
     settings_file: Arc<DeviceSettingsFile>,
+    /// This device's link to a person, if one is in progress.
+    link: Mutex<linking::LinkSlot>,
+    /// Links reach this bucket directly, where the app uses presigned links.
+    #[cfg(test)]
+    test_link_bucket: Mutex<Option<crate::transport::bucket::Bucket>>,
 }
 
 impl Workspaces {
@@ -197,6 +206,9 @@ impl Workspaces {
             connect,
             open: Mutex::default(),
             settings_file,
+            link: Mutex::default(),
+            #[cfg(test)]
+            test_link_bucket: Mutex::default(),
         }
     }
 

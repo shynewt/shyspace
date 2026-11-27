@@ -15,7 +15,7 @@ use crate::{
     storage::Store,
 };
 
-const LINKING_SUFFIX: &str = ".linking";
+pub(crate) const LINKING_SUFFIX: &str = ".linking";
 const LINK_CODE_META: &str = "link_code";
 const LINK_REQUEST_META: &str = "link_request";
 pub(crate) const HANDOVER_SECRET_META: &str = "link_handover_secret";

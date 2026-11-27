@@ -1773,7 +1773,7 @@ async fn a_wiped_link_left_open_is_told_and_deleted_at_the_next_start() {
 
     let mut was_told = false;
     while let Ok(change) = told.try_recv() {
-        was_told |= change == crate::views::Change::Removed;
+        was_told |= change == crate::views::Change::ReadingClosed;
     }
     assert!(was_told, "the app's handle is told to let go");
     kept_by_the_app.inner.forget_on_close.disarm();
@@ -1888,6 +1888,7 @@ async fn a_linking_store_is_not_joined_into() {
 
     let refused = format!("{:#}", joined.err().unwrap());
     assert!(refused.contains("opens only for reading"), "{refused}");
+}
 
 /// Links that end with nothing handed over leave nothing behind, so the
 /// next link starts afresh.
@@ -1993,6 +1994,191 @@ async fn the_voucher_can_tell_when_the_device_it_linked_is_added() {
     assert!(bob.is_device_added(&device).unwrap());
 }
 
+/// The app's set of workspaces on the new device, reaching `bucket`.
+fn app_on_new_device(root: &std::path::Path, bucket: &Bucket) -> crate::workspaces::Workspaces {
+    std::fs::create_dir_all(root.join("app-keys")).unwrap();
+    let device = crate::workspaces::Workspaces::with_connector(
+        root.join("app"),
+        crate::workspaces::DeviceKeys::Files(root.join("app-keys")),
+        connector(bucket),
+    );
+    device.set_test_link_bucket(bucket.clone());
+    device
+}
+
+/// The new device's app starts the link and waits for the number while the
+/// person's device opens the request.
+async fn begin_in_app(
+    device: &crate::workspaces::Workspaces,
+    voucher: &Workspace,
+    code: &LinkCode,
+    cancel: &JoinCancel,
+) -> CheckOnNewDevice {
+    begin_pasted_in_app(device, voucher, &code.encode().unwrap(), cancel).await
+}
+
+/// As `begin_in_app`, with the code as the person pasted it.
+async fn begin_pasted_in_app(
+    device: &crate::workspaces::Workspaces,
+    voucher: &Workspace,
+    pasted: &str,
+    cancel: &JoinCancel,
+) -> CheckOnNewDevice {
+    let (check, ()) = tokio::join!(device.begin_link(pasted, Platform::Linux, cancel), async {
+        while voucher.pending_link().await.unwrap().is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    });
+    check.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_shows_the_reading_workspace_then_the_real_one_in_its_place() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    let code = bob.create_test_link_code().unwrap();
+    let cancel = JoinCancel::new();
+
+    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code, &cancel).await else {
+        panic!("the number to show");
+    };
+    bob.confirm_link(&shown).await.unwrap();
+    let reading = device.wait_for_link_handover(&cancel).await.unwrap();
+    assert!(reading.is_reading_only());
+    assert!(device.selected().unwrap().is_reading_only(), "shown at once");
+    bob.sync().await;
+    admin.sync().await;
+
+    let joined = device
+        .wait_until_linked(&cancel, Networking::Offline)
+        .await
+        .unwrap();
+
+    assert!(!joined.is_reading_only());
+    let shown = device.open_workspaces();
+    assert_eq!(shown.len(), 1, "the real workspace took the reading one's place");
+    assert!(!shown[0].is_reading_only());
+    assert_eq!(joined.state().store.person_of(&joined.me()).unwrap(), bob.me());
+    drop(reading);
+    let linking_folder = root
+        .path()
+        .join("app/workspaces")
+        .join(format!("{}.linking", code.workspace_id));
+    for _ in 0..50 {
+        if !linking_folder.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(!linking_folder.exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_a_link_in_the_app_closes_the_reading_workspace_and_wipes() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    let code = bob.create_test_link_code().unwrap();
+    let cancel = JoinCancel::new();
+    let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code, &cancel).await else {
+        panic!("the number to show");
+    };
+    bob.confirm_link(&shown).await.unwrap();
+    drop(device.wait_for_link_handover(&cancel).await.unwrap());
+
+    device.cancel_link().await.unwrap();
+
+    assert!(device.open_workspaces().is_empty());
+    let folder = root.path().join("app/workspaces").join(&code.workspace_id);
+    assert!(!folder.join(crate::workspace::STORE_FILE).exists());
+    assert!(
+        !root
+            .path()
+            .join("app/workspaces")
+            .join(format!("{}.linking", code.workspace_id))
+            .exists()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_picks_a_reading_link_up_after_a_restart() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let code = bob.create_test_link_code().unwrap();
+    {
+        let device = app_on_new_device(root.path(), &bucket);
+        let cancel = JoinCancel::new();
+        let CheckOnNewDevice::Code(shown) = begin_in_app(&device, &bob, &code, &cancel).await else {
+            panic!("the number to show");
+        };
+        bob.confirm_link(&shown).await.unwrap();
+        drop(device.wait_for_link_handover(&cancel).await.unwrap());
+        drop(device.close_all());
+    }
+    let device = app_on_new_device(root.path(), &bucket);
+
+    let Some(crate::workspaces::ResumedLinkStep::Reading(reading)) = device.resume_link().await.unwrap()
+    else {
+        panic!("the link reads again");
+    };
+
+    assert!(reading.is_reading_only());
+    drop(reading);
+    bob.sync().await;
+    admin.sync().await;
+    let joined = device
+        .wait_until_linked(&JoinCancel::new(), Networking::Offline)
+        .await
+        .unwrap();
+    assert_eq!(joined.state().store.person_of(&joined.me()).unwrap(), bob.me());
+}
+
+/// Every step says so when there's no link at it, and picking up with
+/// nothing to pick up is harmless.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_link_steps_refuse_clearly_out_of_turn() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    let cancel = JoinCancel::new();
+
+    assert!(device.resume_link().await.unwrap().is_none());
+    for refused in [
+        device.wait_for_link_handover(&cancel).await.err().unwrap(),
+        device
+            .wait_until_linked(&cancel, Networking::Offline)
+            .await
+            .err()
+            .unwrap(),
+        device.cancel_link().await.err().unwrap(),
+    ] {
+        assert!(format!("{refused:#}").contains("no link waiting"), "{refused:#}");
+    }
+
+    let code = bob.create_test_link_code().unwrap();
+    let CheckOnNewDevice::Code(_) = begin_in_app(&device, &bob, &code, &cancel).await else {
+        panic!("the number to show");
+    };
+    let not_yet = device
+        .wait_until_linked(&cancel, Networking::Offline)
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        format!("{not_yet:#}").contains("isn't reading yet"),
+        "{not_yet:#}"
+    );
+    let second = bob.create_test_link_code().unwrap().encode().unwrap();
+    let busy = device
+        .begin_link(&second, Platform::Linux, &cancel)
+        .await
+        .err()
+        .unwrap();
+    assert!(format!("{busy:#}").contains("already linking"), "{busy:#}");
+    assert!(
+        device.resume_link().await.unwrap().is_none(),
+        "one link already runs here"
+    );
+    device.cancel_link().await.unwrap();
+}
+
 /// Once the hand-over opened, the early waits touch nothing, even with the
 /// code long run out: the device keeps the key it joins with.
 #[tokio::test(flavor = "multi_thread")]
@@ -2024,4 +2210,59 @@ async fn early_waits_called_again_after_the_hand_over_touch_nothing() {
     assert!(linking_store_of(&dir).exists());
     reading.sync().await;
     assert_eq!(reading.status().error, None);
+}
+
+/// A pasted code is read by the core alone, so every app takes it the same
+/// way: the workspace's name, or why it can't be used.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pasted_link_code_is_read_without_contacting_anything() {
+    let (_root, _bucket, _admin, bob) = admin_and_bob().await;
+    let mut code = bob.create_test_link_code().unwrap();
+    let encoded = code.encode().unwrap();
+    let wrapped = wrap_as_pasted(&encoded);
+
+    let summary = crate::workspaces::Workspaces::read_link_code(&wrapped).unwrap();
+
+    assert_eq!(summary.workspace_name, code.workspace_name);
+    for junk in ["", "hello", &encoded[..encoded.len() / 2], "shy3_abc"] {
+        let refused = crate::workspaces::Workspaces::read_link_code(junk).unwrap_err();
+        assert!(
+            format!("{refused:#}").contains("This isn't a link code"),
+            "{refused:#}"
+        );
+    }
+    code.expires_ms = 0;
+    let refused = crate::workspaces::Workspaces::read_link_code(&code.encode().unwrap()).unwrap_err();
+    assert!(
+        format!("{refused:#}").contains("This code has run out"),
+        "{refused:#}"
+    );
+}
+
+/// A code pasted with spaces around it and broken across lines.
+fn wrap_as_pasted(encoded: &str) -> String {
+    let lines: Vec<String> = encoded
+        .as_bytes()
+        .chunks(40)
+        .map(|chunk| String::from_utf8(chunk.to_vec()).unwrap())
+        .collect();
+    format!("  {}\r\n", lines.join("\n  "))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_takes_a_code_wrapped_across_lines() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let device = app_on_new_device(root.path(), &bucket);
+    let code = bob.create_test_link_code().unwrap();
+
+    let check = begin_pasted_in_app(
+        &device,
+        &bob,
+        &wrap_as_pasted(&code.encode().unwrap()),
+        &JoinCancel::new(),
+    )
+    .await;
+
+    assert!(matches!(check, CheckOnNewDevice::Code(_)));
+    device.cancel_link().await.unwrap();
 }
