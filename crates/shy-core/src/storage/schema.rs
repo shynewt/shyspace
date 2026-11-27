@@ -79,7 +79,8 @@ CREATE TABLE pending_outcomes (
 const PENDING_LINKS: &str = r#"
 CREATE TABLE pending_links (
     token BLOB PRIMARY KEY, code BLOB NOT NULL, request BLOB NOT NULL, certificate BLOB NOT NULL,
-    answer_until_ms INTEGER NOT NULL, handed_over INTEGER NOT NULL, until_ms INTEGER NOT NULL);
+    answer_until_ms INTEGER NOT NULL, handed_over INTEGER NOT NULL, refused INTEGER NOT NULL,
+    slots_deleted INTEGER NOT NULL, until_ms INTEGER NOT NULL);
 "#;
 
 const FIRST_SCHEMA: &str = r#"

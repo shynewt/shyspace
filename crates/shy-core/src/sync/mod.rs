@@ -383,6 +383,12 @@ impl Workspace {
         {
             warn!("couldn't act on device changes yet: {error:#}");
         }
+        if !self.is_reading_only()
+            && !self.status().removed
+            && let Err(error) = self.tend_pending_links().await
+        {
+            warn!("couldn't tend this device's confirmed links yet: {error:#}");
+        }
         has_found_new
     }
 

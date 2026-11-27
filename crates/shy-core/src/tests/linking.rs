@@ -796,3 +796,231 @@ async fn a_link_not_added_within_a_week_is_wiped_while_waiting() {
     assert!(!linking_store_of(&dir).exists());
     assert!(!dir.join("store.db").exists());
 }
+
+fn edit_pending_link(voucher: &Workspace, change: impl FnOnce(&mut crate::storage::PendingLink)) {
+    let store = &voucher.state().store;
+    let mut link = store.pending_links().unwrap().remove(0);
+    change(&mut link);
+    store.put_pending_link(&link).unwrap();
+}
+
+fn links_asked_by(member: &Workspace, voucher: &Workspace) -> usize {
+    member
+        .state()
+        .store
+        .device_changes()
+        .unwrap()
+        .iter()
+        .filter(|change| change.author == voucher.me() && matches!(change.change, DeviceChange::Link { .. }))
+        .count()
+}
+
+/// A restart between saving the confirmed link and putting the hand-over
+/// up leaves the hand-over to the next pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hand_over_left_undone_is_put_up_by_the_next_pass() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let (code, linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    let handover = bucket.link_slot(&code.token, "answer").await.unwrap().unwrap();
+    bucket
+        .put_link_slot(&code.token, "answer", b"lost".to_vec())
+        .await
+        .unwrap();
+    edit_pending_link(&bob, |link| link.is_handed_over = false);
+
+    bob.sync().await;
+
+    assert_ne!(
+        bucket.link_slot(&code.token, "answer").await.unwrap().unwrap(),
+        b"lost".as_slice()
+    );
+    assert!(linking.handover_now().await.unwrap().is_some());
+    assert!(bob.state().store.pending_links().unwrap()[0].is_handed_over);
+    assert_eq!(links_asked_by(&bob, &bob), 1, "the link is asked for once");
+    drop(handover);
+}
+
+/// The admin's app saw the certificate only after it went stale: the
+/// voucher vouches again for the same device, and it is added.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_certificate_is_vouched_for_again_and_the_device_added() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (_code, linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    for _ in 0..5 {
+        admin.commit_keys_only().await.unwrap();
+    }
+    bob.sync().await;
+    admin.sync().await;
+    let device = bob.state().store.pending_links().unwrap()[0].request.device;
+    assert!(
+        !admin.state().mls.is_member(&device).unwrap(),
+        "refused as stale first"
+    );
+
+    bob.sync().await;
+    // The new link goes out with the next push.
+    bob.sync().await;
+    admin.sync().await;
+
+    assert!(admin.state().mls.is_member(&device).unwrap());
+    assert_eq!(links_asked_by(&admin, &bob), 2);
+    drop(linking);
+}
+
+/// Not after the person removed it: a stale link for a device they took
+/// back is never asked for again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_the_person_removed_is_not_vouched_for_again() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    let device = bob.state().store.pending_links().unwrap()[0].request.device;
+    for _ in 0..5 {
+        admin.commit_keys_only().await.unwrap();
+    }
+    bob.sync().await;
+    admin.sync().await;
+    bob.write(Op::DeviceChange {
+        change: DeviceChange::Remove {
+            devices: vec![device],
+        },
+    })
+    .unwrap();
+
+    bob.sync().await;
+    admin.sync().await;
+
+    assert!(!admin.state().mls.is_member(&device).unwrap());
+    assert_eq!(links_asked_by(&admin, &bob), 1);
+    assert!(bob.state().store.pending_links().unwrap()[0].is_refused);
+}
+
+/// Once the device is added and the answer link has run out, the link's
+/// slots go and the record ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn once_the_device_is_added_its_link_slots_go_and_the_record_ends() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (code, linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    bob.sync().await;
+    admin.sync().await;
+
+    bob.sync().await;
+
+    // The new device may not have fetched its hand-over yet: it stays while
+    // the answer link works.
+    assert!(linking.handover_now().await.unwrap().is_some());
+    edit_pending_link(&bob, |link| link.answer_until_ms = 0);
+    bob.sync().await;
+    assert!(bob.state().store.pending_links().unwrap().is_empty());
+    assert!(bucket.link_slot(&code.token, "request").await.unwrap().is_none());
+    assert!(bucket.link_slot(&code.token, "answer").await.unwrap().is_none());
+}
+
+/// A hand-over that never went up while the new device could read it:
+/// the voucher cancels the link, so no device that can't join is added.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_whose_hand_over_never_went_up_in_time_is_cancelled() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    let device = bob.state().store.pending_links().unwrap()[0].request.device;
+    edit_pending_link(&bob, |link| {
+        link.is_handed_over = false;
+        link.answer_until_ms = 0;
+    });
+
+    bob.sync().await;
+    // The cancellation goes out with the next push, before the admin's app
+    // has seen the link.
+    bob.sync().await;
+    admin.sync().await;
+
+    assert!(!admin.state().mls.is_member(&device).unwrap());
+    let outcome = bucket
+        .link_reply(&code.token, &device, "outcome")
+        .await
+        .unwrap()
+        .unwrap();
+    let signed = SignedOutcome::decode(&outcome).unwrap();
+    let read = signed
+        .read(&admin.me(), &code.workspace_id, &code.token, &device)
+        .unwrap();
+    assert_eq!(read.reason, Reason::Cancelled);
+}
+
+/// A refused link's outcome stays for the new device to read until the
+/// voucher's record ends; then it and the slots go.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_links_outcome_stays_until_the_record_ends() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    let device = bob.state().store.pending_links().unwrap()[0].request.device;
+    bob.write(Op::DeviceChange {
+        change: DeviceChange::Remove {
+            devices: vec![device],
+        },
+    })
+    .unwrap();
+    bob.sync().await;
+    admin.sync().await;
+
+    bob.sync().await;
+
+    assert!(bob.state().store.pending_links().unwrap()[0].is_refused);
+    assert!(
+        bucket
+            .link_reply(&code.token, &device, "outcome")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    edit_pending_link(&bob, |link| link.until_ms = 0);
+    bob.sync().await;
+    assert!(bob.state().store.pending_links().unwrap().is_empty());
+    assert!(
+        bucket
+            .link_reply(&code.token, &device, "outcome")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(bucket.link_slot(&code.token, "answer").await.unwrap().is_none());
+}
+
+/// Once the answer link has run out, nobody can read the slots: they go,
+/// once, while the record waits for the admin's app.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_link_slots_go_once_the_answer_link_runs_out() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let (code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    edit_pending_link(&bob, |link| link.answer_until_ms = 0);
+
+    bob.sync().await;
+
+    assert!(bucket.link_slot(&code.token, "request").await.unwrap().is_none());
+    assert!(bucket.link_slot(&code.token, "answer").await.unwrap().is_none());
+    let link = &bob.state().store.pending_links().unwrap()[0];
+    assert!(link.are_slots_deleted && !link.is_refused);
+}
+
+/// The admin's app added the device before the cancellation arrived: it
+/// never got its hand-over, so it can never join, and it is removed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_added_without_its_hand_over_is_removed() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let (_code, _linking) = handed_over(&bob, &root.path().join("phone"), &bucket).await;
+    let device = bob.state().store.pending_links().unwrap()[0].request.device;
+    bob.sync().await;
+    admin.sync().await;
+    assert!(admin.state().mls.is_member(&device).unwrap());
+    edit_pending_link(&bob, |link| {
+        link.is_handed_over = false;
+        link.answer_until_ms = 0;
+    });
+
+    bob.sync().await;
+    bob.sync().await;
+    admin.sync().await;
+
+    assert!(!admin.state().mls.is_member(&device).unwrap());
+    bob.sync().await;
+    assert!(bob.state().store.pending_links().unwrap().is_empty());
+}

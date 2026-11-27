@@ -12,6 +12,7 @@ mod inbox;
 mod key_rotation;
 mod later;
 mod lifecycle;
+mod link_tending;
 mod linking;
 pub(crate) mod linking_store;
 mod look;
@@ -410,6 +411,8 @@ pub(crate) struct Inner {
     /// Held while the admin's app acts on device changes, so two passes
     /// can't act on the same change.
     pub device_actions_lock: tokio::sync::Mutex<()>,
+    /// One pass at a time over the links this device confirmed.
+    pub pending_links_lock: tokio::sync::Mutex<()>,
     /// When each owed link welcome last went up, by its code and device.
     pub welcomes_sent:
         Mutex<std::collections::HashMap<(crate::membership::link::Token, PublicKey), tokio::time::Instant>>,

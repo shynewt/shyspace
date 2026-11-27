@@ -688,6 +688,7 @@ impl Workspace {
                 fail_segment_save: Default::default(),
                 audience_lock: Mutex::default(),
                 device_actions_lock: tokio::sync::Mutex::new(()),
+                pending_links_lock: tokio::sync::Mutex::new(()),
                 welcomes_sent: Mutex::default(),
                 open_link: Mutex::default(),
                 #[cfg(test)]

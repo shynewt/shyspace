@@ -245,15 +245,18 @@ impl Workspace {
             request,
             certificate,
             is_handed_over: false,
+            is_refused: false,
+            are_slots_deleted: false,
             until_ms: now + PENDING_LINK_LIFETIME_MS,
         };
+        let _one_at_a_time = self.inner.pending_links_lock.lock().await;
         self.state().store.put_pending_link(&pending)?;
         self.finish_pending_link(pending).await
     }
 
     /// Does what is left of a confirmed link: the request op, then the
     /// hand-over while the new device can still read it.
-    async fn finish_pending_link(&self, mut pending: PendingLink) -> Result<()> {
+    pub(super) async fn finish_pending_link(&self, mut pending: PendingLink) -> Result<()> {
         if !self.has_asked_to_link(&pending)? {
             self.write(Op::DeviceChange {
                 change: DeviceChange::Link {
@@ -276,7 +279,7 @@ impl Workspace {
         self.state().store.put_pending_link(&pending)
     }
 
-    fn has_asked_to_link(&self, pending: &PendingLink) -> Result<bool> {
+    pub(super) fn has_asked_to_link(&self, pending: &PendingLink) -> Result<bool> {
         let me = self.me();
         Ok(self.state().store.device_changes()?.iter().any(|change| {
             change.author == me
