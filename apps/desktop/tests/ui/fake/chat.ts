@@ -132,6 +132,8 @@ export class FakeChat {
         return this.markThreadRead(requireString(args, "root"), requireString(args, "message"));
       case "mark_read":
         return this.markRead(requireString(args, "channel"), requireString(args, "message"));
+      case "mark_channel_read":
+        return this.markChannelRead(requireString(args, "channel"));
       case "create_channel":
         return this.createChannel(requireString(args, "name"));
       case "rename_channel":
@@ -398,6 +400,16 @@ export class FakeChat {
     return threadMarker !== undefined && !isAfter(message, threadMarker);
   }
 
+  /** Up to the channel's newest message, thread replies included, like the core. */
+  private markChannelRead(channel: string): void {
+    if (!this.channels.some((candidate) => candidate.id === channel)) throw "no such channel here";
+    const newest = this.messages
+      .filter((message) => message.channel === channel)
+      .sort(compareMessages)
+      .at(-1);
+    if (newest) this.markRead(channel, newest.id);
+  }
+
   /** Forward only, like the core. */
   private markRead(channel: string, messageId: string): void {
     const message = this.messages.find((candidate) => candidate.id === messageId && candidate.channel === channel);
@@ -500,7 +512,10 @@ export class FakeChat {
     items.sort((left, right) => compareMessages(right.message, left.message));
     return {
       attention: items,
-      channels: this.channelViews().filter((channel) => channel.unread > 0),
+      // As the core: muted channels only while they mention you.
+      channels: this.channelViews().filter(
+        (channel) => channel.unread > 0 && (channel.notify !== "nothing" || channel.unread_mentions > 0),
+      ),
       page_mentions: [],
     };
   }

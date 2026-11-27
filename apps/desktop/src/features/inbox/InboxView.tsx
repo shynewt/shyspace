@@ -19,9 +19,8 @@ export function InboxView() {
   const loadInbox = useCallback(() => api.inbox(), []);
   const inbox = useLive(loadInbox, isInboxChange);
   const [isConfirmingMarkAll, setConfirmingMarkAll] = useState(false);
-  // Like the sidebar: a muted channel needs you only when it mentions you.
-  const unreadChannels =
-    inbox?.channels.filter((channel) => channel.notify !== "nothing" || channel.unread_mentions > 0) ?? [];
+  // The core leaves out muted channels unless they mention you.
+  const unreadChannels = inbox?.channels ?? [];
   const entries = inbox ? attentionEntries(inbox.attention, inbox.page_mentions) : [];
   const isEmpty = inbox && entries.length === 0 && unreadChannels.length === 0;
 
@@ -162,10 +161,6 @@ function AttentionRow({ item }: { item: InboxItem }) {
 
 function UnreadChannelRow({ channel }: { channel: Channel }) {
   const { navigate } = useWorkspace();
-  const markRead = async () => {
-    const [latest] = await api.messages(channel.id, null, 1);
-    if (latest) await api.markRead(channel.id, latest.id);
-  };
   return (
     <li className="flex items-center gap-2 rounded-xl px-3 py-1.5 hover:bg-surface-2">
       <button
@@ -176,7 +171,7 @@ function UnreadChannelRow({ channel }: { channel: Channel }) {
         <ChannelName channelId={channel.id} className="min-w-0" />
         <CountBadge>{channel.unread}</CountBadge>
       </button>
-      <Button variant="ghost" size="sm" onClick={() => markRead().catch(reportError)}>
+      <Button variant="ghost" size="sm" onClick={() => api.markChannelRead(channel.id).catch(reportError)}>
         Mark read
       </Button>
     </li>

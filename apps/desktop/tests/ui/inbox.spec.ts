@@ -103,3 +103,30 @@ test("the inbox keeps a readable width", async ({ page }) => {
   await expect(attention).toBeVisible();
   expect((await attention.boundingBox())?.width).toBeLessThanOrEqual(760);
 });
+
+test("mark read clears an unread channel from the inbox", async ({ page }) => {
+  await page.evaluate(() => window.fake.receiveMessage(window.fake.memberNamed("Grace"), "random", "plain news"));
+
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  const unread = page.getByRole("region", { name: "Unread channels" });
+  await expect(unread).toContainText("random");
+  await unread.getByRole("button", { name: "Mark read" }).click();
+
+  await expect(page.getByText("You're all caught up")).toBeVisible();
+});
+
+test("a muted channel waits in the inbox while it mentions you", async ({ page }) => {
+  await page.getByRole("button", { name: "random", exact: true }).hover();
+  await page.getByRole("button", { name: "Actions for #random" }).click();
+  await chooseInSubmenu(page, "Notifications", "Nothing (muted)");
+  await page.evaluate(() =>
+    window.fake.receiveMessage(
+      window.fake.memberNamed("Grace"),
+      "random",
+      `[@Ada](shy://member/${window.fake.session?.me}) look at this`,
+    ),
+  );
+
+  await page.getByRole("button", { name: "Inbox, 1 unread" }).click();
+  await expect(page.getByRole("region", { name: "Unread channels" })).toContainText("random");
+});

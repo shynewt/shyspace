@@ -500,6 +500,7 @@ export const api = {
   renameChannel: (channel: string, name: string) => invoke<void>("rename_channel", { channel, name }),
   deleteChannel: (channel: string) => invoke<void>("delete_channel", { channel }),
   markRead: (channel: string, message: string) => invoke<void>("mark_read", { channel, message }),
+  markChannelRead: (channel: string) => invoke<void>("mark_channel_read", { channel }),
   thread: (root: string) => invoke<Message[]>("thread", { root }),
   inbox: () => invoke<Inbox>("inbox"),
   drafts: () => invoke<Draft[]>("drafts"),

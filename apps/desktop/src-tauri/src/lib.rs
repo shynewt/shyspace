@@ -693,6 +693,11 @@ async fn mark_read(state: State<'_, AppState>, channel: String, message: String)
 }
 
 #[tauri::command]
+async fn mark_channel_read(state: State<'_, AppState>, channel: String) -> CommandResult<()> {
+    current(&state).await?.mark_channel_read(&channel).map_err(failed)
+}
+
+#[tauri::command]
 async fn set_notify_level(
     state: State<'_, AppState>,
     channel: String,
@@ -1298,6 +1303,7 @@ pub fn run() {
             rotate_private_channel_key,
             rename_channel,
             mark_read,
+            mark_channel_read,
             set_status,
             clear_status,
             set_away,
