@@ -1,10 +1,16 @@
 package dev.shynewt.shyspace
 
+import dev.shynewt.shyspace.ui.LastInput
+import dev.shynewt.shyspace.ui.recordsInput
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import uniffi.shy_core.InboxItem
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,9 +35,6 @@ import dev.shynewt.shyspace.features.home.NoWorkspace
 import dev.shynewt.shyspace.features.home.workspaceCreator
 import dev.shynewt.shyspace.features.settings.AppSettings
 import dev.shynewt.shyspace.features.settings.YouScreen
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.togetherWith
 import androidx.navigation3.ui.NavDisplay.popTransitionSpec
 import androidx.navigation3.ui.NavDisplay.predictivePopTransitionSpec
 import androidx.navigation3.ui.NavDisplay.transitionSpec
@@ -79,6 +82,7 @@ private fun List<Route>.toMutableStateList() = mutableStateListOf<Route>().also 
 
 @Composable
 fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
+    val lastInput = remember { LastInput() }
     val backStack = rememberSaveable(saver = backStackSaver) { mutableStateListOf<Route>(Route.Home) }
     val tabs = Tabs(backStack)
     // Kept for the whole app, so Activity follows the workspace Home shows, on any tab.
@@ -99,90 +103,95 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
     val tabBar: @Composable (MainTab) -> Unit = { selected ->
         MainTabBar(selected, activityCount = activityState.attention.size, onSelect = { tabs.select(it) })
     }
-    NavDisplay(
-        backStack = backStack,
-        onBack = tabs::back,
-        entryDecorators = listOf(
-            rememberSaveableStateHolderNavEntryDecorator(),
-            rememberViewModelStoreNavEntryDecorator(),
-        ),
-        entryProvider = entryProvider {
-            entry<Route.Home> {
-                HomeScreen(
-                    state = homeState,
-                    onOpenChannel = { channel, title ->
-                        ready?.let { backStack.add(Route.Channel(it.workspaceId, channel.id, title)) }
-                    },
-                    onRetry = home::retry,
-                    bottomBar = { tabBar(MainTab.HOME) },
-                    noWorkspaceContent = { noWorkspace ->
-                        NoWorkspace(noWorkspace.createError) {
-                            workspaceCreator?.invoke(noWorkspace.isCreating, home::createWorkspace)
-                        }
-                    },
-                )
-            }
-            entry<Route.Channel> { route ->
-                val channel = viewModel(key = "${route.workspaceId}/${route.channelId}") {
-                    ChannelViewModel(core, route.workspaceId, route.channelId)
+    Box(modifier = Modifier.fillMaxSize().recordsInput(lastInput)) {
+        NavDisplay(
+            backStack = backStack,
+            onBack = tabs::back,
+            transitionSpec = { openMotion(lastInput) },
+            popTransitionSpec = { closeMotion(lastInput) },
+            predictivePopTransitionSpec = { predictiveBackMotion() },
+            entryDecorators = listOf(
+                rememberSaveableStateHolderNavEntryDecorator(),
+                rememberViewModelStoreNavEntryDecorator(),
+            ),
+            entryProvider = entryProvider {
+                entry<Route.Home> {
+                    HomeScreen(
+                        state = homeState,
+                        onOpenChannel = { channel, title ->
+                            ready?.let { backStack.add(Route.Channel(it.workspaceId, channel.id, title)) }
+                        },
+                        onRetry = home::retry,
+                        bottomBar = { tabBar(MainTab.HOME) },
+                        noWorkspaceContent = { noWorkspace ->
+                            NoWorkspace(noWorkspace.createError) {
+                                workspaceCreator?.invoke(noWorkspace.isCreating, home::createWorkspace)
+                            }
+                        },
+                    )
                 }
-                val state by channel.state.collectAsStateWithLifecycle()
-                ChannelScreen(
-                    title = route.title,
-                    state = state,
-                    onBack = tabs::back,
-                    onSend = channel::send,
-                    onSeen = channel::markSeen,
-                    onEdit = channel::edit,
-                    onReact = channel::react,
-                    onDelete = channel::delete,
-                    onLoadOlder = channel::loadOlder,
-                    onOpenThread = { root -> backStack.add(Route.Thread(route.workspaceId, route.channelId, root.id, route.title)) },
-                )
-            }
-            entry<Route.Thread> { route ->
-                val thread = viewModel(key = "${route.workspaceId}/${route.rootId}") {
-                    ThreadViewModel(core, route.workspaceId, route.channelId, route.rootId)
+                entry<Route.Channel> { route ->
+                    val channel = viewModel(key = "${route.workspaceId}/${route.channelId}") {
+                        ChannelViewModel(core, route.workspaceId, route.channelId)
+                    }
+                    val state by channel.state.collectAsStateWithLifecycle()
+                    ChannelScreen(
+                        title = route.title,
+                        state = state,
+                        onBack = tabs::back,
+                        onSend = channel::send,
+                        onSeen = channel::markSeen,
+                        onEdit = channel::edit,
+                        onReact = channel::react,
+                        onDelete = channel::delete,
+                        onLoadOlder = channel::loadOlder,
+                        onOpenThread = { root -> backStack.add(Route.Thread(route.workspaceId, route.channelId, root.id, route.title)) },
+                    )
                 }
-                val state by thread.state.collectAsStateWithLifecycle()
-                ThreadScreen(
-                    channelTitle = route.channelTitle,
-                    state = state,
-                    onBack = tabs::back,
-                    onReply = thread::reply,
-                    onSeen = thread::markSeen,
-                    onEdit = thread::edit,
-                    onReact = thread::react,
-                    onDelete = thread::delete,
-                )
-            }
-            entry<Route.Activity>(metadata = switchesAtOnce) {
-                ActivityScreen(
-                    state = activityState,
-                    channels = ready?.channels.orEmpty(),
-                    members = ready?.members.orEmpty(),
-                    onOpenItem = { item, title ->
-                        activityState.workspaceId?.let { backStack.add(routeTo(item, it, title)) }
-                    },
-                    onOpenChannel = { channel, title ->
-                        activityState.workspaceId?.let { backStack.add(Route.Channel(it, channel.id, title)) }
-                    },
-                    onMarkRead = activity::markChannelRead,
-                    bottomBar = { tabBar(MainTab.ACTIVITY) },
-                )
-            }
-            entry<Route.You>(metadata = switchesAtOnce) {
-                val hidesScreenContent by settings.hidesScreenContent.collectAsStateWithLifecycle()
-                val saveFailed by settings.saveFailed.collectAsStateWithLifecycle()
-                YouScreen(
-                    hidesScreenContent = hidesScreenContent,
-                    onHidesScreenContentChange = settings::setHidesScreenContent,
-                    saveFailed = saveFailed,
-                    bottomBar = { tabBar(MainTab.YOU) },
-                )
-            }
-        },
-    )
+                entry<Route.Thread> { route ->
+                    val thread = viewModel(key = "${route.workspaceId}/${route.rootId}") {
+                        ThreadViewModel(core, route.workspaceId, route.channelId, route.rootId)
+                    }
+                    val state by thread.state.collectAsStateWithLifecycle()
+                    ThreadScreen(
+                        channelTitle = route.channelTitle,
+                        state = state,
+                        onBack = tabs::back,
+                        onReply = thread::reply,
+                        onSeen = thread::markSeen,
+                        onEdit = thread::edit,
+                        onReact = thread::react,
+                        onDelete = thread::delete,
+                    )
+                }
+                entry<Route.Activity>(metadata = switchesAtOnce) {
+                    ActivityScreen(
+                        state = activityState,
+                        channels = ready?.channels.orEmpty(),
+                        members = ready?.members.orEmpty(),
+                        onOpenItem = { item, title ->
+                            activityState.workspaceId?.let { backStack.add(routeTo(item, it, title)) }
+                        },
+                        onOpenChannel = { channel, title ->
+                            activityState.workspaceId?.let { backStack.add(Route.Channel(it, channel.id, title)) }
+                        },
+                        onMarkRead = activity::markChannelRead,
+                        bottomBar = { tabBar(MainTab.ACTIVITY) },
+                    )
+                }
+                entry<Route.You>(metadata = switchesAtOnce) {
+                    val hidesScreenContent by settings.hidesScreenContent.collectAsStateWithLifecycle()
+                    val saveFailed by settings.saveFailed.collectAsStateWithLifecycle()
+                    YouScreen(
+                        hidesScreenContent = hidesScreenContent,
+                        onHidesScreenContentChange = settings::setHidesScreenContent,
+                        saveFailed = saveFailed,
+                        bottomBar = { tabBar(MainTab.YOU) },
+                    )
+                }
+            },
+        )
+    }
 }
 
 /** Where an Activity item opens: its thread when it's in one, mentions in a thread too. */
@@ -191,11 +200,9 @@ internal fun routeTo(item: InboxItem, workspaceId: String, channelTitle: String)
     return Route.Thread(workspaceId, item.message.channel, root, channelTitle)
 }
 
-/** Switching tabs replaces the screen at once; only going deeper slides. */
+/** Switching tabs replaces the screen at once; only going deeper moves (see NavMotion.kt). */
 private val switchesAtOnce =
-    transitionSpec { EnterTransition.None togetherWith ExitTransition.None } +
-        popTransitionSpec { EnterTransition.None togetherWith ExitTransition.None } +
-        predictivePopTransitionSpec { EnterTransition.None togetherWith ExitTransition.None }
+    transitionSpec { atOnce() } + popTransitionSpec { atOnce() } + predictivePopTransitionSpec { atOnce() }
 
 /** Moving between screens: the tabs, and Back. */
 internal class Tabs(private val backStack: SnapshotStateList<Route>) {
