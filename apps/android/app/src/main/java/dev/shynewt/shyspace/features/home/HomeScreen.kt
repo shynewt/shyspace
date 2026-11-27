@@ -217,27 +217,6 @@ private fun Centered(content: @Composable () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
 }
 
-/** Nothing on this phone yet: says so, then [extra] (the development tools, in debug builds). */
-@Composable
-fun NoWorkspace(createError: String?, extra: @Composable () -> Unit) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-    ) {
-        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
-        Text(stringResource(R.string.no_workspace), color = LocalShyColors.current.palette.textMuted)
-        extra()
-        createError?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = LocalShyColors.current.palette.dangerText)
-        }
-    }
-}
-
 /** A way to create a workspace from the phone, which only development builds have (`workspaceCreator`). */
 typealias WorkspaceCreator = @Composable (
     isCreating: Boolean,
