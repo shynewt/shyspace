@@ -271,10 +271,14 @@ impl Workspace {
     pub fn members(&self) -> Result<Vec<Member>> {
         let now = now_ms()?;
         let mut members = self.state().store.members(&self.inner.config.admin)?;
+        let current = self.current_members()?;
         for member in &mut members {
             let key = crate::views::parse_member_id(&member.id)?;
             member.status = self.state().store.member_status(key.as_bytes(), now)?;
-            member.presence = self.presence_of(&key, now);
+            let mut devices = self.state().store.devices_of(&key)?;
+            devices.push(key);
+            devices.retain(|device| current.contains(device));
+            member.presence = self.person_presence(&devices, now);
             member.details = self.state().store.profile_details(key.as_bytes())?;
             member.picture = self
                 .state()

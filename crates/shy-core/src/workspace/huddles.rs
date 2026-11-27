@@ -124,6 +124,39 @@ struct MySession {
     speaking: BTreeSet<PublicKey>,
     peers: watch::Sender<BTreeMap<PublicKey, String>>,
     task: tokio::task::AbortHandle,
+    /// The person each allowed device belongs to, for naming peers without
+    /// the store; refreshed with the audience, so a device linked during the
+    /// call is named by its person within a few seconds.
+    persons: BTreeMap<PublicKey, PublicKey>,
+}
+
+impl MySession {
+    fn person_of(&self, device: &PublicKey) -> PublicKey {
+        self.persons.get(device).copied().unwrap_or(*device)
+    }
+
+    fn is_person_speaking(&self, person: &PublicKey) -> bool {
+        self.speaking.iter().any(|peer| self.person_of(peer) == *person)
+    }
+
+    /// The people other than `me` that `peers` stand for.
+    fn persons_among(&self, peers: &BTreeMap<PublicKey, String>, me: &PublicKey) -> BTreeSet<PublicKey> {
+        peers
+            .keys()
+            .map(|peer| self.person_of(peer))
+            .filter(|person| person != me)
+            .collect()
+    }
+}
+
+/// How well a link carries audio, to show the best of a person's devices.
+fn link_rank(link: Link) -> u8 {
+    match link {
+        Link::Direct => 3,
+        Link::Relayed => 2,
+        Link::Reconnecting => 1,
+        Link::Connecting => 0,
+    }
 }
 
 /// Whether this device slept since the last tick, so a session it was in
@@ -143,14 +176,17 @@ impl Workspace {
             .expect("huddle state lock poisoned by an earlier panic")
     }
 
-    /// Who is in `channel`'s huddle, if this member may see the channel.
+    /// Who is in `channel`'s huddle, if this member may see the channel:
+    /// each person once, however many of their devices are in it.
     pub fn huddle(&self, channel: &str) -> Result<Huddle> {
         let members = self.current_members()?;
-        let allowed = {
+        let (allowed, persons) = {
             let state = self.state();
-            huddle_members(&state.store, channel, &members)?
+            let allowed = huddle_members(&state.store, channel, &members)?
                 .context("no such channel here")?
-                .0
+                .0;
+            let persons = persons_of(&state.store, &allowed)?;
+            (allowed, persons)
         };
         ensure!(
             allowed.contains(&self.me()),
@@ -158,58 +194,90 @@ impl Workspace {
         );
         let huddles = self.huddles();
         let now = huddles.now();
-        let mut participants: Vec<HuddleParticipant> = huddles
-            .book
-            .roster(channel, now)
-            .into_iter()
-            .filter(|participant| allowed.contains(&participant.member) && participant.member != self.me())
-            .map(|participant| HuddleParticipant {
-                member: member_id(&participant.member),
-                camera: participant.camera,
-                screen: participant.screen,
-                is_me: false,
-                needs_update: participant.media_wire != MEDIA_WIRE,
-            })
-            .collect();
-        if huddles.mine.as_ref().is_some_and(|mine| mine.channel == channel) {
-            participants.insert(
-                0,
-                HuddleParticipant {
-                    // Per device until huddle views go by person.
-                    member: member_id(&self.me()),
-                    camera: false,
-                    screen: false,
-                    is_me: true,
-                    needs_update: false,
-                },
-            );
+        let me = self.my_person();
+        let am_in = huddles.mine.as_ref().is_some_and(|mine| mine.channel == channel);
+        let mut participants: Vec<HuddleParticipant> = Vec::new();
+        // The limit is on devices, since each one carries its own audio.
+        let mut devices_in = usize::from(am_in);
+        if am_in {
+            participants.push(HuddleParticipant {
+                member: member_id(&me),
+                camera: false,
+                screen: false,
+                is_me: true,
+                needs_update: false,
+            });
+        }
+        for participant in huddles.book.roster(channel, now) {
+            if !allowed.contains(&participant.member) || participant.member == self.me() {
+                continue;
+            }
+            devices_in += 1;
+            let person = persons
+                .get(&participant.member)
+                .copied()
+                .unwrap_or(participant.member);
+            let id = member_id(&person);
+            match participants.iter_mut().find(|listed| listed.member == id) {
+                // This device stands for me; my other devices add nothing.
+                Some(listed) if listed.is_me => {}
+                Some(listed) => {
+                    listed.camera |= participant.camera;
+                    listed.screen |= participant.screen;
+                    listed.needs_update |= participant.media_wire != MEDIA_WIRE;
+                }
+                None => participants.push(HuddleParticipant {
+                    member: id,
+                    camera: participant.camera,
+                    screen: participant.screen,
+                    is_me: false,
+                    needs_update: participant.media_wire != MEDIA_WIRE,
+                }),
+            }
         }
         Ok(Huddle {
             channel: channel.to_owned(),
-            is_full: participants.len() >= MAX_PARTICIPANTS,
+            is_full: devices_in >= MAX_PARTICIPANTS,
             participants,
         })
     }
 
-    /// This device's own huddle, if it is in one.
+    /// This device's own huddle, if it is in one. Peers are named by person,
+    /// once each, with the best link and speaking if any of their devices
+    /// is; my own other devices aren't peers.
     pub fn my_huddle(&self) -> Option<MyHuddle> {
         let huddles = self.huddles();
         let mine = huddles.mine.as_ref()?;
-        let peers = mine.peers.borrow();
+        let me = self.my_person();
+        let mut by_person: BTreeMap<PublicKey, HuddlePeer> = BTreeMap::new();
+        for peer in mine.peers.borrow().keys() {
+            let person = mine.person_of(peer);
+            if person == me {
+                continue;
+            }
+            let link = mine.links.get(peer).copied().unwrap_or(Link::Connecting);
+            let speaking = mine.speaking.contains(peer);
+            by_person
+                .entry(person)
+                .and_modify(|listed| {
+                    listed.speaking |= speaking;
+                    if link_rank(link) > link_rank(listed.link) {
+                        listed.link = link;
+                    }
+                })
+                .or_insert(HuddlePeer {
+                    member: member_id(&person),
+                    link,
+                    speaking,
+                });
+        }
         Some(MyHuddle {
             channel: mine.channel.clone(),
             phase: mine.phase,
             muted: mine.muted,
             mic: mine.mic,
             output: mine.output,
-            peers: peers
-                .keys()
-                .map(|peer| HuddlePeer {
-                    member: member_id(peer),
-                    link: mine.links.get(peer).copied().unwrap_or(Link::Connecting),
-                    speaking: mine.speaking.contains(peer),
-                })
-                .collect(),
+            peers: by_person.into_values().collect(),
         })
     }
 
@@ -235,19 +303,19 @@ impl Workspace {
             self.announce_left(ended)?;
         }
         let members = self.current_members()?;
-        let (allowed, visibility) = {
+        let (allowed, visibility, persons) = {
             let state = self.state();
-            huddle_members(&state.store, channel, &members)?.context("no such channel here")?
+            let (allowed, visibility) =
+                huddle_members(&state.store, channel, &members)?.context("no such channel here")?;
+            let persons = persons_of(&state.store, &allowed)?;
+            (allowed, visibility, persons)
         };
         ensure!(
             allowed.contains(&self.me()),
             "you aren't a member of this channel"
         );
         self.huddles().answer(channel);
-        ensure!(
-            self.huddle(channel)?.participants.len() < MAX_PARTICIPANTS,
-            "this huddle is full"
-        );
+        ensure!(!self.huddle(channel)?.is_full, "this huddle is full");
 
         // As saved, unchecked: listing devices can take seconds, and a
         // device that's gone is the media layer's to report and replace.
@@ -274,6 +342,7 @@ impl Workspace {
             speaking: BTreeSet::new(),
             peers,
             task,
+            persons,
         });
         let started = match self.refresh_audience() {
             Ok(Audience::Updated) => media
@@ -607,15 +676,18 @@ impl Workspace {
             if state.store.notify_level(channel)?.stricter(status_level) == NotifyLevel::Nothing {
                 return Ok(());
             }
-            let starter_id = member_id(starter);
-            state
+            let starter_person = state.store.person_of(starter)?;
+            let starter_id = member_id(&starter_person);
+            let name = state
                 .store
                 .members(&self.inner.config.admin)?
                 .into_iter()
                 .find(|member| member.id == starter_id)
                 .map(|member| member.name)
-                .unwrap_or_default()
+                .unwrap_or_default();
+            (starter_person, name)
         };
+        let (starter_person, member_name) = member_name;
         {
             let mut huddles = self.huddles();
             let now = huddles.now();
@@ -623,13 +695,14 @@ impl Workspace {
         }
         self.emit(Change::HuddleStarted {
             channel: channel.to_owned(),
-            member: member_id(starter),
+            member: member_id(&starter_person),
             member_name: member_name.clone(),
         });
         let am_in_a_huddle = self.huddles().is_in_a_huddle();
         self.ring_for(
             channel,
             starter,
+            &starter_person,
             &member_name,
             IncomingHuddle {
                 is_dm: true,
@@ -704,9 +777,14 @@ impl Workspace {
             return Ok(Audience::Updated);
         };
         let members = self.current_members()?;
-        let allowed = {
+        let (allowed, persons) = {
             let state = self.state();
-            huddle_members(&state.store, &channel, &members)?.map(|(allowed, _)| allowed)
+            let allowed = huddle_members(&state.store, &channel, &members)?.map(|(allowed, _)| allowed);
+            let persons = match &allowed {
+                Some(allowed) => persons_of(&state.store, allowed)?,
+                None => BTreeMap::new(),
+            };
+            (allowed, persons)
         };
         #[cfg(test)]
         self.pause_audience_refresh();
@@ -725,9 +803,12 @@ impl Workspace {
         let heard = hearing_set(&roster, &me, &allowed);
         mine.links.retain(|peer, _| heard.contains_key(peer));
         mine.speaking.retain(|peer| heard.contains_key(peer));
+        mine.persons = persons;
         // The people already there when joining are covered by `Joined`.
         let cue = if mine.phase == HuddlePhase::In {
-            arrival_cue(&mine.peers.borrow(), &heard)
+            let my_person = self.my_person();
+            let before = mine.persons_among(&mine.peers.borrow(), &my_person);
+            arrival_cue(&before, &mine.persons_among(&heard, &my_person))
         } else {
             None
         };
@@ -943,17 +1024,22 @@ impl Workspace {
                     if !mine.peers.borrow().contains_key(&peer) {
                         return;
                     }
-                    let is_change = if speaking {
-                        mine.speaking.insert(peer)
+                    let person = mine.person_of(&peer);
+                    let was_speaking = mine.is_person_speaking(&person);
+                    if speaking {
+                        mine.speaking.insert(peer);
                     } else {
-                        mine.speaking.remove(&peer)
-                    };
-                    if !is_change {
+                        mine.speaking.remove(&peer);
+                    }
+                    let is_speaking = mine.is_person_speaking(&person);
+                    // My own other devices aren't peers; a person speaks while
+                    // any of their devices does.
+                    if person == self.my_person() || is_speaking == was_speaking {
                         return;
                     }
-                    speaking_change = Some((member_id(&peer), speaking));
+                    speaking_change = Some((member_id(&person), is_speaking));
                 }
-                MediaEvent::MeSpeaking(speaking) => speaking_change = Some((member_id(&self.me()), speaking)),
+                MediaEvent::MeSpeaking(speaking) => speaking_change = Some((self.my_id(), speaking)),
                 MediaEvent::Mic(mic) => mine.mic = mic,
                 MediaEvent::Output(output) => mine.output = output,
                 MediaEvent::Incompatible { .. } | MediaEvent::DevicesChanged => {}
@@ -968,11 +1054,12 @@ impl Workspace {
 
 /// The one sound for how the people heard changed, if they did: anyone
 /// leaving outweighs anyone arriving. A rejoin under a new path is neither.
-fn arrival_cue(before: &BTreeMap<PublicKey, String>, after: &BTreeMap<PublicKey, String>) -> Option<Cue> {
-    if before.keys().any(|peer| !after.contains_key(peer)) {
+/// By person: a person's second device, or another of mine, plays nothing.
+fn arrival_cue(before: &BTreeSet<PublicKey>, after: &BTreeSet<PublicKey>) -> Option<Cue> {
+    if before.iter().any(|person| !after.contains(person)) {
         return Some(Cue::PeerLeft);
     }
-    if after.keys().any(|peer| !before.contains_key(peer)) {
+    if after.iter().any(|person| !before.contains(person)) {
         return Some(Cue::PeerJoined);
     }
     None
@@ -984,6 +1071,17 @@ fn joined() -> BeaconState {
         screen: false,
         reach: Reach::Direct,
     }
+}
+
+/// The person each of `devices` belongs to.
+fn persons_of(
+    store: &crate::storage::Store,
+    devices: &[PublicKey],
+) -> Result<BTreeMap<PublicKey, PublicKey>> {
+    devices
+        .iter()
+        .map(|device| Ok((*device, store.person_of(device)?)))
+        .collect()
 }
 
 #[cfg(test)]

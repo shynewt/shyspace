@@ -537,6 +537,17 @@ pub fn device_certificate(
 /// Links a new device in `dir` to `voucher`'s person: the device asks, the
 /// voucher vouches, the admin adds it, and the device finishes joining.
 pub async fn link_device(admin: &Workspace, voucher: &Workspace, dir: &Path, bucket: &Bucket) -> Workspace {
+    link_device_with(admin, voucher, dir, bucket, Networking::Offline.into()).await
+}
+
+/// Like `link_device`, opening the device with `options`.
+pub async fn link_device_with(
+    admin: &Workspace,
+    voucher: &Workspace,
+    dir: &Path,
+    bucket: &Bucket,
+    options: WorkspaceOptions,
+) -> Workspace {
     let (enrollment, request) = begin_link(voucher, dir).await;
     let certificate = vouch(voucher, &request);
     let welcome = admin
@@ -544,7 +555,7 @@ pub async fn link_device(admin: &Workspace, voucher: &Workspace, dir: &Path, buc
         .await
         .unwrap();
     enrollment
-        .finish_with(welcome, connector(bucket), Networking::Offline)
+        .finish_with(welcome, connector(bucket), options)
         .await
         .unwrap()
 }

@@ -125,3 +125,48 @@ fn sent(beat: NextBeat) -> crate::workspace::Heartbeat {
         NextBeat::After(_) | NextBeat::Silent => panic!("expected a heartbeat to go out now"),
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_is_online_if_any_of_their_devices_is() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    admin
+        .receive_heartbeat(&phone.heartbeat(PresenceState::Online).unwrap())
+        .unwrap();
+    assert_eq!(
+        member(&admin.members().unwrap(), &bob.my_id()).presence,
+        PresenceState::Online,
+        "online on the phone only"
+    );
+
+    admin
+        .receive_heartbeat(&bob.heartbeat(PresenceState::Away).unwrap())
+        .unwrap();
+    assert_eq!(
+        member(&admin.members().unwrap(), &bob.my_id()).presence,
+        PresenceState::Online,
+        "the best of the two"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_device_still_heard_online_does_not_keep_its_person_online() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    admin
+        .receive_heartbeat(&phone.heartbeat(PresenceState::Online).unwrap())
+        .unwrap();
+    admin
+        .receive_heartbeat(&bob.heartbeat(PresenceState::Away).unwrap())
+        .unwrap();
+
+    admin.remove_devices(&[phone.my_device_id()]).await.unwrap();
+
+    assert_eq!(
+        member(&admin.members().unwrap(), &bob.my_id()).presence,
+        PresenceState::Away
+    );
+}

@@ -16,6 +16,8 @@ use crate::{
 pub(crate) struct Ring {
     channel: String,
     caller: PublicKey,
+    /// The person the calling device belongs to, as the ring names them.
+    caller_person: PublicKey,
     caller_name: String,
     started_ms: u64,
     _sound: Ringing,
@@ -25,7 +27,7 @@ impl Ring {
     fn view(&self) -> views::IncomingHuddle {
         views::IncomingHuddle {
             channel: self.channel.clone(),
-            member: member_id(&self.caller),
+            member: member_id(&self.caller_person),
             member_name: self.caller_name.clone(),
         }
     }
@@ -38,6 +40,7 @@ impl Workspace {
         &self,
         channel: &str,
         caller: &PublicKey,
+        caller_person: &PublicKey,
         caller_name: &str,
         incoming: IncomingHuddle,
     ) {
@@ -54,6 +57,7 @@ impl Workspace {
             let ring = Ring {
                 channel: channel.to_owned(),
                 caller: *caller,
+                caller_person: *caller_person,
                 caller_name: caller_name.to_owned(),
                 started_ms,
                 _sound: sound,

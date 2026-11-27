@@ -9,6 +9,11 @@ impl Workspace {
     /// Makes sure others can hand us channel keys: the newest sealing key is
     /// announced, and the first one is made on first start.
     pub(crate) fn announce_sealing_key(&self) -> Result<()> {
+        // A linked device takes no channel keys until private channels and
+        // DMs go by person.
+        if self.my_person() != self.me() {
+            return Ok(());
+        }
         let (newest, announced) = {
             let state = self.state();
             if !state.mls.is_active() {

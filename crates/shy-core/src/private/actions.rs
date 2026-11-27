@@ -18,9 +18,20 @@ use crate::{
 };
 
 impl Workspace {
+    /// Private channels and DMs are each person's first device's until
+    /// they go by person.
+    fn ensure_may_use_private(&self) -> Result<()> {
+        ensure!(
+            self.my_person() == self.me(),
+            "private channels and DMs aren't available on a linked device yet"
+        );
+        Ok(())
+    }
+
     /// A private channel only you and `members` (member ids) can read. You
     /// own it: you add and remove people.
     pub fn create_private_channel(&self, name: &str, members: &[String]) -> Result<EntityId> {
+        self.ensure_may_use_private()?;
         let name = normalize_channel_name(name)?;
         let me = self.me();
         let others = self.members_to_seal_for(members)?;
@@ -60,6 +71,7 @@ impl Workspace {
 
     /// Adds someone to a private channel you own. They can read its history.
     pub fn add_to_private_channel(&self, channel: &str, member_id: &str) -> Result<()> {
+        self.ensure_may_use_private()?;
         self.ensure_owner(channel)?;
         let [member] = self.members_to_seal_for(&[member_id.to_owned()])?[..] else {
             bail!("pick someone other than yourself");
@@ -77,26 +89,34 @@ impl Workspace {
         if is_listed {
             self.rotate(channel, Some(member))?;
         }
-        let (keys, after_seq, latest) = {
+        let (keys, after_seq, latest, position) = {
             let store = &self.state().store;
             (
                 vouched_keys(store, channel)?,
                 store.last_seq(&member)?,
                 store.latest_generation(channel)?,
+                store.next_position(channel)?,
             )
         };
+        // Everything that can refuse the add comes first, so a refused add
+        // hands over no key.
+        let writing_key = self.writing_key(channel)?;
         let history: Vec<(u64, ChannelKey)> = keys.iter().map(|key| (key.generation, key.key)).collect();
         self.grant(channel, &history, &[member], &[])?;
-        self.write_owner_op(channel, |position| PrivateOp::Add {
-            invitee: Invitee { member, after_seq },
-            from_generation: latest,
-            position,
-        })
+        self.write_sealed(
+            writing_key,
+            PrivateOp::Add {
+                invitee: Invitee { member, after_seq },
+                from_generation: latest,
+                position,
+            },
+        )
     }
 
     /// Removes someone from a private channel you own. They keep what they
     /// already read; a new key keeps them out of what comes next.
     pub fn remove_from_private_channel(&self, channel: &str, member_id: &str) -> Result<()> {
+        self.ensure_may_use_private()?;
         let member = parse_member_id(member_id)?;
         ensure!(
             member != self.me(),
@@ -111,6 +131,7 @@ impl Workspace {
 
     /// Starts a new key for a private channel you own, for its current members.
     pub fn rotate_private_channel_key(&self, channel: &str) -> Result<()> {
+        self.ensure_may_use_private()?;
         self.rotate(channel, None)
     }
 
@@ -148,6 +169,7 @@ impl Workspace {
     /// Leaves a private channel. Its owner hands it over first, unless
     /// they're the last one in it.
     pub fn leave_private_channel(&self, channel: &str) -> Result<()> {
+        self.ensure_may_use_private()?;
         {
             let store = &self.state().store;
             let is_owner = store.current_owner(channel)? == Some(self.me());
@@ -165,6 +187,7 @@ impl Workspace {
 
     /// Makes another member the channel's owner.
     pub fn hand_over_private_channel(&self, channel: &str, member_id: &str) -> Result<()> {
+        self.ensure_may_use_private()?;
         self.ensure_owner(channel)?;
         let to = parse_member_id(member_id)?;
         ensure!(to != self.me(), "you already own this channel");
@@ -174,6 +197,7 @@ impl Workspace {
     /// The DM with exactly these members (member ids) and you. Opening it
     /// again finds the same one.
     pub fn open_dm(&self, members: &[String]) -> Result<EntityId> {
+        self.ensure_may_use_private()?;
         let mut everyone = self.members_to_seal_for(members)?;
         everyone.push(self.me());
         everyone.sort_unstable_by_key(|member| *member.as_bytes());
@@ -193,6 +217,7 @@ impl Workspace {
     /// Your notes to yourself: a DM whose only member is you, made the first
     /// time. Its key is granted to you alone, so only you can read or write it.
     pub fn open_notes(&self) -> Result<EntityId> {
+        self.ensure_may_use_private()?;
         let me = self.me();
         let channel = dm_id(&self.inner.config.workspace_id, &[me]);
         if !self.state().store.channel_keys(Some(&channel))?.is_empty() {
@@ -429,7 +454,8 @@ impl Workspace {
         Ok(())
     }
 
-    /// Current workspace members other than you, each with a sealing key.
+    /// Current workspace members other than you, none of them a linked
+    /// device.
     fn members_to_seal_for(&self, member_ids: &[String]) -> Result<Vec<PublicKey>> {
         let me = self.me();
         let current = self.current_members()?;
@@ -437,6 +463,10 @@ impl Workspace {
         for id in member_ids {
             let member = parse_member_id(id)?;
             ensure!(current.contains(&member), "{id} isn't a member of this workspace");
+            ensure!(
+                self.state().store.person_of(&member)? == member,
+                "that's a linked device: private channels and DMs aren't available on linked devices yet"
+            );
             if member != me && !members.contains(&member) {
                 members.push(member);
             }

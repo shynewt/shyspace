@@ -296,6 +296,10 @@ impl Store {
                 };
                 self.record_add(channel, author, creator, origin)?;
                 for invitee in members {
+                    // Linked devices have no part in private channels yet.
+                    if self.is_linked_device_at(&invitee.member, verified.epoch)? {
+                        continue;
+                    }
                     let membership = Membership {
                         after_seq: invitee.after_seq,
                         from_generation: 1,

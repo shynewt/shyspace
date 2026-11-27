@@ -333,6 +333,11 @@ impl Store {
                 if !is_valid_sealing_public_key(public) {
                     return Err(rule_violation("malformed sealing key"));
                 }
+                // A linked device takes no channel keys until private
+                // channels and DMs go by person, whatever its app does.
+                if self.is_linked_device_at(&verified.author, verified.epoch)? {
+                    return Ok(None);
+                }
                 self.put_sealing_key(&verified.author, public, lamport)?;
                 return Ok(None);
             }

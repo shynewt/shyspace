@@ -1124,3 +1124,276 @@ async fn private_channels_created_with_names_that_break_the_rule_are_skipped() {
         assert_eq!(listed(&admin, &channel).is_some(), is_shown, "{name}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_device_says_private_channels_come_later() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    for refused in [
+        phone.create_private_channel("plans", &[admin.my_id()]).map(drop),
+        phone.open_notes().map(drop),
+    ] {
+        let refused = format!("{:#}", refused.unwrap_err());
+        assert!(refused.contains("linked device"), "{refused}");
+    }
+    assert!(admin.state().store.sealing_key_of(&phone.me()).unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_add_naming_a_linked_devices_key_adds_nobody() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let channel = bob.create_private_channel("plans", &[admin.my_id()]).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let key = newest_key(&bob, &channel);
+    let position = bob.state().store.next_position(&channel).unwrap();
+
+    admin
+        .receive(Forger::new(&bob).seal_private(
+            &key,
+            PrivateOp::Add {
+                invitee: Invitee {
+                    member: phone.me(),
+                    after_seq: own_last_seq(&phone),
+                },
+                from_generation: key.generation,
+                position,
+            },
+        ))
+        .unwrap();
+
+    assert!(!members_of(&admin, &channel).contains(&phone.my_device_id()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_creation_naming_a_linked_device_leaves_it_out() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let key = new_channel_key();
+    let invitees = vec![
+        Invitee {
+            member: admin.me(),
+            after_seq: own_last_seq(&admin),
+        },
+        Invitee {
+            member: phone.me(),
+            after_seq: own_last_seq(&phone),
+        },
+    ];
+    let channel = private_channel_id(&bob.me(), &commitment(&key), "plans", &invitees).unwrap();
+    let first = StoredKey {
+        channel: channel.clone(),
+        generation: 1,
+        key,
+    };
+    let mut forger = Forger::new(&bob);
+    admin
+        .receive(forger.seal(forged_grant(&bob, &admin, &channel, 1, key)))
+        .unwrap();
+    admin
+        .receive(forger.seal_private(
+            &first,
+            PrivateOp::Create {
+                name: "plans".into(),
+                commitment: commitment(&key),
+                members: invitees,
+            },
+        ))
+        .unwrap();
+
+    let members = members_of(&admin, &channel);
+    assert!(members.contains(&admin.my_id()), "{members:?}");
+    assert!(!members.contains(&phone.my_device_id()), "{members:?}");
+}
+
+/// Bob's channel with Ada (and `readers`) that names the phone's key in its
+/// creation, before the phone is linked to Bob. Ada has applied it; the
+/// envelopes (Bob's grants, then the creation) are returned for the rest.
+struct NamedBeforeLink {
+    phone: Workspace,
+    channel: String,
+    first: StoredKey,
+    envelopes: Vec<Envelope>,
+}
+
+async fn channel_naming_a_device_before_its_link(
+    root: &std::path::Path,
+    bucket: &Bucket,
+    admin: &Workspace,
+    bob: &Workspace,
+    readers: &[&Workspace],
+) -> NamedBeforeLink {
+    let phone_key = iroh::SecretKey::generate();
+    let phone_dir = root.join("phone");
+    data_dir(&phone_dir)
+        .use_identity_for_test(&phone_key)
+        .await
+        .unwrap();
+    let key = new_channel_key();
+    let mut invitees: Vec<Invitee> = std::iter::once(admin)
+        .chain(readers.iter().copied())
+        .map(|member| Invitee {
+            member: member.me(),
+            after_seq: own_last_seq(member),
+        })
+        .collect();
+    invitees.push(Invitee {
+        member: phone_key.public(),
+        after_seq: 0,
+    });
+    let channel = private_channel_id(&bob.me(), &commitment(&key), "plans", &invitees).unwrap();
+    let first = StoredKey {
+        channel: channel.clone(),
+        generation: 1,
+        key,
+    };
+    let mut forger = Forger::new(bob);
+    let mut envelopes: Vec<Envelope> = std::iter::once(admin)
+        .chain(readers.iter().copied())
+        .map(|reader| forger.seal(forged_grant(bob, reader, &channel, 1, key)))
+        .collect();
+    envelopes.push(forger.seal_private(
+        &first,
+        PrivateOp::Create {
+            name: "plans".into(),
+            commitment: commitment(&key),
+            members: invitees,
+        },
+    ));
+    for envelope in &envelopes {
+        admin.receive(envelope.clone()).unwrap();
+    }
+    let phone = link_device(admin, bob, &phone_dir, bucket).await;
+    assert_eq!(phone.me(), phone_key.public());
+    NamedBeforeLink {
+        phone,
+        channel,
+        first,
+        envelopes,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_devices_private_op_counts_nowhere() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    // Bob names the phone's key in a channel before the phone is linked.
+    let NamedBeforeLink {
+        phone,
+        channel,
+        first,
+        envelopes,
+    } = channel_naming_a_device_before_its_link(root.path(), &bucket, &admin, &bob, &[&carol]).await;
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+    // Carol applies the creation only after she knows the phone is Bob's.
+    for envelope in envelopes {
+        carol.receive(envelope).unwrap();
+    }
+
+    admin
+        .receive(Forger::new(&phone).seal_private(
+            &first,
+            PrivateOp::Content(message(&phone, &channel, "from a linked device")),
+        ))
+        .unwrap();
+
+    assert!(!texts(&admin, &channel).contains(&"from a linked device".to_string()));
+    // Named before its link, the key is judged as of that epoch: still
+    // listed, whatever the order and after a rebuild.
+    admin.state().store.rebuild_views(admin.apply_context()).unwrap();
+    for member in [&admin, &carol] {
+        assert!(
+            members_of(member, &channel).contains(&phone.my_device_id()),
+            "{:?}",
+            members_of(member, &channel)
+        );
+    }
+}
+
+/// The phone's own app skips announcing a sealing key; a changed one
+/// announces anyway.
+fn announce_sealing_key_from(device: &Workspace, members: &[&Workspace]) {
+    let public = crate::private::crypto::new_sealing_key_pair().unwrap().public;
+    let announced = Forger::new(device).seal(Op::SealingKey { public });
+    for member in members {
+        member.receive(announced.clone()).unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sealing_key_announced_by_a_linked_device_is_ignored_everywhere() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    announce_sealing_key_from(&phone, &[&admin, &bob]);
+
+    for member in [&admin, &bob] {
+        assert!(
+            member
+                .state()
+                .store
+                .sealing_key_of(&phone.me())
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_owner_cannot_hand_a_linked_device_a_channel_key() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let channel = admin.create_private_channel("plans", &[bob.my_id()]).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    announce_sealing_key_from(&phone, &[&admin]);
+    let phone_id = phone.my_device_id();
+
+    for refused in [
+        admin
+            .create_private_channel("more", std::slice::from_ref(&phone_id))
+            .map(drop),
+        admin.add_to_private_channel(&channel, &phone_id),
+        admin.open_dm(std::slice::from_ref(&phone_id)).map(drop),
+    ] {
+        let refused = format!("{:#}", refused.unwrap_err());
+        assert!(refused.contains("linked device"), "{refused}");
+    }
+    sync_all(&[&admin, &bob, &phone]).await;
+    assert!(phone.state().store.channel_keys(None).unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_device_holding_a_channel_key_still_cannot_write_there() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let NamedBeforeLink {
+        phone,
+        channel,
+        first,
+        envelopes,
+    } = channel_naming_a_device_before_its_link(root.path(), &bucket, &admin, &bob, &[]).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    // Listed by the creation, and holding the key as if a forged grant
+    // reached it: only the write guard is left to stop it.
+    let origin = crate::storage::Origin {
+        author: &bob.me(),
+        seq: 1,
+    };
+    phone.state().store.put_channel_key(&first, origin).unwrap();
+    for envelope in envelopes {
+        phone.receive(envelope).unwrap();
+    }
+
+    let refused = format!(
+        "{:#}",
+        phone.send_message(&channel, "from the phone", None).unwrap_err()
+    );
+
+    assert!(refused.contains("linked device"), "{refused}");
+    sync_all(&[&admin, &bob, &phone]).await;
+    assert!(!texts(&admin, &channel).contains(&"from the phone".to_string()));
+}

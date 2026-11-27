@@ -97,6 +97,10 @@ impl Workspace {
                     }
                     let is_sealed = matches!(op, Op::Sealed { .. });
                     let is_private = is_sealed || matches!(op, Op::KeyGrant { .. });
+                    ensure!(
+                        !is_private || self.my_person() == author,
+                        "private channels and DMs aren't available on a linked device yet"
+                    );
                     // Private state may still hold what a removed member's
                     // late ops did, like a key their rotation brought.
                     ensure!(

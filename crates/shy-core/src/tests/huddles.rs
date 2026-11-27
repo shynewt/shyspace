@@ -9,7 +9,7 @@ use crate::{
     Networking, Workspace, WorkspaceOptions,
     huddle::{
         beacon::{Beacon, BeaconBody, BeaconState, MEDIA_WIRE, Reach},
-        media::{DeviceChoice, MediaEvent, MicState, fake::FakeMedia},
+        media::{DeviceChoice, Link, MediaEvent, MicState, fake::FakeMedia},
         rules::MAX_PARTICIPANTS,
     },
     ops::now_ms,
@@ -673,4 +673,349 @@ async fn a_device_list_change_during_a_call_reloads_the_pickers() {
     })
     .await
     .expect("no huddle_devices change");
+}
+
+/// Ada and Bob, Bob also on a linked phone, each with fake media.
+struct TwoDevices {
+    _root: tempfile::TempDir,
+    ada: Workspace,
+    ada_media: FakeMedia,
+    bob: Workspace,
+    bob_media: FakeMedia,
+    phone: Workspace,
+    general: String,
+}
+
+async fn bob_on_two_devices() -> TwoDevices {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let ada_media = FakeMedia::default();
+    let ada = create_admin_with(&root.path().join("ada"), &bucket, with_media(&ada_media)).await;
+    let bob_media = FakeMedia::default();
+    let bob = join_with(
+        &ada,
+        &root.path().join("bob"),
+        &bucket,
+        "Bob",
+        with_media(&bob_media),
+    )
+    .await;
+    let phone = link_device_with(
+        &ada,
+        &bob,
+        &root.path().join("phone"),
+        &bucket,
+        with_media(&FakeMedia::default()),
+    )
+    .await;
+    sync_all(&[&ada, &bob, &phone]).await;
+    let general = channel_id(&ada, "general");
+    TwoDevices {
+        _root: root,
+        ada,
+        ada_media,
+        bob,
+        bob_media,
+        phone,
+        general,
+    }
+}
+
+/// Everyone joins `channel` and hears everyone else.
+fn all_join(members: &[&Workspace], channel: &str) {
+    for member in members {
+        member.join_huddle(channel, false).unwrap();
+    }
+    for from in members {
+        let others: Vec<&Workspace> = members
+            .iter()
+            .copied()
+            .filter(|to| to.me() != from.me())
+            .collect();
+        carry(from, &others, Via::Gossip);
+    }
+}
+
+/// Waits until `media`'s workspace has applied every event reported before:
+/// events apply in order, and this one ends with a change we can see.
+async fn after_earlier_media_events(member: &Workspace, media: &FakeMedia) {
+    let mut changes = member.subscribe();
+    media.report(MediaEvent::MeSpeaking(true)).await;
+    wait_for_speaking(&mut changes, (&member.my_id(), true)).await;
+}
+
+/// The speaking changes before the first that is exactly `until`.
+async fn wait_for_speaking(
+    changes: &mut tokio::sync::broadcast::Receiver<crate::views::Change>,
+    until: (&str, bool),
+) -> Vec<(String, bool)> {
+    let mut seen = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(crate::views::Change::HuddleSpeaking { member, speaking }) = changes.recv().await {
+                if (member.as_str(), speaking) == until {
+                    return;
+                }
+                seen.push((member, speaking));
+            }
+        }
+    })
+    .await
+    .unwrap();
+    seen
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_in_a_huddle_on_two_devices_shows_once() {
+    let TwoDevices {
+        ada,
+        ada_media,
+        bob,
+        phone,
+        general,
+        ..
+    } = bob_on_two_devices().await;
+    all_join(&[&ada, &bob, &phone], &general);
+
+    assert_eq!(in_huddle(&ada, &general), [ada.my_id(), bob.my_id()]);
+    assert_eq!(in_huddle(&bob, &general), [bob.my_id(), ada.my_id()]);
+    let mine = bob.my_huddle().unwrap();
+    assert!(
+        mine.peers.iter().all(|peer| peer.member != bob.my_id()),
+        "my phone isn't a peer"
+    );
+    let peers: Vec<String> = ada
+        .my_huddle()
+        .unwrap()
+        .peers
+        .into_iter()
+        .map(|peer| peer.member)
+        .collect();
+    assert_eq!(
+        peers,
+        [bob.my_id()],
+        "Bob once, though both his devices are peers"
+    );
+
+    let mut changes = ada.subscribe();
+    ada_media
+        .report(MediaEvent::Speaking {
+            peer: phone.me(),
+            speaking: true,
+        })
+        .await;
+    let speaking = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(crate::views::Change::HuddleSpeaking { member, speaking }) = changes.recv().await {
+                return (member, speaking);
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        speaking,
+        (bob.my_id(), true),
+        "Bob's phone speaking is Bob speaking"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_device_never_rings_for_a_dm_call() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let ada_media = FakeMedia::default();
+    let ada = create_admin_with(&root.path().join("ada"), &bucket, with_media(&ada_media)).await;
+    let bob = join(&ada, &root.path().join("bob"), &bucket, "Bob", false).await;
+    let phone_media = FakeMedia::default();
+    let phone = link_device_with(
+        &ada,
+        &bob,
+        &root.path().join("phone"),
+        &bucket,
+        with_media(&phone_media),
+    )
+    .await;
+    sync_all(&[&ada, &bob, &phone]).await;
+    let dm = ada.open_dm(&[bob.my_id()]).unwrap();
+    sync_all(&[&ada, &bob, &phone]).await;
+
+    ada.join_huddle(&dm, false).unwrap();
+    // DMs are a person's first device's until they go by person: the phone
+    // doesn't have this one.
+    for beacon in ada.take_sent_beacons() {
+        assert!(phone.receive_beacon(&beacon, Via::Direct(ada.me())).is_err());
+    }
+
+    assert_eq!(phone_media.rings_playing(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_persons_devices_merge_into_one_peer_with_the_best_link_and_speaking() {
+    let TwoDevices {
+        ada,
+        ada_media,
+        bob,
+        phone,
+        general,
+        ..
+    } = bob_on_two_devices().await;
+    all_join(&[&ada, &bob, &phone], &general);
+    let bob_peer = || {
+        let peers = ada.my_huddle().unwrap().peers;
+        assert_eq!(peers.len(), 1, "Bob once");
+        peers.into_iter().next().unwrap()
+    };
+
+    for (laptop_link, phone_link) in [(Link::Relayed, Link::Direct), (Link::Direct, Link::Relayed)] {
+        for (peer, link) in [(bob.me(), laptop_link), (phone.me(), phone_link)] {
+            ada_media.report(MediaEvent::Link { peer, link }).await;
+        }
+        after_earlier_media_events(&ada, &ada_media).await;
+        assert_eq!(bob_peer().link, Link::Direct, "the best of his two links");
+    }
+    for (laptop_speaking, phone_speaking) in [(true, false), (false, true)] {
+        for (peer, speaking) in [(bob.me(), laptop_speaking), (phone.me(), phone_speaking)] {
+            ada_media.report(MediaEvent::Speaking { peer, speaking }).await;
+        }
+        after_earlier_media_events(&ada, &ada_media).await;
+        assert!(bob_peer().speaking, "speaking while either device is");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn my_other_device_adds_nothing_to_my_own_row() {
+    let TwoDevices {
+        ada,
+        bob,
+        phone,
+        general,
+        ..
+    } = bob_on_two_devices().await;
+    all_join(&[&ada, &bob, &phone], &general);
+    // The phone's app says its camera is on.
+    let inner = &phone.inner;
+    let beacon = Beacon::sign(
+        &inner.identity,
+        &inner.config.workspace_id,
+        BeaconBody {
+            member: phone.me(),
+            endpoint: phone.me(),
+            channel: general.clone(),
+            session: [7; 16],
+            seq: 0,
+            sent_ms: now_ms().unwrap(),
+            state: BeaconState::Joined {
+                camera: true,
+                screen: false,
+                reach: Reach::Direct,
+            },
+            media_wire: MEDIA_WIRE,
+        },
+    )
+    .unwrap();
+    bob.receive_beacon(&beacon, Via::Gossip).unwrap();
+
+    let mine = bob.huddle(&general).unwrap();
+    let my_rows: Vec<_> = mine
+        .participants
+        .iter()
+        .filter(|row| row.member == bob.my_id())
+        .collect();
+    assert!(
+        my_rows.len() == 1 && my_rows[0].is_me && !my_rows[0].camera,
+        "{my_rows:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_speaks_while_any_of_their_devices_does_and_my_own_devices_say_nothing() {
+    let TwoDevices {
+        ada,
+        ada_media,
+        bob,
+        bob_media,
+        phone,
+        general,
+        ..
+    } = bob_on_two_devices().await;
+    all_join(&[&ada, &bob, &phone], &general);
+    let mut changes = ada.subscribe();
+
+    for (peer, speaking) in [
+        (phone.me(), true),
+        (bob.me(), true),
+        (phone.me(), false),
+        (bob.me(), false),
+    ] {
+        ada_media.report(MediaEvent::Speaking { peer, speaking }).await;
+    }
+    ada_media.report(MediaEvent::MeSpeaking(true)).await;
+
+    assert_eq!(
+        wait_for_speaking(&mut changes, (&ada.my_id(), true)).await,
+        [(bob.my_id(), true), (bob.my_id(), false)],
+        "Bob starts once and stops once"
+    );
+    let mut bobs_changes = bob.subscribe();
+    bob_media
+        .report(MediaEvent::Speaking {
+            peer: phone.me(),
+            speaking: true,
+        })
+        .await;
+    // Ends on what my phone speaking would wrongly have said first.
+    bob_media.report(MediaEvent::MeSpeaking(false)).await;
+    assert_eq!(
+        wait_for_speaking(&mut bobs_changes, (&bob.my_id(), false)).await,
+        Vec::<(String, bool)>::new(),
+        "nothing for my own phone"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_linked_during_a_call_shows_as_its_person() {
+    let root = tempfile::tempdir().unwrap();
+    let bucket = memory_bucket();
+    let ada_media = FakeMedia::default();
+    let ada = create_admin_with(&root.path().join("ada"), &bucket, with_media(&ada_media)).await;
+    let bob = join_with(
+        &ada,
+        &root.path().join("bob"),
+        &bucket,
+        "Bob",
+        with_media(&FakeMedia::default()),
+    )
+    .await;
+    sync_all(&[&ada, &bob]).await;
+    let general = channel_id(&ada, "general");
+    all_join(&[&ada, &bob], &general);
+
+    let phone = link_device_with(
+        &ada,
+        &bob,
+        &root.path().join("phone"),
+        &bucket,
+        with_media(&FakeMedia::default()),
+    )
+    .await;
+    sync_all(&[&ada, &bob, &phone]).await;
+    ada.age_huddles(Duration::from_millis(crate::huddle::ring::CUE_GAP_MS));
+    let cues_before = ada_media.cues();
+    phone.join_huddle(&general, false).unwrap();
+    carry(&phone, &[&ada, &bob], Via::Gossip);
+
+    let peers: Vec<String> = ada
+        .my_huddle()
+        .unwrap()
+        .peers
+        .into_iter()
+        .map(|peer| peer.member)
+        .collect();
+    assert_eq!(peers, [bob.my_id()]);
+    assert_eq!(
+        ada_media.cues(),
+        cues_before,
+        "Bob's phone joining plays no sound"
+    );
 }

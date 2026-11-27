@@ -259,6 +259,21 @@ impl Workspace {
         Ok(book.state_of(&heartbeat.member, now) != before)
     }
 
+    /// A person's presence: the best of their current devices' (online,
+    /// then away, then unreachable).
+    pub(crate) fn person_presence(&self, devices: &[PublicKey], now_ms: i64) -> PresenceState {
+        let rank = |state: &PresenceState| match state {
+            PresenceState::Online => 2,
+            PresenceState::Away => 1,
+            PresenceState::Unreachable => 0,
+        };
+        devices
+            .iter()
+            .map(|device| self.presence_of(device, now_ms))
+            .max_by_key(rank)
+            .unwrap_or_default()
+    }
+
     pub(crate) fn presence_of(&self, member: &PublicKey, now_ms: i64) -> PresenceState {
         if *member == self.me() {
             return self.own_state();

@@ -41,6 +41,11 @@ impl Store {
         if body.channel != key.channel || body.generation != key.generation {
             return Ok(Verdict::Void("sealed for another channel or key"));
         }
+        // Until private channels and DMs go by person, linked devices have
+        // no part in them.
+        if self.is_linked_device_at(&verified.author, verified.epoch)? {
+            return Ok(Verdict::Void("written by a linked device"));
+        }
         match private_kind(&body.channel) {
             Some(PrivateKind::Channel) => self.judge_in_channel(verified, body, key, context),
             Some(PrivateKind::Dm) => self.judge_in_dm(verified, body),
@@ -92,6 +97,8 @@ impl Store {
             } => self.judge_owner_op(verified, channel, key.generation, *position, || {
                 Ok(if *from_generation != self.latest_generation(channel)? {
                     Verdict::Void("an add from another key generation")
+                } else if self.is_linked_device_at(&invitee.member, verified.epoch)? {
+                    Verdict::Void("an add naming a linked device")
                 } else if self.owner_membership(channel, &invitee.member)?.is_some() {
                     Verdict::Void("they are already in the channel")
                 } else {

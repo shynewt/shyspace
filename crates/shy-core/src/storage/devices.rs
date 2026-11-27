@@ -136,6 +136,11 @@ impl Store {
         Ok(usize::try_from(count)?)
     }
 
+    /// Whether `key` was a device linked to someone else as of `epoch`.
+    pub fn is_linked_device_at(&self, key: &PublicKey, epoch: u64) -> Result<bool> {
+        Ok(self.person_at(key, epoch)? != *key)
+    }
+
     pub fn has_devices(&self) -> Result<bool> {
         self.exists("SELECT 1 FROM devices LIMIT 1", [])
     }
