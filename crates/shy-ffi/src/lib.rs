@@ -4,6 +4,8 @@
 //! touches the core runs on this crate's own Tokio runtime, off the app's
 //! threads.
 
+#[cfg(target_os = "android")]
+mod android;
 mod app;
 mod error;
 mod keys;

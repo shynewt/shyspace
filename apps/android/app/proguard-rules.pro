@@ -4,3 +4,5 @@
 -keep class * implements com.sun.jna.** { *; }
 -keep class uniffi.** { *; }
 -dontwarn java.awt.**
+# rustls-platform-verifier's Kotlin half is called only from Rust, over JNI.
+-keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }

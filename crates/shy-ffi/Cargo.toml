@@ -21,6 +21,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 uniffi = "0.31"
 zeroize = "1"
 
+# Matches the versions reqwest brings in; Android needs the verifier set up over JNI.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.22", default-features = false }
+rustls-platform-verifier = "0.7"
+
 [dev-dependencies]
 shy-core = { path = "../shy-core", features = ["ffi", "memory-bucket"] }
 tempfile = "3"

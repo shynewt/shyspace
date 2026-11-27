@@ -9344,6 +9344,8 @@ name = "shy-ffi"
 version = "0.1.4"
 dependencies = [
  "anyhow",
+ "jni 0.22.4",
+ "rustls-platform-verifier",
  "shy-core",
  "tempfile",
  "tokio",

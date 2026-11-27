@@ -52,7 +52,7 @@ unit: image
 # incremental compile once missed a test that no longer built after the bindings changed, and
 # the check passed without running it.
 check: image
-	$(call gradle,testDebugUnitTest testReleaseUnitTest lintDebug assembleDebug -Pkotlin.incremental=false)
+	$(call gradle,testDebugUnitTest testReleaseUnitTest lintDebug assembleDebug assembleDebugAndroidTest -Pkotlin.incremental=false)
 
 # Runs the instrumented tests on a phone or emulator that adb can see on this machine: a phone
 # on USB (USB debugging on) or one paired for wireless debugging. It updates the debug app and

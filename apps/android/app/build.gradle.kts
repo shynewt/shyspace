@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -9,6 +11,23 @@ val repoRoot: File = rootDir.resolve("../..").canonicalFile
 val rustTargetDir: File = repoRoot.resolve("target/android")
 val rustTriples = mapOf("arm64-v8a" to "aarch64-linux-android", "x86_64" to "x86_64-linux-android")
 val phoneAbis = rustTriples.keys.toList()
+
+// rustls-platform-verifier's Kotlin half, vendored in libs/ (see its README). It must be the
+// version Cargo.lock pairs with the Rust half, or certificate checks fail at run time, and its
+// content must be the one recorded here.
+val platformVerifierSha256 = mapOf("0.2.0" to "aa021794230fbc2f0be355999e2cf67398dd563de066a2e17001ffbd0b69101b")
+val platformVerifierAar: File = run {
+    val lockFile = providers.fileContents(layout.projectDirectory.file(repoRoot.resolve("Cargo.lock").path)).asText.get()
+    val version = Regex("""name = "rustls-platform-verifier-android"\nversion = "([^"]+)"""").find(lockFile)?.groupValues?.get(1)
+        ?: error("rustls-platform-verifier-android isn't in Cargo.lock")
+    val aar = file("libs/rustls-platform-verifier-$version.aar")
+    check(aar.exists()) { "Cargo.lock wants rustls-platform-verifier-android $version: vendor its AAR as $aar (see libs/README.md)" }
+    val expected = platformVerifierSha256[version] ?: error("record the SHA-256 of $aar in platformVerifierSha256 (see libs/README.md)")
+    val bytes = providers.fileContents(layout.projectDirectory.file(aar.path)).asBytes.get()
+    val actual = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    check(actual == expected) { "$aar has SHA-256 $actual, not the recorded $expected" }
+    aar
+}
 
 android {
     namespace = "dev.shynewt.shyspace"
@@ -195,6 +214,7 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.jna) { artifact { type = "aar" } }
+    implementation(files(platformVerifierAar))
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
