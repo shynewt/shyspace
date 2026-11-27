@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use shy_core::{
     Workspace,
-    views::{Change, Channel, LinkedMessage, Member, Message, MessageCursor},
+    views::{Change, Channel, Inbox, LinkedMessage, Member, Message, MessageCursor},
 };
 use tokio::{sync::broadcast::error::RecvError, task::AbortHandle};
 
@@ -107,6 +107,18 @@ impl ShyWorkspace {
     pub async fn delete_message(&self, message: String) -> Result<(), ShyError> {
         let workspace = self.inner.clone();
         run_blocking(move || workspace.delete_message(&message)).await
+    }
+
+    /// Marks `channel` read up to its newest message.
+    pub async fn mark_channel_read(&self, channel: String) -> Result<(), ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.mark_channel_read(&channel)).await
+    }
+
+    /// What needs your attention: mentions and followed replies, unread channels and page mentions.
+    pub async fn inbox(&self) -> Result<Inbox, ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.inbox()).await
     }
 
     /// The thread starting at `root`: its first message, then every reply.

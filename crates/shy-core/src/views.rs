@@ -774,6 +774,7 @@ pub struct HuddlePeer {
 
 /// What needs your attention, across channels and threads.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Inbox {
     /// Unread mentions of you and new replies in threads you follow, newest first.
     pub attention: Vec<InboxItem>,
@@ -785,6 +786,7 @@ pub struct Inbox {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct PageMention {
     pub page: EntityId,
     pub page_title: String,
@@ -799,6 +801,7 @@ pub struct PageMention {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct InboxItem {
     pub message: Message,
     pub channel_name: String,
@@ -809,6 +812,7 @@ pub struct InboxItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum InboxReason {
     Mention,
     ThreadReply,

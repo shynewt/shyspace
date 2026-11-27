@@ -348,3 +348,45 @@ async fn a_deleted_message_is_no_longer_found() {
 
     assert!(acme.linked_message(root).await.unwrap().is_none());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_inbox_reaches_the_phones_and_has_nothing_from_yourself() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+    let general = general_of(&acme).await;
+    let root = acme
+        .send_message(general.clone(), "lunch?".into(), None)
+        .await
+        .unwrap();
+    acme.send_message(general, "yes".into(), Some(root))
+        .await
+        .unwrap();
+
+    let inbox = acme.inbox().await.unwrap();
+
+    assert!(inbox.attention.is_empty());
+    assert!(inbox.channels.is_empty());
+    assert!(inbox.page_mentions.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn marking_a_channel_read_refreshes_the_channels() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+    let general = general_of(&acme).await;
+    acme.send_message(general.clone(), "hello".into(), None)
+        .await
+        .unwrap();
+    let (sender, mut changes) = mpsc::unbounded_channel();
+    let _subscription = acme.subscribe(Arc::new(ChangeChannel(sender)));
+
+    acme.mark_channel_read(general).await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while changes.recv().await.unwrap() != Change::Channels {}
+    })
+    .await
+    .expect("the channel list was told to refresh");
+}
