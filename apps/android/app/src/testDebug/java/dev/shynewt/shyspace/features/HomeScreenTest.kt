@@ -1,5 +1,10 @@
 package dev.shynewt.shyspace.features
 
+import uniffi.shy_core.Member
+import uniffi.shy_core.Channel
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.SemanticsMatcher
@@ -152,6 +157,60 @@ class HomeScreenTest {
         compose.onNodeWithContentDescription("Private").assertExists()
         compose.onNodeWithText("Notes").assertExists()
         compose.onNodeWithText("notes").assertDoesNotExist()
+    }
+
+    private var shown by mutableStateOf<HomeState>(HomeState.Loading)
+
+    private fun showHomeWith(channels: List<Channel>, members: List<Member>) {
+        shown = HomeState.Ready("w1", "Acme", channels = channels, members = members, openFailures = emptyList())
+        compose.setContent {
+            ShyTheme(isDark = false) {
+                HomeScreen(state = shown, onOpenChannel = { _, _ -> }, onRetry = {}, bottomBar = {}, noWorkspaceContent = {})
+            }
+        }
+    }
+
+    @Test
+    fun aGroupDirectMessageIsNamedForEveryoneInIt() {
+        val group = sampleChannel("dm-group", kind = ChannelKind.DM, dmMembers = listOf("grace", "linus"))
+        showHomeWith(listOf(group), listOf(sampleMember("grace", "Grace Hopper"), sampleMember("linus", "Linus")))
+
+        compose.onNodeWithText("Grace Hopper, Linus").assertExists()
+    }
+
+    @Test
+    fun aDirectMessageWithAnAgentSaysSo() {
+        val dm = sampleChannel("dm-helper", kind = ChannelKind.DM, dmMembers = listOf("helper"))
+        showHomeWith(listOf(dm), listOf(sampleMember("helper", "Helper", isBot = true)))
+
+        compose.onNode(hasText("Helper")).assertStateDescriptionEquals("Agent")
+    }
+
+    @Test
+    fun aRenamedPersonsDirectMessageTakesTheNewName() {
+        val dm = sampleChannel("dm-grace", kind = ChannelKind.DM, dmMembers = listOf("grace"))
+        showHomeWith(listOf(dm), listOf(sampleMember("grace", "Grace")))
+        compose.onNodeWithText("Grace").assertExists()
+
+        shown = (shown as HomeState.Ready).copy(members = listOf(sampleMember("grace", "Grace Hopper")))
+
+        compose.onNodeWithText("Grace Hopper").assertExists()
+        compose.onNodeWithText("Grace").assertDoesNotExist()
+    }
+
+    @Test
+    fun aDirectMessageWithNobodyElseStillHasAName() {
+        showHomeWith(listOf(sampleChannel("dm-empty", kind = ChannelKind.DM, dmMembers = emptyList())), emptyList())
+
+        compose.onNodeWithText("Direct message").assertExists()
+    }
+
+    @Test
+    fun withNoDirectMessagesTheirLabelIsHidden() {
+        showHomeWith(listOf(sampleChannel("general")), emptyList())
+
+        compose.onNodeWithText("general").assertExists()
+        compose.onNodeWithText("Direct messages").assertDoesNotExist()
     }
 }
 

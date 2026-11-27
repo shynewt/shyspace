@@ -72,7 +72,9 @@ fun HomeScreen(
 @Composable
 fun channelTitle(channel: Channel, members: List<Member>): String = when (channel.kind) {
     ChannelKind.NOTES -> stringResource(R.string.notes)
+    // Everyone else may have left; the row still needs a name.
     ChannelKind.DM -> channel.dmMembers.joinToString { id -> displayName(members.find { it.id == id }?.name.orEmpty(), id) }
+        .ifEmpty { stringResource(R.string.direct_message) }
     else -> "#${channel.name}"
 }
 
@@ -121,7 +123,9 @@ private fun ChannelList(state: HomeState.Ready, onOpenChannel: (Channel, String)
             }
             item { SectionLabel(stringResource(R.string.channels), modifier = Modifier.padding(horizontal = 12.dp)) }
             items(channels, key = { it.id }) { channel -> ChannelRow(channel, state.members, onOpen = onOpenChannel) }
-            item { SectionLabel(stringResource(R.string.direct_messages), modifier = Modifier.padding(horizontal = 12.dp)) }
+            if (direct.isNotEmpty()) {
+                item { SectionLabel(stringResource(R.string.direct_messages), modifier = Modifier.padding(horizontal = 12.dp)) }
+            }
             items(direct, key = { it.id }) { channel -> ChannelRow(channel, state.members, onOpen = onOpenChannel) }
         }
     }
@@ -148,11 +152,16 @@ private fun ChannelRow(channel: Channel, members: List<Member>, onOpen: (Channel
         isMuted -> colors.textFaint
         else -> colors.textMuted
     }
-    val state = when {
-        isMuted -> stringResource(R.string.muted)
-        hasUnread -> stringResource(R.string.unread)
-        else -> null
-    }
+    // The robot avatar is hidden from screen readers, so a DM with an agent says so in words.
+    val isWithAgent = dmPerson?.first?.isBot == true
+    val state = listOfNotNull(
+        stringResource(R.string.agent).takeIf { isWithAgent },
+        when {
+            isMuted -> stringResource(R.string.muted)
+            hasUnread -> stringResource(R.string.unread)
+            else -> null
+        },
+    ).joinToString(", ").ifEmpty { null }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
