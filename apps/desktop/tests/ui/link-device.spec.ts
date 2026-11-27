@@ -90,3 +90,36 @@ test("a link that ends after the hand-over says why and leaves the workspace", a
   await expect(page.getByText("Your other device was removed before this one was added.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Welcome to shyspace" })).toBeVisible();
 });
+
+test("a linked device offers no private messages yet, and says so calmly", async ({ page }) => {
+  await chooseLinking(page);
+  await page.getByLabel("Link code").fill(LINK_CODE);
+  await expect(page.getByText("On your other device, tap this number")).toBeVisible();
+  await page.evaluate(() => window.fake.devices.handOver());
+  await expect(page.getByLabel("Message #general")).toBeVisible();
+
+  const nav = page.getByRole("navigation", { name: "Workspace" });
+  const dms = nav.getByRole("region", { name: "Direct messages" });
+  await expect(dms.getByText("Private messages come to linked devices in a later update.")).toBeVisible();
+  await expect(dms.getByRole("button", { name: "New direct message" })).toHaveCount(0);
+  await expect(nav.getByText("Notes", { exact: true })).toHaveCount(0);
+
+  const channels = nav.getByRole("region", { name: "Channels" });
+  await channels.hover();
+  await channels.getByRole("button", { name: "Actions for the Channels section" }).click();
+  await expect(page.getByRole("menuitem", { name: "New section" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "New private channel" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.evaluate(() => {
+    const grace = window.fake.addMember("Grace");
+    window.fake.receiveMessage(grace, "general", "Morning all");
+  });
+  await page
+    .getByRole("log", { name: "Messages in #general" })
+    .getByRole("button", { name: "Grace", exact: true })
+    .click();
+  const grace = page.getByRole("dialog", { name: "Grace's profile" });
+  await expect(grace.getByRole("button", { name: "Mention" })).toBeVisible();
+  await expect(grace.getByRole("button", { name: "Message" })).toHaveCount(0);
+});

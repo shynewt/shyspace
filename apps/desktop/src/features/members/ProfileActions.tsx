@@ -119,7 +119,8 @@ export function ProfileActions({
           </Button>
         </>
       ) : (
-        member.active && (
+        member.active &&
+        !session.is_linked_device && (
           <Button
             size="sm"
             variant="primary"

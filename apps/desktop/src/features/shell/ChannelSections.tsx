@@ -32,6 +32,8 @@ export function ChannelSections() {
   const [isUnreadOnly, setUnreadOnly] = useState(false);
   const [isAddingSection, setAddingSection] = useState(false);
   const [isCreatingPrivate, setCreatingPrivate] = useState(false);
+  const { session } = useWorkspace();
+  const canStartPrivate = !session.is_linked_device;
   // Each opening of the new-channel field is a fresh one: reopening while
   // the last one fades out must not revive it, already submitted.
   const [newChannelRound, setNewChannelRound] = useState<number | null>(null);
@@ -73,7 +75,7 @@ export function ChannelSections() {
             )
           }
           onAddSection={() => setAddingSection(true)}
-          onNewPrivateChannel={section.is_builtin ? () => setCreatingPrivate(true) : undefined}
+          onNewPrivateChannel={section.is_builtin && canStartPrivate ? () => setCreatingPrivate(true) : undefined}
         />
       ))}
       <NewPrivateChannelDialog open={isCreatingPrivate} onOpenChange={setCreatingPrivate} />

@@ -14,6 +14,24 @@ import { NavItem } from "./NavItem";
 
 /** Your notes, then your DMs, with a button to start one. */
 export function DirectMessages() {
+  const { session } = useWorkspace();
+  if (session.is_linked_device) return <PrivateComesLater />;
+  return <NotesAndDms />;
+}
+
+/** A linked device gets no keys for private channels yet, so it offers none rather than letting them fail. */
+function PrivateComesLater() {
+  return (
+    <section aria-label="Direct messages" className="mt-3 px-2.5">
+      <div className="flex h-7 items-center text-2xs font-semibold tracking-wide text-faint uppercase">
+        Direct messages
+      </div>
+      <p className="text-xs leading-relaxed text-faint">Private messages come to linked devices in a later update.</p>
+    </section>
+  );
+}
+
+function NotesAndDms() {
   const { channels } = useWorkspace();
   const members = useLive(api.members, (change) => change.kind === "members");
   const [isStarting, setStarting] = useState(false);
