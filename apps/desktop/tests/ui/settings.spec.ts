@@ -200,6 +200,7 @@ test("settings group your sections and the workspace's", async ({ page }) => {
     "Notifications",
     "Huddles",
     "Privacy & security",
+    "Devices",
     "Workspace",
     "Members",
     "Agents",
@@ -358,6 +359,7 @@ test("members see their own sections and the member list, not the admin's", asyn
     "Notifications",
     "Huddles",
     "Privacy & security",
+    "Devices",
     "Members",
   ]);
   await page.keyboard.press("Escape");

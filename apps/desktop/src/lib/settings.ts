@@ -7,6 +7,7 @@ export type SettingsSection =
   | "notifications"
   | "huddles"
   | "privacy"
+  | "devices"
   | "members"
   | "agents"
   | "storage"
@@ -40,6 +41,7 @@ const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: "notifications", label: "Notifications", group: "you" },
   { id: "huddles", label: "Huddles", group: "you" },
   { id: "privacy", label: "Privacy & security", group: "you" },
+  { id: "devices", label: "Devices", group: "you" },
   { id: "workspace", label: "Workspace", group: "workspace", isAdminOnly: true },
   { id: "members", label: "Members", group: "workspace" },
   { id: "agents", label: "Agents", group: "workspace", isAdminOnly: true },

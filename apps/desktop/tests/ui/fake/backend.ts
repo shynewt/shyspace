@@ -33,6 +33,7 @@ import type {
   WorkspaceBadge,
 } from "../../../src/lib/api";
 import { FakeChat, NOT_CHAT } from "./chat";
+import { FakeDevices, NOT_DEVICES } from "./devices";
 import { FakeDrafts } from "./drafts";
 import { FakeFiles, NOT_FILES } from "./files";
 import {
@@ -194,6 +195,23 @@ export class FakeBackend {
     },
   });
   private invites = new FakeInvites(() => this.notify({ kind: "invites" }));
+  readonly devices = new FakeDevices({
+    me: () => this.me(),
+    onChange: () => this.notify({ kind: "members" }),
+    startReading: () => {
+      const joined = this.joinWorkspace("You");
+      this.session = { ...joined, is_reading_only: true, is_linked_device: true };
+      return this.session;
+    },
+  });
+
+  /** The admin's app added this linking device: the real workspace takes the reading one's place. */
+  finishLinking(): void {
+    if (!this.session) return;
+    this.session = { ...this.session, is_reading_only: false };
+    this.notify({ kind: "reading_closed" });
+    void emit("change", { workspace_id: null, change: { kind: "workspaces" } });
+  }
   private storage: StorageSettings | null = null;
   private lamport = 0;
 
@@ -524,6 +542,8 @@ export class FakeBackend {
   private answer(command: string, args: InvokeArgs | undefined): unknown {
     const filesAnswer = this.files.answer(command, args);
     if (filesAnswer !== NOT_FILES) return filesAnswer;
+    const devicesAnswer = this.devices.answer(command, args);
+    if (devicesAnswer !== NOT_DEVICES) return devicesAnswer;
     const cursorsAnswer = this.pageCursors.answer(command, args);
     if (cursorsAnswer !== NOT_PAGE_CURSORS) return cursorsAnswer;
     const huddlesAnswer = this.huddles.answer(command, args);

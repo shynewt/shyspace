@@ -5,6 +5,7 @@ import {
   Headphones,
   LifeBuoy,
   Monitor,
+  MonitorSmartphone,
   Palette,
   ShieldCheck,
   UserRound,
@@ -18,6 +19,7 @@ import { type SettingsGroup, type SettingsSection, type SettingsTarget, sections
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
 import { cx, Dialog, instantAfterAKey, springs } from "../../ui";
+import { DevicesSettings } from "../devices/DevicesSettings";
 import { WaitingRequestsBadge } from "../members/JoinRequests";
 import { AgentsSettings } from "./AgentsSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
@@ -58,6 +60,11 @@ const SECTION_VIEWS: Record<SettingsSection, { icon: ReactNode; description: str
     icon: <Headphones size={15} />,
     description: "Your microphone and speakers for voice huddles.",
     content: <HuddleSettings />,
+  },
+  devices: {
+    icon: <MonitorSmartphone size={15} />,
+    description: "The computers and phones you use shyspace on.",
+    content: <DevicesSettings />,
   },
   privacy: {
     icon: <ShieldCheck size={15} />,
