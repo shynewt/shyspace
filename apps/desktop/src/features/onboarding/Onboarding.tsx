@@ -1,7 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { api, type LinkCheck, type Session } from "../../lib/api";
+import { api, type CheckAfterRestart, onLinkEnded, type Session } from "../../lib/api";
 import { reportError } from "../../lib/toast";
 import { Button, Logo, SegmentedControl, tweens } from "../../ui";
 import { CreateForm } from "./CreateForm";
@@ -29,13 +29,26 @@ export function Onboarding({
   cancelLabel?: string;
 }) {
   const [mode, setMode] = useState<Mode>("create");
-  const [resumedLink, setResumedLink] = useState<LinkCheck | undefined>();
+  const [resumedLink, setResumedLink] = useState<CheckAfterRestart | undefined>();
+  const [endedLink, setEndedLink] = useState<string | undefined>();
   useEffect(() => {
     api.waitingDeviceLink().then((waiting) => {
       if (!waiting) return;
       setResumedLink(waiting);
       setMode("link");
     }, reportError);
+  }, []);
+  // A link that ended (at startup too, before any screen listened) says why here.
+  useEffect(() => {
+    const showEnded = () =>
+      api.takeEndedDeviceLink().then((ended) => {
+        if (ended === null) return;
+        setEndedLink(ended);
+        setResumedLink(undefined);
+        setMode("link");
+      }, reportError);
+    void showEnded();
+    return onLinkEnded(() => void showEnded());
   }, []);
   return (
     <motion.main
@@ -80,7 +93,9 @@ export function Onboarding({
               >
                 {mode === "create" && <CreateForm onReady={onReady} />}
                 {mode === "join" && <JoinForm onReady={onReady} />}
-                {mode === "link" && <LinkJoinForm onReady={onReady} resumed={resumedLink} />}
+                {mode === "link" && (
+                  <LinkJoinForm key={endedLink} onReady={onReady} resumed={resumedLink} ended={endedLink} />
+                )}
                 {mode === "restore" && <RestoreForm onReady={onReady} />}
               </motion.div>
             </AnimatePresence>

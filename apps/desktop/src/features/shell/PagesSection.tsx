@@ -9,7 +9,7 @@ import { PageTree } from "./PageTree";
 
 /** The sidebar's pages, as a tree under a header that folds like a channel section. */
 export function PagesSection() {
-  const { pages, navigate } = useWorkspace();
+  const { pages, navigate, session } = useWorkspace();
   const [{ isPagesCollapsed }, setPreferences] = usePreferences();
   const isOpen = !isPagesCollapsed;
   const setOpen = (open: boolean) => setPreferences({ isPagesCollapsed: !open });
@@ -38,13 +38,15 @@ export function PagesSection() {
           </motion.span>
           <span className="truncate">Pages</span>
         </button>
-        <IconButton
-          label="New page"
-          size="sm"
-          icon={<Plus size={14} />}
-          onClick={() => createPage(null)}
-          className="opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100"
-        />
+        {!session.is_reading_only && (
+          <IconButton
+            label="New page"
+            size="sm"
+            icon={<Plus size={14} />}
+            onClick={() => createPage(null)}
+            className="opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100"
+          />
+        )}
       </div>
       <AnimatePresence initial={false}>
         {isOpen && (

@@ -7,7 +7,7 @@ import { displayName } from "../../lib/people";
 import { reportError, showToast } from "../../lib/toast";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { ConfirmDialog, cx, IconButton, Menu, type MenuItem } from "../../ui";
+import { ConfirmDialog, cx, IconButton, Menu, type MenuItem, StatusLine } from "../../ui";
 import { MemberAvatar } from "../members/MemberAvatar";
 import { HeaderAction, ViewHeader } from "../shell/ViewHeader";
 import { type CursorJump, Editor } from "./Editor";
@@ -124,9 +124,21 @@ export function PageView({ pageId, mentionAt }: { pageId: string; mentionAt?: nu
       />
       <div className="flex-1 overflow-y-auto">
         <article className="mx-auto max-w-reading px-6 pt-8 @2xl/main:px-12 @2xl/main:pt-14">
-          <PageTitle ref={title} pageId={pageId} title={page?.title ?? ""} />
+          {session.is_reading_only && (
+            <StatusLine className="mb-4">
+              This device can read now. It can edit pages once the admin's app adds it, the next time it syncs.
+            </StatusLine>
+          )}
+          <PageTitle ref={title} pageId={pageId} title={page?.title ?? ""} isReadOnly={session.is_reading_only} />
           <div className="mt-5">
-            <Editor key={pageId} pageId={pageId} presence={presence} jumpTo={jumpTo} mentionAt={mentionAt} />
+            <Editor
+              key={`${pageId}:${session.is_reading_only}`}
+              pageId={pageId}
+              presence={presence}
+              jumpTo={jumpTo}
+              mentionAt={mentionAt}
+              isReadOnly={session.is_reading_only}
+            />
           </div>
         </article>
       </div>

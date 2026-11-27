@@ -2,20 +2,24 @@
 //! a person who already uses shyspace, and the list of your devices. One
 //! command per core call. The core runs each step of this device's link in
 //! a task of its own; the wait for the admin's app goes on in the
-//! background, also after a restart, and tells the UI when it ends. A link
-//! a restart interrupted before its hand-over waits for the UI to ask
-//! (`waiting_device_link`), so no event can arrive before anyone listens.
+//! background, also after a restart. What a screen must learn about this
+//! device's link (one waiting after a restart, one that ended) is kept for
+//! it to ask (`waiting_device_link`, `take_ended_device_link`): an event
+//! (`link-ended`) only says to ask, so nothing is lost if no screen listens
+//! yet.
 
 use serde::Serialize;
 use shy_core::{
     membership::link::Platform,
     views::{DeviceInfo, DeviceNotice, LinkCodeSummary},
-    workspace::{CheckAfterRestart, CheckOnNewDevice, LinkCheckShown},
-    workspaces::{LinkStop, ResumedLinkStep, Workspaces},
+    workspace::{CheckAfterRestart, CheckOnNewDevice, LinkCheckShown, LinkKeptUnfinished, Workspace},
+    workspaces::{LinkPutAside, LinkStop, ResumedLinkStep, Workspaces},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::{AppState, CommandResult, Session, current, emit_workspaces_changed, failed, install};
+use crate::{
+    AppState, CommandResult, Session, current, emit_workspaces_changed, failed, install, session_of,
+};
 
 /// What the new device shows once the person's other device opened its
 /// request: the number to tap there, or nothing if they were quicker.
@@ -24,10 +28,16 @@ pub(crate) struct LinkCheck {
     code: Option<String>,
 }
 
-/// Why a link on this device ended without it being added, said once.
-#[derive(Serialize, Clone)]
-struct LinkEnded {
-    message: String,
+/// What this app knows about this device's link, for the screens.
+#[derive(Default)]
+pub(crate) struct LinkState {
+    /// A link a restart interrupted before its hand-over.
+    waiting: Option<CheckAfterRestart>,
+    /// Why the last link ended without this device being added, until a
+    /// screen takes it.
+    ended: Option<String>,
+    /// A reading link is shown and waited on already.
+    is_following: bool,
 }
 
 #[tauri::command]
@@ -40,9 +50,30 @@ pub(crate) async fn pending_link(state: State<'_, AppState>) -> CommandResult<Op
     current(&state).await?.pending_link().await.map_err(failed)
 }
 
+/// A new device confirmed: its id, and whether what's left finishes later
+/// (the link is kept; the next sync pass sends it on).
+#[derive(Serialize)]
+pub(crate) struct ConfirmedLink {
+    device: Option<String>,
+    is_finishing: bool,
+}
+
 #[tauri::command]
-pub(crate) async fn confirm_link(state: State<'_, AppState>, picked: String) -> CommandResult<String> {
-    current(&state).await?.confirm_link(&picked).await.map_err(failed)
+pub(crate) async fn confirm_link(state: State<'_, AppState>, picked: String) -> CommandResult<ConfirmedLink> {
+    match current(&state).await?.confirm_link(&picked).await {
+        Ok(device) => Ok(ConfirmedLink {
+            device: Some(device),
+            is_finishing: false,
+        }),
+        Err(error) if error.downcast_ref::<LinkKeptUnfinished>().is_some() => {
+            tracing::warn!("a confirmed link finishes later: {error:#}");
+            Ok(ConfirmedLink {
+                device: None,
+                is_finishing: true,
+            })
+        }
+        Err(error) => Err(failed(error)),
+    }
 }
 
 #[tauri::command]
@@ -118,17 +149,17 @@ pub(crate) async fn begin_device_link(state: State<'_, AppState>, code: String) 
 }
 
 /// Waits for what the other device hands over, then shows the workspace
-/// for reading; the wait to be added goes on in the background.
+/// for reading; the wait to be added goes on in the background. Asking
+/// again shows the same workspace and starts nothing twice.
 #[tauri::command]
 pub(crate) async fn wait_for_device_link_handover(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> CommandResult<Session> {
     let handed_over = state.workspaces.wait_for_link_handover().await;
-    set_waiting_link(&state, None)?;
+    link_state(&state)?.waiting = None;
     let reading = handed_over.map_err(failed)?;
-    wait_until_linked_in_background(&app);
-    Ok(install(&app, &reading))
+    follow_reading_link(&app, &reading)
 }
 
 /// Stops linking this device, for good: what it was handed is wiped. If
@@ -137,7 +168,7 @@ pub(crate) async fn wait_for_device_link_handover(
 #[tauri::command]
 pub(crate) async fn stop_device_link(app: AppHandle, state: State<'_, AppState>) -> CommandResult<()> {
     let stopped = state.workspaces.cancel_link().await.map_err(failed)?;
-    set_waiting_link(&state, None)?;
+    link_state(&state)?.waiting = None;
     if let LinkStop::AlreadyJoined(joined) = stopped {
         install(&app, &joined);
     }
@@ -145,12 +176,27 @@ pub(crate) async fn stop_device_link(app: AppHandle, state: State<'_, AppState>)
     Ok(())
 }
 
-/// The link a restart interrupted while it waited for its hand-over, with
-/// the number to show again; the UI goes on with
-/// `wait_for_device_link_handover`.
+/// Where a link a restart interrupted before its hand-over stood when last
+/// asked; the screen asks again with `recheck_device_link`, then goes on
+/// with `wait_for_device_link_handover`.
 #[tauri::command]
-pub(crate) fn waiting_device_link(state: State<'_, AppState>) -> CommandResult<Option<LinkCheck>> {
-    Ok(waiting_link_lock(&state)?.clone())
+pub(crate) fn waiting_device_link(state: State<'_, AppState>) -> CommandResult<Option<CheckAfterRestart>> {
+    Ok(link_state(&state)?.waiting.clone())
+}
+
+/// Asks again where a link picked up after a restart stands.
+#[tauri::command]
+pub(crate) async fn recheck_device_link(state: State<'_, AppState>) -> CommandResult<CheckAfterRestart> {
+    let rechecked = state.workspaces.recheck_link().await;
+    let mut link = link_state(&state)?;
+    link.waiting = rechecked.as_ref().ok().cloned();
+    rechecked.map_err(failed)
+}
+
+/// Why this device's last link ended without it being added, once.
+#[tauri::command]
+pub(crate) fn take_ended_device_link(state: State<'_, AppState>) -> CommandResult<Option<String>> {
+    Ok(link_state(&state)?.ended.take())
 }
 
 /// Picks up a link a restart interrupted, after the workspaces opened. One
@@ -160,30 +206,33 @@ pub(crate) async fn resume_device_link(app: &AppHandle, state: &AppState) {
     match state.workspaces.resume_link().await {
         Ok(None) => {}
         Ok(Some(ResumedLinkStep::Reading(reading))) => {
-            install(app, &reading);
-            wait_until_linked_in_background(app);
-        }
-        Ok(Some(ResumedLinkStep::Waiting { check })) => {
-            let code = match check {
-                CheckAfterRestart::Code { code } => Some(code),
-                _ => None,
-            };
-            if let Err(error) = set_waiting_link(state, Some(LinkCheck { code })) {
-                tracing::error!("couldn't keep the interrupted link for the UI: {error}");
+            if let Err(error) = follow_reading_link(app, &reading) {
+                tracing::error!("couldn't follow the link this device is reading through: {error}");
             }
         }
+        Ok(Some(ResumedLinkStep::Waiting { check })) => match link_state(state) {
+            Ok(mut link) => link.waiting = Some(check),
+            Err(error) => tracing::error!("couldn't keep the interrupted link for the UI: {error}"),
+        },
         Err(error) => tell_link_ended(app, &error),
     }
 }
 
-fn set_waiting_link(state: &AppState, link: Option<LinkCheck>) -> CommandResult<()> {
-    *waiting_link_lock(state)? = link;
-    Ok(())
+/// Shows the reading workspace and waits in the background until the
+/// device is added, unless that runs already.
+fn follow_reading_link(app: &AppHandle, reading: &Workspace) -> CommandResult<Session> {
+    let state = app.state::<AppState>();
+    let is_following = std::mem::replace(&mut link_state(&state)?.is_following, true);
+    if is_following {
+        return Ok(session_of(reading));
+    }
+    wait_until_linked_in_background(app);
+    Ok(install(app, reading))
 }
 
-fn waiting_link_lock(state: &AppState) -> CommandResult<std::sync::MutexGuard<'_, Option<LinkCheck>>> {
+fn link_state(state: &AppState) -> CommandResult<std::sync::MutexGuard<'_, LinkState>> {
     state
-        .waiting_link
+        .link
         .lock()
         .map_err(|_| "link state lock poisoned".to_owned())
 }
@@ -192,7 +241,12 @@ fn wait_until_linked_in_background(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
-        match state.workspaces.wait_until_linked(state.online()).await {
+        let linked = state.workspaces.wait_until_linked(state.online()).await;
+        match link_state(&state) {
+            Ok(mut link) => link.is_following = false,
+            Err(error) => tracing::error!("couldn't note the link's end: {error}"),
+        }
+        match linked {
             Ok(workspace) => {
                 install(&app, &workspace);
             }
@@ -204,14 +258,19 @@ fn wait_until_linked_in_background(app: &AppHandle) {
     });
 }
 
+/// Keeps why the link ended for a screen to take, and says to ask. Closing
+/// the app isn't an ending: the link picks up at the next start.
 fn tell_link_ended(app: &AppHandle, error: &anyhow::Error) {
+    if error.downcast_ref::<LinkPutAside>().is_some() {
+        return;
+    }
     tracing::warn!("linking this device ended: {error:#}");
-    let _ = app.emit(
-        "link-ended",
-        LinkEnded {
-            message: format!("{error:#}"),
-        },
-    );
+    let state = app.state::<AppState>();
+    match link_state(&state) {
+        Ok(mut link) => link.ended = Some(format!("{error:#}")),
+        Err(lock_error) => tracing::error!("couldn't keep why the link ended: {lock_error}"),
+    }
+    let _ = app.emit("link-ended", ());
 }
 
 fn this_platform() -> Platform {

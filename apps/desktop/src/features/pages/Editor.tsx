@@ -93,6 +93,7 @@ export function Editor({
   presence,
   jumpTo,
   mentionAt,
+  isReadOnly = false,
 }: {
   pageId: string;
   /** Who else is on the page, and their cursors. */
@@ -100,6 +101,8 @@ export function Editor({
   jumpTo: CursorJump | null;
   /** A spot to put the caret at and show, as an encoded Yjs relative position; a new array goes there again. */
   mentionAt?: number[];
+  /** Shown, not editable: on a device that only reads until it is added. */
+  isReadOnly?: boolean;
 }) {
   // A Yjs doc can't forget what it merged, so a rebuilt page gets a fresh one.
   const [resets, setResets] = useState(0);
@@ -117,6 +120,7 @@ export function Editor({
       presence={presence}
       jumpTo={jumpTo}
       mentionAt={mentionAt}
+      isReadOnly={isReadOnly}
       restart={() => setResets((count) => count + 1)}
     />
   );
@@ -128,12 +132,14 @@ function PageEditor({
   presence,
   jumpTo,
   mentionAt,
+  isReadOnly,
   restart,
 }: {
   pageId: string;
   presence: PagePresence | undefined;
   jumpTo: CursorJump | null;
   mentionAt: number[] | undefined;
+  isReadOnly: boolean;
   restart: () => void;
 }) {
   const [{ showCursorsInPages, shareCursorInPages }] = usePreferences();
@@ -285,6 +291,8 @@ function PageEditor({
         state: EditorState.create({
           doc: text.toString(),
           extensions: [
+            EditorState.readOnly.of(isReadOnly),
+            EditorView.editable.of(!isReadOnly),
             drawSelection(),
             EditorView.lineWrapping,
             markdown({ base: markdownLanguage, codeLanguages: languages }),
@@ -380,7 +388,7 @@ function PageEditor({
       created?.destroy();
       doc.destroy();
     };
-  }, [pageId, dropTarget]);
+  }, [pageId, dropTarget, isReadOnly]);
 
   useEffect(() => {
     if (!view) return;

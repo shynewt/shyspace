@@ -61,16 +61,18 @@ export function ChannelSections() {
                   onClick={() => setUnreadOnly(!isUnreadOnly)}
                   className={cx(!isUnreadOnly && "opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100")}
                 />
-                <IconButton
-                  label="New channel"
-                  size="sm"
-                  icon={<Plus size={14} />}
-                  onClick={() => {
-                    roundsStarted.current += 1;
-                    setNewChannelRound(roundsStarted.current);
-                  }}
-                  className="opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100"
-                />
+                {!session.is_reading_only && (
+                  <IconButton
+                    label="New channel"
+                    size="sm"
+                    icon={<Plus size={14} />}
+                    onClick={() => {
+                      roundsStarted.current += 1;
+                      setNewChannelRound(roundsStarted.current);
+                    }}
+                    className="opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100"
+                  />
+                )}
               </>
             )
           }

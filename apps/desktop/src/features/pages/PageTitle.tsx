@@ -8,7 +8,17 @@ import { reportError } from "../../lib/toast";
  * follows remote renames while not being edited. An untitled page starts
  * here, so a new page is named first; Enter moves on to the body.
  */
-export function PageTitle({ pageId, title, ref }: { pageId: string; title: string; ref: Ref<{ focus: () => void }> }) {
+export function PageTitle({
+  pageId,
+  title,
+  ref,
+  isReadOnly = false,
+}: {
+  pageId: string;
+  title: string;
+  ref: Ref<{ focus: () => void }>;
+  isReadOnly?: boolean;
+}) {
   const [draft, setDraft] = useState(title);
   const [isEditing, setEditing] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -44,6 +54,7 @@ export function PageTitle({ pageId, title, ref }: { pageId: string; title: strin
     <textarea
       ref={field}
       aria-label="Page title"
+      readOnly={isReadOnly}
       rows={1}
       value={draft}
       onFocus={() => setEditing(true)}

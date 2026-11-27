@@ -54,8 +54,8 @@ pub(crate) struct AppState {
     opening: Mutex<()>,
     /// Stops the join in progress, if one is waiting for the admin.
     joining: std::sync::Mutex<Option<JoinCancel>>,
-    /// A link a restart interrupted while waiting for its hand-over, for the UI to pick up.
-    waiting_link: std::sync::Mutex<Option<devices::LinkCheck>>,
+    /// What the screens learn about this device's link when they ask.
+    link: std::sync::Mutex<devices::LinkState>,
     /// Huddle audio, shared by every workspace: one huddle at a time.
     media: ShyMedia,
 }
@@ -97,7 +97,7 @@ pub(crate) fn failed(error: anyhow::Error) -> String {
     format!("{error:#}")
 }
 
-fn session_of(workspace: &Workspace) -> Session {
+pub(crate) fn session_of(workspace: &Workspace) -> Session {
     Session {
         workspace_id: workspace.workspace_id().to_owned(),
         workspace_name: workspace.name().to_owned(),
@@ -1166,7 +1166,7 @@ pub fn run() {
                 single_folder,
                 opening: Mutex::new(()),
                 joining: std::sync::Mutex::new(None),
-                waiting_link: std::sync::Mutex::new(None),
+                link: std::sync::Mutex::default(),
                 media: ShyMedia::new(),
             });
             window::create_main_window(app.handle())?;
@@ -1251,8 +1251,11 @@ pub fn run() {
             devices::wait_for_device_link_handover,
             devices::stop_device_link,
             devices::waiting_device_link,
+            devices::recheck_device_link,
+            devices::take_ended_device_link,
             files::stage_pasted_file,
             clipboard::clipboard_image,
+            clipboard::clipboard_text,
             files::staged_file_bytes,
             files::unstage_file,
             files::send_files,

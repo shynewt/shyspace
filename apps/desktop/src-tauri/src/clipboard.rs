@@ -1,6 +1,7 @@
-//! The image on the system clipboard, read only when the person pastes and
-//! the web view handed the page nothing: some WebKitGTK builds drop pasted
-//! images on the way to the page.
+//! The system clipboard, read only when the person asks: its image when
+//! they paste and the web view handed the page nothing (some WebKitGTK
+//! builds drop pasted images on the way to the page), and its text for a
+//! Paste button, which the web view's own clipboard API can't read.
 
 use tauri::{AppHandle, ipc::Response};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -26,6 +27,22 @@ pub fn clipboard_image(app: AppHandle) -> CommandResult<Response> {
         image.height(),
         image.rgba(),
     )?))
+}
+
+/// Longer than any code a person pastes into the app.
+const MAX_TEXT_BYTES: usize = 64 * 1024;
+
+/// The clipboard's text, for a Paste button.
+#[tauri::command(async)]
+pub fn clipboard_text(app: AppHandle) -> CommandResult<String> {
+    let text = app
+        .clipboard()
+        .read_text()
+        .map_err(|error| format!("there's no text on the clipboard to paste ({error})"))?;
+    if text.len() > MAX_TEXT_BYTES {
+        return Err("the clipboard's text is too long to be a code".to_owned());
+    }
+    Ok(text)
 }
 
 fn frame_image(width: u32, height: u32, rgba: &[u8]) -> CommandResult<Vec<u8>> {

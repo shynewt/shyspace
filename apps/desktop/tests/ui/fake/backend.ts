@@ -198,7 +198,10 @@ export class FakeBackend {
   readonly devices = new FakeDevices({
     me: () => this.me(),
     workspaceId: () => this.session?.workspace_id ?? "",
+    isAdmin: () => Boolean(this.session?.is_admin),
+    isReadingOnly: () => Boolean(this.session?.is_reading_only),
     emitFrom: (workspaceId, change) => void emit("change", { workspace_id: workspaceId, change }),
+    stopReading: (hasJoined) => (hasJoined ? this.finishLinking() : this.dropReading()),
     onChange: () => this.notify({ kind: "members" }),
     startReading: () => {
       const joined = this.joinWorkspace("You");
@@ -209,8 +212,14 @@ export class FakeBackend {
 
   /** This device's link ended without it being added: its reading workspace is wiped. */
   endLinking(message: string): void {
+    this.devices.ended = message;
+    this.dropReading();
+    void emit("link-ended", null);
+  }
+
+  private dropReading(): void {
     this.session = null;
-    void emit("link-ended", { message });
+    void emit("change", { workspace_id: null, change: { kind: "workspaces" } });
   }
 
   /** The admin's app added this linking device: the real workspace takes the reading one's place. */

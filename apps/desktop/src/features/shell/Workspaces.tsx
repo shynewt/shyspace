@@ -37,6 +37,8 @@ type WorkspacesValue = {
   leave: (workspaceId: string) => Promise<void>;
   /** Opens joining, creating or restoring another workspace. */
   add: () => void;
+  /** Stops this device's link, then shows what's left (the joined workspace, if it was added just before). */
+  stopLink: () => Promise<void>;
 };
 
 const WorkspacesContext = createContext<WorkspacesValue | null>(null);
@@ -119,14 +121,25 @@ export function WorkspacesProvider({
   }, [onAdd]);
 
   // A linking device's link ended without it being added: its workspace is gone, so say why and show what's left.
-  useEffect(
-    () =>
-      onLinkEnded((message) => {
-        reportError(message);
-        api.session().then(onSession, reportError);
-      }),
-    [onSession],
-  );
+  // With no workspace left, onboarding shows why; with one, it's said here.
+  useEffect(() => {
+    const sayWhyItEnded = async () => {
+      const ended = await api.takeEndedDeviceLink();
+      if (ended !== null) reportError(ended);
+    };
+    const showWhatsLeft = async () => {
+      const next = await api.session();
+      onSession(next);
+      if (next !== null) await sayWhyItEnded();
+    };
+    void sayWhyItEnded().catch(reportError);
+    return onLinkEnded(() => void showWhatsLeft().catch(reportError));
+  }, [onSession]);
+
+  const stopLink = useCallback(async () => {
+    await api.stopDeviceLink();
+    onSession(await api.session());
+  }, [onSession]);
 
   // A linking device's reading-only workspace was replaced by the real one: show that one.
   useEffect(
@@ -213,8 +226,8 @@ export function WorkspacesProvider({
   useEffect(() => () => onLook(null), [onLook]);
 
   const value = useMemo(
-    () => ({ workspaces, badges, shownId: session.workspace_id, look, select, openIn, leave, add: onAdd }),
-    [workspaces, badges, session.workspace_id, look, select, openIn, leave, onAdd],
+    () => ({ workspaces, badges, shownId: session.workspace_id, look, select, openIn, leave, add: onAdd, stopLink }),
+    [workspaces, badges, session.workspace_id, look, select, openIn, leave, onAdd, stopLink],
   );
   return (
     <WorkspacesContext.Provider value={value}>

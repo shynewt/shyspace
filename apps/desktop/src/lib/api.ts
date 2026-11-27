@@ -24,6 +24,16 @@ export type LinkCheck = { code: string | null };
 /** A pasted link code, read without contacting anything; the name is the code's own claim. */
 export type LinkCodeSummary = { workspace_name: string };
 /** One of your own devices, for Settings › Devices. */
+/** Where a link picked up after a restart stands before its hand-over (Rust `CheckAfterRestart`). */
+export type CheckAfterRestart =
+  | { kind: "code"; code: string }
+  | { kind: "confirmed" }
+  | { kind: "not_yet" }
+  | { kind: "unreachable" };
+
+/** A confirmed new device: its id, or, with `is_finishing`, kept and sent on by the next sync. */
+export type ConfirmedLink = { device: string | null; is_finishing: boolean };
+
 export type DeviceInfo = {
   id: string;
   is_this_device: boolean;
@@ -44,6 +54,9 @@ export type DeviceInfo = {
   is_linking: boolean;
   /** What removing it with the devices it linked would also take (ids). */
   linked_devices: string[];
+  /** Whether this device may ask to remove it now; if not, `why_not_removable` says why. */
+  may_remove: boolean;
+  why_not_removable: string | null;
 };
 /** Something that happened to one of your own devices, for your own screens. */
 export type DeviceNotice = {
@@ -534,7 +547,7 @@ export const api = {
   /** The numbers to pick from, once the new device has asked; null until then. */
   pendingLink: () => invoke<LinkCheckShown | null>("pending_link"),
   /** Links the device whose number was picked; any other pick ends the link. Returns its id. */
-  confirmLink: (picked: string) => invoke<string>("confirm_link", { picked }),
+  confirmLink: (picked: string) => invoke<ConfirmedLink>("confirm_link", { picked }),
   /** "None of these", or closing the dialog: the new device is told the link stopped. */
   cancelLink: () => invoke<void>("cancel_link"),
   myDevices: () => invoke<DeviceInfo[]>("my_devices"),
@@ -553,7 +566,13 @@ export const api = {
   /** Stops linking this device, for good: what it was handed is wiped. */
   stopDeviceLink: () => invoke<void>("stop_device_link"),
   /** A link a restart interrupted before its hand-over, to show again; go on with `waitForDeviceLinkHandover`. */
-  waitingDeviceLink: () => invoke<LinkCheck | null>("waiting_device_link"),
+  waitingDeviceLink: () => invoke<CheckAfterRestart | null>("waiting_device_link"),
+  /** Asks again where a link picked up after a restart stands. */
+  recheckDeviceLink: () => invoke<CheckAfterRestart>("recheck_device_link"),
+  /** Why this device's last link ended without it being added, once; null if it didn't. */
+  /** The clipboard's text, for a Paste button. */
+  clipboardText: () => invoke<string>("clipboard_text"),
+  takeEndedDeviceLink: () => invoke<string | null>("take_ended_device_link"),
   recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),
   createChannel: (name: string) => invoke<string>("create_channel", { name }),
@@ -802,8 +821,9 @@ export function onFileDrag(listener: (position: DropPoint | null) => void): () =
 }
 
 /** Linking this device ended without it being added, after its workspace opened for reading. */
-export function onLinkEnded(listener: (message: string) => void): () => void {
-  return subscribe<{ message: string }>("link-ended", (ended) => listener(ended.message));
+/** This device's link ended without it being added: `takeEndedDeviceLink` says why. */
+export function onLinkEnded(listener: () => void): () => void {
+  return subscribe<null>("link-ended", () => listener());
 }
 
 function subscribe<T>(event: string, listener: (payload: T) => void): () => void {

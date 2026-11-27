@@ -218,6 +218,7 @@ export const MessageItem = memo(function MessageItem({
                       whileTap={{ scale: 0.88 }}
                       transition={springs.pop}
                       onClick={() => toggleReaction(reaction.emoji)}
+                      disabled={session.is_reading_only}
                       className={cx(
                         "flex h-6 items-center gap-1 rounded-full border px-2 text-xs transition-colors",
                         reaction.mine
@@ -261,40 +262,42 @@ export const MessageItem = memo(function MessageItem({
               : "opacity-0 group-hover:opacity-100 keyboard-focus-within:opacity-100",
           )}
         >
-          <Popover
-            open={isPickerOpen}
-            onOpenChange={(open) => {
-              setPickerOpen(open);
-              if (!open) setFullPickerShown(false);
-            }}
-            trigger={<IconButton label="React" icon={<SmilePlus size={15} />} />}
-          >
-            {isFullPickerShown ? (
-              <EmojiPicker onSelect={toggleReaction} />
-            ) : (
-              <div className="flex items-center gap-0.5">
-                {QUICK_REACTIONS.map((emoji) => (
-                  <motion.button
-                    key={emoji}
-                    type="button"
-                    aria-label={`React with ${emoji}`}
-                    whileHover={{ scale: 1.25 }}
-                    transition={tweens.fast}
-                    onClick={() => toggleReaction(emoji)}
-                    className="grid h-8 w-8 place-items-center rounded-md text-xl hover:bg-surface-2"
-                  >
-                    {emoji}
-                  </motion.button>
-                ))}
-                <IconButton
-                  label="More emoji…"
-                  icon={<Plus size={15} />}
-                  onClick={() => setFullPickerShown(true)}
-                  className="ml-0.5 h-8 w-8"
-                />
-              </div>
-            )}
-          </Popover>
+          {!session.is_reading_only && (
+            <Popover
+              open={isPickerOpen}
+              onOpenChange={(open) => {
+                setPickerOpen(open);
+                if (!open) setFullPickerShown(false);
+              }}
+              trigger={<IconButton label="React" icon={<SmilePlus size={15} />} />}
+            >
+              {isFullPickerShown ? (
+                <EmojiPicker onSelect={toggleReaction} />
+              ) : (
+                <div className="flex items-center gap-0.5">
+                  {QUICK_REACTIONS.map((emoji) => (
+                    <motion.button
+                      key={emoji}
+                      type="button"
+                      aria-label={`React with ${emoji}`}
+                      whileHover={{ scale: 1.25 }}
+                      transition={tweens.fast}
+                      onClick={() => toggleReaction(emoji)}
+                      className="grid h-8 w-8 place-items-center rounded-md text-xl hover:bg-surface-2"
+                    >
+                      {emoji}
+                    </motion.button>
+                  ))}
+                  <IconButton
+                    label="More emoji…"
+                    icon={<Plus size={15} />}
+                    onClick={() => setFullPickerShown(true)}
+                    className="ml-0.5 h-8 w-8"
+                  />
+                </div>
+              )}
+            </Popover>
+          )}
           {onOpenThread && (
             <IconButton label="Reply in thread" icon={<MessageSquareReply size={15} />} onClick={onOpenThread} />
           )}
@@ -382,8 +385,10 @@ function MessageMenu({
       onCustom: () => setPicking(true),
     }),
   );
-  if (message.can_edit) items.push({ label: "Edit", icon: <Pencil size={14} />, onSelect: onEdit });
-  if (message.can_delete) {
+  // A device that only reads can't write: the core refuses, so nothing offers it.
+  const canWrite = !session.is_reading_only;
+  if (message.can_edit && canWrite) items.push({ label: "Edit", icon: <Pencil size={14} />, onSelect: onEdit });
+  if (message.can_delete && canWrite) {
     items.push({
       label: "Delete",
       icon: <Trash2 size={14} />,
