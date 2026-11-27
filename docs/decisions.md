@@ -2,6 +2,9 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Notices about your devices: the inbox always, an alert only when new (2026-11)
+A device linked or removed shows in the inbox of the person's other devices until they mark it seen, and as a desktop alert when it arrives while the app runs, in every open workspace, shown or not. Notices already there when a workspace opens show only in its inbox: alerting them at every start would nag about the same change, and the inbox keeps them in sight. The notice is the defense against someone using one of the person's devices to link or remove others, so it never waits for the person to open that workspace or look in Settings.
+
 ## Linking a device: a code, and a number picked from three (2026-11)
 A new device links through a short-lived code from one of the person's devices, not through an invite: the person is already in, so the admin isn't asked to approve, only to commit. The one security step is the person tapping, on the device they already use, the number the new device shows, among two random decoys. The number is committed then revealed, so nobody can steer it. Picking from three makes the person look at the new device, where "They match" could be tapped without looking. Typing the number was ruled out as a step more for the same check.
 

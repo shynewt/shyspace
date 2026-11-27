@@ -100,7 +100,7 @@ What shyspace protects, how, and where it falls short. Update this whenever a ch
 
 - The check code protects against a swapped link code or request, not against a person talked into linking someone else's device. The dialog warns about it, and picking the number from three makes the person look at the new device.
 - A device the person confirmed that keeps what it was handed holds read keys up to its certificate's epoch, and the bucket keys until they change. After a refusal, the key-only commit stops those keys opening new content, except what members that haven't followed it yet still write in the old epoch.
-
+- Someone holding one of a person's devices can ask to remove the person's other devices, except that a linked device can't remove the first one. The person's other devices get a notice (in the inbox, and as an alert when it arrives while the app runs, in every open workspace), which is the defense.
 - MLS processes a received commit before merging it, and processing uses it up; a disk error between the two, inside OpenMLS, leaves that member unable to follow that commit, and it would need to join again.
 - A dishonest admin can stall members by committing with a wrong device-map digest, as it can by not committing at all, or by leaving the key out of a v3 commit, after which that member must join again.
 - Someone with the bucket keys can keep a new device waiting to finish its link by emptying its commit slot, as they can deny service in other ways; members put the commit back, and the device's folder stays as it was until it finishes or the link is started again.
