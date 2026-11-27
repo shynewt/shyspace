@@ -1397,3 +1397,68 @@ async fn a_linked_device_holding_a_channel_key_still_cannot_write_there() {
     sync_all(&[&admin, &bob, &phone]).await;
     assert!(!texts(&admin, &channel).contains(&"from the phone".to_string()));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_channel_naming_a_key_later_linked_still_rotates_without_it() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone_key = iroh::SecretKey::generate();
+    let phone_dir = root.path().join("phone");
+    data_dir(&phone_dir)
+        .use_identity_for_test(&phone_key)
+        .await
+        .unwrap();
+    let key = new_channel_key();
+    let invitees = vec![
+        Invitee {
+            member: admin.me(),
+            after_seq: own_last_seq(&admin),
+        },
+        Invitee {
+            member: phone_key.public(),
+            after_seq: 0,
+        },
+    ];
+    let channel = private_channel_id(&bob.me(), &commitment(&key), "plans", &invitees).unwrap();
+    let first = StoredKey {
+        channel: channel.clone(),
+        generation: 1,
+        key,
+    };
+    // Bob's own app wrote these before the phone was linked.
+    let mut forger = Forger::new(&bob);
+    let envelopes = [
+        forger.seal(forged_grant(&bob, &admin, &channel, 1, key)),
+        forger.seal(forged_grant(&bob, &bob, &channel, 1, key)),
+        forger.seal_private(
+            &first,
+            PrivateOp::Create {
+                name: "plans".into(),
+                commitment: commitment(&key),
+                members: invitees,
+            },
+        ),
+    ];
+    for envelope in &envelopes {
+        admin.receive(envelope.clone()).unwrap();
+        bob.receive(envelope.clone()).unwrap();
+    }
+    let phone = link_device(&admin, &bob, &phone_dir, &bucket).await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    assert!(
+        members_of(&bob, &channel).contains(&phone.my_device_id()),
+        "listed before its link"
+    );
+
+    bob.rotate_private_channel_key(&channel).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert_eq!(newest_key(&admin, &channel).generation, 2);
+    assert!(
+        phone
+            .state()
+            .store
+            .channel_keys(Some(&channel))
+            .unwrap()
+            .is_empty()
+    );
+}

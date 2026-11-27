@@ -401,6 +401,30 @@ impl Mls {
         Ok(self.members()?.contains(identity))
     }
 
+    /// What a dishonest admin's app could stage: adds and removals in one
+    /// commit, which an honest one never makes for devices.
+    #[cfg(test)]
+    pub(crate) fn commit_adds_and_removals(
+        &mut self,
+        adds: Vec<KeyPackage>,
+        removals: &[PublicKey],
+        binding: &[u8],
+        map_key: &[u8; 32],
+    ) -> Result<Vec<u8>> {
+        let group = self.group.as_ref().context("no group")?;
+        let leaves = removals
+            .iter()
+            .map(|member| {
+                Ok(group
+                    .members()
+                    .find(|candidate| identity_of(&candidate.credential).is_ok_and(|id| id == *member))
+                    .context("not a member")?
+                    .index)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(self.commit_with_map_key(adds, leaves, binding, map_key)?.0)
+    }
+
     /// `binding` and `map_key` as for [`Self::add_member`].
     /// Stages one commit removing every leaf in `members`.
     pub fn remove_members(

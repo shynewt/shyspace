@@ -417,6 +417,28 @@ mod tests {
         members.iter().chain(added).copied().collect()
     }
 
+    /// An edit sealed before the phone was linked gets the same verdict
+    /// whether a member followed the link's commit before judging it or not.
+    #[test]
+    fn ownership_through_a_device_counts_only_from_the_epoch_it_was_linked() {
+        let world = world();
+        let phone = SecretKey::generate();
+        let edit = crate::ops::Op::MessageEdit {
+            id: crate::ops::new_owned_id(&phone.public()),
+            text: "changed".into(),
+        };
+        let (ada, admin) = (world.ada.public(), world.admin.public());
+        let may_edit = |epoch| world.store.is_permitted(&edit, &ada, epoch, &admin).unwrap();
+
+        assert!(!may_edit(4), "before the phone's row arrived");
+        world.put(&world.ada, &world.ada, &phone, 5);
+        assert!(
+            !may_edit(4),
+            "after it arrived, for an edit sealed before the link"
+        );
+        assert!(may_edit(5), "from the link on");
+    }
+
     #[test]
     fn the_devices_a_device_vouched_for_are_found_through_every_link() {
         let world = world();

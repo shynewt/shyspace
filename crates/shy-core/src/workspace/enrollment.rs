@@ -194,16 +194,9 @@ fn record_own_certificate(
         Mls::commit_binding(&verified.commit)? == expected,
         "the commit that added this device doesn't match its lists"
     );
-    // The members after the commit come from the Welcome's tree, which MLS
-    // checked; the grant must say the same.
-    let mut members_after = mls.members()?;
-    let mut granted_members = local.store.epoch_members(join_epoch)?;
-    members_after.sort_unstable();
-    granted_members.sort_unstable();
-    ensure!(
-        members_after == granted_members,
-        "the grant's members don't match the group this device joined"
-    );
+    // The members after the commit come from the Welcome's tree; `admit`
+    // checked that the grant says the same.
+    let members_after = mls.members()?;
     let me = local.identity.public();
     let mine = local
         .store

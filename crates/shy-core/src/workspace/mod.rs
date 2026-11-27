@@ -36,7 +36,7 @@ pub use storage::StorageUpdate;
 
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use iroh::{PublicKey, SecretKey};
 use tokio::sync::{Notify, broadcast};
 
@@ -233,8 +233,16 @@ impl State {
     fn record_members(&self) -> Result<()> {
         if self.mls.is_active() {
             let members = self.mls.members()?;
-            self.store
-                .put_epoch(self.mls.epoch()?, &self.mls.epoch_key()?, &members)?;
+            let (epoch, key) = (self.mls.epoch()?, self.mls.epoch_key()?);
+            // Storing never replaces a key, so one already there must be the
+            // group's: anything else is a gap that must fail loudly.
+            if let Some(stored) = self.store.epoch_key(epoch)? {
+                ensure!(
+                    stored == key,
+                    "this device's key for the current epoch doesn't match its group"
+                );
+            }
+            self.store.put_epoch(epoch, &key, &members)?;
             self.store.set_current_members(&members)?;
         }
         Ok(())
@@ -383,6 +391,10 @@ pub(crate) struct Inner {
     /// call: it says so on the first channel, then waits on the second.
     #[cfg(test)]
     pub audience_pause: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
+    /// Pauses the next removal after it collected the removed devices'
+    /// logs, before it reads where to freeze them.
+    #[cfg(test)]
+    pub removal_pause: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
 }
 
 #[derive(Clone)]

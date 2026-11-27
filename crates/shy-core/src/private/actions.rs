@@ -443,6 +443,12 @@ impl Workspace {
         };
         let mut wraps = Vec::new();
         for recipient in recipients {
+            // A linked device can't hold a sealing key until private channels
+            // go by person; one an add named before its link stays listed,
+            // and gets no key, rather than stopping every rotation.
+            if self.state().store.person_of(recipient)? != *recipient {
+                continue;
+            }
             let public = self
                 .state()
                 .store

@@ -262,7 +262,17 @@ impl Workspace {
             };
             let grant = match delivery.map_digest {
                 Some(_) => postcard::to_stdvec(&self.grant_with_devices(&state.store, grant)?)?,
-                None => postcard::to_stdvec(&grant)?,
+                None => {
+                    #[cfg(test)]
+                    let grant = self
+                        .tampered(GrantWithDevices {
+                            grant,
+                            devices: Vec::new(),
+                            bound_frozen: Vec::new(),
+                        })
+                        .grant;
+                    postcard::to_stdvec(&grant)?
+                }
             };
             let sealed_grant = state.mls.seal_for_members(&grant)?;
             let delivery = Delivery {
@@ -643,6 +653,8 @@ impl Workspace {
                 .await
                 .context("can't collect the member's last messages")?;
         }
+        #[cfg(test)]
+        self.pause_removal();
         // One hold from reading the last seqs to settling the freeze, so no
         // op can land in between.
         let (from_epoch, signed) = {
@@ -748,6 +760,20 @@ impl Workspace {
         };
         state.save_commit(from_epoch, &signed)?;
         Ok(signed)
+    }
+
+    #[cfg(test)]
+    fn pause_removal(&self) {
+        let pause = self
+            .inner
+            .removal_pause
+            .lock()
+            .expect("removal pause lock")
+            .take();
+        if let Some((paused, resume)) = pause {
+            let _ = paused.send(());
+            let _ = resume.recv();
+        }
     }
 
     async fn upload_commit(&self, from_epoch: u64, signed: Vec<u8>) -> Result<()> {

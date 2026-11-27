@@ -667,6 +667,8 @@ impl Workspace {
                 #[cfg(test)]
                 audience_pause: Mutex::default(),
                 #[cfg(test)]
+                removal_pause: Mutex::default(),
+                #[cfg(test)]
                 drop_segment_transaction: Default::default(),
                 #[cfg(test)]
                 fail_next_answer_upload: Default::default(),
@@ -836,6 +838,7 @@ pub(super) fn admit(
                 bucket,
                 bucket_lamport,
             } = postcard::from_bytes(&opened)?;
+            check_join_epoch(&history, mls)?;
             history.store_into(&local.store, context)?;
             GrantedBucket {
                 bucket,
@@ -847,6 +850,7 @@ pub(super) fn admit(
             // Before anything is stored, written or announced: a map the
             // members don't share would split the workspace.
             check_device_map(facts.workspace_id, &with_devices, &expected)?;
+            check_join_epoch(&with_devices.grant.history, mls)?;
             let GrantWithDevices {
                 grant:
                     Grant {
@@ -866,6 +870,40 @@ pub(super) fn admit(
     };
     local.store.record_joined_epoch(mls.epoch()?)?;
     Ok(granted)
+}
+
+/// Checks the grant against the group MLS let this device into: the epoch
+/// it joined at must list the Welcome tree's members, with the group's key.
+/// Only epochs before it are on the admin's word.
+fn check_join_epoch(history: &crate::membership::keyring::KeyHistory, mls: &Mls) -> Result<()> {
+    let join_epoch = mls.epoch()?;
+    // One entry per epoch, ending at the join epoch: a second entry for an
+    // epoch, or one past it, would be merged in unchecked.
+    ensure!(
+        history
+            .epochs
+            .windows(2)
+            .all(|pair| pair[0].epoch < pair[1].epoch),
+        "the grant's history isn't one entry per epoch in order"
+    );
+    let granted = history
+        .epochs
+        .last()
+        .filter(|entry| entry.epoch == join_epoch)
+        .context("the grant's history doesn't end at the epoch this device joined")?;
+    let mut granted_members = granted.members.clone();
+    let mut members = mls.members()?;
+    granted_members.sort_unstable();
+    members.sort_unstable();
+    ensure!(
+        granted_members == members,
+        "the grant's members don't match the group this device joined"
+    );
+    ensure!(
+        granted.key == mls.epoch_key()?,
+        "the grant's key doesn't match the group this device joined"
+    );
+    Ok(())
 }
 
 /// Checks that the grant's device map and bound freezes are the ones the

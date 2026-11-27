@@ -593,3 +593,56 @@ pub fn vouch(voucher: &Workspace, request: &DeviceRequest) -> DeviceCertificate 
     )
     .unwrap()
 }
+
+/// A commit a dishonest admin's app could make, skipping its own checks:
+/// adding each of `new_devices` and removing `removals` at once, carrying
+/// `certificates`. The admin signs a v3 wrapper, saves it and settles.
+/// Returns the epoch it leaves and the wrapper, for the bucket.
+pub fn stage_devices_change_unchecked(
+    admin: &Workspace,
+    new_devices: &[(&iroh::SecretKey, &Path)],
+    removals: &[iroh::PublicKey],
+    certificates: &[DeviceCertificate],
+) -> (u64, Vec<u8>) {
+    let frozen: Vec<FrozenAuthor> = removals
+        .iter()
+        .map(|member| frozen_at_last_seq(admin, member))
+        .collect();
+    let key_packages: Vec<_> = new_devices
+        .iter()
+        .map(|(device, dir)| {
+            std::fs::create_dir_all(dir).unwrap();
+            let device_mls = Mls::open(&dir.join("device-mls.db"), TEST_DB_KEY, device, None, None).unwrap();
+            let binding = device.sign(&binding_message(device_mls.signer_public()));
+            (device_mls.key_package().unwrap(), binding.to_bytes())
+        })
+        .collect();
+    let mut state = admin.state();
+    let adds = key_packages
+        .iter()
+        .map(|(key_package, binding)| state.mls.verify_key_package(key_package, binding).unwrap().1)
+        .collect();
+    let from_epoch = state.mls.epoch().unwrap();
+    let from_epoch_key = state.mls.epoch_key().unwrap();
+    let lists = commit::lists_hash(&from_epoch_key, from_epoch, &frozen, certificates).unwrap();
+    let map_key = state
+        .map_key(&admin.inner.config.workspace_id, from_epoch, &frozen)
+        .unwrap();
+    let mls_commit = state
+        .mls
+        .commit_adds_and_removals(adds, removals, &lists, &map_key)
+        .unwrap();
+    let signed = commit::sign_v3(
+        &admin.inner.identity,
+        &from_epoch_key,
+        from_epoch,
+        mls_commit,
+        frozen,
+        certificates,
+    )
+    .unwrap();
+    state.save_commit(from_epoch, &signed).unwrap();
+    state.mls.merge_pending_commit().unwrap();
+    state.record_epoch(&admin.inner.config).unwrap();
+    (from_epoch, signed)
+}
