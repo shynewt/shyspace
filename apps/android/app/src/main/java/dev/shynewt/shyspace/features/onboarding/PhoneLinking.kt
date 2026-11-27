@@ -5,11 +5,14 @@ package dev.shynewt.shyspace.features.onboarding
  * per step. Each call fails with the core's own words for the person (ShyException).
  */
 interface PhoneLinking {
-    /** Starts linking with the code the person's other device shows. */
-    suspend fun beginLink(code: String)
+    /**
+     * Whether [text] is a whole link code that hasn't run out, returning the name of the workspace
+     * it links into. Reads nothing but the text, so it's fine on every keystroke.
+     */
+    fun readLinkCode(text: String): String
 
-    /** Waits until the other device opens this phone's request. */
-    suspend fun waitForCheck(): LinkCheck
+    /** Starts linking with the code the person's other device shows, and waits until that device opens the request. */
+    suspend fun beginLink(code: String): LinkCheck
 
     /** Waits until the other device hands this phone what it needs; returns the workspace it can now read. */
     suspend fun waitForLinkHandover(): String

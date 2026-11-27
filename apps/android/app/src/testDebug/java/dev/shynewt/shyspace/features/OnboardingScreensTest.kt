@@ -66,39 +66,47 @@ class OnboardingScreensTest {
 
     private var step by mutableStateOf<LinkStep>(LinkStep.EnterCode())
 
+    /** Every text the code field held, in order. */
+    private val changes = mutableListOf<String>()
+
     private fun showLink() {
         compose.setContent {
             ShyTheme(isDark = false) {
-                LinkScreen(step = step, onCodeEntered = { asked += "code $it" }, onStartAgain = { asked += "again" }, onBack = {})
+                LinkScreen(
+                    step = step,
+                    onCodeChange = { changes += it },
+                    onCodeSubmitted = { asked += "code $it" },
+                    onStartAgain = { asked += "again" },
+                    onBack = {},
+                )
             }
         }
     }
 
     @Test
-    fun aCodePastedIntoTheFieldIsTakenAsItLands() {
-        showLink()
-
-        compose.onNodeWithText("Link code").performTextInput("shy-link-1234")
-        compose.waitForIdle()
-
-        assertEquals(listOf("code shy-link-1234"), asked)
-    }
-
-    @Test
-    fun aCodeTypedByHandIsTakenOnDone() {
+    fun everyChangeToTheFieldIsPassedOnForTheCoreToRead() {
         showLink()
 
         compose.onNodeWithText("Link code").performTextInput("a")
         compose.onNodeWithText("Link code").performTextInput("b")
         compose.waitForIdle()
+
+        assertEquals(listOf("a", "ab"), changes.filter { it.isNotEmpty() })
         assertEquals(emptyList<String>(), asked)
+    }
+
+    @Test
+    fun aCodeTypedByHandIsHandedInOnDone() {
+        showLink()
+
+        compose.onNodeWithText("Link code").performTextInput("ab")
         compose.onNodeWithText("Link code").performImeAction()
 
         assertEquals(listOf("code ab"), asked)
     }
 
     @Test
-    fun pasteTakesTheCodeFromTheClipboard() {
+    fun pasteHandsInTheClipboardAsItIs() {
         RuntimeEnvironment.getApplication().getSystemService(ClipboardManager::class.java)
             .setPrimaryClip(ClipData.newPlainText("code", "  shy-link-5678 \n"))
         showLink()
@@ -106,7 +114,7 @@ class OnboardingScreensTest {
         compose.onNodeWithText("Paste").performClick()
         compose.waitForIdle()
 
-        assertEquals(listOf("code shy-link-5678"), asked)
+        assertEquals(listOf("code   shy-link-5678 \n"), asked)
     }
 
     @Test

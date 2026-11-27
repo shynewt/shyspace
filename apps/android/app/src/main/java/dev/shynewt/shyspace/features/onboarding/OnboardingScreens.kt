@@ -131,12 +131,19 @@ fun WelcomeScreen(onLinkThisPhone: (() -> Unit)?, developerTools: (@Composable (
 }
 
 /**
- * Linking this phone to an account: paste (or later scan) the code, then the other device
- * confirms. [onCodeEntered] gets a code only once it arrived whole.
+ * Linking this phone to an account: paste or scan the code, then the other device confirms.
+ * [onCodeChange] gets every change to the code field; [onCodeSubmitted] a code handed in at
+ * once (pasted, scanned, or typed and Done).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LinkScreen(step: LinkStep, onCodeEntered: (String) -> Unit, onStartAgain: () -> Unit, onBack: () -> Unit) {
+fun LinkScreen(
+    step: LinkStep,
+    onCodeChange: (String) -> Unit,
+    onCodeSubmitted: (String) -> Unit,
+    onStartAgain: () -> Unit,
+    onBack: () -> Unit,
+) {
     val colors = LocalShyColors.current.palette
     Scaffold(
         containerColor = colors.bg,
@@ -170,7 +177,7 @@ fun LinkScreen(step: LinkStep, onCodeEntered: (String) -> Unit, onStartAgain: ()
                     .padding(horizontal = 24.dp, vertical = 16.dp),
             ) {
                 when (step) {
-                    is LinkStep.EnterCode -> EnterCode(step.problem, onCodeEntered)
+                    is LinkStep.EnterCode -> EnterCode(step.problem, onCodeChange, onCodeSubmitted)
                     LinkStep.Waiting -> Waiting()
                     is LinkStep.Checking -> Checking(step.checkCode)
                     LinkStep.SomeoneElse -> {
@@ -190,33 +197,29 @@ fun LinkScreen(step: LinkStep, onCodeEntered: (String) -> Unit, onStartAgain: ()
 }
 
 @Composable
-private fun EnterCode(problem: String?, onCodeEntered: (String) -> Unit) {
+private fun EnterCode(problem: String?, onCodeChange: (String) -> Unit, onCodeSubmitted: (String) -> Unit) {
     val colors = LocalShyColors.current.palette
     val code = rememberTextFieldState()
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    // A code that lands whole (pasted into the field) is taken at once: there's no Continue button.
-    LaunchedEffect(code) {
-        var previous = ""
-        snapshotFlow { code.text.toString() }.collect { text ->
-            if (text.length - previous.length > 1) onCodeEntered(text)
-            previous = text
-        }
+    // There's no Continue button: a whole code is taken as soon as the core reads it as one.
+    LaunchedEffect(code) { snapshotFlow { code.text.toString() }.collect(onCodeChange) }
+    val fill: (String) -> Unit = { handedIn ->
+        code.setTextAndPlaceCursorAtEnd(handedIn.trim())
+        onCodeSubmitted(handedIn)
     }
     Text(stringResource(R.string.link_where), style = MaterialTheme.typography.bodyLarge, color = colors.text)
     Text(stringResource(R.string.link_gets), style = MaterialTheme.typography.bodyMedium, color = colors.textMuted)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        CodeField(code, onDone = { onCodeEntered(code.text.toString()) }, modifier = Modifier.weight(1f))
+        CodeField(code, onDone = { onCodeSubmitted(code.text.toString()) }, modifier = Modifier.weight(1f))
         OutlinedButton(onClick = {
             scope.launch {
                 val pasted = clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text ?: return@launch
-                // Filling the field is a code landing whole, which takes it.
-                code.setTextAndPlaceCursorAtEnd(pasted.toString().trim())
+                fill(pasted.toString())
             }
         }) { Text(stringResource(R.string.paste)) }
     }
-    // A scanned code fills the field, landing whole like a paste.
-    ScanCodeButton(onCode = { scanned -> code.setTextAndPlaceCursorAtEnd(scanned.trim()) })
+    ScanCodeButton(onCode = fill)
     problem?.let {
         Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.dangerText, modifier = Modifier.announcedWhenItAppears())
     }

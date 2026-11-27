@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.shynewt.shyspace.core.coreCall
+import uniffi.shy_ffi.ShyException
+import dev.shynewt.shyspace.core.reason
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,12 +18,22 @@ class LinkViewModel(private val linking: PhoneLinking) : ViewModel() {
     val step: StateFlow<LinkStep> = mutableStep.asStateFlow()
     private var linkingJob: Job? = null
 
-    /** A whole code arrived (pasted, scanned, or typed and confirmed): link with it. */
-    fun enterCode(code: String) {
-        val trimmed = code.trim()
-        if (trimmed.isEmpty() || mutableStep.value !is LinkStep.EnterCode) return
-        mutableStep.value = LinkStep.Waiting
-        linkingJob = viewModelScope.launch { link(trimmed) }
+    /** The code field changed: a code is taken as soon as it's whole, typed or pasted. */
+    fun codeChanged(text: String) {
+        if (mutableStep.value !is LinkStep.EnterCode || !isWholeCode(text)) return
+        begin(text)
+    }
+
+    /** A code was handed in (pasted, scanned, or typed and Done): taken, or the core says why not. */
+    fun codeSubmitted(text: String) {
+        if (mutableStep.value !is LinkStep.EnterCode) return
+        try {
+            linking.readLinkCode(text)
+        } catch (problem: ShyException) {
+            mutableStep.value = LinkStep.EnterCode(problem = problem.reason())
+            return
+        }
+        begin(text)
     }
 
     /** After the link ended, or someone else used the code: back to entering a code. */
@@ -40,9 +52,21 @@ class LinkViewModel(private val linking: PhoneLinking) : ViewModel() {
         viewModelScope.launch { coreCall({ reason -> Log.w(TAG, "couldn't stop linking: $reason") }) { linking.cancelLink() } }
     }
 
+    private fun isWholeCode(text: String): Boolean = try {
+        linking.readLinkCode(text)
+        true
+    } catch (_: ShyException) {
+        false
+    }
+
+    private fun begin(code: String) {
+        mutableStep.value = LinkStep.Waiting
+        linkingJob = viewModelScope.launch { link(code) }
+    }
+
     private suspend fun link(code: String) {
-        coreCall({ reason -> mutableStep.value = LinkStep.EnterCode(problem = reason) }) { linking.beginLink(code) } ?: return
-        val check = coreCall(::end) { linking.waitForCheck() } ?: return
+        // The code read as whole, so a failure from here on is the link ending.
+        val check = coreCall(::end) { linking.beginLink(code) } ?: return
         when (check) {
             is LinkCheck.ShowNumber -> mutableStep.value = LinkStep.Checking(check.code)
             LinkCheck.SomeoneElse -> {

@@ -19,62 +19,73 @@ class LinkViewModelTest {
     @get:Rule
     val mainThread = MainThreadRule()
 
-    /** The core's linking, scripted: each step answers when the test completes it. */
-    private class ScriptedLinking : PhoneLinking {
+    /** The core's linking, scripted: whole codes are listed, and each step answers when the test completes it. */
+    private class ScriptedLinking(private val wholeCodes: Set<String>) : PhoneLinking {
         val calls = mutableListOf<String>()
-        val begun = CompletableDeferred<Unit>()
         val check = CompletableDeferred<LinkCheck>()
         val handover = CompletableDeferred<String>()
 
-        override suspend fun beginLink(code: String) {
-            synchronized(calls) { calls += "begin $code" }
-            begun.await()
+        override fun readLinkCode(text: String): String {
+            if (text !in wholeCodes) throw ShyException.Failed("This isn't a link code. Copy it again from your other device.")
+            return "Acme"
         }
 
-        override suspend fun waitForCheck(): LinkCheck = check.await()
+        override suspend fun beginLink(code: String): LinkCheck {
+            synchronized(calls) { calls += "begin $code" }
+            return check.await()
+        }
 
         override suspend fun waitForLinkHandover(): String = handover.await()
 
         override suspend fun cancelLink() {
             synchronized(calls) { calls += "cancel" }
         }
+
+        fun callsSoFar() = synchronized(calls) { calls.toList() }
     }
 
-    private val linking = ScriptedLinking()
+    private val linking = ScriptedLinking(wholeCodes = setOf("shy-link-1234", "shy-link-5678"))
     private val link = mainThread.viewModel { LinkViewModel(linking) }
 
     private suspend fun stepWhere(predicate: (LinkStep) -> Boolean): LinkStep = withTimeout(5_000) { link.step.first(predicate) }
 
     @Test
-    fun aCodeLeadsToTheNumberThenToReading() = runBlocking {
-        link.enterCode("  shy-link-1234 \n")
-        stepWhere { it == LinkStep.Waiting }
+    fun aCodeIsTakenTheMomentItIsWholeWhileAHalfTypedOneStaysQuiet() = runBlocking {
+        link.codeChanged("shy-li")
+        assertEquals(LinkStep.EnterCode(), link.step.value)
 
-        linking.begun.complete(Unit)
+        link.codeChanged("shy-link-1234")
+
+        stepWhere { it == LinkStep.Waiting }
+        withTimeout(5_000) { while (linking.callsSoFar().isEmpty()) delay(10) }
+        assertEquals(listOf("begin shy-link-1234"), linking.callsSoFar())
+    }
+
+    @Test
+    fun aSubmittedCodeThatIsNotOneSaysWhyInTheCoresWords() {
+        link.codeSubmitted("hello there")
+
+        assertEquals(LinkStep.EnterCode(problem = "This isn't a link code. Copy it again from your other device."), link.step.value)
+        assertEquals(emptyList<String>(), linking.callsSoFar())
+    }
+
+    @Test
+    fun aCodeLeadsToTheNumberThenToReading() = runBlocking {
+        link.codeSubmitted("shy-link-1234")
+
         linking.check.complete(LinkCheck.ShowNumber("482917"))
         stepWhere { it == LinkStep.Checking("482917") }
         linking.handover.complete("w1")
 
         stepWhere { it == LinkStep.Reading("w1") }
-        assertEquals(listOf("begin shy-link-1234"), linking.calls)
-    }
-
-    @Test
-    fun aCodeThatDoesNotWorkSaysWhyInTheCoresWords() = runBlocking {
-        linking.begun.completeExceptionally(ShyException.Failed("This code has run out. Show a new one on your other device."))
-
-        link.enterCode("shy-link-old")
-
-        stepWhere { it == LinkStep.EnterCode(problem = "This code has run out. Show a new one on your other device.") }
         Unit
     }
 
     @Test
     fun aRefusedLinkEndsAndCanStartAgain() = runBlocking {
-        linking.begun.complete(Unit)
         linking.check.completeExceptionally(ShyException.Failed("Your other device stopped the link. Nothing was shared."))
 
-        link.enterCode("shy-link-1234")
+        link.codeSubmitted("shy-link-1234")
         stepWhere { it == LinkStep.Ended("Your other device stopped the link. Nothing was shared.") }
         link.startAgain()
 
@@ -82,11 +93,10 @@ class LinkViewModelTest {
     }
 
     @Test
-    fun whenSomeoneElseUsedTheCodeItStopsThere() = runBlocking {
-        linking.begun.complete(Unit)
+    fun whenSomeoneElseUsedTheCodeItStopsThereAndCanStartAgain() = runBlocking {
         linking.check.complete(LinkCheck.SomeoneElse)
 
-        link.enterCode("shy-link-1234")
+        link.codeSubmitted("shy-link-1234")
         stepWhere { it == LinkStep.SomeoneElse }
         link.startAgain()
 
@@ -95,11 +105,10 @@ class LinkViewModelTest {
 
     @Test
     fun alreadyConfirmedGoesStraightOnToReading() = runBlocking {
-        linking.begun.complete(Unit)
         linking.check.complete(LinkCheck.AlreadyConfirmed)
         linking.handover.complete("w1")
 
-        link.enterCode("shy-link-1234")
+        link.codeSubmitted("shy-link-1234")
 
         stepWhere { it == LinkStep.Reading("w1") }
         Unit
@@ -107,25 +116,25 @@ class LinkViewModelTest {
 
     @Test
     fun leavingPartWayStopsTheLink() = runBlocking {
-        link.enterCode("shy-link-1234")
-        stepWhere { it == LinkStep.Waiting }
+        link.codeSubmitted("shy-link-1234")
+        withTimeout(5_000) { while (linking.callsSoFar().isEmpty()) delay(10) }
 
         link.stop()
 
-        withTimeout(5_000) { while (synchronized(linking.calls) { "cancel" !in linking.calls }) delay(10) }
-        assertEquals(listOf("begin shy-link-1234", "cancel"), synchronized(linking.calls) { linking.calls.toList() })
+        withTimeout(5_000) { while ("cancel" !in linking.callsSoFar()) delay(10) }
+        assertEquals(listOf("begin shy-link-1234", "cancel"), linking.callsSoFar())
     }
 
     @Test
     fun aSecondCodeWhileOneIsUnderWayIsIgnored() = runBlocking {
-        link.enterCode("shy-link-1234")
+        link.codeSubmitted("shy-link-1234")
         stepWhere { it == LinkStep.Waiting }
 
-        link.enterCode("shy-link-5678")
-        linking.begun.complete(Unit)
+        link.codeChanged("shy-link-5678")
+        link.codeSubmitted("shy-link-5678")
         linking.check.complete(LinkCheck.ShowNumber("482917"))
         stepWhere { it is LinkStep.Checking }
 
-        assertEquals(listOf("begin shy-link-1234"), synchronized(linking.calls) { linking.calls.toList() })
+        assertEquals(listOf("begin shy-link-1234"), linking.callsSoFar())
     }
 }
