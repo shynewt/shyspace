@@ -2,6 +2,7 @@
 //! views (channels, messages, pages, search) that ops are folded into.
 
 mod apply;
+mod device_actions;
 mod device_changes;
 mod devices;
 mod epochs;
@@ -33,9 +34,10 @@ mod test_channel;
 mod threads;
 
 pub use apply::{Applied, ApplyContext};
+pub use device_actions::{Acted, OwedWelcome};
 pub use device_changes::RecordedChange;
 pub use devices::DeviceSource;
-pub(crate) use devices::MAX_DEVICES_PER_PERSON;
+pub(crate) use devices::{CERTIFICATE_LIFETIME_EPOCHS, MAX_DEVICES_PER_PERSON};
 pub use files::{BlobRemoval, StoredFile};
 pub(crate) use forks::CheckedFork;
 pub use invites::PendingRequest;

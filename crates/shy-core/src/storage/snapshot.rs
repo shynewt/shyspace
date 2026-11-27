@@ -68,17 +68,22 @@ mod tests {
     use crate::storage::{Store, TEST_DB_KEY};
 
     /// What a snapshot keeps: the keys, the membership and its history,
-    /// invites and their pending welcomes, settings, and the admin's sidebar.
+    /// invites and their pending welcomes, what the admin acted on among
+    /// device changes and still owes for them, settings, and the admin's
+    /// sidebar.
     const TABLES_KEPT: &[&str] = &[
         "commits",
         "deliveries",
+        "device_changes_acted",
         "devices",
         "epoch_keys",
         "epoch_members",
         "frozen_authors",
         "invites",
+        "link_deliveries",
         "members",
         "meta",
+        "pending_outcomes",
         "sealing_secrets",
         "sidebar_placement",
         "sidebar_sections",

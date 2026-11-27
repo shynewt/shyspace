@@ -339,14 +339,16 @@ impl Mls {
         self.store_map_key(map_key)?;
         let nonce = self.provider.rand().random_vec(CIPHERSUITE.hash_length())?;
         let psk = PreSharedKeyId::external(MAP_KEY_ID.to_vec(), nonce);
-        let is_adding = !adds.is_empty();
+        // A commit with no adds or removals exists only to change the keys,
+        // which takes the admin's own leaf changing.
+        let is_forcing_update = !adds.is_empty() || removals.is_empty();
         let group = self.group.as_mut().context("no group")?;
         group.set_aad(binding.to_vec());
         let staged = group
             .commit_builder()
             .propose_adds(adds)
             .propose_removals(removals)
-            .force_self_update(is_adding)
+            .force_self_update(is_forcing_update)
             .add_proposal(Proposal::PreSharedKey(Box::new(PreSharedKeyProposal::new(psk))))
             .load_psks(self.provider.storage())
             .map_err(anyhow::Error::from)
@@ -423,6 +425,34 @@ impl Mls {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(self.commit_with_map_key(adds, leaves, binding, map_key)?.0)
+    }
+
+    /// The admin's own leaf's encryption key, which a key-only commit changes.
+    #[cfg(test)]
+    pub(crate) fn own_leaf_encryption_key(&self) -> Result<Vec<u8>> {
+        Ok(postcard::to_stdvec(
+            self.group()?
+                .own_leaf_node()
+                .context("no own leaf")?
+                .encryption_key(),
+        )?)
+    }
+
+    /// Stages a commit that changes nothing but the group's keys, by
+    /// refreshing the admin's own leaf: keys handed to a device that was
+    /// then refused stop opening what comes next. `binding` and `map_key`
+    /// as for [`Self::add_member`].
+    pub fn update_keys(&mut self, binding: &[u8], map_key: Option<&[u8; 32]>) -> Result<Vec<u8>> {
+        if let Some(map_key) = map_key {
+            return Ok(self
+                .commit_with_map_key(Vec::new(), Vec::new(), binding, map_key)?
+                .0);
+        }
+        let group = self.group.as_mut().context("no group")?;
+        group.set_aad(binding.to_vec());
+        let updated = group.self_update(&self.provider, &self.signer, LeafNodeParameters::default());
+        let bundle = updated.inspect_err(|_| group.set_aad(Vec::new()))?;
+        Ok(bundle.into_commit().to_bytes()?)
     }
 
     /// `binding` and `map_key` as for [`Self::add_member`].

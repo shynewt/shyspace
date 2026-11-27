@@ -20,6 +20,7 @@ const MIGRATIONS: &[&str] = &[
     PAGE_MENTIONS,
     DEVICES,
     DEVICE_CHANGES,
+    DEVICE_ACTIONS,
 ];
 
 /// The workspace's icon and default look, set by the admin.
@@ -57,6 +58,20 @@ CREATE TABLE device_changes (
     change BLOB NOT NULL, shown_ms INTEGER NOT NULL,
     PRIMARY KEY (author, seq));
 CREATE INDEX device_changes_by_person ON device_changes (person);
+"#;
+
+/// The admin's record of acting on device changes, and what each still
+/// owes; not views, so the recovery snapshot keeps them.
+const DEVICE_ACTIONS: &str = r#"
+CREATE TABLE device_changes_acted (
+    author BLOB NOT NULL, seq INTEGER NOT NULL, acted TEXT NOT NULL, acted_ms INTEGER NOT NULL,
+    PRIMARY KEY (author, seq));
+CREATE TABLE link_deliveries (
+    device BLOB PRIMARY KEY, token BLOB NOT NULL, welcome BLOB NOT NULL, map_digest BLOB NOT NULL,
+    epoch INTEGER NOT NULL, devices_before BLOB NOT NULL, sealed_grant BLOB, until_ms INTEGER NOT NULL);
+CREATE TABLE pending_outcomes (
+    token BLOB NOT NULL, device BLOB NOT NULL, outcome BLOB NOT NULL,
+    PRIMARY KEY (token, device));
 "#;
 
 const FIRST_SCHEMA: &str = r#"

@@ -301,6 +301,21 @@ fn invite_path(token: &str, slot: &str) -> Path {
     Path::from(format!("invites/{token}/{slot}"))
 }
 
+/// A slot between the two devices of a link (`request`, `answer`).
+fn link_path(token: &crate::membership::link::Token, slot: &str) -> Path {
+    Path::from(format!("links/{}/{slot}", hex::encode(token)))
+}
+
+/// A slot the admin's app answers one device in (`welcome`, `outcome`):
+/// named by device as well, since a Link op names any token it likes.
+fn link_reply_path(token: &crate::membership::link::Token, device: &PublicKey, slot: &str) -> Path {
+    Path::from(format!(
+        "links/{}/{}/{slot}",
+        hex::encode(token),
+        member_id(device)
+    ))
+}
+
 fn padded(number: u64) -> String {
     format!("{number:020}")
 }
@@ -700,6 +715,55 @@ impl Bucket {
 
     pub async fn put_invite_answer(&self, token: &str, answer: Vec<u8>) -> Result<()> {
         self.put(&invite_path(token, "answer"), answer).await
+    }
+
+    pub async fn put_link_slot(
+        &self,
+        token: &crate::membership::link::Token,
+        slot: &str,
+        bytes: Vec<u8>,
+    ) -> Result<()> {
+        self.put(&link_path(token, slot), bytes).await
+    }
+
+    pub async fn link_slot(
+        &self,
+        token: &crate::membership::link::Token,
+        slot: &str,
+    ) -> Result<Option<Bytes>> {
+        self.get(&link_path(token, slot)).await
+    }
+
+    pub async fn delete_link_slot(&self, token: &crate::membership::link::Token, slot: &str) -> Result<()> {
+        self.delete(&link_path(token, slot)).await
+    }
+
+    pub async fn put_link_reply(
+        &self,
+        token: &crate::membership::link::Token,
+        device: &PublicKey,
+        slot: &str,
+        bytes: Vec<u8>,
+    ) -> Result<()> {
+        self.put(&link_reply_path(token, device, slot), bytes).await
+    }
+
+    pub async fn link_reply(
+        &self,
+        token: &crate::membership::link::Token,
+        device: &PublicKey,
+        slot: &str,
+    ) -> Result<Option<Bytes>> {
+        self.get(&link_reply_path(token, device, slot)).await
+    }
+
+    pub async fn delete_link_reply(
+        &self,
+        token: &crate::membership::link::Token,
+        device: &PublicKey,
+        slot: &str,
+    ) -> Result<()> {
+        self.delete(&link_reply_path(token, device, slot)).await
     }
 
     pub(super) async fn delete(&self, path: &Path) -> Result<()> {

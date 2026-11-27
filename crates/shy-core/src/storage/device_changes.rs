@@ -47,8 +47,11 @@ impl Store {
                     .map_err(|error| rule_violation(format!("a link with a bad certificate: {error:#}")))?;
             }
             DeviceChange::Remove { devices } => {
+                // A key not yet in the workspace may be named: that cancels
+                // the person's own pending link for it, and nothing else.
                 for device in devices {
-                    if self.person_at(device, verified.epoch)? != person {
+                    let is_persons = self.person_at(device, verified.epoch)? == person;
+                    if !is_persons && self.was_member_at(verified.epoch, device)? {
                         return Err(rule_violation("a removal naming someone else's device"));
                     }
                 }
@@ -79,11 +82,23 @@ impl Store {
         Ok(Applied::default())
     }
 
-    /// Every change that passed the rules, in each author's log order.
+    /// Every change that passed the rules, by author and then log order.
     pub fn device_changes(&self) -> Result<Vec<RecordedChange>> {
-        let mut statement = self.db.prepare(
+        self.device_changes_in(
             "SELECT author, seq, epoch, person, change, shown_ms FROM device_changes ORDER BY author, seq",
-        )?;
+        )
+    }
+
+    /// Every change that passed the rules, in the order this device applied
+    /// them (each author's still in log order).
+    pub fn device_changes_as_applied(&self) -> Result<Vec<RecordedChange>> {
+        self.device_changes_in(
+            "SELECT author, seq, epoch, person, change, shown_ms FROM device_changes ORDER BY rowid",
+        )
+    }
+
+    fn device_changes_in(&self, query: &'static str) -> Result<Vec<RecordedChange>> {
+        let mut statement = self.db.prepare(query)?;
         let rows = statement.query_map([], |row| {
             Ok((
                 row.get::<_, Vec<u8>>(0)?,

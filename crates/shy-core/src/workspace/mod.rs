@@ -142,9 +142,20 @@ impl State {
     /// Saves a commit just before MLS applies it, and marks its epoch as not
     /// yet settled, so a crash after the merge still finds its lists.
     pub fn save_commit(&self, from_epoch: u64, signed: &[u8]) -> Result<()> {
+        self.save_commit_with(from_epoch, signed, |_| Ok(()))
+    }
+
+    /// Saves a commit together with `also`, in one transaction.
+    pub fn save_commit_with(
+        &self,
+        from_epoch: u64,
+        signed: &[u8],
+        also: impl FnOnce(&Store) -> Result<()>,
+    ) -> Result<()> {
         self.store.atomically(|store| {
             store.put_commit_record(from_epoch, signed)?;
-            store.set_meta(UNSETTLED_COMMIT_META, &from_epoch.to_le_bytes())
+            store.set_meta(UNSETTLED_COMMIT_META, &from_epoch.to_le_bytes())?;
+            also(store)
         })
     }
 
@@ -387,6 +398,12 @@ pub(crate) struct Inner {
     /// Held while a huddle's audience is worked out and published, so an
     /// older result can never replace a newer one.
     pub audience_lock: Mutex<()>,
+    /// Held while the admin's app acts on device changes, so two passes
+    /// can't act on the same change.
+    pub device_actions_lock: tokio::sync::Mutex<()>,
+    /// When each owed link welcome last went up, by its code and device.
+    pub welcomes_sent:
+        Mutex<std::collections::HashMap<(crate::membership::link::Token, PublicKey), tokio::time::Instant>>,
     /// Pauses the next audience refresh after it read who may hear the
     /// call: it says so on the first channel, then waits on the second.
     #[cfg(test)]

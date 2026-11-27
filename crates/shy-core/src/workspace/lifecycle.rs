@@ -664,6 +664,8 @@ impl Workspace {
                 #[cfg(test)]
                 fail_segment_save: Default::default(),
                 audience_lock: Mutex::default(),
+                device_actions_lock: tokio::sync::Mutex::new(()),
+                welcomes_sent: Mutex::default(),
                 #[cfg(test)]
                 audience_pause: Mutex::default(),
                 #[cfg(test)]

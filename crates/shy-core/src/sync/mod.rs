@@ -373,7 +373,20 @@ impl Workspace {
         self.pass(PassKind::Check).await
     }
 
+    /// A sync pass, then, on the admin's device, acting on device changes:
+    /// that makes commits, each taking the sync lock the pass holds.
     async fn pass(&self, kind: PassKind) -> bool {
+        let has_found_new = self.locked_pass(kind).await;
+        if self.is_admin()
+            && !self.status().removed
+            && let Err(error) = self.act_on_device_changes().await
+        {
+            warn!("couldn't act on device changes yet: {error:#}");
+        }
+        has_found_new
+    }
+
+    async fn locked_pass(&self, kind: PassKind) -> bool {
         let _guard = self.inner.sync_lock.lock().await;
         // A pass that waited for the lock while the workspace was closing
         // has nothing left to do.

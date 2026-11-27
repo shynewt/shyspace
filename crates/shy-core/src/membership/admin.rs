@@ -31,10 +31,10 @@ const MAX_REQUESTER_NAME: usize = 80;
 const MAX_REMEMBERED_REFUSALS: usize = 1024;
 /// At most this many devices linked to one person within `LINK_WINDOW_MS`,
 /// by this device's clock.
-const MAX_LINKS_PER_DAY: usize = 5;
-const LINK_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
+pub(super) const MAX_LINKS_PER_DAY: usize = 5;
+pub(super) const LINK_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 /// How often a pending join answer is put up again, in case someone removed it.
-const ANSWER_REFRESH: Duration = Duration::from_secs(10 * 60);
+pub(super) const ANSWER_REFRESH: Duration = Duration::from_secs(10 * 60);
 
 /// What the admin still owes a joiner. Saved before the commit is applied and
 /// kept until the joiner posts, so neither a crash nor a failed upload strands
@@ -84,6 +84,17 @@ pub struct DeviceWelcome {
     /// The device map's digest the commit was made with, which the Welcome
     /// needs and the grant must match.
     pub map_digest: [u8; 32],
+}
+
+/// What it takes to hand an added device its welcome later: the Welcome
+/// MLS made with the commit, and the map the grant must carry.
+pub(crate) struct AddedDevice {
+    pub welcome: Vec<u8>,
+    pub map_digest: [u8; 32],
+    /// The epoch the add moved to, the only one its grant can be sealed in.
+    pub epoch: u64,
+    pub devices_before: Vec<super::device::DeviceRecord>,
+    pub bound_frozen_before: Vec<super::device::BoundFreeze>,
 }
 
 /// The device was added, but its commit isn't in the bucket yet; the next
@@ -343,6 +354,19 @@ impl Workspace {
         binding: &[u8],
         certificate: &DeviceCertificate,
     ) -> Result<DeviceWelcome> {
+        self.add_device_with(key_package, binding, certificate, |_, _| Ok(()))
+            .await
+    }
+
+    /// [`Self::add_device`], with `also` written in the commit's own
+    /// transaction, given what it takes to deliver the welcome later.
+    pub(crate) async fn add_device_with(
+        &self,
+        key_package: &[u8],
+        binding: &[u8],
+        certificate: &DeviceCertificate,
+        also: impl FnOnce(&Store, &AddedDevice) -> Result<()> + Send,
+    ) -> Result<DeviceWelcome> {
         self.ensure_admin()?;
         // No pass may upload the commit before the snapshot below covers it.
         let _no_pass = self.inner.sync_lock.lock().await;
@@ -383,24 +407,18 @@ impl Workspace {
                 .mls
                 .add_member(key_package, &binding.lists, Some(&map_digest))?;
             // The digest covers the map before the commit.
-            let devices = state.store.device_records()?;
-            let bound_frozen = state.store.bound_freezes()?;
-            let signed =
-                self.record_commit(&state, from_epoch, commit, Vec::new(), certificates, &binding)?;
+            let added = AddedDevice {
+                welcome: welcome.clone(),
+                map_digest,
+                epoch: from_epoch + 1,
+                devices_before: state.store.device_records()?,
+                bound_frozen_before: state.store.bound_freezes()?,
+            };
+            let signed = self.sign_commit(&state, from_epoch, commit, Vec::new(), certificates, &binding)?;
+            state.save_commit_with(from_epoch, &signed, |store| also(store, &added))?;
             state.mls.merge_pending_commit()?;
             state.record_epoch(&self.inner.config)?;
-            let grant = GrantWithDevices {
-                grant: Grant {
-                    history: KeyHistory::collect(&state.store)?,
-                    bucket: config::current_bucket(&state.store)?,
-                    bucket_lamport: config::bucket_lamport(&state.store)?,
-                },
-                devices,
-                bound_frozen,
-            };
-            #[cfg(test)]
-            let grant = self.tampered(grant);
-            let sealed_grant = state.mls.seal_for_members(&postcard::to_stdvec(&grant)?)?;
+            let sealed_grant = self.seal_device_grant(&mut state, &added)?;
             Workspace::mark_recovery_snapshot_stale(&state.store)?;
             let welcome = DeviceWelcome {
                 welcome,
@@ -587,7 +605,7 @@ impl Workspace {
             .await
     }
 
-    fn answers_sent(
+    pub(super) fn answers_sent(
         &self,
     ) -> std::sync::MutexGuard<'_, std::collections::HashMap<iroh::PublicKey, tokio::time::Instant>> {
         self.inner
@@ -646,6 +664,16 @@ impl Workspace {
     }
 
     async fn remove_leaves(&self, devices: Vec<iroh::PublicKey>) -> Result<()> {
+        self.remove_leaves_with(devices, |_| Ok(())).await
+    }
+
+    /// Removes `devices` in one commit, with `also` written in its own
+    /// transaction.
+    pub(crate) async fn remove_leaves_with(
+        &self,
+        devices: Vec<iroh::PublicKey>,
+        also: impl FnOnce(&Store) -> Result<()> + Send,
+    ) -> Result<()> {
         // No pass may upload the commit before the snapshot below covers it.
         let _no_pass = self.inner.sync_lock.lock().await;
         for device in &devices {
@@ -673,7 +701,8 @@ impl Workspace {
             let commit = state
                 .mls
                 .remove_members(&devices, &binding.lists, binding.map_key.as_ref())?;
-            let signed = self.record_commit(&state, from_epoch, commit, frozen, &[], &binding)?;
+            let signed = self.sign_commit(&state, from_epoch, commit, frozen, &[], &binding)?;
+            state.save_commit_with(from_epoch, &signed, also)?;
             state.mls.merge_pending_commit()?;
             // Freezing comes after the merge, as on every member's device.
             state.record_epoch(&self.inner.config)?;
@@ -688,6 +717,27 @@ impl Workspace {
         }
         self.refresh_recovery_snapshot().await?;
         self.upload_commit(from_epoch, signed).await
+    }
+
+    /// The grant for an added device, sealed in the epoch its add moved to:
+    /// the map as it stood before the add, the keys as they stand now.
+    pub(crate) fn seal_device_grant(&self, state: &mut State, added: &AddedDevice) -> Result<Vec<u8>> {
+        ensure!(
+            state.mls.epoch()? == added.epoch,
+            "the workspace moved past the epoch this device was added in"
+        );
+        let grant = GrantWithDevices {
+            grant: Grant {
+                history: KeyHistory::collect(&state.store)?,
+                bucket: config::current_bucket(&state.store)?,
+                bucket_lamport: config::bucket_lamport(&state.store)?,
+            },
+            devices: added.devices_before.clone(),
+            bound_frozen: added.bound_frozen_before.clone(),
+        };
+        #[cfg(test)]
+        let grant = self.tampered(grant);
+        state.mls.seal_for_members(&postcard::to_stdvec(&grant)?)
     }
 
     /// The grant with the device map and bound freezes, as they stand once
@@ -747,7 +797,21 @@ impl Workspace {
         certificates: &[DeviceCertificate],
         binding: &CommitBinding,
     ) -> Result<Vec<u8>> {
-        let signed = match binding.map_key {
+        let signed = self.sign_commit(state, from_epoch, commit, frozen, certificates, binding)?;
+        state.save_commit(from_epoch, &signed)?;
+        Ok(signed)
+    }
+
+    fn sign_commit(
+        &self,
+        state: &State,
+        from_epoch: u64,
+        commit: Vec<u8>,
+        frozen: Vec<FrozenAuthor>,
+        certificates: &[DeviceCertificate],
+        binding: &CommitBinding,
+    ) -> Result<Vec<u8>> {
+        Ok(match binding.map_key {
             Some(_) => commit::sign_v3(
                 &self.inner.identity,
                 &state.mls.epoch_key()?,
@@ -757,9 +821,7 @@ impl Workspace {
                 certificates,
             )?,
             None => commit::sign(&self.inner.identity, from_epoch, commit, frozen)?,
-        };
-        state.save_commit(from_epoch, &signed)?;
-        Ok(signed)
+        })
     }
 
     #[cfg(test)]
@@ -788,6 +850,33 @@ impl Workspace {
         self.bucket().put_commit(from_epoch, signed).await?;
         self.nudge_peers().await;
         Ok(())
+    }
+}
+
+impl Workspace {
+    /// Changes the group's keys and nothing else, after a refused link: the
+    /// keys the refused device was handed stop opening what comes next.
+    pub(crate) async fn commit_keys_only(&self) -> Result<()> {
+        self.ensure_admin()?;
+        // No pass may upload the commit before the snapshot below covers it.
+        let _no_pass = self.inner.sync_lock.lock().await;
+        let (from_epoch, signed) = {
+            let mut state = self.state();
+            let from_epoch = state.mls.epoch()?;
+            let binding = self.bind_next_commit(&state, from_epoch, &[], &[])?;
+            let commit = state.mls.update_keys(&binding.lists, binding.map_key.as_ref())?;
+            let signed = self.sign_commit(&state, from_epoch, commit, Vec::new(), &[], &binding)?;
+            state.save_commit_with(from_epoch, &signed, Store::clear_key_only_commit_owed)?;
+            state.mls.merge_pending_commit()?;
+            state.record_epoch(&self.inner.config)?;
+            Workspace::mark_recovery_snapshot_stale(&state.store)?;
+            // The refused device may have kept the bucket keys too.
+            Workspace::start_storage_rotation(&state.store)?;
+            (from_epoch, signed)
+        };
+        self.emit(Change::Members);
+        self.refresh_recovery_snapshot().await?;
+        self.upload_commit(from_epoch, signed).await
     }
 }
 
