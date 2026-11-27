@@ -26,9 +26,13 @@ RUN = $(CONTAINER) run --rm --security-opt label=disable \
 	-e CARGO_HOME=/cache/cargo \
 	-w /repo/apps/android $(IMAGE)
 
+# Gradle in separate containers can't hand its cache's locks to each other, so a second build
+# sharing the cache (another worktree's) waits here for its turn instead of failing.
+LOCK = flock $(CACHE)/build.lock
+
 define gradle
 	mkdir -p $(CACHE)/gradle $(CACHE)/cargo $(CACHE)/m2
-	$(RUN) sh -c "export PATH=/opt/cargo/bin:\$$PATH; ./gradlew --no-daemon $(1); status=\$$?; $(HAND_BACK) /repo/apps/android /repo/target/android /cache /root/.m2 2>/dev/null; exit \$$status"
+	$(LOCK) $(RUN) sh -c "export PATH=/opt/cargo/bin:\$$PATH; ./gradlew --no-daemon $(1); status=\$$?; $(HAND_BACK) /repo/apps/android /repo/target/android /cache /root/.m2 2>/dev/null; exit \$$status"
 endef
 
 image:
@@ -70,7 +74,7 @@ WAIT_FOR_PHONE := echo 'Waiting up to 2 minutes for a phone with USB debugging (
 device-test: image
 	mkdir -p $(CACHE)/gradle $(CACHE)/cargo $(CACHE)/adb
 	@$(WAIT_FOR_PHONE)
-	$(CONTAINER) run --rm --security-opt label=disable --network host --device /dev/bus/usb \
+	$(LOCK) $(CONTAINER) run --rm --security-opt label=disable --network host --device /dev/bus/usb \
 		-v $(REPO):/repo -v $(CACHE)/gradle:/cache/gradle -v $(CACHE)/cargo:/cache/cargo -v $(CACHE)/m2:/root/.m2 -v $(CACHE)/adb:/root/.android \
 		-e GRADLE_USER_HOME=/cache/gradle -e CARGO_HOME=/cache/cargo -w /repo/apps/android $(IMAGE) \
 		sh -c "export PATH=/opt/cargo/bin:\$$PATH; adb start-server && adb devices && \
