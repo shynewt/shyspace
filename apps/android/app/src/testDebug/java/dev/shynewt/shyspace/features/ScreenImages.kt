@@ -254,17 +254,17 @@ class ScreenImages {
 
     @Test
     fun linkEnterCode() = capture("link-enter-code") {
-        LinkScreen(step = LinkStep.EnterCode(problem = "This code has run out. Show a new one on your other device."), onCodeChange = {}, onCodeSubmitted = {}, onStartAgain = {}, onBack = {})
+        LinkScreen(isLinkCode = { false }, step = LinkStep.EnterCode(problem = "This code has run out. Show a new one on your other device."), onCodeChange = {}, onCodeSubmitted = {}, onStartAgain = {}, onBack = {})
     }
 
     @Test
     fun linkChecking() = capture("link-checking") {
-        LinkScreen(step = LinkStep.Checking("482917"), onCodeChange = {}, onCodeSubmitted = {}, onStartAgain = {}, onBack = {})
+        LinkScreen(isLinkCode = { false }, step = LinkStep.Checking("482917"), onCodeChange = {}, onCodeSubmitted = {}, onStartAgain = {}, onBack = {})
     }
 
     @Test
     fun linkStopped() = capture("link-stopped") {
-        LinkScreen(step = LinkStep.Ended("Your other device stopped the link. Nothing was shared."), onCodeChange = {}, onCodeSubmitted = {}, onStartAgain = {}, onBack = {})
+        LinkScreen(isLinkCode = { false }, step = LinkStep.Ended("Your other device stopped the link. Nothing was shared."), onCodeChange = {}, onCodeSubmitted = {}, onStartAgain = {}, onBack = {})
     }
 
     @Test

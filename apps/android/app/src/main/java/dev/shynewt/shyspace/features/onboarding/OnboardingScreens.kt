@@ -139,6 +139,7 @@ fun WelcomeScreen(onLinkThisPhone: (() -> Unit)?, developerTools: (@Composable (
 @Composable
 fun LinkScreen(
     step: LinkStep,
+    isLinkCode: (String) -> Boolean,
     onCodeChange: (String) -> Unit,
     onCodeSubmitted: (String) -> Unit,
     onStartAgain: () -> Unit,
@@ -177,7 +178,7 @@ fun LinkScreen(
                     .padding(horizontal = 24.dp, vertical = 16.dp),
             ) {
                 when (step) {
-                    is LinkStep.EnterCode -> EnterCode(step.problem, onCodeChange, onCodeSubmitted)
+                    is LinkStep.EnterCode -> EnterCode(step.problem, isLinkCode, onCodeChange, onCodeSubmitted)
                     LinkStep.Waiting -> Waiting()
                     is LinkStep.Checking -> Checking(step.checkCode)
                     is LinkStep.Ended -> {
@@ -193,7 +194,7 @@ fun LinkScreen(
 }
 
 @Composable
-private fun EnterCode(problem: String?, onCodeChange: (String) -> Unit, onCodeSubmitted: (String) -> Unit) {
+private fun EnterCode(problem: String?, isLinkCode: (String) -> Boolean, onCodeChange: (String) -> Unit, onCodeSubmitted: (String) -> Unit) {
     val colors = LocalShyColors.current.palette
     val code = rememberTextFieldState()
     val clipboard = LocalClipboard.current
@@ -215,7 +216,7 @@ private fun EnterCode(problem: String?, onCodeChange: (String) -> Unit, onCodeSu
             }
         }) { Text(stringResource(R.string.paste)) }
     }
-    ScanCodeButton(onCode = fill)
+    ScanCodeButton(isLinkCode = isLinkCode, onCode = fill)
     problem?.let {
         Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.dangerText, modifier = Modifier.announcedWhenItAppears())
     }
@@ -288,4 +289,4 @@ private fun Note(text: String) {
 }
 
 /** A screen reader reads this when it appears, after what it's reading now. */
-private fun Modifier.announcedWhenItAppears(): Modifier = semantics { liveRegion = LiveRegionMode.Polite }
+internal fun Modifier.announcedWhenItAppears(): Modifier = semantics { liveRegion = LiveRegionMode.Polite }

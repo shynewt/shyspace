@@ -74,6 +74,7 @@ class OnboardingScreensTest {
             ShyTheme(isDark = false) {
                 LinkScreen(
                     step = step,
+                    isLinkCode = { false },
                     onCodeChange = { changes += it },
                     onCodeSubmitted = { asked += "code $it" },
                     onStartAgain = { asked += "again" },

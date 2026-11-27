@@ -1,6 +1,7 @@
 package dev.shynewt.shyspace.features.onboarding
 
 import android.Manifest
+import android.util.Log
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,15 +49,26 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.awaitCancellation
 import zxingcpp.BarcodeReader
 
-/** "Scan code": asks for the camera only when tapped; refused, it says to paste the code instead. */
+/**
+ * "Scan code": asks for the camera only when tapped, and reads QR codes until one is a link code
+ * ([isLinkCode]); others are skipped. Refused, or with no camera to use, it says to paste the code
+ * instead; a phone with no camera at all shows no button. [scanner] is the camera, full screen.
+ */
 @Composable
-fun ScanCodeButton(onCode: (String) -> Unit, modifier: Modifier = Modifier) {
+fun ScanCodeButton(
+    isLinkCode: (String) -> Boolean,
+    onCode: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    scanner: @Composable (isLinkCode: (String) -> Boolean, onCode: (String) -> Unit, onUnavailable: () -> Unit, onClose: () -> Unit) -> Unit =
+        { accepts, found, unavailable, close -> CodeScanner(accepts, found, unavailable, close) },
+) {
     val context = LocalContext.current
+    if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) return
     var isScanning by rememberSaveable { mutableStateOf(false) }
-    var isRefused by rememberSaveable { mutableStateOf(false) }
+    var problem by rememberSaveable { mutableStateOf<Int?>(null) }
     val askForCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
         isScanning = isGranted
-        isRefused = !isGranted
+        problem = if (isGranted) null else R.string.camera_refused
     }
     OutlinedButton(
         onClick = {
@@ -65,28 +77,47 @@ fun ScanCodeButton(onCode: (String) -> Unit, modifier: Modifier = Modifier) {
         },
         modifier = modifier,
     ) { Text(stringResource(R.string.scan_code)) }
-    if (isRefused) {
-        Text(stringResource(R.string.camera_refused), style = MaterialTheme.typography.bodyMedium, color = LocalShyColors.current.palette.textMuted)
+    problem?.let { line ->
+        Text(
+            stringResource(line),
+            style = MaterialTheme.typography.bodyMedium,
+            color = LocalShyColors.current.palette.textMuted,
+            modifier = Modifier.announcedWhenItAppears(),
+        )
     }
     if (isScanning) {
-        CodeScanner(
-            onCode = { code ->
+        scanner(
+            isLinkCode,
+            { code ->
                 isScanning = false
                 onCode(code)
             },
-            onClose = { isScanning = false },
+            {
+                isScanning = false
+                problem = R.string.camera_unavailable
+            },
+            { isScanning = false },
         )
     }
 }
 
-/** The back camera, full screen, until it reads a QR code. Frames are read on the phone and dropped. */
+/** The first of the texts a frame's QR codes hold that is a link code, skipping any other. */
+internal fun firstLinkCode(texts: List<String?>, isLinkCode: (String) -> Boolean): String? =
+    texts.firstOrNull { text -> !text.isNullOrBlank() && isLinkCode(text) }
+
+/**
+ * The back camera, full screen, until it reads a link code. Frames are read on the phone and
+ * dropped. [onUnavailable] when there's no back camera to use.
+ */
 @Composable
-private fun CodeScanner(onCode: (String) -> Unit, onClose: () -> Unit) {
+private fun CodeScanner(isLinkCode: (String) -> Boolean, onCode: (String) -> Unit, onUnavailable: () -> Unit, onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
         var surfaceRequest by remember { mutableStateOf<SurfaceRequest?>(null) }
         val currentOnCode by rememberUpdatedState(onCode)
+        val currentIsLinkCode by rememberUpdatedState(isLinkCode)
+        val currentOnUnavailable by rememberUpdatedState(onUnavailable)
         LaunchedEffect(lifecycleOwner) {
             val camera = ProcessCameraProvider.awaitInstance(context)
             val preview = Preview.Builder().build().apply { setSurfaceProvider { request -> surfaceRequest = request } }
@@ -99,11 +130,19 @@ private fun CodeScanner(onCode: (String) -> Unit, onClose: () -> Unit) {
                 .build()
                 .apply {
                     setAnalyzer(analyzing) { frame ->
-                        val code = frame.use { reader.read(it).firstNotNullOfOrNull { result -> result.text?.takeIf(String::isNotBlank) } }
+                        val code = frame.use { firstLinkCode(reader.read(it).map { result -> result.text }, currentIsLinkCode) }
                         if (code != null && hasFound.compareAndSet(false, true)) mainThread.execute { currentOnCode(code) }
                     }
                 }
-            camera.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+            try {
+                camera.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+            } catch (unavailable: IllegalArgumentException) {
+                // No back camera (a tablet with only a front one, or one that's busy elsewhere).
+                Log.w("CodeScanner", "no back camera to scan with", unavailable)
+                analyzing.shutdown()
+                currentOnUnavailable()
+                return@LaunchedEffect
+            }
             try {
                 awaitCancellation()
             } finally {

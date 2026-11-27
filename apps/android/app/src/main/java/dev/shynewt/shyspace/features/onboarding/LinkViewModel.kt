@@ -52,7 +52,8 @@ class LinkViewModel(private val linking: PhoneLinking) : ViewModel() {
         coreCall({ reason -> Log.w(TAG, "couldn't stop linking: $reason") }) { linking.cancelLink() }
     }
 
-    private fun isWholeCode(text: String): Boolean = try {
+    /** Whether [text] is a whole link code that hasn't run out, as the core reads it. */
+    fun isWholeCode(text: String): Boolean = try {
         linking.readLinkCode(text)
         true
     } catch (_: ShyException) {
