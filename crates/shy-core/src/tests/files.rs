@@ -521,3 +521,21 @@ async fn my_second_device_can_rename_my_file() {
         assert_eq!(device.files().unwrap()[0].name, "Whiteboard.png");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_a_linked_device_shared_shows_as_its_persons() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    phone
+        .send_files(&general, "", None, vec![bytes_file("IMG_1.png", b"pixels")])
+        .await
+        .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    for member in [&admin, &bob, &phone] {
+        assert_eq!(member.files().unwrap()[0].author, bob.my_id());
+    }
+}

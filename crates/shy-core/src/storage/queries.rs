@@ -29,18 +29,43 @@ impl SearchFilters {
     }
 }
 
+/// SQL for the person whose device the column `$device` names: the device
+/// itself, unless the counted device map links it to someone. A device
+/// writes only from the epoch it was linked at, so this is its person when
+/// it wrote.
+macro_rules! person_of {
+    ($device:literal) => {
+        concat!(
+            "COALESCE((SELECT d.person FROM devices d WHERE d.device = ",
+            $device,
+            "), ",
+            $device,
+            ")"
+        )
+    };
+}
+
+/// The person who wrote message `m`.
+pub(super) const MESSAGE_PERSON: &str = person_of!("m.author");
 /// The columns `message_from_row` reads, and the joins they need.
-pub(super) const MESSAGE_COLUMNS: &str =
-    "m.id, m.channel, m.author, COALESCE(p.name, ''), COALESCE(p.is_bot, 0),
-     COALESCE(e.text, m.text), m.reply_to, m.created_ms, m.lamport, e.message IS NOT NULL";
+pub(super) const MESSAGE_COLUMNS: &str = concat!(
+    "m.id, m.channel, ",
+    person_of!("m.author"),
+    " AS person, COALESCE(p.name, ''), COALESCE(p.is_bot, 0),
+     COALESCE(e.text, m.text), m.reply_to, m.created_ms, m.lamport, e.message IS NOT NULL, m.author"
+);
 /// Whether message `m` shows in its channel rather than in a thread: it
 /// isn't a reply, or its parent hasn't arrived or sits in another channel
 /// (threads stay within a channel).
 pub(super) const IS_SHOWN_IN_CHANNEL: &str = "(m.reply_to IS NULL OR NOT EXISTS (
     SELECT 1 FROM messages parent WHERE parent.id = m.reply_to AND parent.channel = m.channel))";
-pub(super) const MESSAGE_JOINS: &str = "FROM messages m
-     LEFT JOIN profiles p ON p.member = m.author
-     LEFT JOIN message_edits e ON e.message = m.id";
+pub(super) const MESSAGE_JOINS: &str = concat!(
+    "FROM messages m
+     LEFT JOIN profiles p ON p.member = ",
+    person_of!("m.author"),
+    "
+     LEFT JOIN message_edits e ON e.message = m.id"
+);
 
 /// A message as stored; what this member may do with it is filled in later.
 pub(super) fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Message> {
@@ -48,6 +73,7 @@ pub(super) fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mess
         id: row.get(0)?,
         channel: row.get(1)?,
         author: hex::encode(row.get::<_, Vec<u8>>(2)?),
+        device: hex::encode(row.get::<_, Vec<u8>>(10)?),
         author_name: row.get(3)?,
         author_is_bot: row.get(4)?,
         text: row.get(5)?,
@@ -120,7 +146,7 @@ impl Store {
         limit: u32,
     ) -> Result<Vec<Message>> {
         let (before_lamport, before_author) = match before {
-            Some(cursor) => (Some(cursor.lamport), Some(hex::decode(&cursor.author)?)),
+            Some(cursor) => (Some(cursor.lamport), Some(hex::decode(&cursor.device)?)),
             None => (None, None),
         };
         let mut statement = self.db.prepare(&format!(
@@ -154,17 +180,19 @@ impl Store {
                 Ok((row.get(0)?, row.get(1)?))
             })
             .optional()?;
-        Ok(row.map(|(lamport, author)| MessageCursor {
+        Ok(row.map(|(lamport, device)| MessageCursor {
             lamport,
-            author: hex::encode(author),
+            device: hex::encode(device),
         }))
     }
 
     fn reactions(&self, message: &str, me: &PublicKey) -> Result<Vec<Reaction>> {
-        let mut statement = self.db.prepare(
-            "SELECT emoji, COUNT(*), MAX(author = ?2), MIN(rowid) AS first FROM reactions
-             WHERE message = ?1 AND active = 1 GROUP BY emoji ORDER BY first",
-        )?;
+        let mut statement = self.db.prepare(concat!(
+            "SELECT emoji, COUNT(*), MAX(",
+            person_of!("reactions.author"),
+            " = ?2), MIN(rowid) AS first FROM reactions
+                 WHERE message = ?1 AND active = 1 GROUP BY emoji ORDER BY first"
+        ))?;
         let rows = statement.query_map(params![message, me.as_bytes()], |row| {
             Ok(Reaction {
                 emoji: row.get(0)?,
@@ -245,7 +273,10 @@ impl Store {
             if authors.is_empty() {
                 return Ok(Vec::new());
             }
-            conditions.push(format!("m.author IN ({})", vec!["?"; authors.len()].join(", ")));
+            conditions.push(format!(
+                "{MESSAGE_PERSON} IN ({})",
+                vec!["?"; authors.len()].join(", ")
+            ));
             values.extend(
                 authors
                     .iter()
@@ -271,7 +302,7 @@ impl Store {
         let sql = if match_expression.is_empty() {
             format!(
                 "SELECT 'message', m.id, COALESCE(n.name, c.name, ''), '', m.channel,
-                        m.author, m.created_ms
+                        {MESSAGE_PERSON}, m.created_ms
                  FROM messages m
                  LEFT JOIN message_edits e ON e.message = m.id
                  LEFT JOIN channels c ON c.id = m.channel
@@ -288,7 +319,7 @@ impl Store {
             format!(
                 "SELECT s.kind, s.ref, COALESCE(NULLIF(s.title, ''), n.name, c.name, ''),
                         '', m.channel,
-                        m.author, COALESCE(m.created_ms, p.updated_ms)
+                        {MESSAGE_PERSON}, COALESCE(m.created_ms, p.updated_ms)
                  FROM search s
                  LEFT JOIN messages m ON s.kind = 'message' AND m.id = s.ref
                  LEFT JOIN pages p ON s.kind = 'page' AND p.id = s.ref

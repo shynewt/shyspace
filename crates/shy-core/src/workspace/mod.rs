@@ -263,6 +263,9 @@ pub(crate) struct Inner {
     /// Kept for the admin's recovery snapshots, which carry it.
     pub device_key: DeviceKey,
     pub identity: SecretKey,
+    /// The person this device belongs to: itself, unless it was linked to
+    /// someone before it first started.
+    pub person: PublicKey,
     pub config: WorkspaceConfig,
     pub state: Mutex<State>,
     /// Swapped when the admin changes the storage settings.
@@ -427,14 +430,21 @@ impl Workspace {
         self.inner.identity.public()
     }
 
+    /// The person this device belongs to, as a member id (hex). What this
+    /// device signs with is [`Workspace::me`].
     pub fn my_id(&self) -> String {
+        member_id(&self.inner.person)
+    }
+
+    /// This device's own member id (hex), as `remove_devices` takes it.
+    pub fn my_device_id(&self) -> String {
         member_id(&self.me())
     }
 
     /// The person this device belongs to: itself, unless it was linked to
     /// someone.
-    pub fn my_person(&self) -> Result<PublicKey> {
-        self.state().store.person_of(&self.me())
+    pub fn my_person(&self) -> PublicKey {
+        self.inner.person
     }
 
     pub fn safety_code(&self) -> String {

@@ -95,12 +95,12 @@ impl Workspace {
         let epoch = state.store.newest_epoch()?;
         for channel in &mut channels {
             // Thread replies count in their thread, but a mention counts anywhere.
-            let unread = state.store.unread_count(&channel.id, &self.me())?;
+            let unread = state.store.unread_count(&channel.id, &self.my_person())?;
             channel.unread = u32::try_from(unread).unwrap_or(u32::MAX);
             channel.unread_mentions = count(
                 state
                     .store
-                    .unread_mentions(&self.inner.config.workspace_id, &channel.id, &self.me())?
+                    .unread_mentions(&self.inner.config.workspace_id, &channel.id, &self.my_person())?
                     .len(),
             );
             channel.last_read = state.store.read_marker(&channel.id)?;
@@ -126,7 +126,7 @@ impl Workspace {
         limit: u32,
     ) -> Result<Vec<Message>> {
         let state = self.state();
-        let messages = state.store.messages(channel, &self.me(), before, limit)?;
+        let messages = state.store.messages(channel, &self.my_person(), before, limit)?;
         self.as_seen_by_me(&state, channel, messages)
     }
 
@@ -134,7 +134,9 @@ impl Workspace {
     pub fn messages_before(&self, channel: &str, message: &str, limit: u32) -> Result<Vec<Message>> {
         let state = self.state();
         let cursor = state.store.message_cursor(message)?.context("no such message")?;
-        let messages = state.store.messages(channel, &self.me(), Some(&cursor), limit)?;
+        let messages = state
+            .store
+            .messages(channel, &self.my_person(), Some(&cursor), limit)?;
         self.as_seen_by_me(&state, channel, messages)
     }
 
@@ -150,7 +152,7 @@ impl Workspace {
     /// The message a `shy://message/<id>` link points to, if it still exists.
     pub fn linked_message(&self, id: &str) -> Result<Option<LinkedMessage>> {
         let state = self.state();
-        let Some(message) = state.store.message(id, &self.me())? else {
+        let Some(message) = state.store.message(id, &self.my_person())? else {
             return Ok(None);
         };
         let thread_root = state.store.thread_root(id)?.filter(|root| root != id);
@@ -162,7 +164,7 @@ impl Workspace {
     /// The thread starting at `root`: its first message, then every reply.
     pub fn thread(&self, root: &str) -> Result<Vec<Message>> {
         let state = self.state();
-        let messages = state.store.thread(root, &self.me())?;
+        let messages = state.store.thread(root, &self.my_person())?;
         let channel = messages.first().context("no such thread")?.channel.clone();
         self.as_seen_by_me(&state, &channel, messages)
     }
@@ -242,8 +244,8 @@ impl Workspace {
                         .filter(|reply| {
                             reply.author != my_id
                                 && read.as_ref().is_none_or(|read| {
-                                    (read.lamport, read.author.as_str())
-                                        < (reply.lamport, reply.author.as_str())
+                                    (read.lamport, read.device.as_str())
+                                        < (reply.lamport, reply.device.as_str())
                                 })
                         })
                         .count(),
@@ -301,7 +303,7 @@ impl Workspace {
         };
         if let Some(from) = &query.from {
             filters.authors = Some(if from.eq_ignore_ascii_case("me") {
-                vec![self.me().as_bytes().to_vec()]
+                vec![self.my_person().as_bytes().to_vec()]
             } else {
                 let wanted = from.to_lowercase();
                 state

@@ -28,7 +28,7 @@ impl Workspace {
         }
         let found = state
             .store
-            .my_messages(&self.me(), &readable, text, before, limit)?;
+            .my_messages(&self.my_person(), &readable, text, before, limit)?;
         let order: Vec<String> = found.iter().map(|message| message.id.clone()).collect();
         let mut by_channel: HashMap<String, Vec<_>> = HashMap::new();
         for message in found {

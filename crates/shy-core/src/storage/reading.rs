@@ -13,17 +13,21 @@ use crate::{
     views::{MessageCursor, NotifyLevel, member_id},
 };
 
-/// Messages in channel `?1` by others than `?2`, after the read position
-/// (`?3`, `?4`). Comparing as a pair lets SQLite start reading the channel's
-/// index there instead of at the beginning.
-const UNREAD_BY_OTHERS: &str = "m.channel = ?1 AND m.author != ?2 AND (m.lamport, m.author) > (?3, ?4)";
+/// Messages in channel `?1` by persons other than `?2`, after the read
+/// position (`?3`, `?4`, a clock and a device). Comparing as a pair lets
+/// SQLite start reading the channel's index there instead of at the
+/// beginning. A person's own key never has a devices row, so their devices
+/// are the person and the rows naming them, found by the person index.
+const UNREAD_BY_OTHERS: &str = "m.channel = ?1 AND m.author != ?2
+     AND m.author NOT IN (SELECT d.device FROM devices d WHERE d.person = ?2)
+     AND (m.lamport, m.author) > (?3, ?4)";
 
 /// An unread message that mentions you.
 pub struct UnreadMention {
     pub id: String,
     pub lamport: u64,
-    /// The author's member id (hex).
-    pub author: String,
+    /// The device that wrote it (hex); with `lamport`, its place in order.
+    pub device: String,
 }
 
 impl Store {
@@ -59,9 +63,9 @@ impl Store {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        Ok(marker.map(|(lamport, author)| MessageCursor {
+        Ok(marker.map(|(lamport, device)| MessageCursor {
             lamport,
-            author: hex::encode(author),
+            device: hex::encode(device),
         }))
     }
 
@@ -110,7 +114,7 @@ impl Store {
                 let mention = UnreadMention {
                     id: row.get(0)?,
                     lamport: row.get(3)?,
-                    author: hex::encode(row.get::<_, Vec<u8>>(4)?),
+                    device: hex::encode(row.get::<_, Vec<u8>>(4)?),
                 };
                 Ok((mention, text, is_in_channel))
             },
@@ -167,7 +171,7 @@ impl Store {
             return Ok(true);
         };
         Ok(self.read_marker(root)?.is_some_and(|read| {
-            (reply.lamport, reply.author.as_str()) <= (read.lamport, read.author.as_str())
+            (reply.lamport, reply.device.as_str()) <= (read.lamport, read.device.as_str())
         }))
     }
 

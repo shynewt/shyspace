@@ -51,7 +51,7 @@ async fn your_own_messages_are_never_unread_and_sending_marks_the_channel_read()
         .find(|c| c.id == general)
         .unwrap()
         .last_read;
-    assert_eq!(last_read.unwrap().author, admin.my_id());
+    assert_eq!(last_read.unwrap().device, crate::views::member_id(&admin.me()));
 }
 
 #[tokio::test(flavor = "multi_thread")]

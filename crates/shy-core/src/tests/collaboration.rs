@@ -190,7 +190,7 @@ async fn older_messages_load_page_by_page() {
     let oldest_loaded = &latest[0];
     let cursor = crate::views::MessageCursor {
         lamport: oldest_loaded.lamport,
-        author: oldest_loaded.author.clone(),
+        device: oldest_loaded.device.clone(),
     };
     let older = admin.messages(&general, Some(&cursor), 2).unwrap();
     assert_eq!(texts(&older), ["message 1", "message 2"]);
@@ -1392,7 +1392,7 @@ async fn every_member_takes_a_linked_device_for_its_persons() {
     let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
     sync_all(&[&admin, &bob, &phone, &carol]).await;
 
-    assert_eq!(phone.my_person().unwrap(), bob.me());
+    assert_eq!(phone.my_person(), bob.me());
     let admins_epoch = admin.state().mls.epoch().unwrap();
     for member in [&admin, &bob, &phone, &carol] {
         let state = member.state();
@@ -1433,7 +1433,7 @@ async fn removing_one_device_leaves_its_siblings_working() {
     let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
     sync_all(&[&admin, &bob, &phone]).await;
 
-    admin.remove_devices(&[phone.my_id()]).await.unwrap();
+    admin.remove_devices(&[phone.my_device_id()]).await.unwrap();
     sync_all(&[&admin, &bob]).await;
     phone.sync().await;
 
@@ -1443,4 +1443,245 @@ async fn removing_one_device_leaves_its_siblings_working() {
     bob.send_message(&general, "still here", None).unwrap();
     sync_all(&[&admin, &bob]).await;
     assert!(texts_in(&admin, &general).contains(&"still here".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_device_writes_and_everyone_sees_it_under_the_persons_name() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    phone.send_message(&general, "from the phone", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert_eq!(phone.my_id(), bob.my_id());
+    for member in [&admin, &bob, &phone] {
+        let shown = member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .find(|message| message.text == "from the phone")
+            .unwrap();
+        assert_eq!(shown.author, bob.my_id());
+        assert_eq!(shown.device, phone.my_device_id());
+        assert_eq!(shown.author_name, "Bob");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn my_other_devices_messages_count_as_mine_in_sent() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    bob.send_message(&general, "from the laptop", None).unwrap();
+    phone.send_message(&general, "from the phone", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    for device in [&bob, &phone] {
+        let mut texts: Vec<_> = device
+            .sent_messages("", None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|sent| sent.message.text)
+            .collect();
+        texts.sort();
+        assert_eq!(texts, ["from the laptop", "from the phone"]);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn paging_does_not_skip_messages_two_devices_wrote_at_the_same_clock() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    for (device, text) in [(&bob, "laptop"), (&phone, "phone")] {
+        let mut forger = Forger::new(device);
+        admin
+            .receive(forger.seal_at(
+                50_000,
+                crate::ops::Op::Message {
+                    id: crate::ops::new_owned_id(&device.me()),
+                    channel: general.clone(),
+                    text: text.into(),
+                    reply_to: None,
+                },
+            ))
+            .unwrap();
+    }
+
+    let mut seen = Vec::new();
+    let mut before = None;
+    for _ in 0..10 {
+        let page = admin.messages(&general, before.as_ref(), 1).unwrap();
+        let Some(oldest) = page.first() else {
+            break;
+        };
+        seen.push(oldest.text.clone());
+        before = Some(crate::views::MessageCursor {
+            lamport: oldest.lamport,
+            device: oldest.device.clone(),
+        });
+    }
+
+    assert!(seen.contains(&"laptop".to_string()), "{seen:?}");
+    assert!(seen.contains(&"phone".to_string()), "{seen:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn search_finds_a_linked_devices_messages_under_its_person() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    phone
+        .send_message(&general, "budget from the phone", None)
+        .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let found = |member: &Workspace, query: &str| {
+        member
+            .search(query, 10)
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.author)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(found(&admin, "budget"), [Some(bob.my_id())]);
+    assert_eq!(found(&admin, "from:Bob budget"), [Some(bob.my_id())]);
+    // Filters with no words take the other search form.
+    assert!(found(&admin, "from:Bob").contains(&Some(bob.my_id())));
+    // The phone's own key isn't Bob's, so this is by person.
+    assert_eq!(found(&phone, "from:me budget"), [Some(bob.my_id())]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reaction_from_my_phone_shows_as_mine_on_my_laptop() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let message = admin.send_message(&general, "lunch?", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    phone.react(&message, "👍", true).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    let shown = bob
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|shown| shown.id == message)
+        .unwrap();
+    assert!(
+        shown
+            .reactions
+            .iter()
+            .any(|reaction| reaction.emoji == "👍" && reaction.mine)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_devices_replying_at_the_same_clock_leave_one_unread_after_reading_one() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    let question = admin.send_message(&general, "who's in?", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    for device in [&bob, &phone] {
+        let reply = Forger::new(device).seal_at(
+            60_000,
+            crate::ops::Op::Message {
+                id: crate::ops::new_owned_id(&device.me()),
+                channel: general.clone(),
+                text: "me".into(),
+                reply_to: Some(question.clone()),
+            },
+        );
+        admin.receive(reply).unwrap();
+    }
+    let replies = admin.thread(&question).unwrap();
+    assert_eq!(replies.len(), 3);
+
+    admin.mark_thread_read(&question, &replies[1].id).unwrap();
+
+    let root = admin
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|shown| shown.id == question)
+        .unwrap();
+    assert_eq!(root.unread_replies, 1);
+    assert_eq!(admin.inbox().unwrap().attention.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_thread_i_started_on_my_laptop_is_followed_on_my_phone_without_my_own_replies() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    let question = bob.send_message(&general, "who's in?", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    phone
+        .send_message(&general, "I am", Some(question.clone()))
+        .unwrap();
+    // After the phone's reply, so it comes later on every device.
+    sync_all(&[&admin, &bob, &phone]).await;
+    admin
+        .send_message(&general, "me too", Some(question.clone()))
+        .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    for device in [&bob, &phone] {
+        let root = device
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .find(|shown| shown.id == question)
+            .unwrap();
+        assert!(root.is_following);
+        assert_eq!(root.unread_replies, 1, "only the admin's reply");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn paging_by_twos_keeps_two_devices_messages_at_one_clock_in_order() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    for (device, text) in [(&bob, "laptop"), (&phone, "phone"), (&admin, "admin")] {
+        admin
+            .receive(Forger::new(device).seal_at(
+                70_000,
+                crate::ops::Op::Message {
+                    id: crate::ops::new_owned_id(&device.me()),
+                    channel: general.clone(),
+                    text: text.into(),
+                    reply_to: None,
+                },
+            ))
+            .unwrap();
+    }
+
+    let all = admin.messages(&general, None, 50).unwrap();
+    let mut paged = Vec::new();
+    let mut before = None;
+    for _ in 0..10 {
+        let page = admin.messages(&general, before.as_ref(), 2).unwrap();
+        let Some(oldest) = page.first() else {
+            break;
+        };
+        before = Some(crate::views::MessageCursor {
+            lamport: oldest.lamport,
+            device: oldest.device.clone(),
+        });
+        paged.splice(0..0, page.into_iter().map(|message| message.id));
+    }
+
+    let expected: Vec<_> = all.into_iter().map(|message| message.id).collect();
+    assert_eq!(paged, expected);
 }

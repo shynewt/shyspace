@@ -52,7 +52,7 @@ impl Workspace {
                 .context("edits are kept for a channel or a thread")?;
             let edited = state
                 .store
-                .message(message, &self.me())?
+                .message(message, &self.my_person())?
                 .context("no such message here")?;
             let edit = crate::ops::Op::MessageEdit {
                 id: message.to_owned(),
@@ -141,7 +141,7 @@ fn conversation_channel(store: &Store, conversation: &str, workspace: &Workspace
     Ok(match store.item_kind(conversation)? {
         Some(ItemKind::Channel) => Some(conversation.to_owned()),
         Some(ItemKind::Message) => store
-            .message(conversation, &workspace.me())?
+            .message(conversation, &workspace.my_person())?
             .map(|message| message.channel),
         _ => None,
     })

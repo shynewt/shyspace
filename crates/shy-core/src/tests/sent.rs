@@ -11,7 +11,7 @@ fn cursor_after(sent: &[LinkedMessage]) -> MessageCursor {
     let oldest = &sent.last().unwrap().message;
     MessageCursor {
         lamport: oldest.lamport,
-        author: oldest.author.clone(),
+        device: oldest.device.clone(),
     }
 }
 

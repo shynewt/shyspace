@@ -154,7 +154,11 @@ pub struct Reaction {
 pub struct Message {
     pub id: EntityId,
     pub channel: EntityId,
+    /// The person who wrote it (member id, hex).
     pub author: String,
+    /// The device that wrote it (hex): with `lamport`, its place in the
+    /// channel's order, as a person's devices can share a clock.
+    pub device: String,
     pub author_name: String,
     pub author_is_bot: bool,
     pub text: String,
@@ -219,14 +223,14 @@ pub struct FileInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MessageCursor {
     pub lamport: u64,
-    /// The message author's member id (hex).
-    pub author: String,
+    /// The device that wrote the message (hex).
+    pub device: String,
 }
 
 impl MessageCursor {
     /// Whether this position comes before `message` in channel order.
     pub fn precedes(&self, message: &Message) -> bool {
-        (self.lamport, self.author.as_str()) < (message.lamport, message.author.as_str())
+        (self.lamport, self.device.as_str()) < (message.lamport, message.device.as_str())
     }
 }
 

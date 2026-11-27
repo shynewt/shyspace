@@ -9,7 +9,7 @@ use rusqlite::{OptionalExtension, ToSql, params};
 
 use super::{
     Store,
-    queries::{IS_SHOWN_IN_CHANNEL, MESSAGE_COLUMNS, MESSAGE_JOINS, message_from_row},
+    queries::{IS_SHOWN_IN_CHANNEL, MESSAGE_COLUMNS, MESSAGE_JOINS, MESSAGE_PERSON, message_from_row},
 };
 use crate::views::Message;
 
@@ -22,8 +22,10 @@ const MAX_THREAD_DEPTH: usize = 1000;
 pub struct Reply {
     pub id: String,
     pub root: String,
-    /// The author's member id (hex).
+    /// The person who wrote it (hex).
     pub author: String,
+    /// The device that wrote it (hex); with `lamport`, its place in order.
+    pub device: String,
     pub lamport: u64,
     pub created_ms: i64,
     pub text: String,
@@ -67,7 +69,7 @@ impl Store {
                 SELECT m.id, chain.root, chain.depth + 1 FROM chain CROSS JOIN messages m ON m.reply_to = chain.id
                 WHERE m.channel = ?1 AND chain.depth < {MAX_THREAD_DEPTH}
              )
-             SELECT chain.id, chain.root, m.author, m.lamport, m.created_ms, COALESCE(e.text, m.text)
+             SELECT chain.id, chain.root, {MESSAGE_PERSON}, m.lamport, m.created_ms, COALESCE(e.text, m.text), m.author
              FROM chain CROSS JOIN messages m ON m.id = chain.id
              LEFT JOIN message_edits e ON e.message = m.id
              WHERE chain.id != chain.root
@@ -80,6 +82,7 @@ impl Store {
                 id: row.get(0)?,
                 root: row.get(1)?,
                 author: hex::encode(row.get::<_, Vec<u8>>(2)?),
+                device: hex::encode(row.get::<_, Vec<u8>>(6)?),
                 lamport: row.get(3)?,
                 created_ms: row.get(4)?,
                 text: row.get(5)?,

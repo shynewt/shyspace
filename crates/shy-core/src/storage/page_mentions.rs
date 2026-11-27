@@ -32,9 +32,9 @@ pub struct PageMentionSpot {
 }
 
 impl Store {
-    /// Records that `author` mentioned you in `page` at `position`,
-    /// replacing any earlier mention of you there by them, read or not.
-    /// Returns whether it is newly unread.
+    /// Records that `author` (a person, whichever of their devices wrote)
+    /// mentioned you in `page` at `position`, replacing any earlier mention
+    /// of you there by them, read or not. Returns whether it is newly unread.
     pub fn note_page_mention(
         &self,
         page: &str,

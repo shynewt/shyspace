@@ -5,7 +5,7 @@ use iroh::PublicKey;
 
 use super::{
     Store,
-    queries::{MESSAGE_COLUMNS, MESSAGE_JOINS, match_expression, message_from_row},
+    queries::{MESSAGE_COLUMNS, MESSAGE_JOINS, MESSAGE_PERSON, match_expression, message_from_row},
 };
 use crate::views::{Message, MessageCursor};
 
@@ -27,7 +27,7 @@ impl Store {
         // One JSON list rather than a variable per channel: a member can make
         // more channels than SQLite takes variables in one statement.
         let mut conditions = vec![
-            "m.author = ?".to_owned(),
+            format!("{MESSAGE_PERSON} = ?"),
             "m.channel IN (SELECT value FROM json_each(?))".to_owned(),
         ];
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![
@@ -38,7 +38,7 @@ impl Store {
             conditions.push("(m.lamport < ? OR (m.lamport = ? AND m.author < ?))".into());
             values.push(Box::new(cursor.lamport));
             values.push(Box::new(cursor.lamport));
-            values.push(Box::new(hex::decode(&cursor.author)?));
+            values.push(Box::new(hex::decode(&cursor.device)?));
         }
         let match_expression = match_expression(text);
         if !match_expression.is_empty() {

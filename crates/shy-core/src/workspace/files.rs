@@ -429,9 +429,9 @@ impl Workspace {
                     name: String::new(),
                 },
             )?,
-            author: PublicKey::try_from(file.author.as_slice())
-                .map(|author| member_id(&author))
-                .context("reading a file's author")?,
+            author: member_id(&store.person_of(
+                &PublicKey::try_from(file.author.as_slice()).context("reading a file's author")?,
+            )?),
             size: file.blob.size,
             id: file.id,
             place: file.place,

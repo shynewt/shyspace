@@ -175,7 +175,8 @@ impl Workspace {
             participants.insert(
                 0,
                 HuddleParticipant {
-                    member: self.my_id(),
+                    // Per device until huddle views go by person.
+                    member: member_id(&self.me()),
                     camera: false,
                     screen: false,
                     is_me: true,
@@ -950,7 +951,7 @@ impl Workspace {
                     }
                     speaking_change = Some((member_id(&peer), speaking));
                 }
-                MediaEvent::MeSpeaking(speaking) => speaking_change = Some((self.my_id(), speaking)),
+                MediaEvent::MeSpeaking(speaking) => speaking_change = Some((member_id(&self.me()), speaking)),
                 MediaEvent::Mic(mic) => mine.mic = mic,
                 MediaEvent::Output(output) => mine.output = output,
                 MediaEvent::Incompatible { .. } | MediaEvent::DevicesChanged => {}

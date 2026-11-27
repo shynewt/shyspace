@@ -143,3 +143,82 @@ async fn the_stricter_of_channel_and_status_wins() {
         "a muted channel stays muted"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn my_other_devices_message_raises_no_alert_and_no_unread() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    bob.set_notify_level(&general, NotifyLevel::All).unwrap();
+    let mut changes = bob.subscribe();
+
+    phone.send_message(&general, "from my phone", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert!(alerted_texts(&mut changes).is_empty());
+    let channel = bob
+        .channels()
+        .unwrap()
+        .into_iter()
+        .find(|channel| channel.id == general)
+        .unwrap();
+    assert_eq!(channel.unread, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mention_from_my_own_other_device_is_not_an_inbox_item() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    let mention = mentions::member_link("Bob", &bob.my_id());
+    phone
+        .send_message(&general, &format!("note to {mention}"), None)
+        .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert!(bob.inbox().unwrap().attention.is_empty());
+    let shown = bob.messages(&general, None, 50).unwrap();
+    assert!(shown.iter().all(|message| !message.mentions_me));
+
+    // A mention of Bob by someone else reaches every one of his devices.
+    admin
+        .send_message(&general, &format!("ask {mention}"), None)
+        .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    for device in [&bob, &phone] {
+        assert_eq!(device.inbox().unwrap().attention.len(), 1);
+        let asked = device
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .find(|message| message.text.starts_with("ask"))
+            .unwrap();
+        assert!(asked.mentions_me);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_alert_from_a_linked_device_names_its_person() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    let mut changes = admin.subscribe();
+
+    phone.send_message(&general, "from the phone", None).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    let mut named = Vec::new();
+    while let Ok(change) = changes.try_recv() {
+        if let Change::Alert {
+            author, author_name, ..
+        } = change
+        {
+            named.push((author, author_name));
+        }
+    }
+    assert_eq!(named, [(bob.my_id(), "Bob".to_string())]);
+}

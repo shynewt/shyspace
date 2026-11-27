@@ -72,7 +72,9 @@ impl Workspace {
         let now = now_ms()?;
         // The author's time can be anything; saturate rather than overflow.
         let age = now.saturating_sub(verified.body.timestamp_ms);
-        if verified.author == self.me() || age > INBOX_WINDOW_MS || state.store.is_deleted(page)? {
+        // Entries, their bounds and alerts go by the person who wrote.
+        let author = state.store.person_of(&verified.author)?;
+        if author == self.my_person() || age > INBOX_WINDOW_MS || state.store.is_deleted(page)? {
             return Ok(Vec::new());
         }
         let Some(found) = self.last_mention_of_me(update)? else {
@@ -88,7 +90,7 @@ impl Workspace {
         let mentioned_ms = verified.body.timestamp_ms.min(now);
         let is_newly_unread = state.store.note_page_mention(
             page,
-            verified.author.as_bytes(),
+            author.as_bytes(),
             &found.position,
             &preview,
             mentioned_ms,
@@ -104,10 +106,10 @@ impl Workspace {
                 .page_alert_times
                 .lock()
                 .expect("page alert lock poisoned by an earlier panic")
-                .take(&verified.author, now);
+                .take(&author, now);
         if is_alerting {
             // The inbox entry is saved; a failure here only loses the alert.
-            match self.page_alert(state, page, &verified.author, found.position, preview, &names) {
+            match self.page_alert(state, page, &author, found.position, preview, &names) {
                 Ok(alert) => changes.push(alert),
                 Err(error) => warn!("couldn't make a page mention's alert: {error:#}"),
             }

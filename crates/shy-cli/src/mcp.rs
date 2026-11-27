@@ -581,6 +581,7 @@ mod tests {
             id: "m".into(),
             channel: "c".into(),
             author: author.into(),
+            device: author.into(),
             author_name: String::new(),
             author_is_bot: is_bot,
             text: String::new(),

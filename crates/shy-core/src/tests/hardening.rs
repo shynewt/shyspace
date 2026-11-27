@@ -6075,6 +6075,58 @@ async fn a_forged_certificate_in_a_v3_commit_leaves_the_device_its_own_person() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_message_never_shows_under_another_persons_id_without_a_counted_record() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    let phone = SecretKey::generate();
+    let from_epoch = epoch_of(&admin);
+    // The admin's own certificate for the phone as Bob's counts nowhere.
+    let forged = device_certificate(&admin.inner.identity, &bob.me(), &phone, from_epoch);
+    let (_, signed) =
+        stage_device_add_unchecked(&admin, &phone, root.path(), &[forged], MapKeyChoice::Admins);
+    bucket.put_commit(from_epoch, signed).await.unwrap();
+    sync_all(&[&bob, &carol]).await;
+    let general = channel_id(&admin, "general");
+    let (epoch, key) = current_key(&carol);
+    let body = OpBody {
+        lamport: 80_000,
+        timestamp_ms: now_ms().unwrap(),
+        op: Op::Message {
+            id: crate::ops::new_owned_id(&phone.public()),
+            channel: general.clone(),
+            text: "as Bob?".into(),
+            reply_to: None,
+        },
+    };
+    let from_phone = crypto::seal(&phone, &key, epoch, 1, &body).unwrap();
+    let unread_in_general = |member: &Workspace| {
+        member
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == general)
+            .unwrap()
+            .unread
+    };
+    let bobs_unread = unread_in_general(&bob);
+
+    for member in [&bob, &carol] {
+        member.receive(from_phone.clone()).unwrap();
+        let shown = member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .find(|message| message.text == "as Bob?")
+            .unwrap();
+        assert_eq!(shown.author, crate::views::member_id(&phone.public()));
+        assert_ne!(shown.author, bob.my_id());
+    }
+    // Not taken for Bob's own, so it's unread for him.
+    assert_eq!(unread_in_general(&bob), bobs_unread + 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_v2_commit_is_ignored_once_the_workspace_has_a_device() {
     let (_root, bucket, admin, _bob, carol, erin, _phone) = bob_with_a_phone().await;
     let freeze = frozen_at_last_seq(&admin, &erin.me());
@@ -6446,7 +6498,7 @@ async fn a_linked_device_keeps_its_own_row_when_it_recomputes_the_map() {
         .unwrap();
 
     assert_eq!(phone.state().store.device_records().unwrap(), before);
-    assert_eq!(phone.my_person().unwrap(), bob.me());
+    assert_eq!(phone.my_person(), bob.me());
     let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
     sync_all(&[&admin, &bob, &phone, &carol]).await;
     assert_eq!(epoch_of(&phone), epoch_of(&admin));
@@ -6507,7 +6559,7 @@ async fn a_device_waits_for_its_join_commit_and_gives_up_only_after_a_while() {
             .await;
 
         match gives_up {
-            false => assert_eq!(finished.unwrap().my_person().unwrap(), bob.me()),
+            false => assert_eq!(finished.unwrap().my_person(), bob.me()),
             true => {
                 let error = format!("{:#}", finished.err().unwrap());
                 assert!(error.contains("couldn't read the commit"), "{error}");
@@ -6541,7 +6593,7 @@ async fn a_device_added_while_the_bucket_is_down_still_gets_its_welcome() {
     admin.sync().await;
 
     let phone = finishing.await.unwrap().unwrap();
-    assert_eq!(phone.my_person().unwrap(), bob.me());
+    assert_eq!(phone.my_person(), bob.me());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6572,7 +6624,7 @@ async fn a_link_started_again_after_an_abandoned_one_makes_a_new_key() {
         .await
         .unwrap();
 
-    assert_eq!(phone.my_person().unwrap(), bob.me());
+    assert_eq!(phone.my_person(), bob.me());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6603,7 +6655,7 @@ async fn a_clearing_stopped_partway_is_finished_by_the_next_link() {
         .await
         .unwrap();
 
-    assert_eq!(phone.my_person().unwrap(), bob.me());
+    assert_eq!(phone.my_person(), bob.me());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6816,7 +6868,7 @@ async fn a_device_and_the_devices_it_linked_are_removed_in_one_commit() {
     let epoch = epoch_of(&admin);
 
     admin
-        .remove_devices(&[phone.my_id(), tablet.my_id()])
+        .remove_devices(&[phone.my_device_id(), tablet.my_device_id()])
         .await
         .unwrap();
     for device in [&bob, &phone, &tablet] {
@@ -6840,13 +6892,16 @@ async fn the_admin_cannot_remove_their_own_person_or_the_device_in_use() {
         refused.to_string().contains("cannot remove themselves"),
         "{refused:#}"
     );
-    let refused = admin.remove_devices(&[admin.my_id()]).await.unwrap_err();
+    let refused = admin.remove_devices(&[admin.my_device_id()]).await.unwrap_err();
     assert!(
         refused.to_string().contains("device they're using"),
         "{refused:#}"
     );
 
-    admin.remove_devices(&[admins_phone.my_id()]).await.unwrap();
+    admin
+        .remove_devices(&[admins_phone.my_device_id()])
+        .await
+        .unwrap();
     admins_phone.sync().await;
     assert!(admins_phone.status().removed);
 }
@@ -6862,7 +6917,7 @@ async fn the_admins_app_refuses_a_sixth_link_in_a_day() {
             &bucket,
         )
         .await;
-        admin.remove_devices(&[device.my_id()]).await.unwrap();
+        admin.remove_devices(&[device.my_device_id()]).await.unwrap();
         bob.sync().await;
     }
     let (_enrollment, request) = begin_link(&bob, &root.path().join("sixth")).await;
@@ -6889,7 +6944,7 @@ async fn a_request_whose_code_starts_like_a_person_whose_first_device_is_gone_is
     let grace = join(&admin, &grace_dir, &bucket, "Grace", false).await;
     let _phone = link_device(&admin, &grace, &root.path().join("phone"), &bucket).await;
     // Grace's first device is lost; her person lives on in the phone.
-    admin.remove_devices(&[grace.my_id()]).await.unwrap();
+    admin.remove_devices(&[grace.my_device_id()]).await.unwrap();
 
     let mallory_dir = root.path().join("mallory");
     data_dir(&mallory_dir)

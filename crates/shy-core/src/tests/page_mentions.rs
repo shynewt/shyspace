@@ -346,3 +346,60 @@ async fn a_mention_whose_text_the_page_never_held_is_forgotten_after_a_rebuild()
     assert_eq!(previews.len(), 1);
     assert!(previews[0].starts_with("Kept "), "{previews:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_mention_from_a_linked_device_is_its_persons_one_entry() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let page = shared_page(&admin, &bob, "# Plan").await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let mut changes = admin.subscribe();
+
+    // Four mentions from Bob's two devices in turn, over his alert bound.
+    for (round, device) in [&bob, &phone, &bob, &phone].into_iter().enumerate() {
+        device
+            .edit_page(
+                &page,
+                Edit::Append(&format!("Ask {} ({round})", mention_of(&admin))),
+            )
+            .unwrap();
+        sync_all(&[&admin, &bob, &phone]).await;
+    }
+
+    let inbox = admin.inbox().unwrap();
+    let [mention] = inbox.page_mentions.as_slice() else {
+        panic!("one entry for Bob: {:?}", inbox.page_mentions);
+    };
+    assert_eq!(mention.author, bob.my_id());
+    let mut alerts = Vec::new();
+    while let Ok(change) = changes.try_recv() {
+        if let Change::PageAlert {
+            author, author_name, ..
+        } = change
+        {
+            alerts.push((author, author_name));
+        }
+    }
+    assert_eq!(
+        alerts,
+        vec![(bob.my_id(), "Bob".to_string()); 3],
+        "Bob's bound of three"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_mention_from_my_other_device_makes_no_entry_and_no_alert() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let page = shared_page(&admin, &bob, "# Plan").await;
+    sync_all(&[&admin, &bob, &phone]).await;
+    let mut changes = bob.subscribe();
+
+    phone
+        .edit_page(&page, Edit::Append(&format!("Note to {}", mention_of(&bob))))
+        .unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+
+    assert!(inbox_previews(&bob).is_empty());
+    assert!(page_alerts(&mut changes).is_empty());
+}

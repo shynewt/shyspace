@@ -565,7 +565,7 @@ pub fn device_link(voucher: &Workspace) -> DeviceLink {
         workspace_name: config.name.clone(),
         admin: config.admin,
         admin_mls_key,
-        person: voucher.my_person().unwrap(),
+        person: voucher.my_person(),
     }
 }
 
@@ -575,7 +575,7 @@ pub fn vouch(voucher: &Workspace, request: &DeviceRequest) -> DeviceCertificate 
     DeviceCertificate::vouch(
         &voucher.inner.identity,
         &voucher.inner.config.workspace_id,
-        voucher.my_person().unwrap(),
+        voucher.my_person(),
         request.device,
         epoch,
         request.acceptance.clone(),

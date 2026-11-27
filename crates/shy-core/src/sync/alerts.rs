@@ -27,7 +27,9 @@ impl Workspace {
             return Ok(None);
         };
         // The author's time can be anything; saturate rather than overflow.
-        if verified.author == self.me()
+        let person = state.store.person_of(&verified.author)?;
+        // Nothing from any of my own devices alerts me.
+        if person == self.my_person()
             || now_ms()?.saturating_sub(verified.body.timestamp_ms) > ALERT_WINDOW_MS
         {
             return Ok(None);
@@ -49,7 +51,7 @@ impl Workspace {
         if !is_wanted {
             return Ok(None);
         }
-        let author = hex::encode(verified.author.as_bytes());
+        let author = hex::encode(person.as_bytes());
         let channel_name = state
             .store
             .channels()?
@@ -97,7 +99,7 @@ impl Workspace {
         if let Some(choice) = state.store.following_choice(&root)? {
             return Ok(choice);
         }
-        let thread = state.store.thread(&root, &self.me())?;
+        let thread = state.store.thread(&root, &self.my_person())?;
         let Some((first, replies)) = thread.split_first() else {
             return Ok(false);
         };

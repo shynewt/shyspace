@@ -601,12 +601,15 @@ impl Workspace {
             Networking::Offline => None,
         };
         let appear_offline = super::presence::load_appear_offline(&state.store)?;
+        // A device's person is set before it first starts, and never changes.
+        let person = state.store.person_of(&identity.public())?;
         let workspace = Self {
             inner: Arc::new(Inner {
                 data: data.clone(),
                 _data_lock: lock,
                 device_key,
                 identity,
+                person,
                 huddle_media: options.media.clone(),
                 device_settings: options.device_settings.clone(),
                 config,

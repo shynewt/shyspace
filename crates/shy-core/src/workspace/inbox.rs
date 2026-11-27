@@ -20,8 +20,8 @@ struct Wanted {
     thread_root: Option<String>,
     reason: InboxReason,
     lamport: u64,
-    /// The author's member id (hex), which breaks ties in order.
-    author: String,
+    /// The device that wrote it (hex), which breaks ties in order.
+    device: String,
     channel: String,
     channel_name: String,
 }
@@ -45,7 +45,7 @@ impl Workspace {
             wanted.extend(self.attention_in(&state, channel)?);
         }
         wanted.sort_by(|left: &Wanted, right: &Wanted| {
-            (right.lamport, &right.author).cmp(&(left.lamport, &left.author))
+            (right.lamport, &right.device).cmp(&(left.lamport, &left.device))
         });
         wanted.truncate(MAX_ATTENTION);
         let attention = wanted
@@ -93,7 +93,7 @@ impl Workspace {
         for mention in
             state
                 .store
-                .unread_mentions(&self.inner.config.workspace_id, &channel.id, &self.me())?
+                .unread_mentions(&self.inner.config.workspace_id, &channel.id, &self.my_person())?
         {
             let thread_root = state
                 .store
@@ -104,7 +104,7 @@ impl Workspace {
                 thread_root,
                 reason: InboxReason::Mention,
                 lamport: mention.lamport,
-                author: mention.author,
+                device: mention.device,
                 channel: channel.id.clone(),
                 channel_name: channel.name.clone(),
             });
@@ -117,7 +117,7 @@ impl Workspace {
             let read = state.store.read_marker(&root)?;
             for reply in replies {
                 let is_new = read.as_ref().is_none_or(|read| {
-                    (read.lamport, read.author.as_str()) < (reply.lamport, reply.author.as_str())
+                    (read.lamport, read.device.as_str()) < (reply.lamport, reply.device.as_str())
                 });
                 if is_new && reply.author != my_id && !mentioned.contains(&reply.id) {
                     wanted.push(Wanted {
@@ -125,7 +125,7 @@ impl Workspace {
                         thread_root: Some(root.clone()),
                         reason: InboxReason::ThreadReply,
                         lamport: reply.lamport,
-                        author: reply.author,
+                        device: reply.device,
                         channel: channel.id.clone(),
                         channel_name: channel.name.clone(),
                     });
@@ -138,7 +138,7 @@ impl Workspace {
     fn inbox_item(&self, state: &State, wanted: Wanted) -> Result<InboxItem> {
         let message = state
             .store
-            .message(&wanted.id, &self.me())?
+            .message(&wanted.id, &self.my_person())?
             .context("inbox message vanished")?;
         let message = self
             .as_seen_by_me(state, &wanted.channel, vec![message])?
@@ -157,7 +157,7 @@ impl Workspace {
         }
         let first = state
             .store
-            .message(root, &self.me())?
+            .message(root, &self.my_person())?
             .context("thread without its first message")?;
         Ok(follows_by_default(
             &self.inner.config.workspace_id,
