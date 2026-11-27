@@ -1,4 +1,4 @@
-.PHONY: image debug release test unit check device-test gradle dependency-checksums wrapper debug-keystore clean
+.PHONY: image debug release test unit check screens device-test gradle dependency-checksums wrapper debug-keystore clean
 
 # Everything builds inside a container, so the host needs no JDK, Android SDK, NDK or Android
 # Rust targets. The whole repository is mounted, since the app builds the Rust core.
@@ -53,6 +53,10 @@ unit: image
 # the check passed without running it.
 check: image
 	$(call gradle,testDebugUnitTest testReleaseUnitTest lintDebug assembleDebug assembleDebugAndroidTest -Pkotlin.incremental=false)
+
+# Renders every screen, light and dark, at a phone's size to app/build/outputs/roborazzi/.
+screens: image
+	$(call gradle,recordRoborazziDebug --tests '*ScreenImages*')
 
 # Runs the instrumented tests on a phone or emulator that adb can see on this machine: a phone
 # on USB (USB debugging on) or one paired for wireless debugging. It updates the debug app and
