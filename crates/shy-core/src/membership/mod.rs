@@ -7,6 +7,7 @@ pub mod device;
 pub(crate) mod follow;
 pub mod invite;
 pub(crate) mod keyring;
+pub mod link;
 pub mod mls;
 pub mod recovery;
 pub(crate) mod request_seal;

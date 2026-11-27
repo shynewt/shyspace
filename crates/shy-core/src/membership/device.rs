@@ -116,7 +116,7 @@ fn voucher_bytes(
     ))?)
 }
 
-fn verify_signature(signer: &PublicKey, bytes: &[u8], signature: &[u8]) -> Result<()> {
+pub(super) fn verify_signature(signer: &PublicKey, bytes: &[u8], signature: &[u8]) -> Result<()> {
     let signature: [u8; 64] = signature.try_into().context("malformed signature")?;
     signer.verify(bytes, &Signature::from_bytes(&signature))?;
     Ok(())
