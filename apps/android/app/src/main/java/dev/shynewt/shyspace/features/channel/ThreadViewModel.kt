@@ -3,9 +3,8 @@ package dev.shynewt.shyspace.features.channel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.shynewt.shyspace.core.ShyCore
+import dev.shynewt.shyspace.core.WorkspaceHandle
 import dev.shynewt.shyspace.core.coreCall
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,10 +38,8 @@ class ThreadViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(ThreadState())
     val state: StateFlow<ThreadState> = mutableState.asStateFlow()
-    private val opening: Deferred<ShyWorkspace?> = viewModelScope.async {
-        // Released when the screen goes: the core needs every handle gone to swap a phone's key when linking.
-        core.openWorkspace(workspaceId, ::showError)?.also(::addCloseable)
-    }
+    // Released when the screen goes: the core needs every handle gone to swap a phone's key when linking.
+    private val followed = WorkspaceHandle(core, workspaceId, ::showError).also(::addCloseable)
 
     init {
         viewModelScope.launch { follow() }
@@ -52,27 +49,27 @@ class ThreadViewModel(
     suspend fun reply(text: String): Boolean {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return false
-        val workspace = opening.await() ?: return false
+        val workspace = followed.get() ?: return false
         return coreCall(::showError) { workspace.sendMessage(channelId, trimmed, rootId) } != null
     }
 
     suspend fun edit(message: String, text: String): Boolean {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return false
-        val workspace = opening.await() ?: return false
+        val workspace = followed.get() ?: return false
         return coreCall(::showError) { workspace.editMessage(message, trimmed) } != null
     }
 
     fun react(message: String, emoji: String, active: Boolean) {
         viewModelScope.launch {
-            val workspace = opening.await() ?: return@launch
+            val workspace = followed.get() ?: return@launch
             coreCall(::showError) { workspace.react(message, emoji, active) }
         }
     }
 
     fun delete(message: String) {
         viewModelScope.launch {
-            val workspace = opening.await() ?: return@launch
+            val workspace = followed.get() ?: return@launch
             coreCall(::showError) { workspace.deleteMessage(message) }
         }
     }
@@ -80,15 +77,16 @@ class ThreadViewModel(
     /** You saw [message], the newest reply: the thread is read up to it. */
     fun markSeen(message: String) {
         viewModelScope.launch {
-            val workspace = opening.await() ?: return@launch
+            val workspace = followed.get() ?: return@launch
             coreCall(::showError) { workspace.markThreadRead(rootId, message) }
         }
     }
 
     private suspend fun follow() {
-        val workspace = opening.await() ?: return
-        core.changes(workspace).collect { change ->
-            if ((change is Change.Messages && change.channel == channelId) || change is Change.Sync) reload(workspace)
+        followed.changes().collect { change ->
+            if ((change is Change.Messages && change.channel == channelId) || change is Change.Sync) {
+                reload(followed.get() ?: return@collect)
+            }
         }
     }
 

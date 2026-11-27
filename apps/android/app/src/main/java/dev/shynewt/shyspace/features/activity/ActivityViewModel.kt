@@ -3,6 +3,7 @@ package dev.shynewt.shyspace.features.activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.shynewt.shyspace.core.ShyCore
+import dev.shynewt.shyspace.core.WorkspaceHandle
 import dev.shynewt.shyspace.core.coreCall
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,36 +33,38 @@ class ActivityViewModel(private val core: ShyCore) : ViewModel() {
     private val mutableState = MutableStateFlow(ActivityState())
     val state: StateFlow<ActivityState> = mutableState.asStateFlow()
     private var following: Job? = null
-    /** The handle on the workspace followed, released when another replaces it or this ends. */
-    private var followed: ShyWorkspace? = null
+    /** The workspace followed, released when another replaces it or this ends. */
+    private var followed: WorkspaceHandle? = null
 
     /** Shows [workspaceId]'s activity from now on. */
     fun follow(workspaceId: String) {
         if (mutableState.value.workspaceId == workspaceId && following?.isActive == true) return
-        following?.cancel()
+        stopFollowing()
         mutableState.value = ActivityState(workspaceId = workspaceId)
+        val handle = WorkspaceHandle(core, workspaceId, ::showError)
+        followed = handle
         following = viewModelScope.launch {
-            val workspace = core.openWorkspace(workspaceId, ::showError) ?: return@launch
-            followed?.close()
-            followed = workspace
-            core.changes(workspace).collect { change ->
-                if (change is Change.Messages || change is Change.Channels || change is Change.Sync) reload(workspace)
+            handle.changes().collect { change ->
+                if (change is Change.Messages || change is Change.Channels || change is Change.Sync) {
+                    reload(handle.get() ?: return@collect)
+                }
             }
         }
     }
 
     /** There's no workspace to follow, for [reason]: say so instead of loading. */
     fun showUnavailable(reason: String) {
-        following?.cancel()
-        followed?.close()
-        followed = null
+        stopFollowing()
         mutableState.value = ActivityState(isLoading = false, error = reason)
     }
 
     /** Marks [channelId] read up to its newest message; a failure is shown above the list, which stays. */
     fun markChannelRead(channelId: String) {
-        val workspace = mutableState.value.workspaceId?.let(core.app::workspace) ?: return
-        viewModelScope.launch { workspace.use { coreCall(::showError) { it.markChannelRead(channelId) } } }
+        val handle = followed ?: return
+        viewModelScope.launch {
+            val workspace = handle.get() ?: return@launch
+            coreCall(::showError) { workspace.markChannelRead(channelId) }
+        }
     }
 
     private suspend fun reload(workspace: ShyWorkspace) {
@@ -76,8 +79,12 @@ class ActivityViewModel(private val core: ShyCore) : ViewModel() {
         )
     }
 
-    override fun onCleared() {
+    override fun onCleared() = stopFollowing()
+
+    private fun stopFollowing() {
+        following?.cancel()
         followed?.close()
+        followed = null
     }
 
     private fun showError(reason: String) {
