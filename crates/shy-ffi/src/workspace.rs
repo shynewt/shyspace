@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use shy_core::{
     Workspace,
-    views::{Change, Channel, Member, Message, MessageCursor},
+    views::{Change, Channel, LinkedMessage, Member, Message, MessageCursor},
 };
 use tokio::{sync::broadcast::error::RecvError, task::AbortHandle};
 
@@ -107,6 +107,24 @@ impl ShyWorkspace {
     pub async fn delete_message(&self, message: String) -> Result<(), ShyError> {
         let workspace = self.inner.clone();
         run_blocking(move || workspace.delete_message(&message)).await
+    }
+
+    /// The thread starting at `root`: its first message, then every reply.
+    pub async fn thread(&self, root: String) -> Result<Vec<Message>, ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.thread(&root)).await
+    }
+
+    /// The message `id`, with the first message of its thread if it's a reply; none once deleted.
+    pub async fn linked_message(&self, id: String) -> Result<Option<LinkedMessage>, ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.linked_message(&id)).await
+    }
+
+    /// Moves your read position in the thread starting at `root` up to `message`.
+    pub async fn mark_thread_read(&self, root: String, message: String) -> Result<(), ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.mark_thread_read(&root, &message)).await
     }
 
     /// Moves your read position in `channel` up to `message`, on this device only.

@@ -816,6 +816,7 @@ pub enum InboxReason {
 
 /// A message found from a `shy://message/<id>` link.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LinkedMessage {
     pub message: Message,
     /// The first message of its thread, if it's a reply.

@@ -283,3 +283,68 @@ async fn the_members_are_listed_with_their_names() {
     );
     assert!(members[0].is_admin);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_thread_lists_its_first_message_then_its_replies() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+    let general = general_of(&acme).await;
+    let root = acme
+        .send_message(general.clone(), "lunch?".into(), None)
+        .await
+        .unwrap();
+    let reply = acme
+        .send_message(general.clone(), "yes".into(), Some(root.clone()))
+        .await
+        .unwrap();
+
+    let thread = acme.thread(root.clone()).await.unwrap();
+    assert_eq!(
+        thread.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
+        ["lunch?", "yes"]
+    );
+    let found = acme.linked_message(reply).await.unwrap().unwrap();
+    assert_eq!(found.thread_root, Some(root));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn marking_a_thread_read_refreshes_its_channel() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+    let general = general_of(&acme).await;
+    let root = acme
+        .send_message(general.clone(), "lunch?".into(), None)
+        .await
+        .unwrap();
+    let reply = acme
+        .send_message(general.clone(), "yes".into(), Some(root.clone()))
+        .await
+        .unwrap();
+    let (sender, mut changes) = mpsc::unbounded_channel();
+    let _subscription = acme.subscribe(Arc::new(ChangeChannel(sender)));
+
+    acme.mark_thread_read(root, reply).await.unwrap();
+
+    let expected = Change::Messages { channel: general };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while changes.recv().await.unwrap() != expected {}
+    })
+    .await
+    .expect("the thread's channel was told to refresh");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deleted_message_is_no_longer_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+    let general = general_of(&acme).await;
+    let root = acme.send_message(general, "lunch?".into(), None).await.unwrap();
+    assert!(acme.linked_message(root.clone()).await.unwrap().is_some());
+
+    acme.delete_message(root.clone()).await.unwrap();
+
+    assert!(acme.linked_message(root).await.unwrap().is_none());
+}
