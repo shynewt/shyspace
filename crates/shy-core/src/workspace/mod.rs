@@ -2,6 +2,7 @@
 
 mod actions;
 mod alert_actions;
+pub(crate) mod device_linking;
 mod drafts;
 mod enrollment;
 mod files;
@@ -11,17 +12,21 @@ mod inbox;
 mod key_rotation;
 mod later;
 mod lifecycle;
+mod linking;
+pub(crate) mod linking_store;
 mod look;
 mod page_mentions;
 mod pages_live;
 mod presence;
 mod protection;
+mod reading;
 mod reads;
 mod sections;
 mod sent;
 mod storage;
 
 pub(crate) use actions::OpMaker;
+pub use device_linking::{CheckOnNewDevice, DeviceLinking, LinkRefused, ResumedLink};
 pub use enrollment::{DeviceEnrollment, DeviceLink, DeviceRequest};
 pub use files::{FileSource, MAX_FILES_PER_MESSAGE, NewFile};
 pub use huddles::Via;
@@ -29,8 +34,10 @@ pub use huddles::Via;
 pub(crate) use lifecycle::{CUT_SHORT_CLEARINGS, CUT_SHORT_CREATES};
 pub use lifecycle::{DataDir, JoinCancel};
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
+pub use linking::LinkCheckShown;
 pub use presence::Heartbeat;
 pub(crate) use presence::NextBeat;
+pub use reading::WorkspaceMode;
 pub(crate) use reads::follows_by_default;
 pub use storage::StorageUpdate;
 
@@ -286,6 +293,7 @@ pub(crate) struct Inner {
     /// The person this device belongs to: itself, unless it was linked to
     /// someone before it first started.
     pub person: PublicKey,
+    pub mode: WorkspaceMode,
     pub config: WorkspaceConfig,
     pub state: Mutex<State>,
     /// Swapped when the admin changes the storage settings.
@@ -405,6 +413,8 @@ pub(crate) struct Inner {
     /// When each owed link welcome last went up, by its code and device.
     pub welcomes_sent:
         Mutex<std::collections::HashMap<(crate::membership::link::Token, PublicKey), tokio::time::Instant>>,
+    /// The link code this device shows, with its secrets, in memory only.
+    pub(crate) open_link: Mutex<Option<linking::OpenLink>>,
     /// Pauses the next audience refresh after it read who may hear the
     /// call: it says so on the first channel, then waits on the second.
     #[cfg(test)]

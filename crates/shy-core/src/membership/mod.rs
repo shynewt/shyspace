@@ -7,6 +7,7 @@ pub mod device;
 pub(crate) mod device_actions;
 pub mod device_change;
 pub(crate) mod follow;
+pub mod handover;
 pub mod invite;
 pub(crate) mod keyring;
 pub mod link;

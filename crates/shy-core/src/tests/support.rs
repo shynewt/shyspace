@@ -96,6 +96,27 @@ impl JoinMailbox for BucketMailbox {
     }
 }
 
+/// A new device's mailbox for a link code, talking to the in-memory bucket
+/// directly where production uses the code's presigned links.
+pub struct BucketLinkMailbox {
+    pub bucket: Bucket,
+    pub token: crate::membership::link::Token,
+}
+
+impl JoinMailbox for BucketLinkMailbox {
+    async fn post_request(&self, request: Vec<u8>) -> Result<()> {
+        self.bucket.put_link_slot(&self.token, "request", request).await
+    }
+
+    async fn fetch_answer(&self) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .bucket
+            .link_slot(&self.token, "answer")
+            .await?
+            .map(|bytes| bytes.to_vec()))
+    }
+}
+
 /// Starts joining with `invite` in the background.
 pub fn start_join(
     invite: Invite,

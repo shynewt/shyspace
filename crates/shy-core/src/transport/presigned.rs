@@ -24,6 +24,14 @@ pub struct PresignedMailbox {
 }
 
 impl PresignedMailbox {
+    pub fn for_link(code: &crate::membership::link::LinkCode) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            request_url: code.request_url.clone(),
+            answer_url: code.answer_url.clone(),
+        }
+    }
+
     pub fn for_invite(invite: &Invite) -> Self {
         Self {
             http: reqwest::Client::new(),

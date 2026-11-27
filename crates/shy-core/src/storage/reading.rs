@@ -243,6 +243,48 @@ impl Store {
         let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
+
+    /// What this device kept for itself: its drafts and read positions.
+    pub fn personal_reading(&self) -> Result<PersonalReading> {
+        let mut statement = self
+            .db
+            .prepare("SELECT channel, lamport, author FROM read_markers")?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        Ok(PersonalReading {
+            drafts: self.drafts()?,
+            read_markers: rows.collect::<Result<_, _>>()?,
+        })
+    }
+
+    /// Takes in what another store of this device's kept, keeping whichever
+    /// draft changed last and whichever read position is further on.
+    pub fn keep_personal_reading(&self, kept: &PersonalReading) -> Result<()> {
+        self.atomically(|store| {
+            for (target, text, updated_ms) in &kept.drafts {
+                store.db.execute(
+                    "INSERT INTO drafts (target, text, updated_ms) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (target) DO UPDATE SET text = ?2, updated_ms = ?3 WHERE ?3 > updated_ms",
+                    params![target, text, updated_ms],
+                )?;
+            }
+            for (channel, lamport, author) in &kept.read_markers {
+                store.db.execute(
+                    "INSERT INTO read_markers (channel, lamport, author) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (channel) DO UPDATE SET lamport = ?2, author = ?3
+                     WHERE ?2 > lamport OR (?2 = lamport AND ?3 > author)",
+                    params![channel, lamport, author],
+                )?;
+            }
+            Ok(())
+        })
+    }
+}
+
+/// A device's drafts and read positions, carried from the store it read
+/// from while linking into the one it joins with.
+pub struct PersonalReading {
+    drafts: Vec<(String, String, i64)>,
+    read_markers: Vec<(String, u64, Vec<u8>)>,
 }
 
 #[cfg(test)]

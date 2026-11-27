@@ -477,7 +477,13 @@ fn park(state: &State, envelope: &Envelope) -> Result<()> {
     );
     let was_member = state.store.was_ever_member(&envelope.author).context(NotKept)?;
     ensure!(was_member, "op from a non-member");
-    let current_epoch = state.mls.epoch().context(NotKept)?;
+    // A device that only reads has no group: its newest epoch is the
+    // newest it was handed.
+    let current_epoch = match state.mls.is_active() {
+        true => state.mls.epoch(),
+        false => state.store.newest_epoch(),
+    }
+    .context(NotKept)?;
     ensure!(
         envelope.epoch <= current_epoch + MAX_PENDING_EPOCHS_AHEAD,
         "op is for an epoch too far ahead ({})",

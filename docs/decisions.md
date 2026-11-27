@@ -2,6 +2,15 @@
 
 Why things are the way they are. Add an entry when you make a choice that someone might later question. Newest first.
 
+## Linking a device: a code, and a number picked from three (2026-11)
+A new device links through a short-lived code from one of the person's devices, not through an invite: the person is already in, so the admin isn't asked to approve, only to commit. The one security step is the person tapping, on the device they already use, the number the new device shows, among two random decoys. The number is committed then revealed, so nobody can steer it. Picking from three makes the person look at the new device, where "They match" could be tapped without looking. Typing the number was ruled out as a step more for the same check.
+
+## A new device reads at once, from a hand-over, in its own store (2026-11)
+The device the person already uses hands the new one what a newcomer's grant holds, up to its certificate's epoch, so it reads before the admin's app adds it. It reads from a separate store over a bucket that writes nothing, and joins in its real folder only through the admin's welcome, so nothing the person's device sent decides members, devices or freezes. Waiting for the admin's app before showing anything was ruled out: it can be offline for hours.
+
+## Device changes are ops (2026-11)
+A person's device asks the admin's app to link or remove devices with an ordinary signed op, which every member judges the same way and only the admin's app acts on. It reuses the op log's ordering, sealing and sync, at the cost of members seeing that one of a person's devices was linked or removed, which the device count already shows. Separate objects in the bucket were the fallback.
+
 ## Android asks for local network access only for a bucket on the local network (2026-11)
 Since Android 17, an app built for it can reach private and link-local addresses only with the local network permission, which Android shows as "Nearby devices"; without it, connections there time out. Most buckets are on the internet and need nothing, so the app asks only when a bucket's address is local, says why first, and points to Settings after a refusal, as Android stops asking after the second. Devices on the same network still reach each other through relays until the permission is granted.
 

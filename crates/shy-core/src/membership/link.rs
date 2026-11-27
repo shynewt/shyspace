@@ -26,6 +26,10 @@ const HANDOVER_KEY_LABEL: &str = "shyspace link handover key v1";
 const CHECK_LABEL: &str = "shyspace link check v1";
 const CHECK_CODE_CONTEXT: &str = "shyspace link check code v1";
 pub const LINK_CODE_LIFETIME_MS: i64 = 10 * 60 * 1000;
+/// How long the new device can read the answer slot, from when the code was
+/// made: long enough for a confirmation late in the code's life, and the
+/// sync before vouching.
+pub const ANSWER_LIFETIME_MS: i64 = 60 * 60 * 1000;
 
 /// Names a link's bucket slots and commits the voucher to its nonce.
 pub type Token = [u8; 16];
@@ -329,9 +333,29 @@ fn check_code(code: &LinkCode, device: &PublicKey, handover_key: &[u8], nonce: &
         nonce,
     ))?;
     let digest = blake3::derive_key(CHECK_CODE_CONTEXT, &bytes);
-    let number =
-        u64::from_be_bytes(digest[..8].try_into().expect("a 32-byte digest has 8 bytes")) % 1_000_000;
-    Ok(format!("{:03} {:03}", number / 1000, number % 1000))
+    let number = u64::from_be_bytes(digest[..8].try_into().expect("a 32-byte digest has 8 bytes"));
+    Ok(six_digits(number))
+}
+
+fn six_digits(number: u64) -> String {
+    let number = number % 1_000_000;
+    format!("{:03} {:03}", number / 1000, number % 1000)
+}
+
+/// What the voucher shows the person to pick from: the check code and two
+/// random decoys, all different, in random order. The person picks the one
+/// the new device shows, so a tap without looking fails two times in three.
+pub(crate) fn check_choices(check_code: &str) -> [String; 3] {
+    let mut choices = vec![check_code.to_owned()];
+    while choices.len() < 3 {
+        let decoy = six_digits(rand::random());
+        if !choices.contains(&decoy) {
+            choices.push(decoy);
+        }
+    }
+    let real_at = rand::random_range(0..3);
+    choices.swap(0, real_at);
+    choices.try_into().expect("three choices were made")
 }
 
 #[cfg(test)]
@@ -566,5 +590,23 @@ pub(crate) mod tests {
         let impostor = SecretKey::generate();
 
         assert!(make_check(&impostor, &voucher.code, voucher.secrets, &device.request).is_err());
+    }
+
+    #[test]
+    fn the_decoys_never_match_the_check_code_or_each_other() {
+        let mut real_at = [0; 3];
+        for number in 0..3000 {
+            let check_code = six_digits(number % 7);
+            let choices = check_choices(&check_code);
+
+            assert_eq!(choices.iter().filter(|choice| **choice == check_code).count(), 1);
+            assert!(choices[0] != choices[1] && choices[1] != choices[2] && choices[0] != choices[2]);
+            assert!(choices.iter().all(|choice| choice.len() == 7));
+            real_at[choices.iter().position(|choice| *choice == check_code).unwrap()] += 1;
+        }
+        assert!(
+            real_at.iter().all(|count| *count > 800),
+            "the real code moves: {real_at:?}"
+        );
     }
 }

@@ -101,6 +101,64 @@ impl DeviceEnrollment {
         Ok((enrollment, request))
     }
 
+    /// The request to seal to the code's voucher, with this device's new
+    /// one-time key for the hand-over, which it signs for this code.
+    pub fn link_request(
+        &self,
+        code: &crate::membership::link::LinkCode,
+        request: &DeviceRequest,
+        platform: crate::membership::link::Platform,
+    ) -> Result<(
+        crate::membership::link::LinkRequest,
+        crate::private::crypto::SealingKeyPair,
+    )> {
+        let handover = crate::private::crypto::new_sealing_key_pair()?;
+        let linked = crate::membership::link::LinkedDevice {
+            key_package: request.key_package.clone(),
+            binding: request.binding.clone(),
+            acceptance: request.acceptance.clone(),
+        };
+        let link_request = crate::membership::link::LinkRequest::new(
+            &self.local.identity,
+            code,
+            linked,
+            handover.public.clone(),
+            platform,
+        )?;
+        Ok((link_request, handover))
+    }
+
+    /// Opens an enrollment `begin` made earlier, after a restart, without
+    /// clearing it.
+    pub(crate) async fn reopen(data: DataDir, link: DeviceLink) -> Result<Self> {
+        let local = data.open_local().await?;
+        let mls = local.open_mls(&data, None)?;
+        Ok(Self {
+            data,
+            local,
+            mls,
+            link,
+        })
+    }
+
+    pub(crate) fn identity(&self) -> &iroh::SecretKey {
+        &self.local.identity
+    }
+
+    /// Takes in drafts and read positions kept elsewhere on this device, so
+    /// the workspace this enrollment becomes starts with them.
+    pub(crate) fn keep_personal_reading(&self, kept: &crate::storage::PersonalReading) -> Result<()> {
+        self.local.store.keep_personal_reading(kept)
+    }
+
+    /// Deletes what this enrollment made: the link is over.
+    pub(crate) async fn forget(self) -> Result<()> {
+        let Self { data, local, mls, .. } = self;
+        drop(mls);
+        drop(local);
+        data.forget_unfinished().await
+    }
+
     /// Joins with the admin's welcome. Fails, and clears the folder so the
     /// next try makes a new key, if the device map doesn't match or the
     /// commit that added this device doesn't make it the person's.

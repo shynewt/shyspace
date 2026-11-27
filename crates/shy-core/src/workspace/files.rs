@@ -177,6 +177,7 @@ impl Workspace {
         size: u64,
         progress: impl Fn(u64),
     ) -> Result<BlobRef> {
+        ensure!(!self.is_reading_only(), super::reading::READING_ONLY);
         let me = self.me();
         let (cache, blob) = tokio::task::spawn_blocking(move || -> Result<(BlobCache, BlobRef)> {
             let blob = match source {

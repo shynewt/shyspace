@@ -393,6 +393,9 @@ impl Workspace {
         if *self.inner.stopped.borrow() {
             return false;
         }
+        if self.is_reading_only() {
+            return self.reading_pass().await;
+        }
         let mut errors = Vec::new();
         let mut has_found_new = false;
         let mut is_admin_newer = false;
@@ -513,6 +516,26 @@ impl Workspace {
         }
         self.emit(Change::Sync);
         has_found_new
+    }
+
+    /// What a device that only reads does: pulls what it can and applies
+    /// what its keys open, writing nothing anywhere.
+    async fn reading_pass(&self) -> bool {
+        let pulled = self.pull().await;
+        let applied = self.apply_pending();
+        let error = match (&pulled, &applied) {
+            (Err(error), _) | (Ok(_), Err(error)) => Some(format!("{error:#}")),
+            (Ok(_), Ok(pending)) => pending.local_failure.as_ref().map(|error| format!("{error:#}")),
+        };
+        {
+            let mut status = self.status_lock();
+            if error.is_none() {
+                status.last_sync_ms = now_ms().ok();
+            }
+            status.error = error;
+        }
+        self.emit(Change::Sync);
+        pulled.unwrap_or(false)
     }
 
     /// Returns how soon to try again when the beat was held back.

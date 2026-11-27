@@ -31,8 +31,8 @@ const MAX_REQUESTER_NAME: usize = 80;
 const MAX_REMEMBERED_REFUSALS: usize = 1024;
 /// At most this many devices linked to one person within `LINK_WINDOW_MS`,
 /// by this device's clock.
-pub(super) const MAX_LINKS_PER_DAY: usize = 5;
-pub(super) const LINK_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
+pub(crate) const MAX_LINKS_PER_DAY: usize = 5;
+pub(crate) const LINK_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 /// How often a pending join answer is put up again, in case someone removed it.
 pub(super) const ANSWER_REFRESH: Duration = Duration::from_secs(10 * 60);
 

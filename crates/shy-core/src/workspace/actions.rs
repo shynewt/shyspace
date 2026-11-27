@@ -66,6 +66,7 @@ impl Workspace {
     /// next sequence number: all of them or none. They go out live only once
     /// they are all stored.
     pub(crate) fn write_together(&self, makers: Vec<OpMaker<'_>>) -> Result<()> {
+        ensure!(!self.is_reading_only(), super::reading::READING_ONLY);
         let (envelopes, changes) = {
             let state = self.state();
             if !state.mls.is_active() {

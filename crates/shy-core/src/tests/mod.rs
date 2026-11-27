@@ -16,6 +16,7 @@ mod invites;
 mod key_handoff;
 mod key_rotation;
 mod later;
+mod linking;
 mod mentions;
 mod notes;
 mod notifications;

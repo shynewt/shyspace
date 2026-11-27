@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, broadcast, mpsc, watch};
 use tracing::warn;
 
-use super::{Inner, Networking, Profile, State, Workspace, WorkspaceOptions};
+use super::{
+    Inner, Networking, Profile, State, Workspace, WorkspaceMode, WorkspaceOptions, reading::Opening,
+};
 use crate::{
     config::{self, WorkspaceConfig},
     identity,
@@ -63,6 +65,10 @@ impl JoinCancel {
     pub fn cancel(&self) {
         self.0.send_replace(true);
     }
+
+    pub(super) fn subscribe(&self) -> watch::Receiver<bool> {
+        self.0.subscribe()
+    }
 }
 
 impl Default for JoinCancel {
@@ -106,13 +112,13 @@ impl DataDir {
     #[cfg(test)]
     pub(crate) async fn use_identity_for_test(&self, identity: &iroh::SecretKey) -> Result<()> {
         std::fs::create_dir_all(&self.path)?;
-        identity::store_for_test(&self.open_local().await?.store, identity)
+        identity::store(&self.open_local().await?.store, identity)
     }
 
     /// Deletes a declined join: only the files a join makes (anything else
     /// in the folder stays, and the folder with it), then the device key. A
     /// key left by a crash in between opens nothing, and the next join works.
-    async fn forget_unfinished(&self) -> Result<()> {
+    pub(super) async fn forget_unfinished(&self) -> Result<()> {
         // The store before the MLS database: a stop partway leaves an MLS
         // file without a store, which the next link clears again.
         for database in [STORE_FILE, MLS_FILE] {
@@ -146,6 +152,13 @@ impl DataDir {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Deletes a store a linking device read from, settings first, so a
+    /// stop partway never leaves something that opens as a workspace.
+    pub(super) async fn forget_reading(&self) -> Result<()> {
+        remove_if_there(&self.path.join(crate::config::CONFIG_FILE))?;
+        self.forget_unfinished().await
     }
 
     /// Clears what an unfinished join or link left in this folder, so a new
@@ -374,7 +387,7 @@ impl Workspace {
             .store
             .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
         config.mark_complete(&data.path)?;
-        let workspace = Self::start(data, local, mls, config, connect, options).await?;
+        let workspace = Self::start(data, local, mls, config, Opening::Member(connect), options).await?;
         #[cfg(test)]
         if CUT_SHORT_CREATES
             .lock()
@@ -497,7 +510,7 @@ impl Workspace {
                 .set_meta(PENDING_PROFILE_META, &serde_json::to_vec(&pending)?)?;
         }
         config.mark_complete(&data.path)?;
-        let workspace = Self::start(data, local, mls, config, connect, options).await?;
+        let workspace = Self::start(data, local, mls, config, Opening::Member(connect), options).await?;
         // Without it, unbound commits are taken until the next bound one.
         if let Err(error) = workspace.note_a_bound_join().await {
             warn!("can't tell whether the admin's app binds its commits yet: {error:#}");
@@ -526,7 +539,7 @@ impl Workspace {
             "the bucket settings this workspace has (from its admin) can't be used; ask the workspace admin to check them in Settings › Storage",
         )?;
         let mls = local.open_mls(data, Some(config.workspace_id.as_bytes()))?;
-        let workspace = Self::start(data, local, mls, config, connect, options).await?;
+        let workspace = Self::start(data, local, mls, config, Opening::Member(connect), options).await?;
         workspace.finish_writes_left_over()?;
         Ok(workspace)
     }
@@ -565,14 +578,15 @@ impl Workspace {
         self.state().store.delete_meta(PENDING_PROFILE_META)
     }
 
-    async fn start(
+    pub(super) async fn start(
         data: &DataDir,
         local: Local,
         mls: Mls,
         config: WorkspaceConfig,
-        connect: Connector,
+        opening: Opening,
         options: impl Into<WorkspaceOptions>,
     ) -> Result<Self> {
+        let (connect, mode) = opening.into_parts();
         let bucket = connect(&config.workspace_id, &config.bucket)?;
         let Local {
             lock,
@@ -585,7 +599,12 @@ impl Workspace {
         state.record_epoch(&config)?;
         let (incoming_sender, incoming) = mpsc::channel(1024);
         let options: WorkspaceOptions = options.into();
-        let net = match options.networking {
+        // A linking device has no endpoint: it may talk to nobody yet.
+        let networking = match mode {
+            WorkspaceMode::Member => options.networking,
+            WorkspaceMode::Linking => Networking::Offline,
+        };
+        let net = match networking {
             Networking::Online => {
                 let topic = gossip_topic(&config.workspace_id);
                 Some(
@@ -602,7 +621,10 @@ impl Workspace {
         };
         let appear_offline = super::presence::load_appear_offline(&state.store)?;
         // A device's person is set before it first starts, and never changes.
-        let person = state.store.person_of(&identity.public())?;
+        let person = match mode {
+            WorkspaceMode::Member => state.store.person_of(&identity.public())?,
+            WorkspaceMode::Linking => super::reading::linking_person(&state.store)?,
+        };
         let workspace = Self {
             inner: Arc::new(Inner {
                 data: data.clone(),
@@ -610,6 +632,7 @@ impl Workspace {
                 device_key,
                 identity,
                 person,
+                mode,
                 huddle_media: options.media.clone(),
                 device_settings: options.device_settings.clone(),
                 config,
@@ -666,6 +689,7 @@ impl Workspace {
                 audience_lock: Mutex::default(),
                 device_actions_lock: tokio::sync::Mutex::new(()),
                 welcomes_sent: Mutex::default(),
+                open_link: Mutex::default(),
                 #[cfg(test)]
                 audience_pause: Mutex::default(),
                 #[cfg(test)]

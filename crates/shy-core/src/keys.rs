@@ -83,6 +83,25 @@ impl DeviceKey {
 }
 
 impl KeyStorage {
+    /// Where the key for a second folder beside the one this storage is
+    /// for lives: the keychain names each folder's key already; a key file
+    /// or the app's store gets a second name, so deleting one key never
+    /// deletes the other.
+    pub(crate) fn beside(&self, suffix: &str) -> Self {
+        match self {
+            Self::Keychain => Self::Keychain,
+            Self::File(path) => {
+                let mut beside = path.clone().into_os_string();
+                beside.push(suffix);
+                Self::File(beside.into())
+            }
+            Self::Host { store, account } => Self::Host {
+                store: store.clone(),
+                account: format!("{account}{suffix}"),
+            },
+        }
+    }
+
     /// The key for `dir`, creating one the first time.
     pub async fn load_or_create(&self, dir: &Path) -> Result<DeviceKey> {
         match self.load(dir).await {
@@ -402,6 +421,24 @@ mod tests {
         storage.forget(dir.path()).await.unwrap();
         assert!(store.secrets.lock().unwrap().is_empty());
         storage.forget(dir.path()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_key_beside_another_is_its_own_and_forgetting_it_keeps_the_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::default());
+        let file = dir.path().join("first.key");
+        for storage in [host_storage(&store), KeyStorage::File(file)] {
+            let first = storage.load_or_create(dir.path()).await.unwrap();
+            let beside = storage.beside(".linking");
+            let second = beside.load_or_create(dir.path()).await.unwrap();
+            assert_ne!(*first.database_key("shy"), *second.database_key("shy"));
+
+            beside.forget(dir.path()).await.unwrap();
+
+            let kept = storage.load(dir.path()).await.unwrap();
+            assert_eq!(*first.database_key("shy"), *kept.database_key("shy"));
+        }
     }
 
     #[tokio::test]

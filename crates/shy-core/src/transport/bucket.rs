@@ -681,6 +681,31 @@ impl Bucket {
     }
 
     /// Links an invitee can use without credentials, valid for `valid_for`.
+    /// A link code's two links: the new device puts its request with one
+    /// and reads the answer with the other, which outlives the code so a
+    /// late confirmation still reaches it.
+    pub async fn presign_link(
+        &self,
+        token: &crate::membership::link::Token,
+        request_for: Duration,
+        answer_for: Duration,
+    ) -> Result<InviteLinks> {
+        let signing = self.signing.as_ref().context("this bucket can't presign links")?;
+        let full_path = |slot| Path::from(format!("{}/{}", signing.prefix, link_path(token, slot)));
+        let request = signing
+            .signer
+            .signed_url(Method::PUT, &full_path("request"), request_for)
+            .await?;
+        let answer = signing
+            .signer
+            .signed_url(Method::GET, &full_path("answer"), answer_for)
+            .await?;
+        Ok(InviteLinks {
+            request_url: request.to_string(),
+            answer_url: answer.to_string(),
+        })
+    }
+
     pub async fn presign_invite(&self, token: &str, valid_for: Duration) -> Result<InviteLinks> {
         let signing = self.signing.as_ref().context("this bucket can't presign links")?;
         let full_path = |slot| Path::from(format!("{}/invites/{token}/{slot}", signing.prefix));
@@ -955,6 +980,8 @@ impl Bucket {
         self.get(&invite_path(token, "answer")).await
     }
 }
+
+pub mod read_only;
 
 #[cfg(test)]
 pub(crate) mod probe;

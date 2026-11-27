@@ -21,6 +21,7 @@ const MIGRATIONS: &[&str] = &[
     DEVICES,
     DEVICE_CHANGES,
     DEVICE_ACTIONS,
+    PENDING_LINKS,
 ];
 
 /// The workspace's icon and default look, set by the admin.
@@ -72,6 +73,13 @@ CREATE TABLE link_deliveries (
 CREATE TABLE pending_outcomes (
     token BLOB NOT NULL, device BLOB NOT NULL, outcome BLOB NOT NULL,
     PRIMARY KEY (token, device));
+"#;
+
+/// Links this device confirmed and vouched for, until they are acted on.
+const PENDING_LINKS: &str = r#"
+CREATE TABLE pending_links (
+    token BLOB PRIMARY KEY, code BLOB NOT NULL, request BLOB NOT NULL, certificate BLOB NOT NULL,
+    answer_until_ms INTEGER NOT NULL, handed_over INTEGER NOT NULL, until_ms INTEGER NOT NULL);
 "#;
 
 const FIRST_SCHEMA: &str = r#"

@@ -23,8 +23,8 @@ pub fn load_or_create(store: &Store) -> Result<SecretKey> {
     Ok(identity)
 }
 
-/// Makes `identity` this store's identity, for tests that need a chosen key.
-#[cfg(test)]
-pub fn store_for_test(store: &Store, identity: &SecretKey) -> Result<()> {
+/// Makes `identity` this store's identity: a new device's own, in the store
+/// it reads from before it is added, or a key a test chose.
+pub fn store(store: &Store, identity: &SecretKey) -> Result<()> {
     store.set_meta(IDENTITY_META, Zeroizing::new(identity.to_bytes()).as_slice())
 }
