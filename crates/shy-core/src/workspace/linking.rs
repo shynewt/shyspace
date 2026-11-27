@@ -66,6 +66,19 @@ pub struct LinkCheckShown {
     pub platform: Platform,
 }
 
+/// The person confirmed and the link is kept, but sending it on failed;
+/// the next sync pass finishes it, so it isn't a stop.
+#[derive(Debug)]
+pub struct LinkKeptUnfinished;
+
+impl std::fmt::Display for LinkKeptUnfinished {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Linked. It finishes as soon as your workspace can be reached")
+    }
+}
+
+impl std::error::Error for LinkKeptUnfinished {}
+
 impl Workspace {
     /// Makes the code to show for linking a new device, replacing any open
     /// one. Refuses, with the reason, when linking can't work right now.
@@ -287,6 +300,9 @@ impl Workspace {
     /// (after catching up, so the certificate is fresh), asks the admin's
     /// app to add it, and hands it what it needs to read at once. Returns
     /// the new device's id. Any other pick ends the link and spends the code.
+    /// Once the link is kept, what's left (the request op, the hand-over)
+    /// can fail and is finished by a later pass: the error then carries
+    /// [`LinkKeptUnfinished`].
     pub async fn confirm_link(&self, picked: &str) -> Result<String> {
         let Some(OpenLink {
             code,
@@ -337,7 +353,9 @@ impl Workspace {
             store.put_pending_link(&pending)?;
         }
         let device = crate::views::member_id(&pending.request.device);
-        self.finish_pending_link(pending).await?;
+        self.finish_pending_link(pending)
+            .await
+            .map_err(|error| error.context(LinkKeptUnfinished))?;
         Ok(device)
     }
 

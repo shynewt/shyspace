@@ -8333,3 +8333,48 @@ async fn a_stored_key_that_differs_from_the_groups_stops_a_member_loudly() {
     let error = carol.status().error.unwrap_or_default();
     assert!(error.contains("doesn't match its group"), "{error}");
 }
+
+/// A confirmation whose hand-over can't go up is kept, says so in a way an
+/// app can tell from a stop, and the next pass finishes it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_confirmed_link_whose_hand_over_cant_go_up_is_kept_and_finished_later() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, bucket, _admin, bob, _carol) = on_a_flaky_store(root.path()).await;
+    let code = bob.create_test_link_code().unwrap();
+    let mailbox = BucketLinkMailbox {
+        bucket: bucket.clone(),
+        token: code.token,
+    };
+    let mut linking = crate::workspace::DeviceLinking::begin_with(
+        data_dir(&root.path().join("phone")),
+        code.clone(),
+        crate::membership::link::Platform::Linux,
+        mailbox,
+    )
+    .await
+    .unwrap();
+    bob.pending_link().await.unwrap().unwrap();
+    let Some(crate::workspace::CheckOnNewDevice::Code(shown)) = linking.check_now().await.unwrap() else {
+        panic!("the number to show");
+    };
+    *store.refuse_puts_under.lock().unwrap() = Some("links/".to_owned());
+
+    let unfinished = bob.confirm_link(&shown).await.unwrap_err();
+
+    assert!(
+        unfinished
+            .downcast_ref::<crate::workspace::LinkKeptUnfinished>()
+            .is_some(),
+        "an app can tell it's linked and finishing: {unfinished:#}"
+    );
+    *store.refuse_puts_under.lock().unwrap() = None;
+    bob.sync().await;
+    let reading = linking
+        .wait_for_handover_with(
+            &crate::workspace::JoinCancel::new(),
+            crate::transport::bucket::read_only::ReadingConnector::over(connector(&bucket)),
+        )
+        .await
+        .unwrap();
+    assert!(reading.is_reading_only());
+}

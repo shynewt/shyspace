@@ -36,7 +36,7 @@ pub use huddles::Via;
 pub(crate) use lifecycle::{CUT_SHORT_CLEARINGS, CUT_SHORT_CREATES};
 pub use lifecycle::{DataDir, JoinCancel};
 pub(crate) use lifecycle::{MLS_FILE, STORE_FILE};
-pub use linking::LinkCheckShown;
+pub use linking::{LinkCheckShown, LinkKeptUnfinished};
 pub use presence::Heartbeat;
 pub(crate) use presence::NextBeat;
 pub use reading::WorkspaceMode;
