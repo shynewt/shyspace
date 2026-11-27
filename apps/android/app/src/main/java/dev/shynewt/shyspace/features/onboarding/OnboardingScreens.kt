@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
@@ -48,7 +50,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -129,10 +130,13 @@ fun WelcomeScreen(onLinkThisPhone: (() -> Unit)?, developerTools: (@Composable (
     }
 }
 
-/** Linking this phone to an account: paste (or later scan) the code, then the other device confirms. */
+/**
+ * Linking this phone to an account: paste (or later scan) the code, then the other device
+ * confirms. [onCodeEntered] gets a code only once it arrived whole.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LinkScreen(step: LinkStep, onCodeChange: (String) -> Unit, onStartAgain: () -> Unit, onBack: () -> Unit) {
+fun LinkScreen(step: LinkStep, onCodeEntered: (String) -> Unit, onStartAgain: () -> Unit, onBack: () -> Unit) {
     val colors = LocalShyColors.current.palette
     Scaffold(
         containerColor = colors.bg,
@@ -166,16 +170,19 @@ fun LinkScreen(step: LinkStep, onCodeChange: (String) -> Unit, onStartAgain: () 
                     .padding(horizontal = 24.dp, vertical = 16.dp),
             ) {
                 when (step) {
-                    is LinkStep.EnterCode -> EnterCode(step.hasExpired, onCodeChange)
+                    is LinkStep.EnterCode -> EnterCode(step.problem, onCodeEntered)
+                    LinkStep.Waiting -> Waiting()
                     is LinkStep.Checking -> Checking(step.checkCode)
                     LinkStep.SomeoneElse -> {
                         Note(stringResource(R.string.link_someone_else))
                         OutlinedButton(onClick = onStartAgain, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.start_again)) }
                     }
-                    LinkStep.Stopped -> {
-                        Note(stringResource(R.string.link_stopped))
+                    is LinkStep.Ended -> {
+                        Note(step.reason)
                         OutlinedButton(onClick = onStartAgain, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.start_again)) }
                     }
+                    // The workspace opens from here; the screen leaves at once.
+                    is LinkStep.Reading -> Unit
                 }
             }
         }
@@ -183,36 +190,38 @@ fun LinkScreen(step: LinkStep, onCodeChange: (String) -> Unit, onStartAgain: () 
 }
 
 @Composable
-private fun EnterCode(hasExpired: Boolean, onCodeChange: (String) -> Unit) {
+private fun EnterCode(problem: String?, onCodeEntered: (String) -> Unit) {
     val colors = LocalShyColors.current.palette
     val code = rememberTextFieldState()
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    // A whole code is taken as it lands: there's no Continue button.
-    LaunchedEffect(code) { snapshotFlow { code.text.toString() }.collect(onCodeChange) }
+    // A code that lands whole (pasted into the field) is taken at once: there's no Continue button.
+    LaunchedEffect(code) {
+        var previous = ""
+        snapshotFlow { code.text.toString() }.collect { text ->
+            if (text.length - previous.length > 1) onCodeEntered(text)
+            previous = text
+        }
+    }
     Text(stringResource(R.string.link_where), style = MaterialTheme.typography.bodyLarge, color = colors.text)
     Text(stringResource(R.string.link_gets), style = MaterialTheme.typography.bodyMedium, color = colors.textMuted)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        CodeField(code, modifier = Modifier.weight(1f))
+        CodeField(code, onDone = { onCodeEntered(code.text.toString()) }, modifier = Modifier.weight(1f))
         OutlinedButton(onClick = {
             scope.launch {
                 val pasted = clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text ?: return@launch
+                // Filling the field is a code landing whole, which takes it.
                 code.setTextAndPlaceCursorAtEnd(pasted.toString().trim())
             }
         }) { Text(stringResource(R.string.paste)) }
     }
-    if (hasExpired) {
-        Text(
-            stringResource(R.string.link_code_expired),
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.dangerText,
-            modifier = Modifier.announcedWhenItAppears(),
-        )
+    problem?.let {
+        Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.dangerText, modifier = Modifier.announcedWhenItAppears())
     }
 }
 
 @Composable
-private fun CodeField(code: TextFieldState, modifier: Modifier) {
+private fun CodeField(code: TextFieldState, onDone: () -> Unit, modifier: Modifier) {
     val label = stringResource(R.string.link_code)
     OutlinedTextField(
         state = code,
@@ -221,9 +230,18 @@ private fun CodeField(code: TextFieldState, modifier: Modifier) {
         lineLimits = TextFieldLineLimits.SingleLine,
         // A password keyboard, shown as plain text: no autocorrect, no suggestions, and the
         // keyboard doesn't learn the code.
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Done),
+        onKeyboardAction = { onDone() },
         modifier = modifier,
     )
+}
+
+@Composable
+private fun Waiting() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        Text(stringResource(R.string.link_waiting), style = MaterialTheme.typography.bodyMedium, color = LocalShyColors.current.palette.textMuted)
+    }
 }
 
 @Composable
