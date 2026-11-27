@@ -31,8 +31,8 @@ import dev.shynewt.shyspace.features.channel.ThreadViewModel
 import dev.shynewt.shyspace.features.home.HomeScreen
 import dev.shynewt.shyspace.features.home.HomeState
 import dev.shynewt.shyspace.features.home.HomeViewModel
-import dev.shynewt.shyspace.features.home.NoWorkspace
 import dev.shynewt.shyspace.features.home.workspaceCreator
+import dev.shynewt.shyspace.features.onboarding.WelcomeScreen
 import dev.shynewt.shyspace.features.settings.AppSettings
 import dev.shynewt.shyspace.features.settings.YouScreen
 import androidx.navigation3.ui.NavDisplay.popTransitionSpec
@@ -124,9 +124,14 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                         onRetry = home::retry,
                         bottomBar = { tabBar(MainTab.HOME) },
                         noWorkspaceContent = { noWorkspace ->
-                            NoWorkspace(noWorkspace.createError) {
-                                workspaceCreator?.invoke(noWorkspace.isCreating, home::createWorkspace)
-                            }
+                            WelcomeScreen(
+                                // Linking this phone arrives with the core's device linking.
+                                onLinkThisPhone = null,
+                                developerTools = workspaceCreator?.let { creator ->
+                                    { creator(noWorkspace.isCreating, home::createWorkspace) }
+                                },
+                                createError = noWorkspace.createError,
+                            )
                         },
                     )
                 }

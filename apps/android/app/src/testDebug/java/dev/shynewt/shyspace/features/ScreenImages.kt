@@ -1,5 +1,9 @@
 package dev.shynewt.shyspace.features
 
+import dev.shynewt.shyspace.ui.Logo
+import dev.shynewt.shyspace.features.onboarding.WelcomeScreen
+import dev.shynewt.shyspace.features.onboarding.LinkStep
+import dev.shynewt.shyspace.features.onboarding.LinkScreen
 import androidx.compose.runtime.Composable
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.shynewt.shyspace.features.channel.ChannelScreen
@@ -12,7 +16,6 @@ import dev.shynewt.shyspace.features.channel.ThreadScreen
 import dev.shynewt.shyspace.features.channel.ThreadState
 import dev.shynewt.shyspace.features.home.HomeScreen
 import dev.shynewt.shyspace.features.home.HomeState
-import dev.shynewt.shyspace.features.home.NoWorkspace
 import dev.shynewt.shyspace.features.home.DevelopmentWorkspaceTools
 import dev.shynewt.shyspace.MainTab
 import dev.shynewt.shyspace.MainTabBar
@@ -214,6 +217,8 @@ class ScreenImages {
                     .forEach { Avatar(id = it.lowercase(), name = it) }
                 Avatar(id = "helper", name = "Helper", isBot = true)
             }
+            SectionLabel("Logo")
+            Logo(size = 48.dp)
             SectionLabel("Badge")
             Badge("Agent")
             SectionLabel("CountBadge")
@@ -234,10 +239,32 @@ class ScreenImages {
     }
 
     @Test
-    fun noWorkspace() = capture("no-workspace") {
-        NoWorkspace(createError = "checking the bucket settings: can't write to the bucket: operation timed out") {
-            DevelopmentWorkspaceTools(isCreating = false, onCreate = { _, _, _ -> })
-        }
+    fun welcome() = capture("welcome") {
+        WelcomeScreen(onLinkThisPhone = {}, developerTools = null, createError = null)
+    }
+
+    @Test
+    fun welcomeBeforeLinking() = capture("welcome-before-linking") {
+        WelcomeScreen(
+            onLinkThisPhone = null,
+            developerTools = { DevelopmentWorkspaceTools(isCreating = false, onCreate = { _, _, _ -> }) },
+            createError = null,
+        )
+    }
+
+    @Test
+    fun linkEnterCode() = capture("link-enter-code") {
+        LinkScreen(step = LinkStep.EnterCode(hasExpired = true), onCodeChange = {}, onStartAgain = {}, onBack = {})
+    }
+
+    @Test
+    fun linkChecking() = capture("link-checking") {
+        LinkScreen(step = LinkStep.Checking("482917"), onCodeChange = {}, onStartAgain = {}, onBack = {})
+    }
+
+    @Test
+    fun linkStopped() = capture("link-stopped") {
+        LinkScreen(step = LinkStep.Stopped, onCodeChange = {}, onStartAgain = {}, onBack = {})
     }
 
     @Test
