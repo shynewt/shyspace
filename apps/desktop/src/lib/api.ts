@@ -5,7 +5,54 @@ import { appLink } from "./appLinks";
 import { reportError } from "./toast";
 import type { RestartOutcome } from "./updateFlow";
 
-export type Session = { workspace_id: string; workspace_name: string; me: string; is_admin: boolean };
+export type Session = {
+  workspace_id: string;
+  workspace_name: string;
+  me: string;
+  is_admin: boolean;
+  /** A new device's workspace that only reads until the admin's app adds it. */
+  is_reading_only: boolean;
+  /** One of a person's devices other than their first. */
+  is_linked_device: boolean;
+};
+/** What a device runs on, as the device that linked it knows. */
+export type Platform = "Linux" | "MacOs" | "Windows" | "Android" | "Ios";
+/** The numbers to pick from on the device you use: the one the new device shows, among two decoys. */
+export type LinkCheckShown = { choices: [string, string, string]; platform: Platform };
+/** On the new device: the number to tap on the other device, or null if the person was quicker. */
+export type LinkCheck = { code: string | null };
+/** A pasted link code, read without contacting anything; the name is the code's own claim. */
+export type LinkCodeSummary = { workspace_name: string };
+/** One of your own devices, for Settings › Devices. */
+export type DeviceInfo = {
+  id: string;
+  is_this_device: boolean;
+  /** Your first device, whose key is your id. */
+  is_first_device: boolean;
+  /** Known on the device that linked it. */
+  platform: Platform | null;
+  /** When this device learned of the link; null for your first device. */
+  linked_ms: number | null;
+  is_active_now: boolean;
+  /** Heard from this run, or its newest message. */
+  last_active_ms: number | null;
+  /** No op from it and not heard this run: "No activity seen yet". */
+  has_no_activity_seen: boolean;
+  /** You asked to remove it; the admin's app hasn't yet. */
+  is_removing: boolean;
+  /** Confirmed on one of your devices, not added yet ("Linking…"); removing it stops the link. */
+  is_linking: boolean;
+  /** What removing it with the devices it linked would also take (ids). */
+  linked_devices: string[];
+};
+/** Something that happened to one of your own devices, for your own screens. */
+export type DeviceNotice = {
+  device: string;
+  kind: "linked" | "removed";
+  platform: Platform | null;
+  at_ms: number;
+  is_seen: boolean;
+};
 /** A workspace on this device, in the order the rail shows them. */
 export type WorkspaceItem = {
   workspace_id: string;
@@ -482,6 +529,27 @@ export const api = {
   /** Ends the change without proving the old key dead, and forgets which keys were compromised. */
   cancelStorageRotation: () => invoke<void>("cancel_storage_rotation"),
   safetyCode: (invite: string) => invoke<string>("safety_code", { invite }),
+  /** Makes the code a new device of yours links with; refuses with the reason when linking can't work now. */
+  createLinkCode: () => invoke<string>("create_link_code"),
+  /** The numbers to pick from, once the new device has asked; null until then. */
+  pendingLink: () => invoke<LinkCheckShown | null>("pending_link"),
+  /** Links the device whose number was picked; any other pick ends the link. Returns its id. */
+  confirmLink: (picked: string) => invoke<string>("confirm_link", { picked }),
+  /** "None of these", or closing the dialog: the new device is told the link stopped. */
+  cancelLink: () => invoke<void>("cancel_link"),
+  myDevices: () => invoke<DeviceInfo[]>("my_devices"),
+  removeMyDevice: (id: string) => invoke<void>("remove_my_device", { id }),
+  removeMyDeviceAndItsLinks: (id: string) => invoke<void>("remove_my_device_and_its_links", { id }),
+  deviceNotices: () => invoke<DeviceNotice[]>("device_notices"),
+  markDeviceNoticesSeen: () => invoke<void>("mark_device_notices_seen"),
+  /** Whether pasted text is a usable link code, or why not, without contacting anything. */
+  readLinkCode: (code: string) => invoke<LinkCodeSummary>("read_link_code", { code }),
+  /** On the new device: starts linking, and waits for the number to show. */
+  beginDeviceLink: (code: string) => invoke<LinkCheck>("begin_device_link", { code }),
+  /** On the new device: waits for what the other device hands over, then shows the workspace for reading. */
+  waitForDeviceLinkHandover: () => invoke<Session>("wait_for_device_link_handover").then(rememberSelected),
+  /** Stops linking this device, for good: what it was handed is wiped. */
+  stopDeviceLink: () => invoke<void>("stop_device_link"),
   recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),
   createChannel: (name: string) => invoke<string>("create_channel", { name }),

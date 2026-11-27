@@ -866,7 +866,14 @@ export class FakeBackend {
       recovery_snapshot_bytes: null,
       recovery_snapshot_limit: RECOVERY_SNAPSHOT_LIMIT,
     };
-    this.session = { workspace_id: workspaceIdFor("Acme"), workspace_name: workspaceName, me, is_admin: true };
+    this.session = {
+      workspace_id: workspaceIdFor("Acme"),
+      workspace_name: workspaceName,
+      me,
+      is_admin: true,
+      is_reading_only: false,
+      is_linked_device: false,
+    };
     this.chat.createChannel("general");
     return this.session;
   }
@@ -921,7 +928,14 @@ export class FakeBackend {
       recovery_snapshot_bytes: null,
       recovery_snapshot_limit: RECOVERY_SNAPSHOT_LIMIT,
     };
-    this.session = { workspace_id: workspaceIdFor("Team"), workspace_name: "Team", me, is_admin: false };
+    this.session = {
+      workspace_id: workspaceIdFor("Team"),
+      workspace_name: "Team",
+      me,
+      is_admin: false,
+      is_reading_only: false,
+      is_linked_device: false,
+    };
     return this.session;
   }
 

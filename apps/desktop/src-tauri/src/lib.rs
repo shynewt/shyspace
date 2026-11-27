@@ -4,6 +4,7 @@
 mod alert_actions;
 mod alerts;
 mod clipboard;
+mod devices;
 mod files;
 mod huddles;
 #[cfg(target_os = "linux")]
@@ -46,7 +47,7 @@ pub(crate) type CommandResult<T> = Result<T, String>;
 const EXIT_UPLOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub(crate) struct AppState {
-    workspaces: Workspaces,
+    workspaces: std::sync::Arc<Workspaces>,
     /// The one workspace folder of earlier versions, moved once on start.
     single_folder: Option<DataDir>,
     /// Held while opening workspaces, so two opens don't race.
@@ -84,6 +85,10 @@ struct Session {
     workspace_name: String,
     me: String,
     is_admin: bool,
+    /// A new device's workspace that only reads until the admin's app adds it.
+    is_reading_only: bool,
+    /// One of a person's devices other than their first.
+    is_linked_device: bool,
 }
 
 pub(crate) fn failed(error: anyhow::Error) -> String {
@@ -96,6 +101,8 @@ fn session_of(workspace: &Workspace) -> Session {
         workspace_name: workspace.name().to_owned(),
         me: workspace.my_id(),
         is_admin: workspace.is_admin(),
+        is_reading_only: workspace.is_reading_only(),
+        is_linked_device: workspace.my_person() != workspace.me(),
     }
 }
 
@@ -179,6 +186,7 @@ pub(crate) async fn open_workspaces(app: &AppHandle, state: &AppState) -> Comman
     for workspace in &opened.workspaces {
         forward_changes(app, workspace);
     }
+    devices::resume_device_link(app, state).await;
     let selected = state
         .workspaces
         .selected()
@@ -1152,7 +1160,7 @@ pub fn run() {
         .setup(|app| {
             let (workspaces, single_folder) = workspaces_on_this_device(app.handle())?;
             app.manage(AppState {
-                workspaces,
+                workspaces: std::sync::Arc::new(workspaces),
                 single_folder,
                 opening: Mutex::new(()),
                 joining: std::sync::Mutex::new(None),
@@ -1225,6 +1233,19 @@ pub fn run() {
             huddles::huddle_sounds,
             huddles::set_huddle_sounds,
             files::pick_files,
+            devices::create_link_code,
+            devices::pending_link,
+            devices::confirm_link,
+            devices::cancel_link,
+            devices::my_devices,
+            devices::remove_my_device,
+            devices::remove_my_device_and_its_links,
+            devices::device_notices,
+            devices::mark_device_notices_seen,
+            devices::read_link_code,
+            devices::begin_device_link,
+            devices::wait_for_device_link_handover,
+            devices::stop_device_link,
             files::stage_pasted_file,
             clipboard::clipboard_image,
             files::staged_file_bytes,
