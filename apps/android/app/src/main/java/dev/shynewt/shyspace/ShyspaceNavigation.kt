@@ -87,7 +87,13 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                     ChannelViewModel(core, route.workspaceId, route.channelId)
                 }
                 val state by channel.state.collectAsStateWithLifecycle()
-                ChannelScreen(title = route.title, state = state, onBack = { backStack.removeLastOrNull() }, onSend = channel::send)
+                ChannelScreen(
+                    title = route.title,
+                    state = state,
+                    onBack = { backStack.removeLastOrNull() },
+                    onSend = channel::send,
+                    onSeen = channel::markSeen,
+                )
             }
             entry<Route.Settings> {
                 val hidesScreenContent by settings.hidesScreenContent.collectAsStateWithLifecycle()

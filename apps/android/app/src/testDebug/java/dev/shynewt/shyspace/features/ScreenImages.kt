@@ -36,7 +36,9 @@ class ScreenImages {
     }
 
     private val minute = 60_000L
-    private val start = 1_764_230_400_000L // a Thursday morning
+    private val MENTION_AND_LINK = "[@Linus](shy://member/linus) the jump is in the docs too: [the docs](https://example.com)"
+    // This morning at 8, so the day reads "Today" as it would in use.
+    private val start = java.time.LocalDate.now().atTime(8, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     @Test
     fun home() = capture("home") {
@@ -71,18 +73,25 @@ class ScreenImages {
                 reactions = listOf(Reaction(emoji = "👍", count = 2u, mine = true)),
             ),
             sampleMessage("5", "Ada", "Thanks, I'll look at the keyboard jump.", start + 14 * minute),
+            sampleMessage("6", "Grace", MENTION_AND_LINK, start + 20 * minute),
+            sampleMessage("7", "Helper", "I summarised the thread above.", start + 21 * minute).copy(authorIsBot = true),
         )
         ChannelScreen(
             title = "#general",
-            state = ChannelState(messages = messages.reversed(), isLoading = false),
+            state = ChannelState(
+                messages = messages.reversed(),
+                plainTexts = mapOf("6" to "@Linus the jump is in the docs too: the docs"),
+                isLoading = false,
+            ),
             onBack = {},
             onSend = { true },
+            onSeen = {},
         )
     }
 
     @Test
     fun emptyChannel() = capture("channel-empty") {
-        ChannelScreen(title = "#releases", state = ChannelState(isLoading = false), onBack = {}, onSend = { true })
+        ChannelScreen(title = "#releases", state = ChannelState(isLoading = false), onBack = {}, onSend = { true }, onSeen = {})
     }
 
     @Test

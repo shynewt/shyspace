@@ -16,9 +16,14 @@ import uniffi.shy_ffi.ShyWorkspace
 data class ChannelState(
     /** Newest first, as the list shows them from the bottom up. */
     val messages: List<Message> = emptyList(),
+    /** Each message's text as shown, by id: app links named, no markdown marks, lines and list items kept. */
+    val plainTexts: Map<String, String> = emptyMap(),
     val isLoading: Boolean = true,
     val error: String? = null,
-)
+) {
+    /** A message's plain text, or its own where none is known (screens drawn without a core). */
+    fun textOf(message: Message): String = plainTexts[message.id] ?: message.text
+}
 
 /** One channel's latest messages, kept current, and sending into it. */
 class ChannelViewModel(
@@ -41,6 +46,12 @@ class ChannelViewModel(
         return coreCall(::showError) { workspace.sendMessage(channelId, trimmed, null) } != null
     }
 
+    /** You saw [message], the newest: the channel is read up to it. */
+    fun markSeen(message: String) {
+        if (workspace == null) return
+        viewModelScope.launch { coreCall(::showError) { workspace.markRead(channelId, message) } }
+    }
+
     private suspend fun follow() {
         if (workspace == null) {
             mutableState.value = ChannelState(isLoading = false, error = "This workspace isn't open.")
@@ -53,7 +64,12 @@ class ChannelViewModel(
 
     private suspend fun reload(workspace: ShyWorkspace) {
         val messages = coreCall(::showError) { workspace.messages(channelId, null, PAGE) } ?: return
-        mutableState.value = ChannelState(messages = messages.asReversed(), isLoading = false)
+        val plain = coreCall(::showError) { workspace.plainTexts(messages.map { it.text }) } ?: return
+        mutableState.value = ChannelState(
+            messages = messages.asReversed(),
+            plainTexts = messages.map { it.id }.zip(plain).toMap(),
+            isLoading = false,
+        )
     }
 
     private fun showError(reason: String) {

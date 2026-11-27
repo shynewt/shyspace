@@ -28,6 +28,18 @@
     <string name="not_now">Not now</string>
     <string name="open_settings">Open settings</string>
     <string name="close">Close</string>
+    <string name="today">Today</string>
+    <string name="yesterday">Yesterday</string>
+    <string name="edited">(edited)</string>
+    <string name="agent">Agent</string>
+    <plurals name="replies">
+        <item quantity="one">%1$d reply</item>
+        <item quantity="other">%1$d replies</item>
+    </plurals>
+    <plurals name="reaction">
+        <item quantity="one">%2$s, %1$d reaction</item>
+        <item quantity="other">%2$s, %1$d reactions</item>
+    </plurals>
     <plurals name="unread_mentions">
         <item quantity="one">%1$d mention</item>
         <item quantity="other">%1$d mentions</item>
