@@ -5,7 +5,7 @@
     <string name="send">Send</string>
     <string name="loading_older">Loading older messages</string>
     <string name="reply_placeholder">Reply…</string>
-    <string name="reading_only">This device can read now. It can send once your workspace adds it, usually within a minute.</string>
+    <string name="reading_only">This device can read now. It can send once your workspace adds it. That happens the next time the admin\'s app is online.</string>
     <string name="thread">Thread</string>
     <string name="thread_in">in %1$s</string>
     <string name="message_placeholder">Message %1$s</string>
