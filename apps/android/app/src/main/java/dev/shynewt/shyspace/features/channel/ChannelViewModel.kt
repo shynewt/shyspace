@@ -25,6 +25,8 @@ data class ChannelState(
     /** Whether older messages may be left to load: the last load came back full. */
     val hasOlder: Boolean = false,
     val isLoadingOlder: Boolean = false,
+    /** A linked phone that can read here but not send until the workspace adds it. */
+    val isReadingOnly: Boolean = false,
     val error: String? = null,
 ) {
     /** A message's plain text, or its own where none is known (screens drawn without a core). */
@@ -128,6 +130,7 @@ class ChannelViewModel(
             hasOlder = messages.size.toUInt() == limit,
             // Older ones asked for after this load began are still on their way.
             isLoadingOlder = shownLimit > limit,
+            isReadingOnly = workspace.isReadingOnly(),
         )
     }
 

@@ -24,6 +24,8 @@ data class ThreadState(
     val isLoading: Boolean = true,
     /** Its first message was deleted, and the thread with it. */
     val isGone: Boolean = false,
+    /** A linked phone that can read here but not send until the workspace adds it. */
+    val isReadingOnly: Boolean = false,
     val error: String? = null,
 ) {
     fun textOf(message: Message): String = plainTexts[message.id] ?: message.text
@@ -108,6 +110,7 @@ class ThreadViewModel(
             replies = thread.drop(1).asReversed(),
             plainTexts = thread.map { it.id }.zip(plain).toMap(),
             isLoading = false,
+            isReadingOnly = workspace.isReadingOnly(),
         )
     }
 

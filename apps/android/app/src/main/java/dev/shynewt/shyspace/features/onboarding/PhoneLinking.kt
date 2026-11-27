@@ -17,8 +17,23 @@ interface PhoneLinking {
     /** Waits until the other device hands this phone what it needs; returns the workspace it can now read. */
     suspend fun waitForLinkHandover(): String
 
-    /** Stops the link for good, a running step too; nothing is kept. */
+    /** Waits, for as long as it takes, until the workspace adds this phone; it can then send. */
+    suspend fun waitUntilLinked()
+
+    /** Stops the link for good, a running step too; nothing is kept. Not for closing the app. */
     suspend fun cancelLink()
+
+    /** A link a restart interrupted, after the workspaces opened; null if there is none. */
+    suspend fun resumeLink(): PickedUpLink?
+}
+
+/** Where a link a restart interrupted stands. */
+sealed interface PickedUpLink {
+    /** Still waiting for the hand-over; [checkCode] is the number to show again, if there was one. */
+    data class Waiting(val checkCode: String?) : PickedUpLink
+
+    /** Reading [workspaceId], and waiting to be added. */
+    data class Reading(val workspaceId: String) : PickedUpLink
 }
 
 /** What the other device answered once it opened this phone's request. */

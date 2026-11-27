@@ -135,6 +135,7 @@ fun ChannelScreen(
                     modifier = Modifier.padding(horizontal = GUTTER, vertical = 4.dp),
                 )
             }
+            if (state.isReadingOnly) ReadingOnlyLine()
             Composer(
                 placeholder = stringResource(R.string.message_placeholder, title),
                 draft = draft.text,

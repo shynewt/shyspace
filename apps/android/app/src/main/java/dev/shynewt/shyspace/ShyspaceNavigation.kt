@@ -6,6 +6,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.launch
+import dev.shynewt.shyspace.features.onboarding.PickedUpLink
+import dev.shynewt.shyspace.features.onboarding.LinkViewModel
+import dev.shynewt.shyspace.features.onboarding.LinkStep
+import dev.shynewt.shyspace.features.onboarding.LinkScreen
+import dev.shynewt.shyspace.features.onboarding.LinkKeeper
+import dev.shynewt.shyspace.features.onboarding.CorePhoneLinking
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.activity.compose.BackHandler
 import uniffi.shy_core.InboxItem
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.LaunchedEffect
@@ -46,10 +57,13 @@ sealed interface Route {
 
     data class Thread(val workspaceId: String, val channelId: String, val rootId: String, val channelTitle: String) : Route
 
-    /** The You tab; it sits on Home, so Back returns there, as Android's tabs do. */
+    /** The Activity and You tabs sit on Home, so Back returns there, as Android's tabs do. */
     data object Activity : Route
 
     data object You : Route
+
+    /** Linking this phone; [isResuming] picks up a link a restart interrupted, at [checkCode] if it had one. */
+    data class Link(val isResuming: Boolean = false, val checkCode: String? = null) : Route
 }
 
 /** The back stack, kept across process death as plain strings. */
@@ -62,6 +76,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
                 is Route.Thread -> listOf("thread", route.workspaceId, route.channelId, route.rootId, route.channelTitle)
                 Route.Activity -> listOf("activity")
                 Route.You -> listOf("you")
+                is Route.Link -> listOf("link", route.isResuming.toString(), route.checkCode.orEmpty())
             }
         }
     },
@@ -72,6 +87,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
                 "thread" -> Route.Thread(parts[1], parts[2], parts[3], parts[4])
                 "activity" -> Route.Activity
                 "you" -> Route.You
+                "link" -> Route.Link(parts[1].toBoolean(), parts[2].ifEmpty { null })
                 else -> Route.Home
             }
         }.toMutableStateList()
@@ -81,7 +97,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Route>, List<String>>(
 private fun List<Route>.toMutableStateList() = mutableStateListOf<Route>().also { it.addAll(this) }
 
 @Composable
-fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
+fun ShyspaceNavigation(core: ShyCore, settings: AppSettings, linkKeeper: LinkKeeper) {
     val lastInput = remember { LastInput() }
     val backStack = rememberSaveable(saver = backStackSaver) { mutableStateListOf<Route>(Route.Home) }
     val tabs = Tabs(backStack)
@@ -91,6 +107,18 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
     val ready = homeState as? HomeState.Ready
     val activity = viewModel { ActivityViewModel(core) }
     val activityState by activity.state.collectAsStateWithLifecycle()
+    val linkProblem by linkKeeper.problem.collectAsStateWithLifecycle()
+    // Once the workspaces have opened: pick up a link a restart interrupted.
+    var hasResumedLink by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(homeState is HomeState.Loading) {
+        if (hasResumedLink || homeState is HomeState.Loading) return@LaunchedEffect
+        hasResumedLink = true
+        when (val picked = linkKeeper.resume()) {
+            is PickedUpLink.Waiting -> backStack.add(Route.Link(isResuming = true, checkCode = picked.checkCode))
+            is PickedUpLink.Reading -> home.retry()
+            null -> Unit
+        }
+    }
     val noWorkspace = stringResource(R.string.no_workspace)
     LaunchedEffect(homeState) {
         when (val state = homeState) {
@@ -125,14 +153,42 @@ fun ShyspaceNavigation(core: ShyCore, settings: AppSettings) {
                         bottomBar = { tabBar(MainTab.HOME) },
                         noWorkspaceContent = { noWorkspace ->
                             WelcomeScreen(
-                                // Linking this phone arrives with the core's device linking.
-                                onLinkThisPhone = null,
+                                onLinkThisPhone = { backStack.add(Route.Link()) },
                                 developerTools = workspaceCreator?.let { creator ->
                                     { creator(noWorkspace.isCreating, home::createWorkspace) }
                                 },
-                                createError = noWorkspace.createError,
+                                createError = noWorkspace.createError ?: linkProblem,
                             )
                         },
+                    )
+                }
+                entry<Route.Link> { route ->
+                    val link = viewModel { LinkViewModel(CorePhoneLinking(core.app)) }
+                    val step by link.step.collectAsStateWithLifecycle()
+                    val scope = rememberCoroutineScope()
+                    LaunchedEffect(route) { if (route.isResuming) link.resume(route.checkCode) }
+                    LaunchedEffect(step) {
+                        if (step !is LinkStep.Reading) return@LaunchedEffect
+                        // Reading now: the long wait to be added goes on outside this screen.
+                        linkKeeper.waitUntilAdded()
+                        tabs.select(MainTab.HOME)
+                        home.retry()
+                    }
+                    // Leaving part way stops the link, before the screen goes.
+                    val leave: () -> Unit = {
+                        scope.launch {
+                            link.stop()
+                            tabs.back()
+                        }
+                    }
+                    BackHandler(onBack = leave)
+                    LinkScreen(
+                        step = step,
+                        isLinkCode = link::isWholeCode,
+                        onCodeChange = link::codeChanged,
+                        onCodeSubmitted = link::codeSubmitted,
+                        onStartAgain = link::startAgain,
+                        onBack = leave,
                     )
                 }
                 entry<Route.Channel> { route ->

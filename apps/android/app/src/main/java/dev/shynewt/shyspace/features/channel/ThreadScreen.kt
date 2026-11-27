@@ -164,6 +164,7 @@ fun ThreadScreen(
                     modifier = Modifier.padding(horizontal = GUTTER, vertical = 4.dp),
                 )
             }
+            if (state.isReadingOnly) ReadingOnlyLine()
             if (!state.isGone) Composer(
                 placeholder = stringResource(R.string.reply_placeholder),
                 draft = draft.text,

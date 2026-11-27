@@ -34,6 +34,13 @@ class LinkViewModel(private val linking: PhoneLinking) : ViewModel() {
         begin(text)
     }
 
+    /** Picks up a link a restart interrupted, still waiting for its hand-over: at its number, if it had one. */
+    fun resume(checkCode: String?) {
+        if (mutableStep.value !is LinkStep.EnterCode) return
+        mutableStep.value = checkCode?.let(LinkStep::Checking) ?: LinkStep.Waiting
+        viewModelScope.launch { awaitHandover() }
+    }
+
     /** After the link ended: back to entering a code. */
     fun startAgain() {
         if (mutableStep.value !is LinkStep.Ended) return
@@ -69,6 +76,10 @@ class LinkViewModel(private val linking: PhoneLinking) : ViewModel() {
         // The code read as whole, so a failure from here on is the link ending.
         val check = coreCall(::end) { linking.beginLink(code) } ?: return
         if (check is LinkCheck.ShowNumber) mutableStep.value = LinkStep.Checking(check.code)
+        awaitHandover()
+    }
+
+    private suspend fun awaitHandover() {
         val workspaceId = coreCall(::end) { linking.waitForLinkHandover() } ?: return
         mutableStep.value = LinkStep.Reading(workspaceId)
     }

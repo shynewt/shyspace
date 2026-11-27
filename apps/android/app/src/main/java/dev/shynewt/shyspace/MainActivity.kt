@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
             val hidesScreenContent by app.settings.hidesScreenContent.collectAsStateWithLifecycle()
             HideScreenContent(hidesScreenContent)
             ShyTheme {
-                ShyspaceNavigation(core = app.core, settings = app.settings)
+                ShyspaceNavigation(core = app.core, settings = app.settings, linkKeeper = app.linkKeeper)
             }
         }
     }

@@ -531,4 +531,12 @@ class ChannelScreenTest {
 
         assertEquals(listOf("1"), opened)
     }
+
+    @Test
+    fun aPhoneThatCanOnlyReadSaysSoAboveTheMessageBox() {
+        showAsking()
+        shown = shown.copy(isReadingOnly = true)
+
+        compose.onNodeWithText("This device can read now. It can send once your workspace adds it, usually within a minute.").assertExists()
+    }
 }

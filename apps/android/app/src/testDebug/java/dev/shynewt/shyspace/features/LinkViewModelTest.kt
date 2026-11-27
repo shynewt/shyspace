@@ -5,6 +5,7 @@ import dev.shynewt.shyspace.features.onboarding.LinkCheck
 import dev.shynewt.shyspace.features.onboarding.LinkStep
 import dev.shynewt.shyspace.features.onboarding.LinkViewModel
 import dev.shynewt.shyspace.features.onboarding.PhoneLinking
+import dev.shynewt.shyspace.features.onboarding.PickedUpLink
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -37,9 +38,13 @@ class LinkViewModelTest {
 
         override suspend fun waitForLinkHandover(): String = handover.await()
 
+        override suspend fun waitUntilLinked() = error("the link screen doesn't wait to be added")
+
         override suspend fun cancelLink() {
             synchronized(calls) { calls += "cancel" }
         }
+
+        override suspend fun resumeLink(): PickedUpLink? = error("the link screen doesn't resume links")
 
         fun callsSoFar() = synchronized(calls) { calls.toList() }
     }
@@ -142,5 +147,23 @@ class LinkViewModelTest {
         stepWhere { it is LinkStep.Checking }
 
         assertEquals(listOf("begin shy-link-1234"), linking.callsSoFar())
+    }
+
+    @Test
+    fun aResumedLinkShowsItsNumberAgainThenReads() = runBlocking {
+        link.resume(checkCode = "482917")
+        assertEquals(LinkStep.Checking("482917"), link.step.value)
+
+        linking.handover.complete("w1")
+
+        stepWhere { it == LinkStep.Reading("w1") }
+        Unit
+    }
+
+    @Test
+    fun aResumedLinkWithNoNumberYetWaits() {
+        link.resume(checkCode = null)
+
+        assertEquals(LinkStep.Waiting, link.step.value)
     }
 }

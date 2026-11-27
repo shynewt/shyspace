@@ -167,3 +167,14 @@ private fun Reactions(reactions: List<Reaction>, onToggle: (Reaction) -> Unit) {
         }
     }
 }
+
+/** Above the message box on a linked phone the workspace hasn't added yet: a still line, no error. */
+@Composable
+internal fun ReadingOnlyLine() {
+    Text(
+        stringResource(R.string.reading_only),
+        style = MaterialTheme.typography.bodySmall,
+        color = LocalShyColors.current.palette.textMuted,
+        modifier = Modifier.padding(horizontal = GUTTER, vertical = 4.dp),
+    )
+}
