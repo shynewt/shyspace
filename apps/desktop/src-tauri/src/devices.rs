@@ -2,14 +2,16 @@
 //! a person who already uses shyspace, and the list of your devices. One
 //! command per core call. The core runs each step of this device's link in
 //! a task of its own; the wait for the admin's app goes on in the
-//! background, also after a restart, and tells the UI when it ends.
+//! background, also after a restart, and tells the UI when it ends. A link
+//! a restart interrupted before its hand-over waits for the UI to ask
+//! (`waiting_device_link`), so no event can arrive before anyone listens.
 
 use serde::Serialize;
 use shy_core::{
     membership::link::Platform,
     views::{DeviceInfo, DeviceNotice, LinkCodeSummary},
     workspace::{CheckOnNewDevice, LinkCheckShown},
-    workspaces::{ResumedLinkStep, Workspaces},
+    workspaces::{LinkStop, ResumedLinkStep, Workspaces},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -109,22 +111,38 @@ pub(crate) async fn wait_for_device_link_handover(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> CommandResult<Session> {
-    let reading = state.workspaces.wait_for_link_handover().await.map_err(failed)?;
+    let handed_over = state.workspaces.wait_for_link_handover().await;
+    set_waiting_link(&state, None)?;
+    let reading = handed_over.map_err(failed)?;
     wait_until_linked_in_background(&app);
     Ok(install(&app, &reading))
 }
 
-/// Stops linking this device, for good: what it was handed is wiped.
+/// Stops linking this device, for good: what it was handed is wiped. If
+/// the admin's app added the device just before, the joined workspace
+/// stays and is shown.
 #[tauri::command]
 pub(crate) async fn stop_device_link(app: AppHandle, state: State<'_, AppState>) -> CommandResult<()> {
-    state.workspaces.cancel_link().await.map_err(failed)?;
+    let stopped = state.workspaces.cancel_link().await.map_err(failed)?;
+    set_waiting_link(&state, None)?;
+    if let LinkStop::AlreadyJoined(joined) = stopped {
+        install(&app, &joined);
+    }
     emit_workspaces_changed(&app);
     Ok(())
 }
 
+/// The link a restart interrupted while it waited for its hand-over, with
+/// the number to show again; the UI goes on with
+/// `wait_for_device_link_handover`.
+#[tauri::command]
+pub(crate) fn waiting_device_link(state: State<'_, AppState>) -> CommandResult<Option<LinkCheck>> {
+    Ok(waiting_link_lock(&state)?.clone())
+}
+
 /// Picks up a link a restart interrupted, after the workspaces opened. One
-/// still waiting for its hand-over shows its number again
-/// (`link-waiting`), and both wait on in the background.
+/// already reading opens and waits on in the background; one still waiting
+/// for its hand-over is kept for the UI to ask about.
 pub(crate) async fn resume_device_link(app: &AppHandle, state: &AppState) {
     match state.workspaces.resume_link().await {
         Ok(None) => {}
@@ -133,21 +151,24 @@ pub(crate) async fn resume_device_link(app: &AppHandle, state: &AppState) {
             wait_until_linked_in_background(app);
         }
         Ok(Some(ResumedLinkStep::Waiting { code })) => {
-            let _ = app.emit("link-waiting", LinkCheck { code });
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                let state = app.state::<AppState>();
-                match state.workspaces.wait_for_link_handover().await {
-                    Ok(reading) => {
-                        install(&app, &reading);
-                        wait_until_linked_in_background(&app);
-                    }
-                    Err(error) => tell_link_ended(&app, &error),
-                }
-            });
+            if let Err(error) = set_waiting_link(state, Some(LinkCheck { code })) {
+                tracing::error!("couldn't keep the interrupted link for the UI: {error}");
+            }
         }
         Err(error) => tell_link_ended(app, &error),
     }
+}
+
+fn set_waiting_link(state: &AppState, link: Option<LinkCheck>) -> CommandResult<()> {
+    *waiting_link_lock(state)? = link;
+    Ok(())
+}
+
+fn waiting_link_lock(state: &AppState) -> CommandResult<std::sync::MutexGuard<'_, Option<LinkCheck>>> {
+    state
+        .waiting_link
+        .lock()
+        .map_err(|_| "link state lock poisoned".to_owned())
 }
 
 fn wait_until_linked_in_background(app: &AppHandle) {

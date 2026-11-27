@@ -3,7 +3,7 @@ import { api, type Channel, type Member } from "../../lib/api";
 import { channelTitle } from "../../lib/channels";
 import { useLive } from "../../lib/useLive";
 import { useWorkspace } from "../../lib/workspace";
-import { Notice } from "../../ui";
+import { Notice, StatusLine } from "../../ui";
 
 /** Why you can't write in `channel` any more, or null if you can. */
 function whyReadOnly(channel: Channel | undefined, members: Member[] | undefined): string | null {
@@ -18,10 +18,20 @@ function whyReadOnly(channel: Channel | undefined, members: Member[] | undefined
 
 /** Shows `children` (a composer) only where you can still write. */
 export function WriteGate({ channelId, children }: { channelId: string; children: ReactNode }) {
-  const { channels } = useWorkspace();
+  const { channels, session } = useWorkspace();
   const members = useLive(api.members, (change) => change.kind === "members");
   const channel = channels.find((candidate) => candidate.id === channelId);
   const notice = whyReadOnly(channel, members);
+  if (session.is_reading_only) {
+    return (
+      <>
+        <StatusLine className="px-5 pb-1">
+          This device can read now. It can send once your workspace adds it, usually within a minute.
+        </StatusLine>
+        {children}
+      </>
+    );
+  }
   if (!notice && channel?.is_missing_key) {
     return (
       <>

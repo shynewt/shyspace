@@ -205,6 +205,12 @@ export class FakeBackend {
     },
   });
 
+  /** This device's link ended without it being added: its reading workspace is wiped. */
+  endLinking(message: string): void {
+    this.session = null;
+    void emit("link-ended", { message });
+  }
+
   /** The admin's app added this linking device: the real workspace takes the reading one's place. */
   finishLinking(): void {
     if (!this.session) return;

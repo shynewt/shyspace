@@ -8,6 +8,7 @@ import { characterCount, MAX_MESSAGE_CHARS, SHOW_COUNT_FROM_CHARS } from "../../
 import { droppedPageId, isPageDrag } from "../../lib/pageDrag";
 import { reportError } from "../../lib/toast";
 import { useFocusOnMount } from "../../lib/useFocusOnMount";
+import { useWorkspace } from "../../lib/workspace";
 import { Button, cx, EmojiPicker, fade, IconButton, Kbd, Popover, tweens } from "../../ui";
 import { AttachmentList, DropHint, UploadProgress } from "./Attachments";
 import { useAttachments } from "./useAttachments";
@@ -62,8 +63,14 @@ export function Composer({
   const hasFiles = !editing && attachments.staged.length > 0;
   const sentLength = characterCount(picker.toSend(text).trim());
   const isTooLong = sentLength > MAX_MESSAGE_CHARS;
+  // A device only reading keeps what's typed as a draft, and sends once added.
+  const { session } = useWorkspace();
   const canSend =
-    (sentLength > 0 || hasFiles) && !isTooLong && !(hasFiles && attachments.problem) && !attachments.upload;
+    !session.is_reading_only &&
+    (sentLength > 0 || hasFiles) &&
+    !isTooLong &&
+    !(hasFiles && attachments.problem) &&
+    !attachments.upload;
 
   const updateText = useCallback((next: string) => setText(next), []);
   // While editing, the draft is set aside and comes back afterwards; a draft

@@ -550,6 +550,8 @@ export const api = {
   waitForDeviceLinkHandover: () => invoke<Session>("wait_for_device_link_handover").then(rememberSelected),
   /** Stops linking this device, for good: what it was handed is wiped. */
   stopDeviceLink: () => invoke<void>("stop_device_link"),
+  /** A link a restart interrupted before its hand-over, to show again; go on with `waitForDeviceLinkHandover`. */
+  waitingDeviceLink: () => invoke<LinkCheck | null>("waiting_device_link"),
   recoveryKit: () => invoke<string>("recovery_kit"),
   channels: () => invoke<Channel[]>("channels"),
   createChannel: (name: string) => invoke<string>("create_channel", { name }),
@@ -795,6 +797,11 @@ export function onFilesDropped(listener: (drop: FilesDropped) => void): () => vo
 /** Where files are being dragged over the window; null once the drag leaves or drops. */
 export function onFileDrag(listener: (position: DropPoint | null) => void): () => void {
   return subscribe<DropPoint | null>("file-drag", listener);
+}
+
+/** Linking this device ended without it being added, after its workspace opened for reading. */
+export function onLinkEnded(listener: (message: string) => void): () => void {
+  return subscribe<{ message: string }>("link-ended", (ended) => listener(ended.message));
 }
 
 function subscribe<T>(event: string, listener: (payload: T) => void): () => void {

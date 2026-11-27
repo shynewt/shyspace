@@ -1,17 +1,20 @@
 import { ArrowLeft } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
-import type { Session } from "../../lib/api";
+import { useEffect, useState } from "react";
+import { api, type LinkCheck, type Session } from "../../lib/api";
+import { reportError } from "../../lib/toast";
 import { Button, Logo, SegmentedControl, tweens } from "../../ui";
 import { CreateForm } from "./CreateForm";
 import { JoinForm } from "./JoinForm";
+import { LinkJoinForm } from "./LinkJoinForm";
 import { RestoreForm } from "./RestoreForm";
 
-type Mode = "create" | "join" | "restore";
+type Mode = "create" | "join" | "link" | "restore";
 
 const MODES: Array<{ value: Mode; label: string }> = [
   { value: "create", label: "Create" },
   { value: "join", label: "Join" },
+  { value: "link", label: "I already use shyspace" },
   { value: "restore", label: "Restore admin" },
 ];
 
@@ -26,6 +29,14 @@ export function Onboarding({
   cancelLabel?: string;
 }) {
   const [mode, setMode] = useState<Mode>("create");
+  const [resumedLink, setResumedLink] = useState<LinkCheck | undefined>();
+  useEffect(() => {
+    api.waitingDeviceLink().then((waiting) => {
+      if (!waiting) return;
+      setResumedLink(waiting);
+      setMode("link");
+    }, reportError);
+  }, []);
   return (
     <motion.main
       className="relative grid h-full place-items-center overflow-auto px-6 py-10"
@@ -69,6 +80,7 @@ export function Onboarding({
               >
                 {mode === "create" && <CreateForm onReady={onReady} />}
                 {mode === "join" && <JoinForm onReady={onReady} />}
+                {mode === "link" && <LinkJoinForm onReady={onReady} resumed={resumedLink} />}
                 {mode === "restore" && <RestoreForm onReady={onReady} />}
               </motion.div>
             </AnimatePresence>

@@ -1,10 +1,11 @@
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useAlertActions } from "../../lib/alertActions";
 import {
   api,
   type Change,
   type LaterItem,
   onAnyWorkspaceChange,
+  onLinkEnded,
   type Session,
   type WorkspaceBadge,
   type WorkspaceItem,
@@ -107,6 +108,34 @@ export function WorkspacesProvider({
       stop();
     };
   }, []);
+
+  // A link a restart interrupted before its hand-over goes on in Add workspace, once per start.
+  const hasCheckedWaitingLink = useRef(false);
+  useEffect(() => {
+    if (hasCheckedWaitingLink.current) return;
+    hasCheckedWaitingLink.current = true;
+    api.waitingDeviceLink().then((waiting) => waiting && onAdd(), reportError);
+  }, [onAdd]);
+
+  // A linking device's link ended without it being added: its workspace is gone, so say why and show what's left.
+  useEffect(
+    () =>
+      onLinkEnded((message) => {
+        reportError(message);
+        api.session().then(onSession, reportError);
+      }),
+    [onSession],
+  );
+
+  // A linking device's reading-only workspace was replaced by the real one: show that one.
+  useEffect(
+    () =>
+      onAnyWorkspaceChange((workspaceId, change) => {
+        if (change.kind !== "reading_closed" || workspaceId !== session.workspace_id) return;
+        api.session().then(onSession, reportError);
+      }),
+    [session.workspace_id, onSession],
+  );
 
   const select = useCallback(
     (workspaceId: string, open?: Opener) => {

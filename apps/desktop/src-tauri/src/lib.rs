@@ -54,6 +54,8 @@ pub(crate) struct AppState {
     opening: Mutex<()>,
     /// Stops the join in progress, if one is waiting for the admin.
     joining: std::sync::Mutex<Option<JoinCancel>>,
+    /// A link a restart interrupted while waiting for its hand-over, for the UI to pick up.
+    waiting_link: std::sync::Mutex<Option<devices::LinkCheck>>,
     /// Huddle audio, shared by every workspace: one huddle at a time.
     media: ShyMedia,
 }
@@ -1164,6 +1166,7 @@ pub fn run() {
                 single_folder,
                 opening: Mutex::new(()),
                 joining: std::sync::Mutex::new(None),
+                waiting_link: std::sync::Mutex::new(None),
                 media: ShyMedia::new(),
             });
             window::create_main_window(app.handle())?;
@@ -1246,6 +1249,7 @@ pub fn run() {
             devices::begin_device_link,
             devices::wait_for_device_link_handover,
             devices::stop_device_link,
+            devices::waiting_device_link,
             files::stage_pasted_file,
             clipboard::clipboard_image,
             files::staged_file_bytes,

@@ -32,6 +32,8 @@ export class FakeDevices {
   private devices: DeviceInfo[] = [];
   private notices: DeviceNotice[] = [];
   private openCode: { code: string; hasAsked: boolean } | null = null;
+  /** A link a restart interrupted before its hand-over. */
+  interrupted: LinkCheck | null = null;
   private pendingHandover: { resolve: (session: Session) => void; reject: (error: Error) => void } | null = null;
   /** The choices in the order they show, real one in the middle unless a test says otherwise. */
   choices: [string, string, string] = [DECOYS[0], REAL_CODE, DECOYS[1]];
@@ -62,6 +64,7 @@ export class FakeDevices {
 
   /** The person's other device hands this one what it needs. */
   handOver(): void {
+    this.interrupted = null;
     this.pendingHandover?.resolve(this.context.startReading());
     this.pendingHandover = null;
   }
@@ -121,7 +124,10 @@ export class FakeDevices {
         return new Promise<Session>((resolve, reject) => {
           this.pendingHandover = { resolve, reject };
         });
+      case "waiting_device_link":
+        return this.interrupted;
       case "stop_device_link":
+        this.interrupted = null;
         this.pendingHandover?.reject(new Error("You stopped linking this device. Nothing was kept."));
         this.pendingHandover = null;
         return null;
