@@ -198,3 +198,51 @@ async fn a_thread_summary_names_links_of_this_workspace_and_never_labels_others(
         "@Carol or a link to another workspace"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_reads_as_text_with_its_links_named_and_no_marks() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    sync_all(&[&admin, &bob]).await;
+    let markdown = format!(
+        "**ship** it, [@Ada](shy://member/{}) and [the docs](https://example.com) `now`",
+        bob.my_id()
+    );
+
+    let plain = admin.plain_texts(&[markdown, "plain".to_owned()]).unwrap();
+
+    assert_eq!(plain, ["ship it, @Bob and the docs now", "plain"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_body_keeps_its_lines_lists_and_code_lines() {
+    let (_root, _bucket, admin, bob) = admin_and_bob().await;
+    sync_all(&[&admin, &bob]).await;
+    let texts = [
+        "a\nb\n\nc".to_owned(),
+        "to do:\n\n- one\n- **two**\n\nthen done".to_owned(),
+        "run:\n\n```\nlet a = 1;\nlet b = 2;\n```".to_owned(),
+        format!("hi <b>[@Ada](shy://member/{})</b> ![shot](x.png)", bob.my_id()),
+    ];
+
+    let plain = admin.plain_texts(&texts).unwrap();
+
+    assert_eq!(
+        plain,
+        [
+            "a\nb\n\nc",
+            "to do:\n\n• one\n• two\n\nthen done",
+            "run:\n\nlet a = 1;\nlet b = 2;",
+            "hi @Bob",
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_body_is_cut_to_a_messages_length() {
+    let (_root, _bucket, admin, _bob) = admin_and_bob().await;
+    let long = "x".repeat(crate::ops::MAX_MESSAGE_CHARS + 10);
+
+    let plain = admin.plain_texts(&[long]).unwrap();
+
+    assert_eq!(plain[0].chars().count(), crate::ops::MAX_MESSAGE_CHARS);
+}

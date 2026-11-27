@@ -7,9 +7,9 @@ use anyhow::{Context, Result};
 
 use super::{State, Workspace};
 use crate::{
-    markdown::{LinkNames, preview_text},
+    markdown::{LinkNames, body_text, preview_text},
     mentions::mentions,
-    ops::{Op, now_ms},
+    ops::{MAX_MESSAGE_CHARS, Op, cut_to, now_ms},
     pages, search,
     storage::{Reply, SearchFilters},
     views::{
@@ -159,6 +159,21 @@ impl Workspace {
         let channel = message.channel.clone();
         let message = self.as_seen_by_me(&state, &channel, vec![message])?.remove(0);
         Ok(Some(LinkedMessage { message, thread_root }))
+    }
+
+    /// What a reader sees of each of `texts` as a message's body: app links
+    /// named by their real target, as a chip does, no markdown marks, and its
+    /// lines, list items and code lines kept. For apps that don't render
+    /// markdown yet. Each text is cut to a message's length first.
+    pub fn plain_texts(&self, texts: &[String]) -> Result<Vec<String>> {
+        let names = self
+            .state()
+            .store
+            .link_names(&self.inner.config.admin, &self.inner.config.workspace_id)?;
+        Ok(texts
+            .iter()
+            .map(|text| body_text(cut_to(text, MAX_MESSAGE_CHARS), &names))
+            .collect())
     }
 
     /// The thread starting at `root`: its first message, then every reply.

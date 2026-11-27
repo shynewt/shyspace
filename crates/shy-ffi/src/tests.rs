@@ -177,3 +177,55 @@ async fn changes_reach_the_listener_until_the_subscription_ends() {
         "a cancelled subscription stays quiet"
     );
 }
+
+async fn general_of(acme: &crate::ShyWorkspace) -> String {
+    let channels = acme.channels().await.unwrap();
+    channels
+        .into_iter()
+        .find(|channel| channel.name == "general")
+        .unwrap()
+        .id
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_can_be_shown_as_plain_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+
+    let plain = acme.plain_texts(vec!["**ship** it `now`".into()]).await.unwrap();
+
+    assert_eq!(plain, ["ship it now"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reading_up_to_a_message_moves_the_channels_read_position_to_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+    let general = general_of(&acme).await;
+    acme.send_message(general.clone(), "first".into(), None)
+        .await
+        .unwrap();
+    let second = acme
+        .send_message(general.clone(), "second".into(), None)
+        .await
+        .unwrap();
+
+    acme.mark_read(general.clone(), second.clone()).await.unwrap();
+
+    let messages = acme.messages(general.clone(), None, 50).await.unwrap();
+    let read_up_to = messages.iter().find(|message| message.id == second).unwrap();
+    let channel = acme
+        .channels()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|channel| channel.id == general)
+        .unwrap();
+    let last_read = channel.last_read.unwrap();
+    assert_eq!(
+        (last_read.lamport, last_read.device.as_str()),
+        (read_up_to.lamport, read_up_to.device.as_str())
+    );
+}

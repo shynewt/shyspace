@@ -96,9 +96,29 @@ impl LinkNames {
 /// by its real target: never its author's label, and found through the
 /// parser, so a reference link resolves wherever its definition is.
 pub(crate) fn preview_text(markdown: &str, names: &LinkNames) -> String {
+    plain_text(markdown, names, Layout::OneLine)
+}
+
+/// What a reader sees of `markdown` as a message's body: as [`preview_text`],
+/// but keeping its lines, paragraphs, list items (as "• ") and code lines.
+pub(crate) fn body_text(markdown: &str, names: &LinkNames) -> String {
+    plain_text(markdown, names, Layout::Body)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Layout {
+    OneLine,
+    Body,
+}
+
+fn plain_text(markdown: &str, names: &LinkNames, layout: Layout) -> String {
     let mut text = String::with_capacity(markdown.len());
     let mut is_in_named_link = false;
     let mut images_open = 0_usize;
+    let line_break = match layout {
+        Layout::OneLine => ' ',
+        Layout::Body => '\n',
+    };
     for event in Parser::new_ext(markdown, options()) {
         match event {
             // Chat shows no images, so their alt text isn't seen either.
@@ -114,15 +134,50 @@ pub(crate) fn preview_text(markdown: &str, names: &LinkNames) -> String {
             Event::End(TagEnd::Link) => is_in_named_link = false,
             _ if is_in_named_link => {}
             Event::Text(words) | Event::Code(words) => text.push_str(&with_bare_links_named(&words, names)),
-            Event::SoftBreak | Event::HardBreak => text.push(' '),
-            Event::End(end) if !is_inline(end) => text.push(' '),
+            Event::SoftBreak | Event::HardBreak => text.push(line_break),
+            Event::Start(Tag::Item) if layout == Layout::Body => text.push_str("• "),
+            Event::End(end) if !is_inline(end) => text.push_str(block_end(end, layout)),
             _ => {}
         }
     }
-    // Control characters would fake a snippet's match marks, or reach a
-    // system notification.
-    let text: String = text.chars().filter(|character| !character.is_control()).collect();
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    match layout {
+        Layout::OneLine => {
+            // Control characters would fake a snippet's match marks, or reach a
+            // system notification.
+            let text: String = text.chars().filter(|character| !character.is_control()).collect();
+            text.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+        Layout::Body => tidy_lines(&text),
+    }
+}
+
+/// What follows a block: a space on one line; in a body, a line break after a
+/// list item or table row and a blank line after anything else.
+fn block_end(end: TagEnd, layout: Layout) -> &'static str {
+    match (layout, end) {
+        (Layout::OneLine, _) | (Layout::Body, TagEnd::TableCell) => " ",
+        (Layout::Body, TagEnd::Item | TagEnd::TableRow | TagEnd::TableHead) => "\n",
+        (Layout::Body, _) => "\n\n",
+    }
+}
+
+/// A body's lines without control characters or trailing spaces, at most one
+/// blank line in a row, and none at the start or end. A line's leading spaces
+/// stay, so code keeps its indent.
+fn tidy_lines(text: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        let line: String = line.chars().filter(|character| !character.is_control()).collect();
+        let line = line.trim_end();
+        let is_second_blank = line.is_empty() && lines.last().is_none_or(|previous| previous.is_empty());
+        if !is_second_blank {
+            lines.push(line.to_owned());
+        }
+    }
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
 }
 
 /// Where a message id ends in `text`: an optional `p:<hex>/` or `dm:<hex>/`

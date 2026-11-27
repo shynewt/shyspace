@@ -77,6 +77,19 @@ impl ShyWorkspace {
         run_blocking(move || workspace.send_message(&channel, &text, reply_to)).await
     }
 
+    /// What a reader sees of each of `texts` as a message's body: app links
+    /// named, no markdown marks, lines and list items kept.
+    pub async fn plain_texts(&self, texts: Vec<String>) -> Result<Vec<String>, ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.plain_texts(&texts)).await
+    }
+
+    /// Moves your read position in `channel` up to `message`, on this device only.
+    pub async fn mark_read(&self, channel: String, message: String) -> Result<(), ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.mark_read(&channel, &message)).await
+    }
+
     /// Tells `listener` of every change from now on. Missed changes (the
     /// listener fell behind) arrive as one `Change::Sync`: reload everything.
     pub fn subscribe(&self, listener: Arc<dyn ChangeListener>) -> Arc<Subscription> {
