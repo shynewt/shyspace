@@ -285,9 +285,9 @@ impl Workspace {
 
     /// Links the device whose code the person picked: vouches for it
     /// (after catching up, so the certificate is fresh), asks the admin's
-    /// app to add it, and hands it what it needs to read at once. Any
-    /// other pick ends the link and spends the code.
-    pub async fn confirm_link(&self, picked: &str) -> Result<()> {
+    /// app to add it, and hands it what it needs to read at once. Returns
+    /// the new device's id. Any other pick ends the link and spends the code.
+    pub async fn confirm_link(&self, picked: &str) -> Result<String> {
         let Some(OpenLink {
             code,
             opened: Some(opened),
@@ -336,7 +336,15 @@ impl Workspace {
             store.put_device_platform(&pending.request.device, pending.request.platform)?;
             store.put_pending_link(&pending)?;
         }
-        self.finish_pending_link(pending).await
+        let device = crate::views::member_id(&pending.request.device);
+        self.finish_pending_link(pending).await?;
+        Ok(device)
+    }
+
+    /// Whether the admin's app has added the device `id` this device linked.
+    pub fn is_device_added(&self, id: &str) -> Result<bool> {
+        let device = crate::views::parse_member_id(id)?;
+        self.state().mls.is_member(&device)
     }
 
     /// Does what is left of a confirmed link: the request op, then the

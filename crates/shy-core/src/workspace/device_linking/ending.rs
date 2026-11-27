@@ -53,8 +53,10 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         joined
     }
 
-    /// Stops this link on this device: both stores are wiped, so nothing it
-    /// was handed stays.
+    /// Stops linking this device, for good: both stores are wiped, so
+    /// nothing it was handed stays. Never for shutting the app down:
+    /// dropping the handle (quitting) keeps the link, and a restart resumes
+    /// it.
     pub async fn cancel(mut self, reading: Option<Workspace>) -> Result<()> {
         self.wipe(reading).await
     }

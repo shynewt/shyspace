@@ -11,7 +11,7 @@ pub(crate) use ending::{STOPS_BEFORE_FORGETTING_READING, STOPS_BEFORE_JOINING};
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use tokio::time::sleep;
 use tracing::warn;
 use zeroize::Zeroizing;
@@ -43,6 +43,12 @@ const DID_NOT_FINISH: &str = "Linking didn't finish on this device. Link again f
 const NOT_ADDED_IN_TIME: &str =
     "This device wasn't added within a week, so nothing was kept. Link again from your other device.";
 const LINK_IS_OVER: &str = "this link is over; start again with a new code";
+const CODE_RAN_OUT: &str = "This code has run out. Show a new one on your other device.";
+const NOT_HANDED_OVER_IN_TIME: &str = "Your other device didn't finish the link in time. Link again.";
+/// Cancelling on this device wipes at once: nothing it was handed stays.
+const SOMEONE_ELSE: &str =
+    "Someone else used this code. On your other device, choose \"None of these\". Nothing was shared.";
+const STOPPED_HERE: &str = "You stopped linking this device. Nothing was kept.";
 
 /// What this device shows once the person's device opened its request.
 #[derive(Debug, Clone, PartialEq)]
@@ -227,6 +233,12 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         Ok(Some(ResumedLink::Reading(linking_handle, reading)))
     }
 
+    /// Makes this link's code look `age_ms` older.
+    #[cfg(test)]
+    pub(crate) fn age_code(&mut self, age_ms: i64) {
+        self.code.expires_ms -= age_ms;
+    }
+
     /// Makes this link look `age_ms` old.
     #[cfg(test)]
     pub(crate) fn backdate(&mut self, age_ms: i64) {
@@ -234,11 +246,19 @@ impl<M: JoinMailbox> DeviceLinking<M> {
     }
 
     /// Waits until the person's device opens this device's request. If it
-    /// stopped the link instead, both stores are wiped.
+    /// stopped the link, someone else used the code, the code ran out or the
+    /// wait is cancelled, both stores are wiped: nothing was handed over.
     pub async fn wait_for_check(&mut self, cancel: &JoinCancel) -> Result<CheckOnNewDevice> {
+        // The hand-over opened already: confirmed, and nothing to wipe.
+        if self.handover_secret.is_none() {
+            return Ok(CheckOnNewDevice::Confirmed);
+        }
         let mut cancelled = cancel.subscribe();
         loop {
             match self.check_now().await {
+                Ok(Some(CheckOnNewDevice::SomeoneElse)) => {
+                    return self.wiped_after(anyhow!(SOMEONE_ELSE), None).await;
+                }
                 Ok(Some(check)) => return Ok(check),
                 Ok(None) => {}
                 Err(error) if error.downcast_ref::<LinkRefused>().is_some() => {
@@ -246,13 +266,14 @@ impl<M: JoinMailbox> DeviceLinking<M> {
                 }
                 Err(error) => warn!("can't read the answer yet: {error:#}"),
             }
-            ensure!(
-                !self.code.is_expired(now_ms()?),
-                "This code has run out. Show a new one on your other device."
-            );
+            if self.code.is_expired(now_ms()?) {
+                return self.wiped_after(anyhow!(CODE_RAN_OUT), None).await;
+            }
             tokio::select! {
                 () = sleep(POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => bail!("you stopped linking this device"),
+                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
+                    return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
+                }
             }
         }
     }
@@ -297,6 +318,12 @@ impl<M: JoinMailbox> DeviceLinking<M> {
         cancel: &JoinCancel,
         connect: ReadingConnector,
     ) -> Result<Workspace> {
+        // The hand-over opened already: nothing to wait for, and nothing it
+        // ends may wipe, as the device reads now.
+        ensure!(
+            self.handover_secret.is_some(),
+            "this device opened its hand-over already and reads now"
+        );
         let mut cancelled = cancel.subscribe();
         let answer_until_ms = self.code.expires_ms - LINK_CODE_LIFETIME_MS + ANSWER_LIFETIME_MS;
         loop {
@@ -308,13 +335,14 @@ impl<M: JoinMailbox> DeviceLinking<M> {
                 }
                 Err(error) => warn!("ignoring a hand-over the person's device didn't make: {error:#}"),
             }
-            ensure!(
-                now_ms()? < answer_until_ms,
-                "Your other device didn't finish the link in time. Link again."
-            );
+            if now_ms()? >= answer_until_ms {
+                return self.wiped_after(anyhow!(NOT_HANDED_OVER_IN_TIME), None).await;
+            }
             tokio::select! {
                 () = sleep(POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => bail!("you stopped linking this device"),
+                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
+                    return self.wiped_after(anyhow!(STOPPED_HERE), None).await;
+                }
             }
         }
     }
@@ -374,7 +402,9 @@ impl<M: JoinMailbox> DeviceLinking<M> {
             }
             tokio::select! {
                 () = sleep(ADDED_POLL) => {}
-                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => bail!("you stopped linking this device"),
+                _ = cancelled.wait_for(|is_cancelled| *is_cancelled) => {
+                    return self.wiped_after(anyhow!(STOPPED_HERE), Some(reading)).await;
+                }
             }
         }
     }

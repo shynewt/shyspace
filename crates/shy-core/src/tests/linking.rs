@@ -1856,3 +1856,140 @@ async fn a_linking_store_is_not_created_over() {
     let refused = format!("{:#}", created.err().unwrap());
     assert!(refused.contains("opens only for reading"), "{refused}");
 }
+
+/// Links that end with nothing handed over leave nothing behind, so the
+/// next link starts afresh.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_code_someone_else_used_wipes_the_new_devices_stores() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let code = bob.create_test_link_code().unwrap();
+    let _first = ask_through(&code, &root.path().join("intruder"), &bucket).await;
+    bob.pending_link().await.unwrap().unwrap();
+    let mut linking = begin_linking(&code, &dir, &bucket).await;
+
+    let Err(error) = linking.wait_for_check(&JoinCancel::new()).await else {
+        panic!("someone else used the code");
+    };
+
+    assert!(
+        format!("{error:#}").contains("Someone else used this code"),
+        "{error:#}"
+    );
+    assert!(!linking_store_of(&dir).exists());
+    assert_enrollment_gone(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_code_that_ran_out_before_the_check_wipes_the_new_devices_stores() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let code = bob.create_test_link_code().unwrap();
+    let mut linking = begin_linking(&code, &dir, &bucket).await;
+    linking.age_code(crate::membership::link::LINK_CODE_LIFETIME_MS);
+
+    let Err(error) = linking.wait_for_check(&JoinCancel::new()).await else {
+        panic!("the code ran out");
+    };
+
+    assert!(format!("{error:#}").contains("run out"), "{error:#}");
+    assert!(!linking_store_of(&dir).exists());
+    assert_enrollment_gone(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hand_over_that_never_came_in_time_wipes_the_new_devices_stores() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let code = bob.create_test_link_code().unwrap();
+    let mut linking = begin_linking(&code, &dir, &bucket).await;
+    linking.age_code(crate::membership::link::ANSWER_LIFETIME_MS);
+
+    let Err(error) = linking
+        .wait_for_handover_with(&JoinCancel::new(), ReadingConnector::over(connector(&bucket)))
+        .await
+    else {
+        panic!("the answer link ran out");
+    };
+
+    assert!(
+        format!("{error:#}").contains("didn't finish the link in time"),
+        "{error:#}"
+    );
+    assert!(!linking_store_of(&dir).exists());
+    assert_enrollment_gone(&dir);
+}
+
+/// Cancelling while waiting to be added wipes both stores at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_wait_wipes_both_stores() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (_code, linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    let cancel = JoinCancel::new();
+    cancel.cancel();
+
+    let Err(error) = linking
+        .wait_until_added_with(reading, &cancel, connector(&bucket), Networking::Offline)
+        .await
+    else {
+        panic!("cancelled");
+    };
+
+    assert!(format!("{error:#}").contains("You stopped linking"), "{error:#}");
+    assert!(!linking_store_of(&dir).exists());
+    assert_enrollment_gone(&dir);
+}
+
+/// The device that linked another can ask whether the admin's app added it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_voucher_can_tell_when_the_device_it_linked_is_added() {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let code = bob.create_test_link_code().unwrap();
+    let linking = begin_linking(&code, &root.path().join("phone"), &bucket).await;
+    bob.pending_link().await.unwrap().unwrap();
+    let Some(CheckOnNewDevice::Code(shown)) = linking.check_now().await.unwrap() else {
+        panic!("the check answers this device");
+    };
+
+    let device = bob.confirm_link(&shown).await.unwrap();
+
+    assert!(!bob.is_device_added(&device).unwrap());
+    bob.sync().await;
+    admin.sync().await;
+    bob.sync().await;
+    assert!(bob.is_device_added(&device).unwrap());
+}
+
+/// Once the hand-over opened, the early waits touch nothing, even with the
+/// code long run out: the device keeps the key it joins with.
+#[tokio::test(flavor = "multi_thread")]
+async fn early_waits_called_again_after_the_hand_over_touch_nothing() {
+    let (root, bucket, _admin, bob) = admin_and_bob().await;
+    let dir = root.path().join("phone");
+    let (code, mut linking, reading) = reading_device(&bob, &dir, &bucket).await;
+    linking.age_code(crate::membership::link::ANSWER_LIFETIME_MS);
+    // The voucher deletes the slots once the answer link has run out.
+    bucket.delete_link_slot(&code.token, "answer").await.unwrap();
+    let cancel = JoinCancel::new();
+
+    assert_eq!(
+        linking.wait_for_check(&cancel).await.unwrap(),
+        CheckOnNewDevice::Confirmed
+    );
+    assert!(
+        linking
+            .wait_for_handover_with(&cancel, ReadingConnector::over(connector(&bucket)))
+            .await
+            .is_err()
+    );
+
+    assert!(
+        dir.join(crate::workspace::STORE_FILE).exists(),
+        "the enrollment is intact"
+    );
+    assert!(dir.join(crate::workspace::MLS_FILE).exists());
+    assert!(linking_store_of(&dir).exists());
+    reading.sync().await;
+    assert_eq!(reading.status().error, None);
+}
