@@ -7268,3 +7268,670 @@ async fn a_newcomer_who_could_not_read_its_own_commit_checks_it_again_later() {
             .is_some()
     );
 }
+
+// ---- Certificates that count as strangers, as every member sees them ----
+
+/// Bob and Carol in Ada's workspace, all up to date.
+async fn bob_and_carol() -> (tempfile::TempDir, Bucket, Workspace, Workspace, Workspace) {
+    let (root, bucket, admin, bob) = admin_and_bob().await;
+    let carol = join(&admin, &root.path().join("carol"), &bucket, "Carol", false).await;
+    sync_all(&[&admin, &bob, &carol]).await;
+    (root, bucket, admin, bob, carol)
+}
+
+/// The admin's app adds `device` with `certificates`, skipping its own
+/// checks. Every member follows the commit; returns `device`'s person as
+/// each of them (the admin first) then sees it.
+async fn added_with(
+    root: &std::path::Path,
+    bucket: &Bucket,
+    admin: &Workspace,
+    members: &[&Workspace],
+    device: &SecretKey,
+    certificates: &[DeviceCertificate],
+) -> Vec<iroh::PublicKey> {
+    let from_epoch = epoch_of(admin);
+    let dir = root.join(format!(
+        "device-{}",
+        &crate::views::member_id(&device.public())[..8]
+    ));
+    let (_, signed) = stage_device_add_unchecked(admin, device, &dir, certificates, MapKeyChoice::Admins);
+    bucket.put_commit(from_epoch, signed).await.unwrap();
+    for member in members {
+        member.sync().await;
+        assert_eq!(member.status().error, None);
+        assert_eq!(epoch_of(member), from_epoch + 1, "the commit is followed");
+    }
+    std::iter::once(admin)
+        .chain(members.iter().copied())
+        .map(|member| member.state().store.person_of(&device.public()).unwrap())
+        .collect()
+}
+
+fn is_a_stranger_everywhere(persons: &[iroh::PublicKey], device: &SecretKey) -> bool {
+    persons.iter().all(|person| *person == device.public())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forged_or_altered_certificate_counts_as_a_stranger() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let alterations: [fn(&mut DeviceCertificate, &Workspace); 4] = [
+        |certificate, carol| certificate.person = carol.me(),
+        |certificate, _| certificate.device = SecretKey::generate().public(),
+        |certificate, carol| certificate.voucher = carol.me(),
+        |certificate, _| certificate.epoch -= 1,
+    ];
+    for alter in alterations {
+        let phone = SecretKey::generate();
+        let mut certificate = device_certificate(&bob.inner.identity, &bob.me(), &phone, epoch_of(&admin));
+        alter(&mut certificate, &carol);
+        let persons = added_with(
+            root.path(),
+            &bucket,
+            &admin,
+            &[&bob, &carol],
+            &phone,
+            &[certificate],
+        )
+        .await;
+        assert!(is_a_stranger_everywhere(&persons, &phone), "{persons:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_certificate_from_another_workspace_counts_as_a_stranger() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = SecretKey::generate();
+    let elsewhere = "fedcba9876543210";
+    let acceptance = crate::membership::device::accept(&phone, elsewhere, &bob.me()).unwrap();
+    let certificate = DeviceCertificate::vouch(
+        &bob.inner.identity,
+        elsewhere,
+        bob.me(),
+        phone.public(),
+        epoch_of(&admin),
+        acceptance,
+    )
+    .unwrap();
+
+    let persons = added_with(
+        root.path(),
+        &bucket,
+        &admin,
+        &[&bob, &carol],
+        &phone,
+        &[certificate],
+    )
+    .await;
+
+    assert!(is_a_stranger_everywhere(&persons, &phone), "{persons:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_certificate_replayed_for_another_key_counts_as_a_stranger() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let certified = SecretKey::generate();
+    let certificate = device_certificate(&bob.inner.identity, &bob.me(), &certified, epoch_of(&admin));
+    let other = SecretKey::generate();
+
+    let persons = added_with(
+        root.path(),
+        &bucket,
+        &admin,
+        &[&bob, &carol],
+        &other,
+        &[certificate],
+    )
+    .await;
+
+    assert!(is_a_stranger_everywhere(&persons, &other), "{persons:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_certificate_older_than_four_epochs_or_from_the_future_counts_as_a_stranger() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let stale_from = epoch_of(&admin);
+    for name in ["Dan", "Eve", "Fay", "Gus", "Hal"] {
+        join(&admin, &root.path().join(name), &bucket, name, false).await;
+    }
+    sync_all(&[&admin, &bob, &carol]).await;
+    assert!(epoch_of(&admin) >= stale_from + 5);
+    // Each commit moves the epoch on, so each date is taken just before.
+    let dates: [fn(u64) -> u64; 2] = [|now| now - 5, |now| now + 1];
+    for date in dates {
+        let epoch = date(epoch_of(&admin));
+        let phone = SecretKey::generate();
+        let certificate = device_certificate(&bob.inner.identity, &bob.me(), &phone, epoch);
+        let persons = added_with(
+            root.path(),
+            &bucket,
+            &admin,
+            &[&bob, &carol],
+            &phone,
+            &[certificate],
+        )
+        .await;
+        assert!(
+            is_a_stranger_everywhere(&persons, &phone),
+            "epoch {epoch}: {persons:?}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sixth_device_counts_as_a_stranger() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    for round in 0..5 {
+        let device = SecretKey::generate();
+        let certificate = device_certificate(&bob.inner.identity, &bob.me(), &device, epoch_of(&admin));
+        let persons = added_with(
+            root.path(),
+            &bucket,
+            &admin,
+            &[&bob, &carol],
+            &device,
+            &[certificate],
+        )
+        .await;
+        match round {
+            // Bob's first device and four more make five.
+            0..4 => assert!(persons.iter().all(|person| *person == bob.me()), "{persons:?}"),
+            _ => assert!(is_a_stranger_everywhere(&persons, &device), "{persons:?}"),
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_certificate_whose_person_is_a_linked_device_or_an_unknown_key_counts_as_a_stranger() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = SecretKey::generate();
+    let certificate = device_certificate(&bob.inner.identity, &bob.me(), &phone, epoch_of(&admin));
+    added_with(
+        root.path(),
+        &bucket,
+        &admin,
+        &[&bob, &carol],
+        &phone,
+        &[certificate],
+    )
+    .await;
+    let unknown = SecretKey::generate();
+    for (voucher, person) in [(&phone, phone.public()), (&unknown, unknown.public())] {
+        let tablet = SecretKey::generate();
+        let certificate = device_certificate(voucher, &person, &tablet, epoch_of(&admin));
+        let persons = added_with(
+            root.path(),
+            &bucket,
+            &admin,
+            &[&bob, &carol],
+            &tablet,
+            &[certificate],
+        )
+        .await;
+        assert!(is_a_stranger_everywhere(&persons, &tablet), "{persons:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_that_was_a_member_cannot_come_back_as_someones_device() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let carols_key = carol.inner.identity.clone();
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let certificate = device_certificate(&bob.inner.identity, &bob.me(), &carols_key, epoch_of(&admin));
+
+    let persons = added_with(root.path(), &bucket, &admin, &[&bob], &carols_key, &[certificate]).await;
+
+    assert!(is_a_stranger_everywhere(&persons, &carols_key), "{persons:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_cannot_claim_a_newcomers_key_as_their_device() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let newcomer = SecretKey::generate();
+    // The newcomer agreed to be Carol's, not Bob's.
+    let mut certificate = device_certificate(&bob.inner.identity, &bob.me(), &newcomer, epoch_of(&admin));
+    certificate.device_signature =
+        crate::membership::device::accept(&newcomer, &admin.inner.config.workspace_id, &carol.me()).unwrap();
+
+    let persons = added_with(
+        root.path(),
+        &bucket,
+        &admin,
+        &[&bob, &carol],
+        &newcomer,
+        &[certificate],
+    )
+    .await;
+
+    assert!(is_a_stranger_everywhere(&persons, &newcomer), "{persons:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_demoted_device_cannot_be_bound_by_a_later_commit() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = SecretKey::generate();
+    let forged = device_certificate(&admin.inner.identity, &bob.me(), &phone, epoch_of(&admin));
+    let persons = added_with(root.path(), &bucket, &admin, &[&bob, &carol], &phone, &[forged]).await;
+    assert!(is_a_stranger_everywhere(&persons, &phone));
+
+    // A valid certificate for it, in the next commit that adds a device.
+    let tablet = SecretKey::generate();
+    let valid = device_certificate(&bob.inner.identity, &bob.me(), &phone, epoch_of(&admin));
+    let tablets = device_certificate(&bob.inner.identity, &bob.me(), &tablet, epoch_of(&admin));
+    added_with(
+        root.path(),
+        &bucket,
+        &admin,
+        &[&bob, &carol],
+        &tablet,
+        &[valid, tablets],
+    )
+    .await;
+
+    for member in [&admin, &bob, &carol] {
+        assert_eq!(
+            member.state().store.person_of(&phone.public()).unwrap(),
+            phone.public()
+        );
+    }
+}
+
+// ---- Removing devices, and the gaps the docs name ----
+
+/// Whether `member` shows a message with `text` in `channel`.
+fn shows(member: &Workspace, channel: &str, text: &str) -> bool {
+    member
+        .messages(channel, None, 50)
+        .unwrap()
+        .iter()
+        .any(|message| message.text == text)
+}
+
+/// A message `device` seals as its next op, with the epoch key it holds.
+fn written_by(device: &Workspace, channel: &str, text: &str) -> crate::ops::Envelope {
+    Forger::new(device).seal(Op::Message {
+        id: crate::ops::new_owned_id(&device.me()),
+        channel: channel.to_owned(),
+        text: text.into(),
+        reply_to: None,
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_device_keeps_working_until_the_admin_commits_its_removal() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+
+    // Stolen, and not removed yet: its writes count as Bob's.
+    phone.send_message(&general, "before the removal", None).unwrap();
+    sync_all(&[&admin, &carol, &phone]).await;
+    assert!(shows(&carol, &general, "before the removal"));
+
+    // Sealed while it still holds the epoch key, delivered after.
+    let late = written_by(&phone, &general, "after the removal");
+    admin.remove_devices(&[phone.my_device_id()]).await.unwrap();
+    sync_all(&[&admin, &carol]).await;
+    phone.sync().await;
+    assert!(phone.status().removed);
+    // Refused outright or kept out of the views: either way it never shows.
+    let _ = carol.receive(late);
+    assert!(!shows(&carol, &general, "after the removal"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ops_a_removed_device_sent_just_before_removal_are_undone() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+    let before = phone.state().store.last_seq(&phone.me()).unwrap();
+    phone
+        .send_message(&general, "sent live just before", None)
+        .unwrap();
+    // It reaches Carol live, but not the admin or the bucket.
+    for envelope in phone.state().store.envelopes_after(&phone.me(), before).unwrap() {
+        carol.receive(envelope).unwrap();
+    }
+    assert!(shows(&carol, &general, "sent live just before"));
+
+    admin.remove_devices(&[phone.my_device_id()]).await.unwrap();
+    carol.sync().await;
+
+    assert!(!shows(&carol, &general, "sent live just before"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_device_cannot_write_while_its_siblings_can() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+
+    admin.remove_devices(&[phone.my_device_id()]).await.unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    // With the epoch key it still holds, past where its log was frozen.
+    let late = written_by(&phone, &general, "from the removed phone");
+    let _ = carol.receive(late);
+    bob.send_message(&general, "from the laptop", None).unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+
+    assert!(!shows(&carol, &general, "from the removed phone"));
+    assert!(shows(&carol, &general, "from the laptop"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_persons_second_device_cannot_backdate_ops() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+
+    admin.remove_member(&bob.my_id()).await.unwrap();
+    sync_all(&[&admin, &carol]).await;
+    let _ = carol.receive(written_by(&phone, &general, "backdated by the phone"));
+
+    assert!(!shows(&carol, &general, "backdated by the phone"));
+    assert!(
+        carol
+            .state()
+            .store
+            .frozen_last_seq(&phone.me())
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_persons_removed_first_device_cannot_speak_for_them_again() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+
+    admin.remove_devices(&[bob.my_device_id()]).await.unwrap();
+    sync_all(&[&admin, &carol, &phone]).await;
+    let _ = carol.receive(written_by(&bob, &general, "from the lost laptop"));
+    phone.send_message(&general, "from the phone", None).unwrap();
+    sync_all(&[&admin, &carol, &phone]).await;
+
+    assert!(!shows(&carol, &general, "from the lost laptop"));
+    let from_phone = carol
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.text == "from the phone")
+        .unwrap();
+    assert_eq!(from_phone.author, bob.my_id(), "the phone still speaks for Bob");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_stays_its_persons_after_its_voucher_is_removed() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let tablet = link_device(&admin, &phone, &root.path().join("tablet"), &bucket).await;
+    sync_all(&[&admin, &bob, &carol, &phone, &tablet]).await;
+
+    admin.remove_devices(&[phone.my_device_id()]).await.unwrap();
+    sync_all(&[&admin, &bob, &carol, &tablet]).await;
+
+    for member in [&admin, &bob, &carol, &tablet] {
+        assert_eq!(member.state().store.person_of(&tablet.me()).unwrap(), bob.me());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_device_added_again_stays_frozen() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+    let phone_key = phone.inner.identity.clone();
+    admin.remove_devices(&[phone.my_device_id()]).await.unwrap();
+    sync_all(&[&admin, &bob, &carol]).await;
+    let frozen_at = carol
+        .state()
+        .store
+        .frozen_last_seq(&phone_key.public())
+        .unwrap()
+        .unwrap();
+
+    let certificate = device_certificate(&bob.inner.identity, &bob.me(), &phone_key, epoch_of(&admin));
+    let persons = added_with(
+        root.path(),
+        &bucket,
+        &admin,
+        &[&bob, &carol],
+        &phone_key,
+        &[certificate],
+    )
+    .await;
+
+    // Its old record stands, and the new certificate counts for nothing.
+    assert!(persons.iter().all(|person| *person == bob.me()), "{persons:?}");
+    // Its log stays frozen where it was, even in the new epoch.
+    let (epoch, key) = current_key(&carol);
+    let body = OpBody {
+        lamport: 99_000,
+        timestamp_ms: now_ms().unwrap(),
+        op: Op::Message {
+            id: crate::ops::new_owned_id(&phone_key.public()),
+            channel: general.clone(),
+            text: "back again".into(),
+            reply_to: None,
+        },
+    };
+    let _ = carol.receive(crypto::seal(&phone_key, &key, epoch, frozen_at + 1, &body).unwrap());
+    assert!(!shows(&carol, &general, "back again"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn known_gap_members_see_how_many_devices_a_person_has_and_which_wrote() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &carol, &phone]).await;
+    phone.send_message(&general, "from the phone", None).unwrap();
+    sync_all(&[&admin, &carol, &phone]).await;
+
+    assert_eq!(
+        carol.state().store.devices_of(&bob.me()).unwrap(),
+        [bob.me(), phone.me()]
+    );
+    let shown = carol
+        .messages(&general, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.text == "from the phone")
+        .unwrap();
+    assert_eq!(shown.device, phone.my_device_id());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn known_gap_a_newcomer_takes_past_members_and_older_freezes_on_the_admins_word() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    sync_all(&[&admin, &bob]).await;
+    let _phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob]).await;
+    let stranger = SecretKey::generate().public();
+    let carols_key = carol.me();
+    // A changed app lists a stranger in an old epoch and moves Carol's
+    // freeze, which came before the first device: both outside the digest.
+    *admin.inner.tamper_next_grant.lock().unwrap() = Some(Box::new(move |grant| {
+        grant.grant.history.epochs[0].members.push(stranger);
+        for frozen in &mut grant.grant.history.frozen {
+            if frozen.member == carols_key {
+                frozen.last_seq += 1;
+            }
+        }
+    }));
+
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+
+    let first_epoch = dave.state().store.epoch_keys().unwrap()[0].0;
+    assert!(
+        dave.state()
+            .store
+            .epoch_members(first_epoch)
+            .unwrap()
+            .contains(&stranger)
+    );
+    assert_eq!(
+        dave.state().store.frozen_last_seq(&carols_key).unwrap(),
+        admin
+            .state()
+            .store
+            .frozen_last_seq(&carols_key)
+            .unwrap()
+            .map(|seq| seq + 1)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_member_cannot_read_the_certificates_of_later_commits() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let carols_epoch = epoch_of(&carol);
+    admin.remove_member(&carol.my_id()).await.unwrap();
+    carol.sync().await;
+    assert!(carol.status().removed);
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let from_epoch = admin.state().store.device_records().unwrap()[0].added_epoch - 1;
+    assert!(from_epoch > carols_epoch);
+
+    let signed = bucket.commit(from_epoch).await.unwrap().unwrap();
+    let verified = commit::verify(&signed, from_epoch, &admin.me()).unwrap();
+    // Carol holds keys only up to her removal; the list is sealed with the
+    // key of the epoch the commit leaves.
+    assert!(carol.state().store.epoch_key(from_epoch).unwrap().is_none());
+    let her_newest = carol.state().store.epoch_keys().unwrap().last().unwrap().1;
+    assert!(verified.certificates(from_epoch, &her_newest).is_err());
+    assert!(!signed.windows(32).any(|window| window == phone.me().as_bytes()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newcomer_refuses_a_device_record_the_person_never_signed() {
+    let (root, bucket, admin, bob, _carol) = bob_and_carol().await;
+    let _phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    sync_all(&[&admin, &bob]).await;
+    *admin.inner.tamper_next_grant.lock().unwrap() = Some(Box::new(|grant| {
+        grant.devices[0].certificate.device_signature = vec![0; 64];
+    }));
+    let dir = root.path().join("dave");
+    let invite = admin
+        .create_test_invite("Dave", Duration::from_secs(600))
+        .unwrap();
+    let token = invite.token.clone();
+    let joining = start_join(invite, &dir, &bucket, "Dave", false);
+    wait_for_request(&admin, &token).await;
+    admin.approve_invite(&token).await.unwrap();
+
+    let refused = joining.await.unwrap().err().unwrap().to_string();
+
+    assert!(refused.contains("doesn't match"), "{refused}");
+    assert!(!dir.join("shy.db").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebuild_gives_the_same_views_on_a_device_that_learned_the_map_from_a_grant() {
+    let (root, bucket, admin, bob, _carol) = bob_and_carol().await;
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let general = channel_id(&admin, "general");
+    sync_all(&[&admin, &bob, &phone]).await;
+    phone.send_message(&general, "from the phone", None).unwrap();
+    let said = bob.send_message(&general, "from the laptop", None).unwrap();
+    phone.react(&said, "👍", true).unwrap();
+    sync_all(&[&admin, &bob, &phone]).await;
+    let dave = join(&admin, &root.path().join("dave"), &bucket, "Dave", false).await;
+    sync_all(&[&admin, &dave]).await;
+    let views = |member: &Workspace| {
+        let messages: Vec<_> = member
+            .messages(&general, None, 50)
+            .unwrap()
+            .into_iter()
+            .map(|message| {
+                (
+                    message.text,
+                    message.author,
+                    message.author_name,
+                    message.reactions.len(),
+                )
+            })
+            .collect();
+        let members: Vec<_> = member
+            .members()
+            .unwrap()
+            .into_iter()
+            .map(|shown| (shown.id, shown.name))
+            .collect();
+        (messages, members)
+    };
+    let before = views(&dave);
+
+    dave.state().store.rebuild_views(dave.apply_context()).unwrap();
+
+    assert_eq!(views(&dave), before);
+    assert_eq!(views(&admin), before, "the same as a member who saw every commit");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_crash_after_applying_a_devices_commit_keeps_the_device_bound() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let from_epoch = epoch_of(&admin);
+    let phone = link_device(&admin, &bob, &root.path().join("phone"), &bucket).await;
+    let signed = bucket.commit(from_epoch).await.unwrap().unwrap();
+    let verified = commit::verify(&signed, from_epoch, &admin.me()).unwrap();
+    {
+        let mut state = carol.state();
+        let map_key = state
+            .map_key(&carol.inner.config.workspace_id, from_epoch, &[])
+            .unwrap();
+        state.mls.store_map_key(&map_key).unwrap();
+        state.save_commit(from_epoch, &signed).unwrap();
+        state
+            .mls
+            .process_commit(&verified.commit, &admin.me(), CommitKeys::DeviceMap)
+            .unwrap();
+    }
+    // Stopped before settling: the device isn't anyone's yet.
+    assert_eq!(carol.state().store.person_of(&phone.me()).unwrap(), phone.me());
+
+    carol.state().record_epoch(&carol.inner.config).unwrap();
+
+    assert_eq!(carol.state().store.person_of(&phone.me()).unwrap(), bob.me());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commit_flooded_with_certificates_still_counts_only_its_device() {
+    let (root, bucket, admin, bob, carol) = bob_and_carol().await;
+    let phone = SecretKey::generate();
+    let epoch = epoch_of(&admin);
+    let decoy = device_certificate(&bob.inner.identity, &bob.me(), &SecretKey::generate(), epoch);
+    let mut certificates: Vec<_> = (0..3_000)
+        .map(|_| DeviceCertificate {
+            device: SecretKey::generate().public(),
+            ..decoy.clone()
+        })
+        .collect();
+    certificates.push(device_certificate(&bob.inner.identity, &bob.me(), &phone, epoch));
+
+    let persons = added_with(
+        root.path(),
+        &bucket,
+        &admin,
+        &[&bob, &carol],
+        &phone,
+        &certificates,
+    )
+    .await;
+
+    assert!(persons.iter().all(|person| *person == bob.me()), "{persons:?}");
+    for member in [&admin, &bob, &carol] {
+        assert_eq!(
+            member.state().store.devices_of(&bob.me()).unwrap(),
+            [bob.me(), phone.public()]
+        );
+    }
+}
