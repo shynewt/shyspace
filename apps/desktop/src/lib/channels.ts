@@ -4,13 +4,18 @@ import { displayName } from "./people";
 import { useLive } from "./useLive";
 import { useWorkspace } from "./workspace";
 
-/** A channel's name as the app shows it: its own, for a DM the other people in it, or "Notes". */
+/**
+ * A channel's name as the app shows it: its own, for a DM the other people in it ("Direct
+ * message" once they've all left), or "Notes".
+ */
 export function channelTitle(channel: Channel, members: readonly Member[] | undefined): string {
   if (channel.kind === "notes") return "Notes";
   if (channel.kind !== "dm") return channel.name;
-  return channel.dm_members
-    .map((id) => displayName(members?.find((member) => member.id === id)?.name ?? "", id))
-    .join(", ");
+  return (
+    channel.dm_members
+      .map((id) => displayName(members?.find((member) => member.id === id)?.name ?? "", id))
+      .join(", ") || "Direct message"
+  );
 }
 
 /** How text refers to a channel: "#plans", or for a DM, "Ada". */

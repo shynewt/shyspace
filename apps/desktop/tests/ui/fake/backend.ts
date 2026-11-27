@@ -368,6 +368,10 @@ export class FakeBackend {
   }
 
   /** Someone else made a private channel with you (and `others`) in it. */
+  dmTheyLeft(member: string): string {
+    return this.private.dmTheyLeft(member);
+  }
+
   receivePrivateChannel(owner: string, name: string, others: string[] = []): string {
     return this.private.receive(owner, name, others);
   }

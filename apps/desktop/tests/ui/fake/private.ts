@@ -128,6 +128,16 @@ export class FakePrivate {
     return id;
   }
 
+  /** A DM with `member` that they've since left, so only you remain in it. */
+  dmTheyLeft(member: string): string {
+    const id = this.openDm([member]);
+    const found = this.channels.get(id);
+    if (!found) throw new Error("fake private: the DM just opened is missing");
+    found.members = found.members.filter((candidate) => candidate !== member);
+    this.context.notify({ kind: "channels" });
+    return id;
+  }
+
   private openNotes(): string {
     const me = this.context.me();
     for (const [id, found] of this.channels) {

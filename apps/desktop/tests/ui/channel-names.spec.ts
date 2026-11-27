@@ -57,3 +57,9 @@ test("a link to a DM message names the person, not a raw channel name", async ({
   await expect(card.getByText("Grace", { exact: true })).toHaveCount(2);
   await expect(card).not.toContainText("#");
 });
+
+test("a direct message whose others all left still has a name", async ({ page }) => {
+  await page.evaluate(() => window.fake.dmTheyLeft(window.fake.addMember("Grace")));
+
+  await expect(page.getByRole("button", { name: "Direct message, direct message", exact: true })).toBeVisible();
+});
