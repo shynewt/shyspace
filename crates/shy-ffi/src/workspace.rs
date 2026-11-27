@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use shy_core::{
     Workspace,
-    views::{Change, Channel, Message, MessageCursor},
+    views::{Change, Channel, Member, Message, MessageCursor},
 };
 use tokio::{sync::broadcast::error::RecvError, task::AbortHandle};
 
@@ -82,6 +82,13 @@ impl ShyWorkspace {
     pub async fn plain_texts(&self, texts: Vec<String>) -> Result<Vec<String>, ShyError> {
         let workspace = self.inner.clone();
         run_blocking(move || workspace.plain_texts(&texts)).await
+    }
+
+    /// Everyone in the workspace, people once each: names for direct messages
+    /// and mentions, admins and agents marked.
+    pub async fn members(&self) -> Result<Vec<Member>, ShyError> {
+        let workspace = self.inner.clone();
+        run_blocking(move || workspace.members()).await
     }
 
     /// Adds your `emoji` to a message, or with `active` false, takes it away.

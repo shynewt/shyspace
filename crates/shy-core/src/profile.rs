@@ -32,6 +32,7 @@ const EVERY_DAY: u8 = 0b111_1111;
 /// empty string is unset. The fields are part of the op format, which is
 /// positional: never add, remove or reorder them; a new field needs a new op.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ProfileDetails {
     /// Their role or position, like "Product designer".
     pub title: String,
@@ -52,6 +53,7 @@ pub struct ProfileDetails {
 
 /// One working interval, the same on each chosen day, in their time zone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct WorkingHours {
     /// Bit 0 is Monday and bit 6 Sunday: the days a working day starts on.
     pub days: u8,

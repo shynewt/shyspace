@@ -262,3 +262,24 @@ async fn reading_up_to_a_message_moves_the_channels_read_position_to_it() {
         (read_up_to.lamport, read_up_to.device.as_str())
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_members_are_listed_with_their_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app_in(&dir, &Arc::new(AppKeystore::default()));
+    let acme = create_acme(&app).await;
+    let general = general_of(&acme).await;
+    acme.send_message(general.clone(), "mine".into(), None)
+        .await
+        .unwrap();
+    let me = acme.messages(general, None, 1).await.unwrap()[0].author.clone();
+
+    let members = acme.members().await.unwrap();
+
+    assert_eq!(members.len(), 1);
+    assert_eq!(
+        (members[0].id.as_str(), members[0].name.as_str()),
+        (me.as_str(), "Ada")
+    );
+    assert!(members[0].is_admin);
+}

@@ -263,6 +263,7 @@ pub struct PageEditorSession {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Member {
     pub id: String,
     pub name: String,
@@ -290,6 +291,7 @@ pub struct SavedMark {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct MemberStatus {
     pub emoji: String,
     pub text: String,
@@ -310,6 +312,7 @@ pub struct StatusUpdate<'a> {
 /// Whether a member's device is reachable right now. "Unreachable" rather than
 /// "offline": a network that blocks peers looks the same.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 #[serde(rename_all = "snake_case")]
 pub enum PresenceState {
     Online,
