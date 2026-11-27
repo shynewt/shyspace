@@ -2965,3 +2965,21 @@ async fn the_app_can_tell_whether_a_link_is_in_progress() {
     })
     .await;
 }
+
+/// A device that only reads shows its Inbox and its badge calmly: the
+/// notices about the person's devices and the inbox read without error.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reading_device_reads_its_inbox_and_device_notices_without_error() {
+    within(async {
+        let (root, bucket, _admin, bob) = admin_and_bob().await;
+        let (_code, _linking, reading) = reading_device(&bob, &root.path().join("phone"), &bucket).await;
+        reading.sync().await;
+
+        let notices = reading.device_notices();
+        let inbox = reading.inbox();
+
+        assert!(notices.is_ok(), "{:#}", notices.err().unwrap());
+        assert!(inbox.is_ok(), "{:#}", inbox.err().unwrap());
+    })
+    .await;
+}
