@@ -93,6 +93,10 @@ The app is for desktop windows, full screen (1280 to 2560 px wide) and split scr
 | `Switch` | an on/off setting with its `label` beside it (the label toggles it too) |
 | `CopyButton` | copies a value; its icon turns into a check for 1.5 s and a polite live region says "Copied" (the one micro-animation for copying, also inside `CopyField`) |
 | `CopyField` | codes and commands with a copy button |
+| `QrCode` | a code to scan with another device, black on white with a quiet margin in both themes so cameras read it; `label` names it for screen readers |
+| `CheckCode` | a short number to compare between two devices, large and in groups; screen readers hear the groups apart ("482, 917") |
+| `CheckCodeChoice` | the number to tap among decoys, plus "None of these"; three large buttons in a named group, never focused for you, so the person has to look |
+| `StatusLine` | how something stands, in one still line with an optional small icon (a link waiting, a device only reading); announced politely, never animated |
 | `EmojiPicker` | a searchable emoji grid (names and keywords), recently used first, inside a `Popover`; it and its data load on first open, ship with the app and are never fetched from the network |
 | `ConfirmDialog` | asks before something that can't be undone (deletes), showing what it applies to; stays open showing the error if it fails |
 | `Toasts` | transient messages above the message box, from `lib/toast.ts`: `showToast` (a success, or `"info"`), `showUndoToast`, `showReminderToast` (with Open) and `reportError` (announced as an alert) |

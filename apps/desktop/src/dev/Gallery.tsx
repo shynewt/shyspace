@@ -9,6 +9,8 @@ import {
   Badge,
   Button,
   Card,
+  CheckCode,
+  CheckCodeChoice,
   ConfirmDialog,
   ContextMenu,
   CopyButton,
@@ -30,11 +32,13 @@ import {
   Menu,
   Notice,
   Popover,
+  QrCode,
   RelativeTime,
   SectionLabel,
   SegmentedControl,
   Select,
   Spinner,
+  StatusLine,
   Switch,
   TextArea,
   ThemeSwatches,
@@ -256,6 +260,23 @@ export default function Gallery() {
               <SectionLabel>Highlighted card</SectionLabel>
               <p className="text-sm text-muted">For things that need attention, like join requests.</p>
             </Card>
+          </div>
+        </Example>
+
+        <Example title="Linking a device">
+          <div className="grid w-full grid-cols-2 gap-6">
+            <div className="flex flex-col items-center gap-3">
+              <QrCode value="shyl1_example-link-code" label="An example link code" />
+              <CheckCode code="482 917" />
+              <StatusLine>There's nothing to tap here.</StatusLine>
+            </div>
+            <CheckCodeChoice
+              choices={["305 116", "482 917", "771 482"]}
+              label="Tap the number your new device shows"
+              isBusy={false}
+              onPick={(code) => showToast(`Picked ${code}`)}
+              onNone={() => showToast("None of these")}
+            />
           </div>
         </Example>
 
